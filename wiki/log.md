@@ -3,10 +3,19 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-06
+updated: 2026-07-07
 ---
 
 # 操作日志
+
+## [2026-07-07] QUERY | 工单处理口径、统计与相似问题治理方案
+
+- 触发：用户要求结合当前项目情况，分析 `D:\xj\Documents\工单状态和统计相关.txt` 中需求和实现建议，并整理完整方案供后续实现。
+- 检索路径：`wiki/purpose.md`、`wiki/index.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`、`wiki/entities/enums/ticket-enums.md`、`wiki/flows/ticket-workflow-routing.md`、需求原文、`server/modules/ticket/entity/do/ticket_do.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_dao.py`、`web/src/views/ticket/statistics/index.vue`。
+- 创建的页面：`web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md`
+- 更新的页面：`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 关键结论：不新增“已处理”主流程状态；计划以 `processed_at` 承接首次形成排查结论时间；版本治理字段从 `extra_data.version_key` 中拆出；相似/重复工单后续以 `ticket_issue + ticket.issue_id` 承接真实问题归因，`ticket_relation` 只做补充关系。
+- 2026-07-08 讨论后修订：第一阶段新增 `submit_time` 作为统计主时间；`first_response_at` 保留首次响应/接手语义，不替代 `processed_at`；`resolved_at` 保留终态写入逻辑并定义为“工单处置完成时间”；Issue 归因层降为第二阶段增强，现有根因/根因分类/细分问题字段继续承担分类统计。
 
 ## [2026-07-06] INGEST-CODE | 相似工单主动拉取场景与 Embedding 自定义参数
 

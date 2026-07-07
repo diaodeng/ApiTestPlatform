@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-04
 created: 2026-05-20
-updated: 2026-07-05
+updated: 2026-07-07
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -88,6 +88,10 @@ graph TD
 
 ## 当前关键约束
 
+- 2026-07-08 修订待实施方案：第一阶段建议新增 `submit_time` 作为统计主时间，新增 `processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，现有前端 `processStatus` 实际表示日志拉取/AI 分析进度，后续应改文案为“日志/AI进度”或避免与业务处理结论混用。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)。
+- 同一方案确认保留当前 `resolved_at` 终态写入逻辑，但语义明确为“工单处置完成时间”，不是只代表真实 Bug 修复完成；真实 Bug 修复统计应结合 `is_problem`、`solution_type`、`resolution_code`、`fixed_version`、`released_at` 和 `verified_at`。
+- 同一方案建议把版本治理字段从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`extra_data.version_key` 暂保留供 AI 仓库映射兼容。
+- 当前根因字段、根因分类和细分问题字段已经能满足分类统计；Issue 归因层仅作为第二阶段增强，用于统计“多张 Ticket 是否属于同一个真实问题实例”“一个问题影响多少工单”等问题实例口径，不作为第一阶段必做项。
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。
 - 当前工单服务已按依赖关系组织为独立子包：`service/sync` 承接同步编排、配置、主动拉取、远端拉取、同步交付、payload、延后后处理、自动化、群推送和同步通知任务；`service/ai` 承接 AI 分析、轻量 AI、提示词、自动分类统计和向量能力；`service/log_pull` 承接日志拉取和日志查看；`service/core` 承接工单 CRUD、导入、状态流转、RCA、知识库和快照；`service/collaboration` 承接评论幂等、飞书消息同步和事件监听；`service/notification` 承接通用通知；`service/stats` 承接专题统计。旧 `modules.ticket.service.ticket_*` 顶层服务入口已删除，不保留只转发或 re-export 的兼容文件。
