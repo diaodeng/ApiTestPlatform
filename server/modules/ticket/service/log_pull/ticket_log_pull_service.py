@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import gzip
@@ -1125,7 +1125,7 @@ class TicketLogPullService:
     @classmethod
     def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> bool:
         """
-        回写工单版本号到工单字段与扩展字段。
+        回写工单版本号到扩展字段。
 
         :param query_db: 数据库会话。
         :param ticket_id: 工单ID。
@@ -1139,16 +1139,14 @@ class TicketLogPullService:
         if not normalized_version_key:
             return False
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        current_ticket_version = str(getattr(ticket, "version_key", "") or "").strip()
         current_extra_version = str(extra_data.get("version_key") or "").strip()
-        if current_ticket_version == normalized_version_key and current_extra_version == normalized_version_key:
+        if current_extra_version == normalized_version_key:
             return False
         extra_data["version_key"] = normalized_version_key
         TicketDao.update_ticket(
             query_db,
             ticket_id,
             {
-                "version_key": normalized_version_key,
                 "extra_data": extra_data,
                 "update_by": "system",
                 "update_time": datetime.now(),
@@ -1169,9 +1167,8 @@ class TicketLogPullService:
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
             return ""
-        version_key = str(getattr(ticket, "version_key", "") or "").strip()
-        if not version_key and isinstance(ticket.extra_data, dict):
-            version_key = str(ticket.extra_data.get("version_key") or "").strip()
+        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+        version_key = str(extra_data.get("version_key") or "").strip()
         if version_key:
             return version_key
 
