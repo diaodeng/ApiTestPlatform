@@ -8,6 +8,16 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-08] INGEST-CODE | 工单提交时间、处理结论和版本治理第一阶段落地
+
+- 触发：用户要求按方案文件实现第一阶段内容，并强调项目分层、不要揉大文件。
+- 架构层：工单域 / 工单核心数据模型 / 处理统计 / 外部同步 / Web 控制台。
+- 创建的页面：`web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md`
+- 更新的页面：`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：`Ticket` 主表字段 -> `TicketProcessingMetricService` 写入提交/处理/发布验证时间 -> 手动创建/编辑、状态流转、事件、RCA、Excel 导入、外部同步 payload -> `TicketProcessingStatsService` 统计处理率和存量 -> 工单列表与统计页展示。
+- 关键结论：`first_response_at` 继续只表示首次响应/接手，`processed_at` 才表示首次形成有效排查结论；`resolved_at` 保留终态处置完成口径；Issue 归因层仍是第二阶段。
+- 2026-07-08 补充：统计页必须保留旧的整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；处理率与未处理存量只作为新增独立趋势图，趋势明细也同时保留旧列和新增处理列。历史用户显示配置缺少 `processingTrend` 时，前端按配置版本自动补齐一次，保存后尊重用户手动勾选结果。
+
 ## [2026-07-07] QUERY | 工单处理口径、统计与相似问题治理方案
 
 - 触发：用户要求结合当前项目情况，分析 `D:\xj\Documents\工单状态和统计相关.txt` 中需求和实现建议，并整理完整方案供后续实现。

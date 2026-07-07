@@ -47,10 +47,10 @@
             @keyup.enter="handleQuery"
           />
         </el-form-item>
-        <el-form-item label="处理状态" prop="processStatuses">
+        <el-form-item label="日志/AI进度" prop="processStatuses">
           <el-select
             v-model="queryParams.processStatuses"
-            placeholder="处理状态"
+            placeholder="日志/AI进度"
             multiple
             clearable
             collapse-tags
@@ -65,9 +65,32 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="处理结论" prop="processingConclusionStatus">
+          <el-select
+            v-model="queryParams.processingConclusionStatus"
+            placeholder="处理结论"
+            clearable
+            style="width: 140px"
+          >
+            <el-option label="已处理" value="processed" />
+            <el-option label="未处理" value="unprocessed" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="提交时间">
           <el-date-picker
             v-model="submitTimeRange"
+            type="datetimerange"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            format="YYYY-MM-DD HH:mm:ss"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            style="width: 360px"
+          />
+        </el-form-item>
+        <el-form-item label="处理时间">
+          <el-date-picker
+            v-model="processedTimeRange"
             type="datetimerange"
             value-format="YYYY-MM-DD HH:mm:ss"
             format="YYYY-MM-DD HH:mm:ss"
@@ -394,7 +417,7 @@
         </el-table-column>
         <el-table-column
           v-if="isTicketColumnVisible('processStatus')"
-          label="处理状态"
+          label="日志/AI进度"
           prop="processStatus"
           min-width="160"
           align="center"
@@ -408,6 +431,19 @@
               {{ resolveTicketProcessStatus(scope.row).label }}
             </el-tag>
             <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('processingConclusionStatus')"
+          label="处理结论"
+          prop="processingConclusionStatus"
+          width="110"
+          align="center"
+          sortable="custom"
+        >
+          <template #default="scope">
+            <el-tag v-if="scope.row.processedAt" type="success">已处理</el-tag>
+            <el-tag v-else type="info">未处理</el-tag>
           </template>
         </el-table-column>
         <el-table-column
@@ -561,6 +597,48 @@
           }}</template>
         </el-table-column>
         <el-table-column
+          v-if="isTicketColumnVisible('firstResponseAt')"
+          label="首次响应时间"
+          prop="firstResponseAt"
+          width="170"
+          sortable="custom"
+        >
+          <template #default="scope">{{ parseTime(scope.row.firstResponseAt) }}</template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('processedAt')"
+          label="处理完成时间"
+          prop="processedAt"
+          width="170"
+          sortable="custom"
+        >
+          <template #default="scope">{{ parseTime(scope.row.processedAt) }}</template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('plannedFixVersion')"
+          label="计划修复版本"
+          prop="plannedFixVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          v-if="isTicketColumnVisible('fixedVersion')"
+          label="实际修复版本"
+          prop="fixedVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          v-if="isTicketColumnVisible('releasedVersion')"
+          label="实际发版版本"
+          prop="releasedVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        />
+        <el-table-column
           v-if="isTicketColumnVisible('createTime')"
           label="创建时间"
           prop="createTime"
@@ -711,7 +789,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="版本号" prop="versionKey">
+            <el-form-item label="发生版本" prop="versionKey">
               <el-select
                 v-model="form.versionKey"
                 placeholder="请选择或输入版本号"
@@ -729,6 +807,21 @@
                   :value="item.value"
                 />
               </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="计划修复版本" prop="plannedFixVersion">
+              <el-input v-model="form.plannedFixVersion" placeholder="请输入计划修复版本" maxlength="100" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="实际修复版本" prop="fixedVersion">
+              <el-input v-model="form.fixedVersion" placeholder="请输入实际修复版本" maxlength="100" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="实际发版版本" prop="releasedVersion">
+              <el-input v-model="form.releasedVersion" placeholder="请输入实际发版版本" maxlength="100" />
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -3227,6 +3320,7 @@
     total,
     naturalKeyword,
     submitTimeRange,
+    processedTimeRange,
     queryParams,
     queryCurrentAssigneeOption,
     queryFirstLineAssigneeOption,
@@ -3583,6 +3677,10 @@
       moduleId: undefined,
       moduleName: '',
       versionKey: '',
+      affectedVersion: '',
+      plannedFixVersion: '',
+      fixedVersion: '',
+      releasedVersion: '',
       firstLineAssigneeId: undefined,
       firstLineAssigneeName: '',
       internalOwnerId: undefined,
@@ -4071,6 +4169,16 @@
           false;
         form.value.issueTypeId = ticketData.issueTypeId || ticketData.issue_type_id || '';
         form.value.issueTypeName = ticketData.issueTypeName || ticketData.issue_type_name || '';
+        form.value.versionKey =
+          ticketData.versionKey ||
+          ticketData.affectedVersion ||
+          ticketData.extraData?.versionKey ||
+          ticketData.extraData?.version_key ||
+          '';
+        form.value.affectedVersion = ticketData.affectedVersion || form.value.versionKey || '';
+        form.value.plannedFixVersion = ticketData.plannedFixVersion || ticketData.planned_fix_version || '';
+        form.value.fixedVersion = ticketData.fixedVersion || ticketData.fixed_version || '';
+        form.value.releasedVersion = ticketData.releasedVersion || ticketData.released_version || '';
         form.value.isProblem = ticketData.isProblem ?? ticketData.is_problem ?? undefined;
         form.value.rootCauseType = ticketData.rootCauseType || ticketData.root_cause_type || '';
         form.value.solutionType = ticketData.solutionType || ticketData.solution_type || '';
@@ -4171,6 +4279,7 @@
       handleModuleChange(formModuleValue.value);
       payload.moduleId = form.value.moduleId;
       payload.moduleName = form.value.moduleName || '';
+      payload.affectedVersion = payload.affectedVersion || payload.versionKey || '';
       if (payload.issueTypeId) {
         payload.issueTypeName =
           payload.issueTypeName || getStatOptionLabel(issueTypeOptions.value, payload.issueTypeId);

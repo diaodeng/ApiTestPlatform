@@ -107,20 +107,20 @@
       </el-col>
       <el-col :span="6">
         <el-card shadow="never">
-          <div class="metric-label">平均处理耗时</div>
-          <div class="metric-value">{{ formatSeconds(overview.avgProcessSeconds) }}</div>
+          <div class="metric-label">新增工单</div>
+          <div class="metric-value">{{ overview.newCount || 0 }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="never">
-          <div class="metric-label">状态类型数</div>
-          <div class="metric-value">{{ overview.statusCounts?.length || 0 }}</div>
+          <div class="metric-label">已处理数</div>
+          <div class="metric-value">{{ overview.processedInNewCount || 0 }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="never">
-          <div class="metric-label">涉及模块数</div>
-          <div class="metric-value">{{ overview.moduleCounts?.length || 0 }}</div>
+          <div class="metric-label">处理率</div>
+          <div class="metric-value">{{ formatPercent(overview.processRate) }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -167,6 +167,17 @@
           <div ref="problemTrendChartRef" class="trend-chart" />
         </el-card>
       </el-col>
+      <el-col
+        v-show="isTrendBlockVisible('processingTrend')"
+        :xs="24"
+        :lg="12"
+        class="trend-chart-col"
+      >
+        <el-card shadow="never">
+          <template #header>处理率与存量趋势</template>
+          <div ref="processingTrendChartRef" class="trend-chart" />
+        </el-card>
+      </el-col>
       <el-col v-show="isTrendBlockVisible('moduleTrend')" :xs="24" :lg="12" class="trend-chart-col">
         <el-card shadow="never">
           <template #header>Top模块趋势</template>
@@ -191,12 +202,26 @@
       <el-table v-loading="loading" :data="trend.series || []">
         <el-table-column label="周期" prop="bucket" width="120" />
         <el-table-column label="新增" prop="newCount" width="90" align="center" />
+        <el-table-column label="已响应" prop="firstRespondedCount" width="90" align="center" />
+        <el-table-column label="已处理" prop="processedCount" width="90" align="center" />
+        <el-table-column label="新增已处理" prop="processedInNewCount" width="110" align="center" />
+        <el-table-column label="处理率" width="90" align="center">
+          <template #default="scope">{{ formatPercent(scope.row.processRate) }}</template>
+        </el-table-column>
+        <el-table-column label="处置完成" prop="resolvedCount" width="100" align="center" />
         <el-table-column label="关闭" prop="closedCount" width="90" align="center" />
         <el-table-column label="净增" prop="netIncrease" width="90" align="center" />
-        <el-table-column label="估算存量" prop="openBacklog" width="100" align="center" />
+        <el-table-column label="未处理存量" prop="unprocessedBacklog" width="110" align="center" />
+        <el-table-column label="未关闭存量" prop="openBacklog" width="110" align="center" />
         <el-table-column label="Bug" prop="problemCount" width="90" align="center" />
         <el-table-column label="非Bug" prop="nonProblemCount" width="90" align="center" />
         <el-table-column label="支持类" prop="supportCount" width="90" align="center" />
+        <el-table-column label="平均响应耗时" width="130" align="center">
+          <template #default="scope">{{ formatSeconds(scope.row.avgFirstResponseSeconds) }}</template>
+        </el-table-column>
+        <el-table-column label="平均处理耗时" width="130" align="center">
+          <template #default="scope">{{ formatSeconds(scope.row.avgFirstProcessSeconds) }}</template>
+        </el-table-column>
         <el-table-column label="Top细分问题" min-width="220" show-overflow-tooltip>
           <template #default="scope">{{ formatTopRows(scope.row.problemPatternCounts) }}</template>
         </el-table-column>
@@ -261,6 +286,7 @@
   const blockConfigOpen = ref(false);
   const overallTrendChartRef = ref(null);
   const problemTrendChartRef = ref(null);
+  const processingTrendChartRef = ref(null);
   const moduleTrendChartRef = ref(null);
   const problemPatternTrendChartRef = ref(null);
   const trendChartInstances = {};
@@ -276,10 +302,13 @@
   const trendBlockOptions = [
     { key: 'overallTrend', title: '整体趋势曲线' },
     { key: 'problemTrend', title: '问题性质趋势曲线' },
+    { key: 'processingTrend', title: '处理率与存量趋势曲线' },
     { key: 'moduleTrend', title: 'Top模块趋势曲线' },
     { key: 'problemPatternTrend', title: 'Top细分问题趋势曲线' },
     { key: 'trendDetail', title: '趋势明细表格' },
   ];
+  const statisticsBlockConfigVersion = 2;
+  const trendBlockKeysAddedInV2 = ['processingTrend'];
 
   const statisticsBlockOptions = [
     {
@@ -422,6 +451,7 @@
     () =>
       isTrendBlockVisible('overallTrend') ||
       isTrendBlockVisible('problemTrend') ||
+      isTrendBlockVisible('processingTrend') ||
       isTrendBlockVisible('moduleTrend') ||
       isTrendBlockVisible('problemPatternTrend')
   );
@@ -490,7 +520,18 @@
     const normalized = (Array.isArray(rawKeys) ? rawKeys : defaultTrendBlockKeys)
       .map((item) => String(item || '').trim())
       .filter((item) => validKeys.has(item));
-    return normalized.length ? normalized : [...defaultTrendBlockKeys];
+    const result = normalized.length ? normalized : [...defaultTrendBlockKeys];
+    const configVersion = Number(value?.configVersion || 1);
+    if (!Array.isArray(value) && configVersion >= statisticsBlockConfigVersion) {
+      return result;
+    }
+    // 兼容历史用户显示配置：旧配置保存时不存在新增趋势项，需要默认补齐一次。
+    trendBlockKeysAddedInV2.forEach((key) => {
+      if (validKeys.has(key) && !result.includes(key)) {
+        result.push(key);
+      }
+    });
+    return result;
   }
 
   function loadStatisticsBlockConfig() {
@@ -515,6 +556,7 @@
       configType: 'ticket',
       configKey: 'ticket_statistics_blocks',
       configValue: {
+        configVersion: statisticsBlockConfigVersion,
         visibleBlocks: visibleStatisticsBlockKeys.value,
         visibleTrendBlocks: visibleTrendBlockKeys.value,
       },
@@ -599,6 +641,11 @@
     const minute = Math.floor((seconds % 3600) / 60);
     const second = seconds % 60;
     return `${hour}小时${minute}分${second}秒`;
+  }
+
+  function formatPercent(value) {
+    const numeric = Number(value || 0);
+    return `${(numeric * 100).toFixed(1)}%`;
   }
 
   function getStatOptionLabel(options, value) {
@@ -798,6 +845,7 @@
   function renderTrendCharts() {
     const overallChart = getTrendChart('overall', overallTrendChartRef);
     const problemChart = getTrendChart('problem', problemTrendChartRef);
+    const processingChart = getTrendChart('processing', processingTrendChartRef);
     const moduleChart = getTrendChart('module', moduleTrendChartRef);
     const problemPatternChart = getTrendChart('problemPattern', problemPatternTrendChartRef);
     const seriesRows = getTrendSeries();
@@ -814,26 +862,32 @@
           data: seriesRows.map((item) => Number(item.newCount || 0)),
         },
         {
+          name: '已响应',
+          type: 'line',
+          smooth: true,
+          symbolSize: 6,
+          data: seriesRows.map((item) => Number(item.firstRespondedCount || 0)),
+        },
+        {
+          name: '已处理',
+          type: 'line',
+          smooth: true,
+          symbolSize: 6,
+          data: seriesRows.map((item) => Number(item.processedCount || 0)),
+        },
+        {
+          name: '处置完成',
+          type: 'line',
+          smooth: true,
+          symbolSize: 6,
+          data: seriesRows.map((item) => Number(item.resolvedCount || 0)),
+        },
+        {
           name: '关闭',
           type: 'line',
           smooth: true,
           symbolSize: 6,
           data: seriesRows.map((item) => Number(item.closedCount || 0)),
-        },
-        {
-          name: '净增',
-          type: 'line',
-          smooth: true,
-          symbolSize: 6,
-          data: seriesRows.map((item) => Number(item.netIncrease || 0)),
-        },
-        {
-          name: '周期末未关闭存量',
-          type: 'line',
-          smooth: true,
-          symbolSize: 6,
-          areaStyle: { opacity: 0.12 },
-          data: seriesRows.map((item) => Number(item.openBacklog || 0)),
         },
       ]),
       true
@@ -869,6 +923,47 @@
           data: seriesRows.map((item) => Number(item.supportCount || 0)),
         },
       ]),
+      true
+    );
+    processingChart?.setOption(
+      buildLineChartOption(
+        [
+          {
+            name: '处理率',
+            type: 'line',
+            smooth: true,
+            symbolSize: 6,
+            yAxisIndex: 1,
+            data: seriesRows.map((item) => Number(((item.processRate || 0) * 100).toFixed(1))),
+          },
+          {
+            name: '未处理存量',
+            type: 'line',
+            smooth: true,
+            symbolSize: 6,
+            areaStyle: { opacity: 0.12 },
+            data: seriesRows.map((item) => Number(item.unprocessedBacklog || 0)),
+          },
+          {
+            name: '未关闭存量',
+            type: 'line',
+            smooth: true,
+            symbolSize: 6,
+            data: seriesRows.map((item) => Number(item.openBacklog || 0)),
+          },
+        ],
+        {
+          yAxis: [
+            { type: 'value', minInterval: 1 },
+            {
+              type: 'value',
+              min: 0,
+              max: 100,
+              axisLabel: { formatter: '{value}%' },
+            },
+          ],
+        }
+      ),
       true
     );
     moduleChart?.setOption(

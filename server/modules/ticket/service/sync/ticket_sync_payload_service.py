@@ -17,6 +17,7 @@ from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.enums.ticket_enums import TicketStatus
+from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
 from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import user_id as _user_id
@@ -388,6 +389,39 @@ class TicketSyncPayloadService:
         version_key = str((detected or {}).get("versionKey") or sync_object.version_key or "").strip()
         if version_key:
             extra_data["version_key"] = version_key
+        payload["submit_time"] = TicketProcessingMetricService.resolve_submit_time(
+            explicit_submit_time=sync_object.submit_time or (ticket.submit_time if ticket else None),
+            extra_data=extra_data,
+            create_time=external_create_time,
+            fallback_time=now,
+        )
+        payload["affected_version"] = TicketProcessingMetricService.resolve_affected_version(
+            affected_version=sync_object.affected_version,
+            version_key=version_key,
+            extra_data=extra_data,
+            fallback=ticket.affected_version if ticket else None,
+        )
+        payload["planned_fix_version"] = sync_object.planned_fix_version or (
+            ticket.planned_fix_version if ticket else ""
+        )
+        payload["fixed_version"] = sync_object.fixed_version or (ticket.fixed_version if ticket else "")
+        payload["released_version"] = sync_object.released_version or (ticket.released_version if ticket else "")
+        payload["processed_at"] = sync_object.processed_at or (ticket.processed_at if ticket else None)
+        payload["released_at"] = sync_object.released_at or (ticket.released_at if ticket else None)
+        payload["verified_at"] = sync_object.verified_at or (ticket.verified_at if ticket else None)
+        if ticket:
+            TicketProcessingMetricService.apply_status_time_fields(
+                ticket=ticket,
+                from_status=ticket.status,
+                to_status=str(payload.get("status") or ""),
+                update_data=payload,
+                now=now,
+            )
+        elif not payload.get("processed_at") and (
+            str(payload.get("status") or "") in TicketProcessingMetricService.PROCESSED_STATUSES
+            or TicketProcessingMetricService.has_processing_conclusion(payload)
+        ):
+            payload["processed_at"] = now
 
         log_pull_hints = (
             dict(extra_data.get("log_pull_hints") or {})

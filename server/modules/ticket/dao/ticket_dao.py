@@ -262,7 +262,7 @@ def _latest_ai_status_expr(ticket_id_column):
 
 def _ticket_submit_time_expr():
     """
-    构造工单提交时间表达式（外部 createTime 优先，缺失时回退本地 create_time）。
+    构造工单提交时间表达式（主表 submit_time 优先，缺失时兼容外部 createTime）。
     :return: 可用于 SQL 查询过滤的提交时间表达式
     """
     external_create_time_expr = Ticket.extra_data["external_sync"]["externalCreateTime"].as_string()
@@ -271,15 +271,17 @@ def _ticket_submit_time_expr():
         func.nullif(external_create_time_expr, ""),
         func.nullif(source_external_create_time_expr, ""),
     )
-    return func.coalesce(cast(resolved_external_create_time_expr, SqlDateTime), Ticket.create_time)
+    return func.coalesce(Ticket.submit_time, cast(resolved_external_create_time_expr, SqlDateTime), Ticket.create_time)
 
 
 def _resolve_ticket_submit_time(ticket: Ticket) -> datetime | None:
     """
-    解析单条工单的提交时间（外部 createTime 优先，缺失时回退本地 create_time）。
+    解析单条工单的提交时间（主表 submit_time 优先，缺失时兼容外部 createTime）。
     :param ticket: 工单实体
     :return: 工单提交时间
     """
+    if getattr(ticket, "submit_time", None):
+        return ticket.submit_time
     extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
     external_sync = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
     source = external_sync.get("source") if isinstance(external_sync.get("source"), dict) else {}
@@ -340,6 +342,20 @@ def _build_ticket_process_statuses_filter(latest_log_status, latest_ai_status, p
     return or_(*filters)
 
 
+def _build_processing_conclusion_filter(value: str | None):
+    """
+    构造业务处理结论状态过滤条件。
+    :param value: processed/unprocessed。
+    :return: SQLAlchemy 过滤表达式。
+    """
+    status = str(value or "").strip().lower()
+    if status == "processed":
+        return Ticket.processed_at.is_not(None)
+    if status == "unprocessed":
+        return Ticket.processed_at.is_(None)
+    return True
+
+
 def _normalize_ticket_sort_order(value: str | None) -> str:
     """
     归一化工单列表排序方向。
@@ -381,6 +397,7 @@ def _ticket_sort_expression_map(submit_time_expr, latest_log_status, latest_ai_s
     :return: 排序字段到 SQLAlchemy 表达式的映射
     """
     process_status_expr = _ticket_process_status_sort_expr(latest_log_status, latest_ai_status)
+    processing_conclusion_expr = case((Ticket.processed_at.is_not(None), "processed"), else_="unprocessed")
     return {
         "ticketNo": Ticket.ticket_no,
         "ticket_no": Ticket.ticket_no,
@@ -388,6 +405,8 @@ def _ticket_sort_expression_map(submit_time_expr, latest_log_status, latest_ai_s
         "status": Ticket.status,
         "processStatus": process_status_expr,
         "process_status": process_status_expr,
+        "processingConclusionStatus": processing_conclusion_expr,
+        "processing_conclusion_status": processing_conclusion_expr,
         "project": Ticket.merchant_name,
         "projectName": Ticket.merchant_name,
         "project_name": Ticket.merchant_name,
@@ -414,6 +433,14 @@ def _ticket_sort_expression_map(submit_time_expr, latest_log_status, latest_ai_s
         "problem_pattern_code": Ticket.problem_pattern_code,
         "problemPatternName": Ticket.problem_pattern_name,
         "problem_pattern_name": Ticket.problem_pattern_name,
+        "affectedVersion": Ticket.affected_version,
+        "affected_version": Ticket.affected_version,
+        "plannedFixVersion": Ticket.planned_fix_version,
+        "planned_fix_version": Ticket.planned_fix_version,
+        "fixedVersion": Ticket.fixed_version,
+        "fixed_version": Ticket.fixed_version,
+        "releasedVersion": Ticket.released_version,
+        "released_version": Ticket.released_version,
         "customerPriority": Ticket.customer_priority,
         "customer_priority": Ticket.customer_priority,
         "internalPriority": Ticket.internal_priority,
@@ -437,6 +464,14 @@ def _ticket_sort_expression_map(submit_time_expr, latest_log_status, latest_ai_s
         "closed_at": Ticket.closed_at,
         "resolvedAt": Ticket.resolved_at,
         "resolved_at": Ticket.resolved_at,
+        "firstResponseAt": Ticket.first_response_at,
+        "first_response_at": Ticket.first_response_at,
+        "processedAt": Ticket.processed_at,
+        "processed_at": Ticket.processed_at,
+        "releasedAt": Ticket.released_at,
+        "released_at": Ticket.released_at,
+        "verifiedAt": Ticket.verified_at,
+        "verified_at": Ticket.verified_at,
         "totalProcessSeconds": Ticket.total_process_seconds,
         "total_process_seconds": Ticket.total_process_seconds,
     }
@@ -551,6 +586,8 @@ class TicketDao:
         end_time = _date_end(query.end_time)
         submit_begin_time = _date_start(query.submit_begin_time)
         submit_end_time = _date_end(query.submit_end_time)
+        processed_begin_time = _date_start(query.processed_begin_time)
+        processed_end_time = _date_end(query.processed_end_time)
         ticket_no = str(query.ticket_no or "").strip()
         status_values = _normalize_text_list(query.statuses) or _normalize_text_list(query.status)
         process_status_values = _normalize_text_list(query.process_statuses) or _normalize_text_list(
@@ -639,6 +676,15 @@ class TicketDao:
                 Ticket.create_time <= end_time if end_time else True,
                 submit_time_expr >= submit_begin_time if submit_begin_time else True,
                 submit_time_expr <= submit_end_time if submit_end_time else True,
+                _build_processing_conclusion_filter(query.processing_conclusion_status),
+                Ticket.processed_at >= processed_begin_time if processed_begin_time else True,
+                Ticket.processed_at <= processed_end_time if processed_end_time else True,
+                Ticket.affected_version.like(f"%{query.affected_version}%") if query.affected_version else True,
+                Ticket.planned_fix_version.like(f"%{query.planned_fix_version}%")
+                if query.planned_fix_version
+                else True,
+                Ticket.fixed_version.like(f"%{query.fixed_version}%") if query.fixed_version else True,
+                Ticket.released_version.like(f"%{query.released_version}%") if query.released_version else True,
             )
             .filter(_build_ticket_process_statuses_filter(latest_log_status, latest_ai_status, process_status_values))
             .filter(

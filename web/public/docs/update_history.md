@@ -1,3 +1,13 @@
+## 2026-07-08
+
+1. 工单第一阶段处理口径落地：主表新增 `submit_time/processed_at/released_at/verified_at` 和 `affected_version/planned_fix_version/fixed_version/released_version`。
+2. 新增 `TicketProcessingMetricService` 统一维护提交时间、处理结论时间、发布验证时间和版本兼容；`first_response_at` 继续只表示首次响应/接手，`resolved_at` 保留终态处置完成口径。
+3. 新增 `TicketProcessingStatsService` 和 `TicketProcessingStatsDao`，统计接口直接返回新增、已响应、已处理、处理率、未处理存量和首次响应/处理耗时。
+4. 工单列表把旧“处理状态”改名为“日志/AI进度”，新增“处理结论”、处理时间筛选和版本治理列；新增/编辑表单新增计划修复、实际修复和实际发版版本。
+5. Excel 导入和外部同步入库同步写入结构化提交时间、处理时间和版本字段；新增迁移脚本 `server/sql/20260708_ticket_submit_processed_version_columns.sql`。
+6. 工单统计页保留原有整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；处理率与未处理存量作为新增独立趋势图，不替换旧曲线；历史用户显示配置缺少 `processingTrend` 时会按配置版本自动补齐一次。
+7. 新增说明文档：`web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md`。
+
 ## 2026-07-06
 
 1. 相似工单自动刷新场景新增“多维主动拉取入库”开关 `sceneTriggers.bitablePull`；飞书多维表格主动拉取入库和延后后处理改用 `bitable_pull` 场景，不再被 `externalSync` 开关隐式控制。旧配置缺少该开关时继承 `externalSync` 的值。

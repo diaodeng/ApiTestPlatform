@@ -19,6 +19,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_service import TicketService
+from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -288,7 +289,7 @@ async def get_ticket_statistics(
     """
     try:
         statistics = await run_in_threadpool(
-            TicketService.get_statistics_services,
+            TicketProcessingStatsService.get_statistics,
             query_db,
             query.begin_time,
             query.end_time,
@@ -320,7 +321,7 @@ async def get_ticket_statistics_trend(
     """
     try:
         statistics = await run_in_threadpool(
-            TicketService.get_statistics_trend_services,
+            TicketProcessingStatsService.get_statistics_trend,
             query_db,
             query.begin_time,
             query.end_time,

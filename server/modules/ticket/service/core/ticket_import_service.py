@@ -14,6 +14,7 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketRca, TicketStatusHistory
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
 from utils.snowflake import snowIdWorker
 
 IMPORT_HEADERS = [
@@ -30,6 +31,11 @@ IMPORT_HEADERS = [
     "来源",
     "提单人",
     "当前处理人",
+    "工单提交时间",
+    "问题发生版本",
+    "计划修复版本",
+    "实际修复版本",
+    "实际发版版本",
     "是否真实问题",
     "根因分类",
     "根因详情",
@@ -41,6 +47,9 @@ IMPORT_HEADERS = [
     "验证方式",
     "标签",
     "创建时间",
+    "处理完成时间",
+    "发版时间",
+    "验证时间",
     "解决时间",
     "关闭时间",
 ]
@@ -69,6 +78,19 @@ HEADER_ALIASES = {
     "来源": ["来源", "工单来源", "source"],
     "提单人": ["提单人", "反馈人", "创建人", "reporter_name", "reporterName"],
     "当前处理人": ["当前处理人", "处理人", "负责人", "current_assignee_name", "currentAssigneeName"],
+    "工单提交时间": ["工单提交时间", "提交时间", "submit_time", "submitTime"],
+    "问题发生版本": [
+        "问题发生版本",
+        "分析版本",
+        "版本号",
+        "affected_version",
+        "affectedVersion",
+        "version_key",
+        "versionKey",
+    ],
+    "计划修复版本": ["计划修复版本", "planned_fix_version", "plannedFixVersion"],
+    "实际修复版本": ["实际修复版本", "fixed_version", "fixedVersion"],
+    "实际发版版本": ["实际发版版本", "发版版本", "released_version", "releasedVersion"],
     "是否真实问题": ["是否真实问题", "是否问题", "真实问题", "is_problem", "isProblem"],
     "根因分类": ["根因分类", "原因分类", "root_cause_category", "rootCauseCategory"],
     "根因详情": ["根因详情", "原因", "根因", "root_cause", "rootCause", "root_cause_detail"],
@@ -80,6 +102,9 @@ HEADER_ALIASES = {
     "验证方式": ["验证方式", "verify_method", "verifyMethod"],
     "标签": ["标签", "tags"],
     "创建时间": ["创建时间", "提单时间", "create_time", "createTime"],
+    "处理完成时间": ["处理完成时间", "首次处理完成时间", "processed_at", "processedAt"],
+    "发版时间": ["发版时间", "released_at", "releasedAt"],
+    "验证时间": ["验证时间", "verified_at", "verifiedAt"],
     "解决时间": ["解决时间", "resolved_at", "resolvedAt"],
     "关闭时间": ["关闭时间", "closed_at", "closedAt"],
 }
@@ -165,12 +190,18 @@ class TicketImportService:
             "来源": "客户反馈",
             "提单人": "张三",
             "当前处理人": "李四",
+            "工单提交时间": "2026-05-14 09:50:00",
+            "问题发生版本": "release/2.1.3",
+            "计划修复版本": "release/2.1.4",
+            "实际修复版本": "release/2.1.4",
+            "实际发版版本": "release/2.1.4",
             "是否真实问题": "是",
             "根因分类": "代码缺陷",
             "根因详情": "下游重试未设置超时时间",
             "解决方案": "增加超时和熔断配置",
             "标签": "支付,超时",
             "创建时间": "2026-05-14 10:00:00",
+            "处理完成时间": "2026-05-14 11:00:00",
             "解决时间": "2026-05-14 12:00:00",
         }
         sheet.append([samples.get(header, "") for header in IMPORT_HEADERS])
@@ -224,9 +255,22 @@ class TicketImportService:
                     continue
 
                 create_time = cls._parse_datetime(row.get("创建时间")) or now
+                submit_time = (
+                    cls._parse_datetime(row.get("工单提交时间"))
+                    or TicketProcessingMetricService.resolve_submit_time(create_time=create_time, fallback_time=now)
+                )
+                affected_version = cls._cell_text(row.get("问题发生版本"))
+                planned_fix_version = cls._cell_text(row.get("计划修复版本"))
+                fixed_version = cls._cell_text(row.get("实际修复版本"))
+                released_version = cls._cell_text(row.get("实际发版版本"))
+                processed_at = cls._parse_datetime(row.get("处理完成时间"))
+                released_at = cls._parse_datetime(row.get("发版时间"))
+                verified_at = cls._parse_datetime(row.get("验证时间"))
                 resolved_at = cls._parse_datetime(row.get("解决时间"))
                 closed_at = cls._parse_datetime(row.get("关闭时间"))
                 status = cls._normalize_status(row.get("状态"))
+                if not processed_at and cls._row_has_rca_conclusion(row):
+                    processed_at = resolved_at or closed_at or create_time
                 ticket = TicketDao.add_ticket(
                     query_db,
                     Ticket(
@@ -245,9 +289,17 @@ class TicketImportService:
                         source=cls._cell_text(row.get("来源")),
                         reporter_name=cls._cell_text(row.get("提单人")) or _current_user_name(current_user),
                         current_assignee_name=cls._cell_text(row.get("当前处理人")),
+                        submit_time=submit_time,
+                        affected_version=affected_version,
+                        planned_fix_version=planned_fix_version,
+                        fixed_version=fixed_version,
+                        released_version=released_version,
                         is_problem=cls._parse_bool(row.get("是否真实问题")),
                         root_cause=cls._cell_text(row.get("根因详情")),
                         solution=cls._cell_text(row.get("解决方案")),
+                        processed_at=processed_at,
+                        released_at=released_at,
+                        verified_at=verified_at,
                         resolved_at=resolved_at,
                         closed_at=closed_at,
                         total_process_seconds=cls._process_seconds(create_time, resolved_at, closed_at),
@@ -441,6 +493,15 @@ class TicketImportService:
                 create_time=create_time,
             ),
         )
+
+    @classmethod
+    def _row_has_rca_conclusion(cls, row: dict[str, Any]) -> bool:
+        """
+        判断导入行是否包含足以视为已处理的 RCA 结论。
+        :param row: 导入行数据
+        :return: 是否包含结论内容
+        """
+        return any(cls._cell_text(row.get(key)) for key in ["根因详情", "排查过程", "解决方案", "验证方式"])
 
     @classmethod
     def _normalize_status(cls, value: Any) -> str:

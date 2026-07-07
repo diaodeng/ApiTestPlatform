@@ -6,13 +6,15 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-04
+freshness: 2026-07-08
 created: 2026-05-20
 updated: 2026-07-07
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
   - server/modules/ticket/service/core/ticket_import_service.py
+  - server/modules/ticket/service/core/ticket_processing_metric_service.py
+  - server/modules/ticket/service/stats/ticket_processing_stats_service.py
   - server/modules/ticket/service/sync/ticket_sync_service.py
   - server/modules/ticket/service/sync/ticket_sync_payload_service.py
   - server/modules/ticket/service/sync/ticket_sync_post_process_service.py
@@ -34,6 +36,7 @@ related_files:
   - server/modules/ticket/service/collaboration/ticket_message_sync_service.py
   - server/modules/ticket/service/notification/ticket_notify_service.py
   - server/modules/ticket/service/stats/ticket_topic_stats_service.py
+  - server/modules/ticket/dao/ticket_processing_stats_dao.py
   - server/modules/ticket/dao/ticket_dao.py
   - server/modules/ticket/dao/ticket_log_pull_dao.py
   - server/modules/ticket/dao/ticket_ai_dao.py
@@ -88,9 +91,11 @@ graph TD
 
 ## 当前关键约束
 
-- 2026-07-08 修订待实施方案：第一阶段建议新增 `submit_time` 作为统计主时间，新增 `processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，现有前端 `processStatus` 实际表示日志拉取/AI 分析进度，后续应改文案为“日志/AI进度”或避免与业务处理结论混用。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)。
+- 2026-07-08 第一阶段已落地：`Ticket.submit_time` 作为统计主时间，`Ticket.processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，前端 `processStatus` 文案已改为“日志/AI进度”，业务处理结论通过 `processingConclusionStatus/processedAt` 展示。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)，实现记录见 [工单提交时间、处理结论和版本治理第一阶段实现记录](../../../../web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md)。
 - 同一方案确认保留当前 `resolved_at` 终态写入逻辑，但语义明确为“工单处置完成时间”，不是只代表真实 Bug 修复完成；真实 Bug 修复统计应结合 `is_problem`、`solution_type`、`resolution_code`、`fixed_version`、`released_at` 和 `verified_at`。
-- 同一方案建议把版本治理字段从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`extra_data.version_key` 暂保留供 AI 仓库映射兼容。
+- 版本治理字段已从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`extra_data.version_key` 暂保留供 AI 仓库映射兼容。
+- 处理统计已下沉到 `service/stats/TicketProcessingStatsService`，控制器 `/ticket/statistics/overview` 和 `/ticket/statistics/trend` 直接调用该服务；DAO 层仅通过 `TicketProcessingStatsDao` 提供范围查询，不在 `TicketService` 中继续增加统计门面。
+- 工单统计页趋势必须保留原有整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；新增处理口径时只增加独立“处理率与存量趋势”图，`TicketProcessingStatsService.get_statistics_trend` 需要合并 `TicketDao.get_statistics_trend` 的旧趋势字段和新增处理字段，不能用处理口径结果覆盖旧曲线数据。历史用户的 `ticket_statistics_blocks.visibleTrendBlocks` 缺少 `processingTrend` 时，前端按 `configVersion` 自动补齐一次，之后保存为新版配置并尊重用户手动隐藏选择。
 - 当前根因字段、根因分类和细分问题字段已经能满足分类统计；Issue 归因层仅作为第二阶段增强，用于统计“多张 Ticket 是否属于同一个真实问题实例”“一个问题影响多少工单”等问题实例口径，不作为第一阶段必做项。
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。
 - 拆分后禁止在 `TicketService`、`TicketMessageSyncService`、`TicketSyncService` 之间通过函数内导入、延迟代理或兼容门面规避依赖问题；跨链路共享能力必须下沉到无上层依赖的独立子服务或 util。当前评论幂等和消息流写入由 `TicketCommentCoreService` 承接，AI 分类统计由 `TicketAutoClassificationService` 承接，用户上下文和版本号工具由 `ticket_common_util` 承接。

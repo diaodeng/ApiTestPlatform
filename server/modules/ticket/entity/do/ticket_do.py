@@ -33,6 +33,11 @@ class Ticket(Base):
         Index("idx_ticket_del_root_cause_create", "del_flag", "root_cause_type", "create_time", "ticket_id"),
         Index("idx_ticket_del_solution_create", "del_flag", "solution_type", "create_time", "ticket_id"),
         Index("idx_ticket_del_resolution_create", "del_flag", "resolution_code", "create_time", "ticket_id"),
+        Index("idx_ticket_del_submit_time", "del_flag", "submit_time", "ticket_id"),
+        Index("idx_ticket_del_processed_time", "del_flag", "processed_at", "ticket_id"),
+        Index("idx_ticket_del_resolved_time", "del_flag", "resolved_at", "ticket_id"),
+        Index("idx_ticket_del_closed_time", "del_flag", "closed_at", "ticket_id"),
+        Index("idx_ticket_del_planned_fix_version", "del_flag", "planned_fix_version", "ticket_id"),
     )
 
     ticket_id: Mapped[int] = mapped_column(
@@ -93,12 +98,26 @@ class Ticket(Base):
     problem_pattern_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="细分问题类型确认时间"
     )
+    affected_version: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, default="", comment="问题发生或分析版本"
+    )
+    planned_fix_version: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, default="", comment="计划修复版本"
+    )
+    fixed_version: Mapped[str | None] = mapped_column(String(100), nullable=True, default="", comment="实际修复版本")
+    released_version: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, default="", comment="实际发版版本"
+    )
     root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终根因")
     solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终解决方案")
+    submit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="工单业务提交时间")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始处理时间")
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="解决时间")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="处置完成时间")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="关闭时间")
     first_response_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="首次响应时间")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="首次形成处理结论时间")
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="实际发版时间")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="验证完成时间")
     total_process_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="总处理耗时秒")
     tags: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="标签，建议存储字符串数组")
     extra_data: Mapped[dict | None] = mapped_column(
