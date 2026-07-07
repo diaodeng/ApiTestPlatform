@@ -1226,6 +1226,7 @@ class TicketAiAnalysisService:
         *,
         repo_path: str | None = None,
         workspace_root: str | None = None,
+        log_analysis_mode: str = "digest",
     ) -> str:
         """
         构建分析提示词。
@@ -1234,6 +1235,7 @@ class TicketAiAnalysisService:
         :param ticket: 工单信息
         :param repo_path: 实际使用的本地仓库路径。
         :param workspace_root: 实际使用的工作区根目录。
+        :param log_analysis_mode: 日志分析模式（digest/full_directory/hybrid）。
         :return: 提示词文本
         """
         resolved_repo_path = repo_path or mapping.get("resolvedLocalRepoPath") or mapping.get("resolved_local_repo_path")
@@ -1258,12 +1260,13 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 日志读取策略由 context.json 中的 `logAnalysisMode` 决定：
+3. **本次日志分析模式为 `{log_analysis_mode}`**（已写入 context.json 的 logAnalysisMode 字段）：
    - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
      {workspace_path}/source_logs/ 定点读取原始日志。
    - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
      工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
    - `hybrid`：先阅读摘要，再使用 {workspace_path}/source_logs/ 完整目录复核关键证据。
+   **请严格按照上述模式执行，不要自行切换为其他模式。**
 4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
    在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
    OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
@@ -1631,6 +1634,7 @@ class TicketAiAnalysisService:
                         ticket,
                         repo_path=str(repo_path),
                         workspace_root=str(workspace_root),
+                        log_analysis_mode=log_analysis_mode,
                     )
                 prompt_file.write_text(resolved_prompt, encoding="utf-8")
 

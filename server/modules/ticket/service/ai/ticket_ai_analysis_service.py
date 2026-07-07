@@ -1224,22 +1224,32 @@ class TicketAiAnalysisService:
             context_payload = cls._build_context_payload(db, ticket, mapping, log_record)
         compact_context = cls._json_safe_value(task.analysis_context or {})
         if isinstance(compact_context, dict):
-            for key in (
+            # 用户配置项：始终优先使用紧凑快照中的值（代表用户提交时的原始选择），
+            # 避免无 request 重建时被系统默认值覆盖。
+            user_config_keys = (
+                "logAnalysisMode",
+                "logWindowMissingStrategy",
+                "logRequestedBeginTime",
+                "logRequestedEndTime",
+                "forceRefresh",
+                "extraInstruction",
                 "selectedAgentCode",
                 "selectedAiProviderCode",
                 "selectedAiProviderName",
                 "selectedAiProviderType",
                 "selectedWorkerModel",
-                "forceRefresh",
+            )
+            for key in user_config_keys:
+                compact_val = compact_context.get(key)
+                if compact_val not in (None, "", {}):
+                    context_payload[key] = compact_val
+            # 其他配置项：仅在缺失时从快照补充
+            other_keys = (
                 "sourceLogPullRecordId",
                 "sourceLogViewMode",
-                "extraInstruction",
-                "logAnalysisMode",
-                "logWindowMissingStrategy",
-                "logRequestedBeginTime",
-                "logRequestedEndTime",
                 "promptLayers",
-            ):
+            )
+            for key in other_keys:
                 if key not in context_payload or context_payload.get(key) in (None, "", {}):
                     context_payload[key] = compact_context.get(key)
         return cls._json_safe_value(context_payload)
@@ -1254,6 +1264,7 @@ class TicketAiAnalysisService:
         prompt_layers: dict[str, Any] | None = None,
         prompt_templates: list[dict[str, Any]] | None = None,
         extra_instruction: str = "",
+        log_analysis_mode: str = "digest",
     ) -> str:
         """
         构建 Codex 分析提示词。
@@ -1263,6 +1274,7 @@ class TicketAiAnalysisService:
         :param prompt_layers: 项目/模块默认提示词分层。
         :param prompt_templates: 选择追加的提示词模板列表。
         :param extra_instruction: 本次提交的额外说明。
+        :param log_analysis_mode: 日志分析模式（digest/full_directory/hybrid）。
         :return: 提示词文本
         """
         prompt_layers = prompt_layers or {}
@@ -1313,12 +1325,13 @@ class TicketAiAnalysisService:
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 日志读取策略由 context.json 中的 `logAnalysisMode` 决定：
+3. **本次日志分析模式为 `{log_analysis_mode}`**（已写入 context.json 的 logAnalysisMode 字段）：
    - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
      {workspace_path}/source_logs/ 定点读取原始日志。
    - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
      工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
    - `hybrid`：先阅读摘要，再使用 {workspace_path}/source_logs/ 完整目录复核关键证据。
+   **请严格按照上述模式执行，不要自行切换为其他模式。**
 4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
    在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
    OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
@@ -1897,6 +1910,7 @@ class TicketAiAnalysisService:
             prompt_layers=prompt_layers,
             prompt_templates=selected_prompt_templates,
             extra_instruction=request.extra_instruction or "",
+            log_analysis_mode=str(context_payload.get("logAnalysisMode") or "digest"),
         )
 
         now = datetime.now()
@@ -2359,7 +2373,13 @@ class TicketAiAnalysisService:
                 / f"task_{task.task_id}"
             )
         result_file = str(task.result_path or workspace_dir / "result.json")
-        prompt_template = task.prompt_text or cls._build_prompt("{workspace_path}", mapping, ticket)
+        # 优先使用任务创建时生成的 prompt；若缺失则重建，从紧凑快照中取 logAnalysisMode
+        fallback_log_mode = "digest"
+        if isinstance(task.analysis_context, dict):
+            fallback_log_mode = str(task.analysis_context.get("logAnalysisMode") or "digest")
+        prompt_template = task.prompt_text or cls._build_prompt(
+            "{workspace_path}", mapping, ticket, log_analysis_mode=fallback_log_mode,
+        )
         schema_payload = cls._build_result_schema(ticket, mapping)
         timeout_sec = cls._get_config_int(db, cls.CONFIG_WORKER_TIMEOUT, cls.DEFAULT_WORKER_TIMEOUT)
         context_payload = cls._load_workspace_context_payload(db, task, ticket, mapping, workspace_dir)
