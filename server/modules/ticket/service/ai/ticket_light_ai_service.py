@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -34,6 +34,10 @@ class TicketLightAiService:
     CONFIG_LOG_EXTRACT_ENABLED = "ticket.ai.log_extract.enabled"
     CONFIG_LOG_EXTRACT_PROVIDER = "ticket.ai.log_extract.provider.code"
     CONFIG_LOG_EXTRACT_PROMPT = "ticket.ai.log_extract.prompt.code"
+    # 三场景独立开关：外部推送、远端拉取、多维表格拉取
+    CONFIG_SYNC_EXTRACT_EXTERNAL_PUSH_ENABLED = "ticket.ai.sync_extract.external_push.enabled"
+    CONFIG_SYNC_EXTRACT_REMOTE_PULL_ENABLED = "ticket.ai.sync_extract.remote_pull.enabled"
+    CONFIG_SYNC_EXTRACT_BITABLE_PULL_ENABLED = "ticket.ai.sync_extract.bitable_pull.enabled"
     TICKET_CATEGORY_CANDIDATES = (
         "促销",
         "券",
@@ -142,6 +146,30 @@ class TicketLightAiService:
         """
         config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_LOG_EXTRACT_ENABLED).first()
         return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
+
+    # 场景名称映射：sync_scene -> config_key
+    SCENE_SYNC_EXTRACT_CONFIG_MAP = {
+        "external_sync": "ticket.ai.sync_extract.external_push.enabled",
+        "remote_pull": "ticket.ai.sync_extract.remote_pull.enabled",
+        "bitable_pull": "ticket.ai.sync_extract.bitable_pull.enabled",
+    }
+
+    @classmethod
+    def is_sync_extract_enabled_for_scene(cls, db: Session, sync_scene: str) -> bool:
+        """
+        判断指定同步场景是否启用AI统一提取。
+        优先读取场景独立开关，未配置时兜底读取总开关 ticket.ai.log_extract.enabled。
+        :param db: 数据库会话
+        :param sync_scene: 同步场景，支持 external_sync/remote_pull/bitable_pull
+        :return: 是否启用该场景的AI提取
+        """
+        scene_config_key = cls.SCENE_SYNC_EXTRACT_CONFIG_MAP.get(sync_scene)
+        if scene_config_key:
+            scene_row = db.query(SysConfig).filter(SysConfig.config_key == scene_config_key).first()
+            if scene_row is not None:
+                return str(getattr(scene_row, "config_value", "") or "").strip().lower() == "true"
+        # 场景独立开关未配置时，兜底使用总开关
+        return cls.is_log_extract_enabled(db)
 
     @classmethod
     def extract_version_key_from_text(cls, text: str | None) -> str:

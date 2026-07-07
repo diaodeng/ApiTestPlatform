@@ -142,7 +142,8 @@ class TicketSyncService:
         extract_result: dict[str, Any] | None,
     ) -> tuple[TicketExternalSyncUpsertModel, dict[str, Any]]:
         """
-        将统一提取结果回填到同步对象（当前仅回填日志拉取参数）。
+        将统一提取结果回填到同步对象，包括日志拉取参数（POS/SCO/日期）和门店、版本号。
+        POS/SCO/日期写入 log_pull_config；门店和版本号写入 extra_data._ai_extract 供后续 detect_fields 兜底使用。
         :param sync_object: 外部同步对象
         :param extract_result: 统一提取结果
         :return: (回填后的同步对象, 回填摘要)
@@ -151,42 +152,69 @@ class TicketSyncService:
         pos_no = SyncUtil.safe_int(result.get("posNo"))
         sco_no = SyncUtil.safe_int(result.get("scoNo"))
         log_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(result.get("logDate"))
+        ai_store = str(result.get("store") or "").strip()
+        ai_version_key = str(result.get("versionKey") or "").strip()
 
         log_pull_payload = (
             dict(sync_object.log_pull_config or {})
             if isinstance(sync_object.log_pull_config, dict)
             else {}
         )
-        changed = False
+        log_pull_changed = False
         if pos_no:
             if SyncUtil.safe_int(log_pull_payload.get("posNo")) != pos_no:
                 log_pull_payload["posNo"] = pos_no
-                changed = True
+                log_pull_changed = True
         elif sco_no:
             if SyncUtil.safe_int(log_pull_payload.get("scoNo")) != sco_no:
                 log_pull_payload["scoNo"] = sco_no
-                changed = True
+                log_pull_changed = True
         if log_date:
             previous_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(
                 log_pull_payload.get("modifyTime") or log_pull_payload.get("logDate")
             )
             if previous_date != log_date:
                 log_pull_payload["modifyTime"] = log_date
-                changed = True
+                log_pull_changed = True
 
-        if not changed:
+        # 门店和版本号写入 extra_data._ai_extract，供后续 detect_fields 和 build_upsert_payload 兜底使用
+        extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
+        ai_extract_payload = dict(extra_data.get("_ai_extract") or {})
+        ai_extract_changed = False
+        if ai_store and str(ai_extract_payload.get("store") or "").strip() != ai_store:
+            ai_extract_payload["store"] = ai_store
+            ai_extract_changed = True
+        if ai_version_key and str(ai_extract_payload.get("versionKey") or "").strip() != ai_version_key:
+            ai_extract_payload["versionKey"] = ai_version_key
+            ai_extract_changed = True
+        if ai_extract_changed:
+            extra_data["_ai_extract"] = ai_extract_payload
+
+        if not log_pull_changed and not ai_extract_changed:
             return sync_object, {"updated": False}
-        updated_sync_object = sync_object.model_copy(update={"log_pull_config": log_pull_payload})
-        return updated_sync_object, {
-            "updated": True,
-            "logPullConfig": {
+
+        update_payload: dict[str, Any] = {}
+        if log_pull_changed:
+            update_payload["log_pull_config"] = log_pull_payload
+        if ai_extract_changed:
+            update_payload["extra_data"] = extra_data
+
+        updated_sync_object = sync_object.model_copy(update=update_payload)
+        apply_summary: dict[str, Any] = {"updated": True}
+        if log_pull_changed:
+            apply_summary["logPullConfig"] = {
                 "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
                 "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
                 "modifyTime": TicketSyncPayloadService.normalize_auto_log_pull_date_text(
                     log_pull_payload.get("modifyTime")
                 ),
-            },
-        }
+            }
+        if ai_extract_changed:
+            apply_summary["aiExtract"] = {
+                "store": ai_extract_payload.get("store", ""),
+                "versionKey": ai_extract_payload.get("versionKey", ""),
+            }
+        return updated_sync_object, apply_summary
 
     @classmethod
     def _attach_sync_ai_extract_meta(
@@ -362,8 +390,39 @@ class TicketSyncService:
         ai_extract_meta: dict[str, Any] = {"skipped": True}
         ai_extract_apply_meta: dict[str, Any] = {"updated": False}
         title_meta: dict[str, Any] = {"mode": "raw", "title": raw_title}
+        # AI统一提取：三场景（外部推送/远端拉取/多维表格拉取）均执行，由场景独立开关控制
+        if skip_ai_analysis_due_to_update_title:
+            logger.info(
+                f"外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, "
+                f"ticket_no={sync_object.ticket_no}"
+            )
+        else:
+            try:
+                ai_extract_result, ai_extract_meta = TicketLightAiService.extract_ticket_sync_fields(
+                    db,
+                    title=raw_title or existing_title,
+                    description=str(sync_object.description or "").strip(),
+                    raw_payload=sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {},
+                    source_type=f"{sync_scene}_sync_extract",
+                    source_id=getattr(ticket, "ticket_id", None),
+                    source_ref=sync_object.ticket_no,
+                    current_user_name=_user_name(current_user),
+                    sync_scene=sync_scene,
+                )
+                sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(
+                    sync_object,
+                    ai_extract_result,
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"外部工单同步统一提取执行失败，已继续后续流程: ticket_no={sync_object.ticket_no}, error={exc}"
+                )
+                ai_extract_result = {}
+                ai_extract_meta = {"skipped": True, "error": str(exc)}
+                ai_extract_apply_meta = {"updated": False}
+
+        # 标题处理：defer_post_process场景用兜底标题快速入库，其他场景可用AI提取标题
         if defer_post_process:
-            # 延后AI时先用稳定兜底标题入库，避免主链路被AI网络调用阻塞。
             resolved_title = raw_title or existing_title or str(sync_object.description or "").strip()[:100]
             if not resolved_title:
                 resolved_title = sync_object.ticket_no
@@ -374,34 +433,6 @@ class TicketSyncService:
             elif not raw_title:
                 title_meta = {"mode": "fallback", "fallback_title": resolved_title}
         else:
-            if skip_ai_analysis_due_to_update_title:
-                logger.info(
-                    f"外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, "
-                    f"ticket_no={sync_object.ticket_no}"
-                )
-            else:
-                try:
-                    ai_extract_result, ai_extract_meta = TicketLightAiService.extract_ticket_sync_fields(
-                        db,
-                        title=raw_title or existing_title,
-                        description=str(sync_object.description or "").strip(),
-                        raw_payload=sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {},
-                        source_type=f"{sync_scene}_sync_extract",
-                        source_id=getattr(ticket, "ticket_id", None),
-                        source_ref=sync_object.ticket_no,
-                        current_user_name=_user_name(current_user),
-                    )
-                    sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(
-                        sync_object,
-                        ai_extract_result,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        f"外部工单同步统一提取执行失败，已继续后续流程: ticket_no={sync_object.ticket_no}, error={exc}"
-                    )
-                    ai_extract_result = {}
-                    ai_extract_meta = {"skipped": True, "error": str(exc)}
-                    ai_extract_apply_meta = {"updated": False}
             resolved_title = raw_title or existing_title
             if resolved_title:
                 if not raw_title and existing_title:

@@ -341,9 +341,17 @@ class TicketSyncAutomationService:
             internal_owner_id = SyncUtil.safe_int(getattr(sync_object, "internal_owner_id", None))
         if not internal_owner_name:
             internal_owner_name = str(getattr(sync_object, "internal_owner_name", "") or "").strip()
+        # 版本号优先级：sync_object > extra_data > AI提取 > 正则
+        ai_extract_payload = (
+            (sync_object.extra_data or {}).get("_ai_extract")
+            if isinstance(sync_object.extra_data, dict)
+            else {}
+        )
+        ai_version_key = str(ai_extract_payload.get("versionKey") or "").strip() if isinstance(ai_extract_payload, dict) else ""
         version_key = (
             str(sync_object.version_key or "").strip()
             or _extract_ticket_version_key(sync_object.extra_data)
+            or ai_version_key
             or str(cls.extract_pattern(text, config.get("versionPatterns")) or "").strip()
         )
         return {

@@ -60,6 +60,13 @@ class TicketSyncFieldMappingService:
             )
             or ""
         ).strip()
+        # AI提取的门店作为兜底，优先级：raw_payload > mapping_payload > AI提取
+        ai_extract_payload = (
+            extra_data.get("_ai_extract")
+            if isinstance(extra_data.get("_ai_extract"), dict)
+            else {}
+        )
+        ai_store = str(ai_extract_payload.get("store") or "").strip() if isinstance(ai_extract_payload, dict) else ""
         ticket_store = str(
             SyncUtil.payload_field_value(
                 raw_payload,
@@ -76,8 +83,7 @@ class TicketSyncFieldMappingService:
                         default=SyncUtil.payload_field_value(
                             mapping_payload,
                             "ticketStore",
-                            "ticket_store",
-                            default="",
+                            default=ai_store,
                         ),
                     ),
                 ),
