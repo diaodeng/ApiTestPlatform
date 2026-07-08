@@ -141,6 +141,51 @@ def test_processing_stats_response_fields_are_recursive_camel_case():
     assert result["series"][0]["moduleCounts"] == [{"name": "认证检查", "count": 3}]
 
 
+def test_processing_stats_overview_rows_are_merged_by_stable_key():
+    """overview 汇总统计应按稳定编码合并，并把空值与未填写归为同一行。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    payload = {
+        "solutionTypeCounts": [
+            {"solutionType": None, "count": 1},
+            {"solutionType": "", "count": 2},
+            {"solutionType": "未填写", "count": 3},
+        ],
+        "resolutionCounts": [
+            {"resolutionCode": None, "resolutionName": None, "count": 1},
+            {"resolutionCode": "", "resolutionName": "未填写", "count": 2},
+            {"resolutionCode": "fixed", "resolutionName": "已修复旧名", "count": 3},
+            {"resolutionCode": "fixed", "resolutionName": "已修复", "count": 4},
+        ],
+        "problemPatternCounts": [
+            {"problemPatternCode": "pos_client_pay", "problemPatternName": "POS支付旧名", "count": 2},
+            {"problemPatternCode": "pos_client_pay", "problemPatternName": "POS客户端支付", "count": 5},
+            {"problemPatternCode": None, "problemPatternName": None, "count": 1},
+            {"problemPatternCode": "", "problemPatternName": "未填写", "count": 1},
+        ],
+    }
+    stat_options = {
+        "solutionTypes": [],
+        "resolutions": [{"value": "fixed", "label": "已修复"}],
+        "problemPatterns": [{"value": "pos_client_pay", "label": "POS客户端支付"}],
+    }
+
+    result = TicketProcessingStatsService.normalize_overview_count_rows(payload, stat_options)
+
+    assert result["solutionTypeCounts"] == [
+        {"solutionType": "未填写", "count": 6, "label": "未填写"}
+    ]
+    assert result["resolutionCounts"] == [
+        {"resolutionCode": "", "resolutionName": "未填写", "count": 3},
+        {"resolutionCode": "fixed", "resolutionName": "已修复", "count": 7},
+    ]
+    assert result["problemPatternCounts"] == [
+        {"problemPatternCode": "pos_client_pay", "problemPatternName": "POS客户端支付", "count": 7},
+        {"problemPatternCode": "", "problemPatternName": "未填写", "count": 2},
+    ]
+
+
 def test_processing_trend_merge_keeps_base_trend_fields():
     """合并处理趋势时不应覆盖旧趋势的新增、关闭、存量和分类明细。"""
     if TicketProcessingStatsService is None:

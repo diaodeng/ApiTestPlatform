@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao, _date_end, _date_start, _normalize_granularity
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from utils.common_util import CamelCaseUtil
 
 
@@ -100,6 +101,8 @@ class TicketProcessingStatsService:
                 module_code_values,
             )
         )
+        stat_options = TicketSyncConfigService.get_ticket_stat_classification_options(query_db)
+        base_statistics = cls.normalize_overview_count_rows(base_statistics, stat_options)
         rows = TicketProcessingStatsDao.list_metric_tickets(
             query_db,
             begin_time=start,
@@ -110,6 +113,232 @@ class TicketProcessingStatsService:
         )
         metrics = cls.build_overview_metrics(rows, start, finish)
         return {**base_statistics, **_camelize(metrics)}
+
+    @classmethod
+    def normalize_overview_count_rows(cls, statistics: dict, stat_options: dict[str, Any] | None = None) -> dict:
+        """
+        归一化 overview 汇总统计行，避免同一业务含义因空值或旧名称拆成多行。
+        :param statistics: 已转换为小驼峰的 overview 统计结果。
+        :param stat_options: 当前工单统计枚举配置。
+        :return: 合并重复统计行后的 overview 统计结果。
+        """
+        if not isinstance(statistics, dict):
+            return statistics
+        options = stat_options if isinstance(stat_options, dict) else {}
+        result = {**statistics}
+        result["statusCounts"] = cls.merge_label_count_rows(result.get("statusCounts"), "status", "未填写")
+        result["categoryCounts"] = cls.merge_label_count_rows(result.get("categoryCounts"), "category", "未分类")
+        result["moduleCounts"] = cls.merge_label_count_rows(result.get("moduleCounts"), "module", "未填写")
+        result["sourceCounts"] = cls.merge_label_count_rows(result.get("sourceCounts"), "source", "未填写")
+        result["priorityCounts"] = cls.merge_label_count_rows(result.get("priorityCounts"), "priority", "未填写")
+        result["rootCauseCounts"] = cls.merge_label_count_rows(result.get("rootCauseCounts"), "rootCause", "未填写")
+        result["assigneeCounts"] = cls.merge_assignee_count_rows(result.get("assigneeCounts"))
+        result["problemCounts"] = cls.merge_problem_count_rows(result.get("problemCounts"))
+        result["transitionCounts"] = cls.merge_transition_count_rows(result.get("transitionCounts"))
+        result["issueTypeCounts"] = cls.merge_code_name_count_rows(
+            result.get("issueTypeCounts"),
+            "issueTypeId",
+            "issueTypeName",
+            options.get("issueTypes"),
+            "未填写",
+        )
+        result["rootCauseTypeCounts"] = cls.merge_option_value_count_rows(
+            result.get("rootCauseTypeCounts"),
+            "rootCauseType",
+            options.get("rootCauseTypes"),
+            "未填写",
+        )
+        result["solutionTypeCounts"] = cls.merge_option_value_count_rows(
+            result.get("solutionTypeCounts"),
+            "solutionType",
+            options.get("solutionTypes"),
+            "未填写",
+        )
+        result["resolutionCounts"] = cls.merge_code_name_count_rows(
+            result.get("resolutionCounts"),
+            "resolutionCode",
+            "resolutionName",
+            options.get("resolutions"),
+            "未填写",
+        )
+        result["problemPatternCounts"] = cls.merge_code_name_count_rows(
+            result.get("problemPatternCounts"),
+            "problemPatternCode",
+            "problemPatternName",
+            options.get("problemPatterns"),
+            "未填写",
+        )
+        return result
+
+    @staticmethod
+    def normalize_count_text(value: Any, blank_label: str = "未填写") -> str:
+        """
+        归一化统计行文本。
+        :param value: 原始文本。
+        :param blank_label: 空值占位文案。
+        :return: 去除首尾空白后的文本，空值统一返回占位文案。
+        """
+        text = str(value or "").strip()
+        return text if text and text != "未填写" else blank_label
+
+    @classmethod
+    def build_option_label_map(cls, rows: Any) -> dict[str, str]:
+        """
+        构造统计枚举 value 到 label 的映射。
+        :param rows: 枚举配置数组。
+        :return: value -> label 字典。
+        """
+        label_map: dict[str, str] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            value = str(row.get("value") or row.get("code") or "").strip()
+            label = cls.normalize_count_text(row.get("label") or row.get("name") or value)
+            if value:
+                label_map[value] = label
+        return label_map
+
+    @classmethod
+    def merge_label_count_rows(cls, rows: Any, field_name: str, blank_label: str = "未填写") -> list[dict[str, Any]]:
+        """
+        按单个展示字段合并统计行。
+        :param rows: 原始统计行数组。
+        :param field_name: 展示字段名。
+        :param blank_label: 空值占位文案。
+        :return: 合并后的统计行数组。
+        """
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            label = cls.normalize_count_text(row.get(field_name), blank_label)
+            if label not in row_map:
+                row_map[label] = {**row, field_name: label, "count": 0}
+            row_map[label]["count"] = int(row_map[label].get("count") or 0) + int(row.get("count") or 0)
+        return list(row_map.values())
+
+    @classmethod
+    def merge_option_value_count_rows(
+        cls,
+        rows: Any,
+        field_name: str,
+        option_rows: Any,
+        blank_label: str = "未填写",
+    ) -> list[dict[str, Any]]:
+        """
+        按单字段枚举值合并统计行，并统一空值占位。
+        :param rows: 原始统计行数组。
+        :param field_name: 枚举值字段名。
+        :param option_rows: 当前枚举配置数组。
+        :param blank_label: 空值占位文案。
+        :return: 合并后的统计行数组。
+        """
+        label_map = cls.build_option_label_map(option_rows)
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            value = str(row.get(field_name) or "").strip()
+            key = value or blank_label
+            display_value = value or blank_label
+            if key not in row_map:
+                row_map[key] = {
+                    **row,
+                    field_name: display_value,
+                    "label": label_map.get(value, display_value),
+                    "count": 0,
+                }
+            row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
+        return list(row_map.values())
+
+    @classmethod
+    def merge_code_name_count_rows(
+        cls,
+        rows: Any,
+        code_field: str,
+        name_field: str,
+        option_rows: Any,
+        blank_label: str = "未填写",
+    ) -> list[dict[str, Any]]:
+        """
+        按稳定编码优先合并 code/name 统计行，编码为空时按展示名称合并。
+        :param rows: 原始统计行数组。
+        :param code_field: 编码字段名。
+        :param name_field: 名称字段名。
+        :param option_rows: 当前枚举配置数组。
+        :param blank_label: 空值占位文案。
+        :return: 合并后的统计行数组。
+        """
+        label_map = cls.build_option_label_map(option_rows)
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get(code_field) or "").strip()
+            fallback_name = cls.normalize_count_text(row.get(name_field) or code, blank_label)
+            name = label_map.get(code, fallback_name) if code else fallback_name
+            key = f"code:{code}" if code else f"name:{name}"
+            if key not in row_map:
+                row_map[key] = {**row, code_field: code, name_field: name, "count": 0}
+            row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
+        return list(row_map.values())
+
+    @classmethod
+    def merge_problem_count_rows(cls, rows: Any) -> list[dict[str, Any]]:
+        """
+        按真实问题布尔值合并统计行。
+        :param rows: 原始问题性质统计行数组。
+        :return: 合并后的统计行数组。
+        """
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            value = row.get("isProblem")
+            key = "true" if value is True else ("false" if value is False else "unknown")
+            label = "真实问题" if value is True else ("非问题" if value is False else "未填写")
+            if key not in row_map:
+                row_map[key] = {**row, "isProblem": value if isinstance(value, bool) else None, "label": label, "count": 0}
+            row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
+        return list(row_map.values())
+
+    @classmethod
+    def merge_assignee_count_rows(cls, rows: Any) -> list[dict[str, Any]]:
+        """
+        按处理人 ID 优先合并人员处理量统计行，未分配人员按展示名合并。
+        :param rows: 原始人员处理量统计行数组。
+        :return: 合并后的统计行数组。
+        """
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            user_id = row.get("userId")
+            user_name = cls.normalize_count_text(row.get("userName"), "未指派")
+            key = f"id:{user_id}" if user_id not in (None, "") else f"name:{user_name}"
+            if key not in row_map:
+                row_map[key] = {**row, "userName": user_name, "count": 0}
+            row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
+        return list(row_map.values())
+
+    @classmethod
+    def merge_transition_count_rows(cls, rows: Any) -> list[dict[str, Any]]:
+        """
+        按状态流转起止状态合并统计行。
+        :param rows: 原始状态流转统计行数组。
+        :return: 合并后的统计行数组。
+        """
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            from_status = cls.normalize_count_text(row.get("fromStatus"), "创建")
+            to_status = cls.normalize_count_text(row.get("toStatus"), "未填写")
+            key = f"{from_status}->{to_status}"
+            if key not in row_map:
+                row_map[key] = {**row, "fromStatus": from_status, "toStatus": to_status, "count": 0}
+            row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
+        return list(row_map.values())
 
     @classmethod
     def get_statistics_trend(

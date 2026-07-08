@@ -1,5 +1,10 @@
 ## 2026-07-08
 
+1. 修复工单统计汇总块重复行展示问题：后端 overview 统计先把 `null`、空字符串和“未填写”统一归并；有稳定编码的工单类型、关闭结果、细分问题按 code 汇总并使用当前枚举名称展示，前端再按最终展示文案做兜底合并，避免出现两个“未填写”或两个相同细分问题。
+2. 新增说明文档：`web/public/docs/2026-07-08-ticket-statistics-summary-row-dedup.md`。
+
+## 2026-07-08
+
 1. 修复工单统计接口嵌套字段未递归转小驼峰的问题：趋势桶中的 `newCount/problemCount/moduleCounts` 和统计块中的 `issueTypeName/isProblem/rootCauseType` 现在会按前端字段名返回，避免认证检查等工单趋势显示为 0、类型/是否真实问题/根因分类显示为未填写。
 
 ## 2026-07-08

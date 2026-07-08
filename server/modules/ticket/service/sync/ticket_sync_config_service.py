@@ -475,6 +475,7 @@ class TicketSyncConfigService:
             "runOnRemotePull": False,
             "runOnManualCreate": False,
             "runOnStatusChange": False,
+            "runOnBitablePull": False,
             "statusChangeTriggerStatuses": [],
             "statusChangeForceReclassify": False,
             "providerCode": "",
@@ -594,6 +595,7 @@ class TicketSyncConfigService:
             "runOnRemotePull": bool(source.get("runOnRemotePull", source.get("run_on_remote_pull", False))),
             "runOnManualCreate": bool(source.get("runOnManualCreate", source.get("run_on_manual_create", False))),
             "runOnStatusChange": bool(source.get("runOnStatusChange", source.get("run_on_status_change", False))),
+            "runOnBitablePull": bool(source.get("runOnBitablePull", source.get("run_on_bitable_pull", False))),
             "statusChangeTriggerStatuses": cls.normalize_ai_classification_status_triggers(
                 source.get("statusChangeTriggerStatuses", source.get("status_change_trigger_statuses"))
             ),

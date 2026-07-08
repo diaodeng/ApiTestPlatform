@@ -8,6 +8,15 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-08] INGEST-CODE | 工单统计汇总块同名行合并修复
+
+- 触发：用户反馈工单统计汇总块中“解决方式”“关闭结果”“细分问题”存在重复展示行，例如两个“未填写”和两个“POS客户端支付”。
+- 架构层：Web 工单统计页 / 汇总统计块展示规则。
+- 创建的页面：`web/public/docs/2026-07-08-ticket-statistics-summary-row-dedup.md`
+- 更新的页面：`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/tests/test_ticket_processing_metrics.py`、`web/src/views/ticket/statistics/index.vue`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：`overview[*Counts]` 原始统计数组 -> 后端按空值归一和稳定 code 合并 -> 前端统计块 `block.format(row)` 生成最终展示标签 -> 前端按展示标签兜底合并 `count` -> 表格只显示一行。
+- 关键结论：重复行来自同一业务含义在历史数据中以空值、占位值或 code/name 混用保存；统计口径应以后端稳定 key 汇总为主，前端合并只作为展示兜底。
+
 ## [2026-07-08] INGEST-CODE | 工单统计嵌套字段小驼峰转换修复
 
 - 触发：用户反馈认证检查工单统计中所有趋势数据为 0，工单类型、是否真实问题、根因分类都显示未填写，但实际数据有不同值。

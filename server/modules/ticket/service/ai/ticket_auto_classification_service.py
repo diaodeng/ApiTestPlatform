@@ -413,6 +413,8 @@ class TicketAutoClassificationService:
             return bool(ai_config.get("runOnRemotePull"))
         if normalized_scene == "manual_create" or normalized_scene.startswith("ticket_manual_create"):
             return bool(ai_config.get("runOnManualCreate"))
+        if normalized_scene == "bitable_pull" or normalized_scene.startswith("bitable_pull"):
+            return bool(ai_config.get("runOnBitablePull"))
         if normalized_scene == "batch_reclassify" or normalized_scene.startswith("ticket_batch_reclassify"):
             return True
         return False

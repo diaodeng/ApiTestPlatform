@@ -134,9 +134,9 @@
       >
         <el-card shadow="never">
           <template #header>{{ block.title }}</template>
-          <el-table v-loading="loading" :data="overview[block.dataKey] || []">
+          <el-table v-loading="loading" :data="getStatisticsBlockRows(block)">
             <el-table-column :label="block.label">
-              <template #default="scope">{{ block.format(scope.row) }}</template>
+              <template #default="scope">{{ scope.row.__statLabel }}</template>
             </el-table-column>
             <el-table-column :label="block.countLabel" prop="count" width="100" align="center" />
           </el-table>
@@ -468,6 +468,41 @@
       .finally(() => {
         loading.value = false;
       });
+  }
+
+  /**
+   * 获取统计汇总块表格行，并按最终展示文案合并数量。
+   * 后端同一业务含义可能因空值、占位值或 code/name 混用拆成多行，
+   * 这里以用户看到的标签为准聚合，避免“未填写”“POS客户端支付”等重复展示。
+   * @param {object} block 汇总块配置，包含 dataKey 和 format 方法
+   * @returns {Array<object>} 合并后的统计行
+   */
+  function getStatisticsBlockRows(block) {
+    const rows = Array.isArray(overview.value?.[block.dataKey]) ? overview.value[block.dataKey] : [];
+    const rowMap = new Map();
+    rows.forEach((row) => {
+      const statLabel = normalizeStatisticsBlockLabel(block.format(row));
+      const existing = rowMap.get(statLabel);
+      if (existing) {
+        existing.count = Number(existing.count || 0) + Number(row.count || 0);
+        return;
+      }
+      rowMap.set(statLabel, {
+        ...row,
+        __statLabel: statLabel,
+        count: Number(row.count || 0),
+      });
+    });
+    return Array.from(rowMap.values());
+  }
+
+  /**
+   * 归一化统计汇总块的展示标签。
+   * @param {string} value 原始展示文案
+   * @returns {string} 去空白后的展示文案，空值统一为未填写
+   */
+  function normalizeStatisticsBlockLabel(value) {
+    return String(value || '').trim() || '未填写';
   }
 
   function buildQueryParams() {
