@@ -91,6 +91,101 @@ export function getTicket(ticketId) {
   });
 }
 
+// 查询问题实例列表
+export function listTicketIssues(query) {
+  return request({
+    url: '/ticket/issues/list',
+    method: 'get',
+    params: query,
+  });
+}
+
+// 查询问题实例详情
+export function getTicketIssue(issueId) {
+  return request({
+    url: `/ticket/issues/${issueId}`,
+    method: 'get',
+  });
+}
+
+// 新增问题实例
+export function addTicketIssue(data) {
+  return request({
+    url: '/ticket/issues',
+    method: 'post',
+    data,
+  });
+}
+
+// 修改问题实例
+export function updateTicketIssue(data) {
+  return request({
+    url: '/ticket/issues',
+    method: 'put',
+    data,
+  });
+}
+
+// 绑定工单到已有问题实例
+export function bindTicketIssue(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/issue/bind`,
+    method: 'post',
+    data,
+  });
+}
+
+// 新建问题实例并绑定当前工单
+export function createAndBindTicketIssue(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/issue/create-and-bind`,
+    method: 'post',
+    data,
+  });
+}
+
+// 从相似工单确认归入同一问题
+export function bindTicketIssueFromSimilar(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/issue/bind-from-similar`,
+    method: 'post',
+    data,
+  });
+}
+
+// 解除工单问题归因
+export function unbindTicketIssue(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/issue/unbind`,
+    method: 'post',
+  });
+}
+
+// 新增工单补充关系
+export function addTicketRelation(data) {
+  return request({
+    url: '/ticket/relations',
+    method: 'post',
+    data,
+  });
+}
+
+// 确认工单补充关系
+export function confirmTicketRelation(relationId) {
+  return request({
+    url: `/ticket/relations/${relationId}/confirm`,
+    method: 'put',
+  });
+}
+
+// 删除工单补充关系
+export function delTicketRelation(relationId) {
+  return request({
+    url: `/ticket/relations/${relationId}`,
+    method: 'delete',
+  });
+}
+
 // 查询日志拉取存储配置
 export function getTicketLogPullStorageConfig() {
   return request({

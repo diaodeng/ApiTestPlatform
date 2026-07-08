@@ -19,6 +19,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   const total = ref(0)
   const naturalKeyword = ref('')
   const submitTimeRange = ref([])
+  const processedTimeRange = ref([])
 
   // === 查询参数 ===
   const queryParams = ref({
@@ -27,6 +28,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     moduleCodes: [], issueTypeIds: [], rootCauseTypes: [], solutionTypes: [],
     resolutionCodes: [], problemPatternCodes: [], isProblems: [],
     internalPriorities: [], sources: [], reporterNames: [],
+    processingConclusionStatus: '',
     currentAssigneeIds: [], firstLineAssigneeIds: [],
     internalOwnerIds: [], sortField: 'submitTime', sortOrder: 'desc'
   })
@@ -42,8 +44,13 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     { key: 'ticketNo', label: '工单编号', required: true },
     { key: 'title', label: '标题', required: true },
     { key: 'similarityScore', label: '相似度' },
+    { key: 'issueNo', label: '问题编号' },
+    { key: 'issueConfirmed', label: '归因确认' },
+    { key: 'issueTitle', label: '问题标题' },
+    { key: 'issueRelationType', label: '归因类型' },
     { key: 'status', label: '状态' },
-    { key: 'processStatus', label: '处理状态' },
+    { key: 'processStatus', label: '日志/AI进度' },
+    { key: 'processingConclusionStatus', label: '处理结论' },
     { key: 'project', label: '项目' },
     { key: 'moduleName', label: '模块' },
     { key: 'issueType', label: '工单类型' },
@@ -59,6 +66,11 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     { key: 'internalOwnerName', label: '内部负责人' },
     { key: 'currentAssigneeName', label: '当前处理人' },
     { key: 'submitTime', label: '工单提交时间' },
+    { key: 'firstResponseAt', label: '首次响应时间' },
+    { key: 'processedAt', label: '处理完成时间' },
+    { key: 'plannedFixVersion', label: '计划修复版本' },
+    { key: 'fixedVersion', label: '实际修复版本' },
+    { key: 'releasedVersion', label: '实际发版版本' },
     { key: 'createTime', label: '创建时间' }
   ]
   const defaultTicketColumnKeys = ticketColumnOptions.map(item => item.key)
@@ -150,6 +162,10 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     const [submitBeginTime, submitEndTime] = rangeValues
     queryParams.value.submitBeginTime = submitBeginTime || undefined
     queryParams.value.submitEndTime = submitEndTime || undefined
+    const processedRangeValues = Array.isArray(processedTimeRange.value) ? processedTimeRange.value : []
+    const [processedBeginTime, processedEndTime] = processedRangeValues
+    queryParams.value.processedBeginTime = processedBeginTime || undefined
+    queryParams.value.processedEndTime = processedEndTime || undefined
     loading.value = true
     return listTicket(buildTicketListQueryParams()).then(response => {
       ticketList.value = response.rows || []
@@ -245,9 +261,12 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   function resetQuery() {
     proxy.resetForm('queryRef')
     submitTimeRange.value = []
+    processedTimeRange.value = []
     naturalKeyword.value = ''
     queryParams.value.submitBeginTime = undefined
     queryParams.value.submitEndTime = undefined
+    queryParams.value.processedBeginTime = undefined
+    queryParams.value.processedEndTime = undefined
     queryCurrentAssigneeOption.value = []
     queryFirstLineAssigneeOption.value = []
     queryInternalOwnerOption.value = []
@@ -284,7 +303,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
 
   return {
     // state
-    loading, showSearch, ticketList, total, naturalKeyword, submitTimeRange,
+    loading, showSearch, ticketList, total, naturalKeyword, submitTimeRange, processedTimeRange,
     queryParams, queryCurrentAssigneeOption, queryFirstLineAssigneeOption, queryInternalOwnerOption,
     // column config
     columnConfigOpen, ticketColumnOptions, defaultTicketColumnKeys,

@@ -82,6 +82,21 @@ export {
 } from './ai';
 
 export {
+  // issue attribution
+  listTicketIssues,
+  getTicketIssue,
+  addTicketIssue,
+  updateTicketIssue,
+  bindTicketIssue,
+  createAndBindTicketIssue,
+  bindTicketIssueFromSimilar,
+  unbindTicketIssue,
+  addTicketRelation,
+  confirmTicketRelation,
+  delTicketRelation,
+} from './ticket';
+
+export {
   // config
   getTicketSimilarityConfig,
   saveTicketSimilarityConfig,

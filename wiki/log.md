@@ -8,6 +8,34 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-08] INGEST-CODE | 工单问题实例归因层第二阶段落地
+
+- 触发：用户要求按第二阶段计划实现真实问题实例归因层，并提供前端人工确认入口。
+- 架构层：工单域 / 工单核心数据模型 / Web 控制台 / 问题实例归因。
+- 创建的页面：`web/public/docs/2026-07-08-ticket-issue-attribution-implementation.md`
+- 更新的页面：`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：`ticket_issue` / `ticket.issue_id` / `ticket_relation` -> `TicketIssueDao` -> `TicketIssueService` / `TicketRelationService` -> `ticket_issue_controller` API -> 工单详情相似工单人工确认入口和列表 Issue 列。
+- 关键结论：`ticket.issue_id` 是主归因，`ticket_relation` 只保存补充关系；相似工单不会自动强绑定，只在用户点击“归入同一问题”后确认。
+
+## [2026-07-08] INGEST-CODE | 工单提交时间、处理结论和版本治理第一阶段落地
+
+- 触发：用户要求按方案文件实现第一阶段内容，并强调项目分层、不要揉大文件。
+- 架构层：工单域 / 工单核心数据模型 / 处理统计 / 外部同步 / Web 控制台。
+- 创建的页面：`web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md`
+- 更新的页面：`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：`Ticket` 主表字段 -> `TicketProcessingMetricService` 写入提交/处理/发布验证时间 -> 手动创建/编辑、状态流转、事件、RCA、Excel 导入、外部同步 payload -> `TicketProcessingStatsService` 统计处理率和存量 -> 工单列表与统计页展示。
+- 关键结论：`first_response_at` 继续只表示首次响应/接手，`processed_at` 才表示首次形成有效排查结论；`resolved_at` 保留终态处置完成口径；Issue 归因层仍是第二阶段。
+- 2026-07-08 补充：统计页必须保留旧的整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；处理率与未处理存量只作为新增独立趋势图，趋势明细也同时保留旧列和新增处理列。历史用户显示配置缺少 `processingTrend` 时，前端按配置版本自动补齐一次，保存后尊重用户手动勾选结果。
+
+## [2026-07-07] QUERY | 工单处理口径、统计与相似问题治理方案
+
+- 触发：用户要求结合当前项目情况，分析 `D:\xj\Documents\工单状态和统计相关.txt` 中需求和实现建议，并整理完整方案供后续实现。
+- 检索路径：`wiki/purpose.md`、`wiki/index.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`、`wiki/entities/enums/ticket-enums.md`、`wiki/flows/ticket-workflow-routing.md`、需求原文、`server/modules/ticket/entity/do/ticket_do.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_dao.py`、`web/src/views/ticket/statistics/index.vue`。
+- 创建的页面：`web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md`
+- 更新的页面：`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 关键结论：不新增“已处理”主流程状态；计划以 `processed_at` 承接首次形成排查结论时间；版本治理字段从 `extra_data.version_key` 中拆出；相似/重复工单后续以 `ticket_issue + ticket.issue_id` 承接真实问题归因，`ticket_relation` 只做补充关系。
+- 2026-07-08 讨论后修订：第一阶段新增 `submit_time` 作为统计主时间；`first_response_at` 保留首次响应/接手语义，不替代 `processed_at`；`resolved_at` 保留终态写入逻辑并定义为“工单处置完成时间”；Issue 归因层降为第二阶段增强，现有根因/根因分类/细分问题字段继续承担分类统计。
+
 ## [2026-07-07] INGEST-CODE | 工单 AI hybrid 日志模式强制检索原始目录
 
 - 触发：用户反馈选择“摘要 + 完整目录”后 Agent 仍主要读取摘要，遗漏完整日志目录中的异常，怀疑与 Provider 生效和上下文长度限制有关。

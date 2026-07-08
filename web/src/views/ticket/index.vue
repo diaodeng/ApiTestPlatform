@@ -47,10 +47,10 @@
             @keyup.enter="handleQuery"
           />
         </el-form-item>
-        <el-form-item label="处理状态" prop="processStatuses">
+        <el-form-item label="日志/AI进度" prop="processStatuses">
           <el-select
             v-model="queryParams.processStatuses"
-            placeholder="处理状态"
+            placeholder="日志/AI进度"
             multiple
             clearable
             collapse-tags
@@ -65,9 +65,32 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="处理结论" prop="processingConclusionStatus">
+          <el-select
+            v-model="queryParams.processingConclusionStatus"
+            placeholder="处理结论"
+            clearable
+            style="width: 140px"
+          >
+            <el-option label="已处理" value="processed" />
+            <el-option label="未处理" value="unprocessed" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="提交时间">
           <el-date-picker
             v-model="submitTimeRange"
+            type="datetimerange"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            format="YYYY-MM-DD HH:mm:ss"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            style="width: 360px"
+          />
+        </el-form-item>
+        <el-form-item label="处理时间">
+          <el-date-picker
+            v-model="processedTimeRange"
             type="datetimerange"
             value-format="YYYY-MM-DD HH:mm:ss"
             format="YYYY-MM-DD HH:mm:ss"
@@ -379,6 +402,49 @@
           </template>
         </el-table-column>
         <el-table-column
+          v-if="isTicketColumnVisible('issueNo')"
+          label="问题编号"
+          prop="issueNo"
+          width="150"
+          sortable="custom"
+          show-overflow-tooltip
+        >
+          <template #default="scope">{{ scope.row.issueNo || '-' }}</template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('issueConfirmed')"
+          label="归因确认"
+          prop="issueConfirmed"
+          width="110"
+          align="center"
+          sortable="custom"
+        >
+          <template #default="scope">
+            <el-tag v-if="scope.row.issueId && scope.row.issueConfirmed" type="success">已确认</el-tag>
+            <el-tag v-else-if="scope.row.issueId" type="warning">待确认</el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('issueTitle')"
+          label="问题标题"
+          prop="issueTitle"
+          min-width="180"
+          show-overflow-tooltip
+        >
+          <template #default="scope">{{ scope.row.issueTitle || '-' }}</template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('issueRelationType')"
+          label="归因类型"
+          prop="issueRelationType"
+          width="110"
+          sortable="custom"
+          show-overflow-tooltip
+        >
+          <template #default="scope">{{ formatIssueRelationType(scope.row.issueRelationType) }}</template>
+        </el-table-column>
+        <el-table-column
           v-if="isTicketColumnVisible('status')"
           label="状态"
           prop="status"
@@ -394,7 +460,7 @@
         </el-table-column>
         <el-table-column
           v-if="isTicketColumnVisible('processStatus')"
-          label="处理状态"
+          label="日志/AI进度"
           prop="processStatus"
           min-width="160"
           align="center"
@@ -408,6 +474,19 @@
               {{ resolveTicketProcessStatus(scope.row).label }}
             </el-tag>
             <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('processingConclusionStatus')"
+          label="处理结论"
+          prop="processingConclusionStatus"
+          width="110"
+          align="center"
+          sortable="custom"
+        >
+          <template #default="scope">
+            <el-tag v-if="scope.row.processedAt" type="success">已处理</el-tag>
+            <el-tag v-else type="info">未处理</el-tag>
           </template>
         </el-table-column>
         <el-table-column
@@ -561,6 +640,48 @@
           }}</template>
         </el-table-column>
         <el-table-column
+          v-if="isTicketColumnVisible('firstResponseAt')"
+          label="首次响应时间"
+          prop="firstResponseAt"
+          width="170"
+          sortable="custom"
+        >
+          <template #default="scope">{{ parseTime(scope.row.firstResponseAt) }}</template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('processedAt')"
+          label="处理完成时间"
+          prop="processedAt"
+          width="170"
+          sortable="custom"
+        >
+          <template #default="scope">{{ parseTime(scope.row.processedAt) }}</template>
+        </el-table-column>
+        <el-table-column
+          v-if="isTicketColumnVisible('plannedFixVersion')"
+          label="计划修复版本"
+          prop="plannedFixVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          v-if="isTicketColumnVisible('fixedVersion')"
+          label="实际修复版本"
+          prop="fixedVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          v-if="isTicketColumnVisible('releasedVersion')"
+          label="实际发版版本"
+          prop="releasedVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        />
+        <el-table-column
           v-if="isTicketColumnVisible('createTime')"
           label="创建时间"
           prop="createTime"
@@ -711,7 +832,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="版本号" prop="versionKey">
+            <el-form-item label="发生版本" prop="versionKey">
               <el-select
                 v-model="form.versionKey"
                 placeholder="请选择或输入版本号"
@@ -729,6 +850,21 @@
                   :value="item.value"
                 />
               </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="计划修复版本" prop="plannedFixVersion">
+              <el-input v-model="form.plannedFixVersion" placeholder="请输入计划修复版本" maxlength="100" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="实际修复版本" prop="fixedVersion">
+              <el-input v-model="form.fixedVersion" placeholder="请输入实际修复版本" maxlength="100" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="实际发版版本" prop="releasedVersion">
+              <el-input v-model="form.releasedVersion" placeholder="请输入实际发版版本" maxlength="100" />
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -1247,6 +1383,23 @@
               >
               <span v-else>-</span>
             </el-descriptions-item>
+            <el-descriptions-item label="所属问题">
+              <template v-if="detail.issueId">
+                <div class="issue-summary-inline">
+                  <el-tag type="primary">{{ detail.issueNo || detail.issueId }}</el-tag>
+                  <span>{{ detail.issueTitle || '-' }}</span>
+                </div>
+              </template>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="归因确认">
+              <el-tag v-if="detail.issueId && detail.issueConfirmed" type="success">已确认</el-tag>
+              <el-tag v-else-if="detail.issueId" type="warning">待确认</el-tag>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="归因类型">{{
+              formatIssueRelationType(detail.issueRelationType)
+            }}</el-descriptions-item>
             <el-descriptions-item label="版本号">{{
               detail.versionKey || detail.extraData?.versionKey || '-'
             }}</el-descriptions-item>
@@ -1291,6 +1444,26 @@
             <el-descriptions-item label="解决方案" :span="3">{{
               detail.solution || '-'
             }}</el-descriptions-item>
+            <el-descriptions-item label="问题实例操作" :span="3">
+              <el-button
+                v-if="!detail.issueId"
+                link
+                type="primary"
+                @click="openIssueCreateBindDialog"
+                v-hasPermi="['ticket:issue:add']"
+              >
+                新建问题实例并绑定
+              </el-button>
+              <el-button
+                v-if="detail.issueId"
+                link
+                type="danger"
+                @click="handleUnbindIssue"
+                v-hasPermi="['ticket:issue:remove']"
+              >
+                解除归因
+              </el-button>
+            </el-descriptions-item>
           </el-descriptions>
           <div class="ticket-detail-description">
             <div class="ticket-detail-description__label">
@@ -1469,6 +1642,15 @@
                         >
                           飞书详情
                         </el-link>
+                        <el-button
+                          link
+                          type="success"
+                          :loading="issueActionLoading"
+                          @click="handleBindIssueFromSimilar(item)"
+                          v-hasPermi="['ticket:issue:bind']"
+                        >
+                          归入同一问题
+                        </el-button>
                       </div>
                     </div>
                   </el-card>
@@ -1878,6 +2060,15 @@
                         >
                           飞书详情
                         </el-link>
+                        <el-button
+                          link
+                          type="success"
+                          :loading="issueActionLoading"
+                          @click="handleBindIssueFromSimilar(item)"
+                          v-hasPermi="['ticket:issue:bind']"
+                        >
+                          归入同一问题
+                        </el-button>
                       </div>
                     </div>
                   </el-card>
@@ -2894,6 +3085,78 @@
     </el-dialog>
 
     <el-dialog
+      v-model="issueCreateBindOpen"
+      title="新建问题实例并绑定"
+      width="720px"
+      append-to-body
+      destroy-on-close
+    >
+      <el-form :model="issueCreateBindForm" label-width="110px">
+        <el-form-item label="问题标题" required>
+          <el-input v-model="issueCreateBindForm.title" maxlength="500" show-word-limit />
+        </el-form-item>
+        <el-form-item label="问题摘要">
+          <el-input v-model="issueCreateBindForm.summary" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="状态">
+              <el-select v-model="issueCreateBindForm.status" style="width: 100%">
+                <el-option label="待处理" value="open" />
+                <el-option label="处理中" value="processing" />
+                <el-option label="已解决" value="resolved" />
+                <el-option label="已关闭" value="closed" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="严重等级">
+              <el-select v-model="issueCreateBindForm.severity" clearable style="width: 100%">
+                <el-option
+                  v-for="item in severityOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="项目">{{ issueCreateBindForm.projectName || '-' }}</el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="模块">{{ issueCreateBindForm.moduleName || '-' }}</el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="根因分类">
+              <el-select v-model="issueCreateBindForm.rootCauseType" clearable style="width: 100%">
+                <el-option
+                  v-for="item in rootCauseTypeOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="负责人">{{ issueCreateBindForm.ownerName || '-' }}</el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <el-button @click="issueCreateBindOpen = false">取消</el-button>
+        <el-button type="primary" :loading="issueActionLoading" @click="submitIssueCreateBind">
+          确认创建并绑定
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="logPullContentOpen"
       :title="logViewerDialogTitle"
       fullscreen
@@ -3166,7 +3429,9 @@
     addTicketEvent,
     addTicketAiAnalysis,
     assignTicket,
+    bindTicketIssueFromSimilar,
     changeTicketStatus,
+    createAndBindTicketIssue,
     delTicket,
     downloadTicketImportTemplate,
     extractTicketKnowledge,
@@ -3181,6 +3446,7 @@
     getTicketLogPullProjectVendorMap,
     saveTicketLogPullProjectVendorMap,
     translateTicketDescription,
+    unbindTicketIssue,
     updateTicket,
   } from '@/api/ticket/ticket';
   import {
@@ -3227,6 +3493,7 @@
     total,
     naturalKeyword,
     submitTimeRange,
+    processedTimeRange,
     queryParams,
     queryCurrentAssigneeOption,
     queryFirstLineAssigneeOption,
@@ -3313,6 +3580,9 @@
   const descriptionExpanded = ref(true);
   const translationExpanded = ref(false);
   const descriptionTranslateLoading = ref(false);
+  const issueCreateBindOpen = ref(false);
+  const issueActionLoading = ref(false);
+  const issueCreateBindForm = ref({});
   const historyActiveTab = ref('timeline');
   const title = ref('');
   const currentTicketId = ref();
@@ -3583,6 +3853,10 @@
       moduleId: undefined,
       moduleName: '',
       versionKey: '',
+      affectedVersion: '',
+      plannedFixVersion: '',
+      fixedVersion: '',
+      releasedVersion: '',
       firstLineAssigneeId: undefined,
       firstLineAssigneeName: '',
       internalOwnerId: undefined,
@@ -3812,6 +4086,18 @@
     () => detail.value.latestSnapshot || ticketSnapshots.value[0] || null
   );
   const latestSimilarTickets = computed(() => (similarTickets.value || []).slice(0, 3));
+
+  function formatIssueRelationType(value) {
+    const relationType = String(value || '').trim();
+    const labelMap = {
+      primary: '主问题',
+      similar: '相似确认',
+      manual: '手工归因',
+      duplicate: '重复问题',
+      related: '相关问题',
+    };
+    return labelMap[relationType] || relationType || '-';
+  }
   const aiTaskDetailPayload = computed(() => selectedAiTask.value || {});
   const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {});
   const logPullStoreOptions = computed(() => getVendorStoreOptions(logPullForm.value.vendorId));
@@ -4071,6 +4357,16 @@
           false;
         form.value.issueTypeId = ticketData.issueTypeId || ticketData.issue_type_id || '';
         form.value.issueTypeName = ticketData.issueTypeName || ticketData.issue_type_name || '';
+        form.value.versionKey =
+          ticketData.versionKey ||
+          ticketData.affectedVersion ||
+          ticketData.extraData?.versionKey ||
+          ticketData.extraData?.version_key ||
+          '';
+        form.value.affectedVersion = ticketData.affectedVersion || form.value.versionKey || '';
+        form.value.plannedFixVersion = ticketData.plannedFixVersion || ticketData.planned_fix_version || '';
+        form.value.fixedVersion = ticketData.fixedVersion || ticketData.fixed_version || '';
+        form.value.releasedVersion = ticketData.releasedVersion || ticketData.released_version || '';
         form.value.isProblem = ticketData.isProblem ?? ticketData.is_problem ?? undefined;
         form.value.rootCauseType = ticketData.rootCauseType || ticketData.root_cause_type || '';
         form.value.solutionType = ticketData.solutionType || ticketData.solution_type || '';
@@ -4171,6 +4467,7 @@
       handleModuleChange(formModuleValue.value);
       payload.moduleId = form.value.moduleId;
       payload.moduleName = form.value.moduleName || '';
+      payload.affectedVersion = payload.affectedVersion || payload.versionKey || '';
       if (payload.issueTypeId) {
         payload.issueTypeName =
           payload.issueTypeName || getStatOptionLabel(issueTypeOptions.value, payload.issueTypeId);
@@ -4323,6 +4620,100 @@
       syncDetailBundle(response.data || {});
       loadDetailVersionOptions(detail.value.projectId);
     });
+  }
+
+  function buildIssueCreateBindForm() {
+    return {
+      title: detail.value.issueTitle || detail.value.title || '',
+      summary: detail.value.rootCause || latestSnapshotSummary.value || detail.value.description || '',
+      status: 'open',
+      severity: detail.value.severity || detail.value.internalPriority || '',
+      projectId: detail.value.projectId || undefined,
+      projectName: detail.value.projectName || detail.value.merchantName || '',
+      moduleId: detail.value.moduleId || undefined,
+      moduleName: detail.value.moduleName || '',
+      rootCauseType: detail.value.rootCauseType || '',
+      problemPatternCode: detail.value.problemPatternCode || '',
+      problemPatternName: detail.value.problemPatternName || '',
+      ownerId: detail.value.internalOwnerId || detail.value.currentAssigneeId || undefined,
+      ownerName: detail.value.internalOwnerName || detail.value.currentAssigneeName || '',
+      relationType: 'manual',
+      confirmed: true,
+    };
+  }
+
+  function openIssueCreateBindDialog() {
+    if (!detail.value.ticketId) {
+      proxy.$modal.msgWarning('请先打开工单详情');
+      return;
+    }
+    issueCreateBindForm.value = buildIssueCreateBindForm();
+    issueCreateBindOpen.value = true;
+  }
+
+  function submitIssueCreateBind() {
+    const titleText = String(issueCreateBindForm.value.title || '').trim();
+    if (!titleText) {
+      proxy.$modal.msgWarning('问题标题不能为空');
+      return;
+    }
+    issueActionLoading.value = true;
+    createAndBindTicketIssue(detail.value.ticketId, {
+      ...issueCreateBindForm.value,
+      title: titleText,
+    })
+      .then(() => {
+        proxy.$modal.msgSuccess('问题实例已创建并绑定');
+        issueCreateBindOpen.value = false;
+        return Promise.all([refreshDetail(), getList()]);
+      })
+      .finally(() => {
+        issueActionLoading.value = false;
+      });
+  }
+
+  function handleUnbindIssue() {
+    if (!detail.value.ticketId || !detail.value.issueId) {
+      return;
+    }
+    proxy.$modal
+      .confirm(`是否确认解除当前工单与问题实例 ${detail.value.issueNo || detail.value.issueId} 的归因？`)
+      .then(() => {
+        issueActionLoading.value = true;
+        return unbindTicketIssue(detail.value.ticketId);
+      })
+      .then(() => {
+        proxy.$modal.msgSuccess('归因已解除');
+        return Promise.all([refreshDetail(), getList()]);
+      })
+      .finally(() => {
+        issueActionLoading.value = false;
+      });
+  }
+
+  function handleBindIssueFromSimilar(item) {
+    const similarTicketId = Number(item?.ticketId || item?.ticket_id);
+    if (!detail.value.ticketId || !similarTicketId) {
+      proxy.$modal.msgWarning('相似工单ID无效，无法归因');
+      return;
+    }
+    proxy.$modal
+      .confirm(`是否确认将当前工单与 ${item.ticketNo || similarTicketId} 归入同一问题？`)
+      .then(() => {
+        issueActionLoading.value = true;
+        return bindTicketIssueFromSimilar(detail.value.ticketId, {
+          similarTicketId,
+          confidence: item.score,
+          relationType: 'similar',
+        });
+      })
+      .then(() => {
+        proxy.$modal.msgSuccess('相似工单归因已确认');
+        return Promise.all([refreshDetail(), getList()]);
+      })
+      .finally(() => {
+        issueActionLoading.value = false;
+      });
   }
 
   // createDefaultAiRepoMappingForm / resetAiRepoMappingForm 已提取到 hooks/useAiRepoMapping.js
@@ -5310,6 +5701,22 @@
     gap: 12px;
     margin-top: 6px;
     font-size: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .issue-summary-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .issue-summary-inline span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .panel-header {

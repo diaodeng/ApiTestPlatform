@@ -11,6 +11,7 @@ from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao, _date_end, _date_start
+from modules.ticket.dao.ticket_issue_dao import TicketIssueDao
 from modules.ticket.entity.do.ticket_do import (
     KnowledgeArticle,
     Ticket,
@@ -50,6 +51,7 @@ from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiServi
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
 from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_common_util import (
@@ -523,12 +525,19 @@ class TicketService:
             item["merchantName"] = project_name
         extra_data = item.get("extraData")
         sync_summary = _extract_ticket_sync_summary(extra_data)
-        item["versionKey"] = item.get("versionKey") or _extract_ticket_version_key(extra_data)
+        item["versionKey"] = (
+            item.get("versionKey")
+            or item.get("affectedVersion")
+            or _extract_ticket_version_key(extra_data)
+        )
         if not str(item.get("ticketUrl") or "").strip() and isinstance(sync_summary, dict):
             item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
         if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
             item["externalCreateTime"] = sync_summary.get("externalCreateTime")
-        item["submitTime"] = _resolve_ticket_submit_time(extra_data, item.get("createTime") or item.get("create_time"))
+        item["submitTime"] = item.get("submitTime") or _resolve_ticket_submit_time(
+            extra_data, item.get("createTime") or item.get("create_time")
+        )
+        item["processingConclusionStatus"] = "processed" if item.get("processedAt") else "unprocessed"
         origin_description = str(
             (extra_data or {}).get("origin_description")
             or (extra_data or {}).get("original_description")
@@ -543,6 +552,36 @@ class TicketService:
         item["aiTranslationPromptCode"] = (extra_data or {}).get("ai_translation_prompt_code") or ""
         item["syncSummary"] = sync_summary
         return item
+
+    @classmethod
+    def _attach_issue_summary(cls, query_db: Session, items: list[dict[str, Any]]) -> None:
+        """
+        为工单列表或详情补充归属问题实例摘要字段。
+        :param query_db: 数据库会话
+        :param items: 工单字典列表
+        :return: 无
+        """
+        issue_ids = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            issue_id = item.get("issueId") or item.get("issue_id")
+            if issue_id and issue_id not in issue_ids:
+                issue_ids.append(issue_id)
+        issue_map = TicketIssueDao.list_issue_summary_by_ids(query_db, issue_ids)
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            issue = issue_map.get(item.get("issueId") or item.get("issue_id"))
+            if issue:
+                item["issueNo"] = issue.issue_no
+                item["issueTitle"] = issue.title
+                item["issueStatus"] = issue.status
+                item["issueAffectedTicketCount"] = issue.affected_ticket_count
+                item["issue"] = CamelCaseUtil.transform_result(issue)
+            else:
+                item["issueNo"] = item.get("issueNo") or ""
+                item["issueTitle"] = item.get("issueTitle") or ""
 
     @classmethod
     def _attach_relation_codes(cls, query_db: Session, item: dict[str, Any]) -> dict[str, Any]:
@@ -1028,6 +1067,7 @@ class TicketService:
             data["update_by"] = _user_name(current_user)
             data["create_time"] = now
             data["update_time"] = now
+            TicketProcessingMetricService.apply_create_fields(data, now=now)
             ticket = Ticket(**data)
             ticket = TicketDao.add_ticket(query_db, ticket)
             TicketDao.add_status_history(
@@ -1131,6 +1171,7 @@ class TicketService:
                     cls._decorate_ticket_item(item)
                     item["latestLogPull"] = summary_map.get(item.get("ticketId"))
                     item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
+            cls._attach_issue_summary(query_db, rows)
             return result
         ticket_ids = [item.get("ticketId") for item in result if isinstance(item, dict) and item.get("ticketId")]
         summary_map = TicketLogPullService.get_latest_summary_map(query_db, ticket_ids)
@@ -1140,6 +1181,7 @@ class TicketService:
                 cls._decorate_ticket_item(item)
                 item["latestLogPull"] = summary_map.get(item.get("ticketId"))
                 item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
+        cls._attach_issue_summary(query_db, result)
         return result
 
     @classmethod
@@ -1155,6 +1197,7 @@ class TicketService:
             return None
         result = CamelCaseUtil.transform_result(ticket)
         cls._decorate_ticket_item(result)
+        cls._attach_issue_summary(query_db, [result])
         cls._attach_relation_codes(query_db, result)
         result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
         result["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(query_db, ticket_id)
@@ -1185,6 +1228,8 @@ class TicketService:
             data.pop("ticket_id", None)
             data.pop("project_code", None)
             data.pop("project_name", None)
+            data.pop("issue_no", None)
+            data.pop("issue_title", None)
             auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()
@@ -1259,6 +1304,7 @@ class TicketService:
             data.update(relation_fields)
             data["update_by"] = _user_name(current_user)
             data["update_time"] = datetime.now()
+            TicketProcessingMetricService.apply_update_version_fields(ticket, data)
             if data.get("problem_pattern_verified") is True:
                 data["problem_pattern_source"] = data.get("problem_pattern_source") or "manual"
                 data["problem_pattern_verified_by"] = _user_name(current_user)
@@ -1537,8 +1583,21 @@ class TicketService:
                 if status_object.problem_pattern_verified:
                     update_data["problem_pattern_verified_by"] = _user_name(current_user)
                     update_data["problem_pattern_verified_at"] = now
+            if status_object.planned_fix_version is not None:
+                update_data["planned_fix_version"] = status_object.planned_fix_version
+            if status_object.fixed_version is not None:
+                update_data["fixed_version"] = status_object.fixed_version
+            if status_object.released_version is not None:
+                update_data["released_version"] = status_object.released_version
             if not ticket.started_at and status_object.to_status == TicketStatus.PROCESSING.value:
                 update_data["started_at"] = now
+            TicketProcessingMetricService.apply_status_time_fields(
+                ticket=ticket,
+                from_status=ticket.status,
+                to_status=status_object.to_status,
+                update_data=update_data,
+                now=now,
+            )
             if _is_end_status(status_object.to_status):
                 update_data["resolved_at"] = ticket.resolved_at or now
                 if status_object.to_status == TicketStatus.CLOSED.value:
@@ -1575,6 +1634,9 @@ class TicketService:
                         "problem_pattern_code": status_object.problem_pattern_code,
                         "problem_pattern_name": status_object.problem_pattern_name,
                         "problem_pattern_verified": status_object.problem_pattern_verified,
+                        "planned_fix_version": status_object.planned_fix_version,
+                        "fixed_version": status_object.fixed_version,
+                        "released_version": status_object.released_version,
                         "target_assignee_id": transition_extension.get("target_assignee_id"),
                         "target_assignee_name": transition_extension.get("target_assignee_name"),
                         "notify_enabled": transition_extension.get("notify_enabled"),
@@ -1859,9 +1921,22 @@ class TicketService:
         :param current_user: 当前登录用户
         :return: 操作结果
         """
-        if not TicketDao.get_ticket_by_id(query_db, ticket_id):
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
             return CrudResponseModel(is_success=False, message="工单不存在")
         try:
+            now = datetime.now()
+            update_data: dict[str, Any] = {"update_by": _user_name(current_user), "update_time": now}
+            TicketProcessingMetricService.apply_event_time_fields(
+                ticket=ticket,
+                event_type=event_object.event_type,
+                content=event_object.content,
+                event_data=event_object.event_data,
+                update_data=update_data,
+                now=now,
+            )
+            if len(update_data) > 2:
+                TicketDao.update_ticket(query_db, ticket_id, update_data)
             event = TicketDao.add_event(
                 query_db,
                 TicketEvent(
@@ -1871,6 +1946,7 @@ class TicketService:
                     operator_name=_user_name(current_user),
                     content=event_object.content,
                     event_data=event_object.event_data,
+                    create_time=now,
                 ),
             )
             if event_object.content:
@@ -2237,7 +2313,8 @@ class TicketService:
         :param current_user: 当前登录用户
         :return: 操作结果
         """
-        if not TicketDao.get_ticket_by_id(query_db, ticket_id):
+        ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
+        if not ticket:
             return CrudResponseModel(is_success=False, message="工单不存在")
         try:
             data = _dump_model(rca_object)
@@ -2253,6 +2330,8 @@ class TicketService:
                 ticket_update["root_cause_type"] = rca.root_cause_category
             if rca.fix_solution:
                 ticket_update["solution"] = rca.fix_solution
+            if not ticket.processed_at and TicketProcessingMetricService.rca_has_conclusion(data):
+                ticket_update["processed_at"] = ticket_update["update_time"]
             TicketDao.update_ticket(query_db, ticket_id, ticket_update)
             TicketDao.add_event(
                 query_db,

@@ -1,3 +1,20 @@
+## 2026-07-08
+
+1. 工单第二阶段问题实例归因层落地：新增 `ticket_issue`、`ticket_relation`，工单主表新增 `issue_id/issue_relation_type/issue_confirmed`。
+2. 新增 Issue 归因 API：创建/编辑 Issue、绑定已有 Issue、新建并绑定、从相似工单确认归因、解除归因；补充关系支持创建、确认、删除，且不影响主归因字段。
+3. 工单详情页展示所属 Issue、归因确认和归因类型；相似工单卡片新增“归入同一问题”，列表列设置新增问题编号、确认状态、问题标题和归因类型。
+4. 新增说明文档：`web/public/docs/2026-07-08-ticket-issue-attribution-implementation.md`。
+
+## 2026-07-08
+
+1. 工单第一阶段处理口径落地：主表新增 `submit_time/processed_at/released_at/verified_at` 和 `affected_version/planned_fix_version/fixed_version/released_version`。
+2. 新增 `TicketProcessingMetricService` 统一维护提交时间、处理结论时间、发布验证时间和版本兼容；`first_response_at` 继续只表示首次响应/接手，`resolved_at` 保留终态处置完成口径。
+3. 新增 `TicketProcessingStatsService` 和 `TicketProcessingStatsDao`，统计接口直接返回新增、已响应、已处理、处理率、未处理存量和首次响应/处理耗时。
+4. 工单列表把旧“处理状态”改名为“日志/AI进度”，新增“处理结论”、处理时间筛选和版本治理列；新增/编辑表单新增计划修复、实际修复和实际发版版本。
+5. Excel 导入和外部同步入库同步写入结构化提交时间、处理时间和版本字段；新增迁移脚本 `server/sql/20260708_ticket_submit_processed_version_columns.sql`。
+6. 工单统计页保留原有整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；处理率与未处理存量作为新增独立趋势图，不替换旧曲线；历史用户显示配置缺少 `processingTrend` 时会按配置版本自动补齐一次。
+7. 新增说明文档：`web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md`。
+
 ## 2026-07-07
 
 1. 工单 AI “摘要 + 完整目录”（`hybrid`）模式强化为必须检索 `source_logs/` 原始日志目录：摘要只作为定位索引，prompt 要求查看 manifest 或文件清单，并至少执行一次 `rg` 关键词检索。

@@ -49,6 +49,15 @@ class TicketBaseModel(BaseModel):
     problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
     problem_pattern_verified_by: str | None = Field(default=None, description="细分问题类型确认人")
     problem_pattern_verified_at: datetime | None = Field(default=None, description="细分问题类型确认时间")
+    issue_id: int | None = Field(default=None, description="归属问题实例ID")
+    issue_no: str | None = Field(default=None, description="归属问题实例编号")
+    issue_title: str | None = Field(default=None, description="归属问题实例标题")
+    issue_relation_type: str | None = Field(default=None, description="问题实例归属类型")
+    issue_confirmed: bool | None = Field(default=False, description="问题归因是否人工确认")
+    affected_version: str | None = Field(default=None, description="问题发生或分析版本")
+    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
+    fixed_version: str | None = Field(default=None, description="实际修复版本")
+    released_version: str | None = Field(default=None, description="实际发版版本")
     customer_priority: str | None = Field(default="P3", description="对方优先级")
     internal_priority: str | None = Field(default="P3", description="内部优先级")
     severity: str | None = Field(default=None, description="严重等级")
@@ -63,10 +72,14 @@ class TicketBaseModel(BaseModel):
     internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     root_cause: str | None = Field(default=None, description="最终根因")
     solution: str | None = Field(default=None, description="最终解决方案")
+    submit_time: datetime | None = Field(default=None, description="工单业务提交时间")
     started_at: datetime | None = None
     resolved_at: datetime | None = None
     closed_at: datetime | None = None
     first_response_at: datetime | None = None
+    processed_at: datetime | None = Field(default=None, description="首次形成处理结论时间")
+    released_at: datetime | None = Field(default=None, description="实际发版时间")
+    verified_at: datetime | None = Field(default=None, description="验证完成时间")
     total_process_seconds: int | None = None
     tags: dict[str, Any] | list[str] | None = Field(default=None, description="标签")
     extra_data: dict[str, Any] | None = Field(default=None, description="扩展上下文")
@@ -132,6 +145,11 @@ class TicketQueryModel(QueryModel):
         default=None, description="细分问题类型编码多选，逗号分隔字符串"
     )
     problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
+    issue_id: int | None = Field(default=None, description="归属问题实例ID")
+    issue_no: str | None = Field(default=None, description="归属问题实例编号")
+    issue_title: str | None = Field(default=None, description="归属问题实例标题")
+    issue_relation_type: str | None = Field(default=None, description="问题实例归属类型")
+    issue_confirmed: bool | None = Field(default=None, description="问题归因是否人工确认")
     customer_priority: str | None = Field(default=None, description="对方优先级")
     internal_priority: str | None = Field(default=None, description="内部优先级")
     internal_priorities: str | None = Field(default=None, description="内部优先级多选，逗号分隔字符串")
@@ -156,6 +174,13 @@ class TicketQueryModel(QueryModel):
     ticket_ids: str | None = Field(default=None, description="工单ID列表，逗号分隔字符串，用于自然语言搜索后的过滤")
     submit_begin_time: datetime | None = Field(default=None, description="提交时间筛选开始，优先使用外部createTime")
     submit_end_time: datetime | None = Field(default=None, description="提交时间筛选结束，优先使用外部createTime")
+    processing_conclusion_status: str | None = Field(default=None, description="处理结论状态：processed/unprocessed")
+    processed_begin_time: datetime | None = Field(default=None, description="处理完成时间筛选开始")
+    processed_end_time: datetime | None = Field(default=None, description="处理完成时间筛选结束")
+    affected_version: str | None = Field(default=None, description="问题发生或分析版本")
+    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
+    fixed_version: str | None = Field(default=None, description="实际修复版本")
+    released_version: str | None = Field(default=None, description="实际发版版本")
     sort_field: str | None = Field(default="submitTime", description="排序字段，默认按提交时间排序")
     sort_order: str | None = Field(default="desc", description="排序方向，支持 asc/desc 或 ascending/descending")
 
@@ -193,6 +218,9 @@ class TicketStatusChangeModel(BaseModel):
     problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
     problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
     problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
+    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
+    fixed_version: str | None = Field(default=None, description="实际修复版本")
+    released_version: str | None = Field(default=None, description="实际发版版本")
 
 
 class TicketCommentCreateModel(BaseModel):
