@@ -8,6 +8,14 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-08] INGEST-CODE | 工单统计嵌套字段小驼峰转换修复
+
+- 触发：用户反馈认证检查工单统计中所有趋势数据为 0，工单类型、是否真实问题、根因分类都显示未填写，但实际数据有不同值。
+- 架构层：工单域 / 统计响应契约 / Web 统计页字段读取。
+- 更新的页面：`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/tests/test_ticket_processing_metrics.py`、`web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：`TicketDao.get_ticket_statistics/get_statistics_trend` 返回 snake_case 嵌套字段 -> `TicketProcessingStatsService` 递归小驼峰转换 -> 前端统计页读取 `newCount/problemCount/moduleCounts/issueTypeName/isProblem/rootCauseType`。
+- 关键结论：根因不是统计 SQL 聚合为 0，而是新统计服务只转换了响应最外层字段，嵌套数组字段仍是下划线命名，前端按小驼峰读取时全部落入 0 或“未填写”兜底。
+
 ## [2026-07-08] INGEST-CODE | 工单问题实例归因层第二阶段落地
 
 - 触发：用户要求按第二阶段计划实现真实问题实例归因层，并提供前端人工确认入口。

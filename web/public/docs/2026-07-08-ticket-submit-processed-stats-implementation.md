@@ -47,6 +47,8 @@
 
 2026-07-08 修复趋势合并回归：`TicketProcessingStatsService.merge_trend_series` 只允许处理趋势覆盖 `firstRespondedCount/processedCount/processedInNewCount/processRate/unprocessedBacklog/avgFirstResponseSeconds/avgFirstProcessSeconds` 等新增处理字段；`newCount/closedCount/resolvedCount/netIncrease/openBacklog/problemCount/moduleCounts/problemPatternCounts` 继续以 `TicketDao.get_statistics_trend` 的原趋势结果为准，避免处理趋势桶中的 0 覆盖旧曲线和趋势明细。
 
+2026-07-08 补充修复统计响应字段契约：`TicketProcessingStatsService` 不再使用只转换最外层字段的 `CamelCaseUtil.transform_result`，改为在统计服务内递归转换字典和列表。`/ticket/statistics/overview` 的 `issueTypeCounts/problemCounts/rootCauseTypeCounts` 以及 `/ticket/statistics/trend` 的 `series`、`moduleCounts`、`problemPatternCounts` 等嵌套字段都会返回前端读取的小驼峰字段，避免趋势图读不到 `newCount/problemCount` 后显示为 0，统计块读不到 `issueTypeName/isProblem/rootCauseType` 后显示为“未填写”。
+
 ## 验证结果
 
 1. 后端 ruff 针对本次改动文件已通过。

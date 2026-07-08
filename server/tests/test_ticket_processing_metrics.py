@@ -5,9 +5,10 @@ from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
 
 try:
-    from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService
+    from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService, _camelize
 except Exception:
     TicketProcessingStatsService = None
+    _camelize = None
 
 
 def test_first_response_does_not_mark_processed():
@@ -108,6 +109,36 @@ def test_processing_stats_overview_metrics():
     assert metrics["process_rate"] == 0.5
     assert metrics["avg_first_response_seconds"] == 600
     assert metrics["avg_first_process_seconds"] == 3600
+
+
+def test_processing_stats_response_fields_are_recursive_camel_case():
+    """统计接口返回字段应递归转小驼峰，避免前端嵌套表格和趋势图读不到数据。"""
+    if _camelize is None:
+        return
+
+    payload = {
+        "issue_type_counts": [{"issue_type_id": "bug", "issue_type_name": "缺陷", "count": 2}],
+        "problem_counts": [{"is_problem": True, "label": "真实问题", "count": 1}],
+        "root_cause_type_counts": [{"root_cause_type": "config", "count": 1}],
+        "series": [
+            {
+                "bucket": "2026-07-08",
+                "new_count": 3,
+                "problem_count": 2,
+                "module_counts": [{"name": "认证检查", "count": 3}],
+            }
+        ],
+    }
+
+    result = _camelize(payload)
+
+    assert result["issueTypeCounts"][0]["issueTypeId"] == "bug"
+    assert result["issueTypeCounts"][0]["issueTypeName"] == "缺陷"
+    assert result["problemCounts"][0]["isProblem"] is True
+    assert result["rootCauseTypeCounts"][0]["rootCauseType"] == "config"
+    assert result["series"][0]["newCount"] == 3
+    assert result["series"][0]["problemCount"] == 2
+    assert result["series"][0]["moduleCounts"] == [{"name": "认证检查", "count": 3}]
 
 
 def test_processing_trend_merge_keeps_base_trend_fields():

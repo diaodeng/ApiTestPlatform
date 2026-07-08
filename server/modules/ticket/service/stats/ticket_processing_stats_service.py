@@ -45,6 +45,19 @@ def _normalize_text_list(value: Any) -> list[str]:
     return result
 
 
+def _camelize(value: Any) -> Any:
+    """
+    递归转换统计接口返回字段为小驼峰。
+    :param value: 字典、列表或普通值。
+    :return: 小驼峰字段结果。
+    """
+    if isinstance(value, dict):
+        return {CamelCaseUtil.snake_to_camel(str(key)): _camelize(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_camelize(item) for item in value]
+    return value
+
+
 class TicketProcessingStatsService:
     """
     工单处理口径统计服务。
@@ -77,7 +90,7 @@ class TicketProcessingStatsService:
         project_id_values = _normalize_int_list(project_ids)
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
-        base_statistics = CamelCaseUtil.transform_result(
+        base_statistics = _camelize(
             TicketDao.get_ticket_statistics(
                 query_db,
                 start,
@@ -96,7 +109,7 @@ class TicketProcessingStatsService:
             module_codes=module_code_values,
         )
         metrics = cls.build_overview_metrics(rows, start, finish)
-        return {**base_statistics, **CamelCaseUtil.transform_result(metrics)}
+        return {**base_statistics, **_camelize(metrics)}
 
     @classmethod
     def get_statistics_trend(
@@ -129,7 +142,7 @@ class TicketProcessingStatsService:
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
         problem_pattern_code_values = _normalize_text_list(problem_pattern_codes)
-        base_trend = CamelCaseUtil.transform_result(
+        base_trend = _camelize(
             TicketDao.get_statistics_trend(
                 query_db,
                 start,
@@ -149,9 +162,7 @@ class TicketProcessingStatsService:
             module_codes=module_code_values,
             problem_pattern_codes=problem_pattern_code_values,
         )
-        processing_trend = CamelCaseUtil.transform_result(
-            cls.build_trend_metrics(rows, start, finish, normalized_granularity)
-        )
+        processing_trend = _camelize(cls.build_trend_metrics(rows, start, finish, normalized_granularity))
         return cls.merge_trend_series(base_trend, processing_trend, normalized_granularity)
 
     @staticmethod
