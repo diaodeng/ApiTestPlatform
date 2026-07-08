@@ -14,6 +14,37 @@
 
 `affected_ticket_count` 只统计 `del_flag = '0'` 的有效工单；解绑工单不会删除 Issue。
 
+## OceanBase 迁移脚本兼容性
+
+2026-07-08 修正 `server/sql/20260708_ticket_issue_relation_tables.sql` 的 OceanBase MySQL 模式执行方式：原脚本通过 `SET @sql = (...)` + `PREPARE/EXECUTE` 做幂等 DDL，在部分 OceanBase 环境会报 `(1149) SQL syntax`，后续继续执行 `EXECUTE stmt` 时连带出现 `(1243) Unknown prepared statement handle`。
+
+当前脚本改为一次性直写 DDL：
+
+- `ticket_issue`、`ticket_relation` 使用 `CREATE TABLE IF NOT EXISTS`。
+- `ticket_relation.source` 使用反引号转义为 `` `source` ``，避免工具或方言解析冲突。
+- `ticket` 的新增字段和 `idx_ticket_del_issue` 索引用普通 `ALTER TABLE` / `CREATE INDEX` 执行。
+
+如果目标库已部分执行过，先用以下检查 SQL 判断是否需要跳过对应 DDL：
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = DATABASE()
+  AND table_name IN ('ticket_issue', 'ticket_relation');
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND table_name = 'ticket'
+  AND column_name IN ('issue_id', 'issue_relation_type', 'issue_confirmed');
+
+SELECT index_name
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name = 'ticket'
+  AND index_name = 'idx_ticket_del_issue';
+```
+
 ## 后端分层
 
 - `controller/ticket_issue_controller.py`：新增 Issue 和补充关系 API，控制器只做协议、鉴权、响应转换。

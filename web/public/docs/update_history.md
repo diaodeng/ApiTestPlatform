@@ -1,5 +1,9 @@
 ## 2026-07-08
 
+1. 修正工单第二阶段 Issue 归因层迁移脚本的 OceanBase 兼容性：去掉 `PREPARE/EXECUTE` 动态 DDL，改为一次性直写 DDL，并补充已部分执行时的 `information_schema` 检查方式。
+
+## 2026-07-08
+
 1. 工单第二阶段问题实例归因层落地：新增 `ticket_issue`、`ticket_relation`，工单主表新增 `issue_id/issue_relation_type/issue_confirmed`。
 2. 新增 Issue 归因 API：创建/编辑 Issue、绑定已有 Issue、新建并绑定、从相似工单确认归因、解除归因；补充关系支持创建、确认、删除，且不影响主归因字段。
 3. 工单详情页展示所属 Issue、归因确认和归因类型；相似工单卡片新增“归入同一问题”，列表列设置新增问题编号、确认状态、问题标题和归因类型。

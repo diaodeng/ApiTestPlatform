@@ -1164,6 +1164,12 @@ updated: 2026-07-07
 - 更新的页面：`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/public/docs/2026-06-21-ticket-bitable-pull-and-config-unify.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`
 - 变更传播链：`ticket.sync.automation.*.filterFormula` 文案 -> 飞书 `records/search` filter JSON 配置提示 -> 后端错误提示；`createdAfter/updatedAtField/fieldMappings.createTime` -> 主动拉取云端时间窗口 filter；`externalSyncRequiredFields` -> 多维主动拉取记录级必填校验。
 
+## [2026-07-08] INGEST-CODE | 工单 Issue 归因迁移脚本 OceanBase 兼容修正
+- 触发：用户反馈执行 `server/sql/20260708_ticket_issue_relation_tables.sql` 时 OceanBase 报 `(1149) SQL syntax`，并连带出现 `(1243) Unknown prepared statement handle`。
+- 架构层：工单域 / 数据库迁移 / Issue 归因层
+- 更新的页面：`server/sql/20260708_ticket_issue_relation_tables.sql`、`web/public/docs/2026-07-08-ticket-issue-attribution-implementation.md`、`web/public/docs/update_history.md`
+- 变更传播链：迁移脚本 `PREPARE/EXECUTE` 动态 DDL -> OceanBase 一次性直写 DDL -> 已部分执行场景通过 `information_schema` 检查后跳过重复字段或索引。
+
 ## [2026-06-24] INGEST-CODE | 工单 AI 分析弹窗默认值与提交体验修正
 - 触发：用户要求发起 AI 分析时自动填入 Provider、Agent、追加提示词，日志模式默认摘要 + 完整目录，并排查 2026-06-23 改动导致提交后弹窗不关闭且继续 loading 的等待点。
 - 架构层：工单域 / AI 分析 / Web 控制台
