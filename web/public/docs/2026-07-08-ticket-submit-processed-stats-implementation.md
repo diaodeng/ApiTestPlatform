@@ -45,6 +45,8 @@
    - 历史用户的 `ticket_statistics_blocks.visibleTrendBlocks` 配置中没有 `processingTrend` 时，页面会按配置版本自动补齐一次，避免新增曲线不在页面和显示配置中出现。
    - 趋势明细保留原有新增、处置完成、关闭、净增、未关闭存量、Bug、非Bug、支持类、Top细分问题和Top模块列，并新增已响应、已处理、新增已处理、处理率、未处理存量、平均响应/处理耗时。
 
+2026-07-08 修复趋势合并回归：`TicketProcessingStatsService.merge_trend_series` 只允许处理趋势覆盖 `firstRespondedCount/processedCount/processedInNewCount/processRate/unprocessedBacklog/avgFirstResponseSeconds/avgFirstProcessSeconds` 等新增处理字段；`newCount/closedCount/resolvedCount/netIncrease/openBacklog/problemCount/moduleCounts/problemPatternCounts` 继续以 `TicketDao.get_statistics_trend` 的原趋势结果为准，避免处理趋势桶中的 0 覆盖旧曲线和趋势明细。
+
 ## 验证结果
 
 1. 后端 ruff 针对本次改动文件已通过。

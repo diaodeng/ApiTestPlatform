@@ -1164,6 +1164,13 @@ updated: 2026-07-07
 - 更新的页面：`server/modules/ticket/service/ticket_sync_notify_service.py`、`server/modules/ticket/service/ticket_sync_service.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/public/docs/2026-06-21-ticket-bitable-pull-and-config-unify.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`
 - 变更传播链：`ticket.sync.automation.*.filterFormula` 文案 -> 飞书 `records/search` filter JSON 配置提示 -> 后端错误提示；`createdAfter/updatedAtField/fieldMappings.createTime` -> 主动拉取云端时间窗口 filter；`externalSyncRequiredFields` -> 多维主动拉取记录级必填校验。
 
+## [2026-07-08] INGEST-CODE | 工单统计趋势合并归零修复
+- 触发：用户反馈昨晚修改后工单统计中趋势曲线和趋势明细数据都变成 0，而昨天正常。
+- 架构层：工单域 / 统计趋势 / 处理口径合并
+- 更新的页面：`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/tests/test_ticket_processing_metrics.py`、`web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md`、`web/public/docs/update_history.md`
+- 变更传播链：`TicketDao.get_statistics_trend` 原趋势字段 + `TicketProcessingStatsService.build_trend_metrics` 新处理字段 -> `merge_trend_series` 白名单合并 -> 趋势曲线和趋势明细继续保留旧字段真实数据。
+- 关键结论：处理趋势桶也包含 `newCount/closedCount/resolvedCount/openBacklog/netIncrease` 等同名字段，不能整行覆盖原趋势桶；只允许覆盖新增处理字段。
+
 ## [2026-07-08] INGEST-CODE | 工单 Issue 归因迁移脚本 OceanBase 兼容修正
 - 触发：用户反馈执行 `server/sql/20260708_ticket_issue_relation_tables.sql` 时 OceanBase 报 `(1149) SQL syntax`，并连带出现 `(1243) Unknown prepared statement handle`。
 - 架构层：工单域 / 数据库迁移 / Issue 归因层

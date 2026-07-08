@@ -108,3 +108,65 @@ def test_processing_stats_overview_metrics():
     assert metrics["process_rate"] == 0.5
     assert metrics["avg_first_response_seconds"] == 600
     assert metrics["avg_first_process_seconds"] == 3600
+
+
+def test_processing_trend_merge_keeps_base_trend_fields():
+    """合并处理趋势时不应覆盖旧趋势的新增、关闭、存量和分类明细。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    base_trend = {
+        "granularity": "day",
+        "series": [
+            {
+                "bucket": "2026-07-08",
+                "newCount": 7,
+                "closedCount": 2,
+                "resolvedCount": 3,
+                "netIncrease": 5,
+                "openBacklog": 11,
+                "problemCount": 4,
+                "moduleCounts": [{"name": "收银", "count": 7}],
+                "problemPatternCounts": [{"name": "内存泄露", "count": 2}],
+            }
+        ],
+    }
+    processing_trend = {
+        "granularity": "day",
+        "series": [
+            {
+                "bucket": "2026-07-08",
+                "newCount": 0,
+                "closedCount": 0,
+                "resolvedCount": 0,
+                "netIncrease": 0,
+                "openBacklog": 0,
+                "firstRespondedCount": 6,
+                "processedCount": 5,
+                "processedInNewCount": 4,
+                "processRate": 0.5714,
+                "unprocessedBacklog": 3,
+                "avgFirstResponseSeconds": 600,
+                "avgFirstProcessSeconds": 3600,
+            }
+        ],
+    }
+
+    merged = TicketProcessingStatsService.merge_trend_series(base_trend, processing_trend, "day")
+    row = merged["series"][0]
+
+    assert row["newCount"] == 7
+    assert row["closedCount"] == 2
+    assert row["resolvedCount"] == 3
+    assert row["netIncrease"] == 5
+    assert row["openBacklog"] == 11
+    assert row["problemCount"] == 4
+    assert row["moduleCounts"] == [{"name": "收银", "count": 7}]
+    assert row["problemPatternCounts"] == [{"name": "内存泄露", "count": 2}]
+    assert row["firstRespondedCount"] == 6
+    assert row["processedCount"] == 5
+    assert row["processedInNewCount"] == 4
+    assert row["processRate"] == 0.5714
+    assert row["unprocessedBacklog"] == 3
+    assert row["avgFirstResponseSeconds"] == 600
+    assert row["avgFirstProcessSeconds"] == 3600

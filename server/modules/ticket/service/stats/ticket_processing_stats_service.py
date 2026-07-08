@@ -168,6 +168,15 @@ class TicketProcessingStatsService:
             processing_trend.get("series") if isinstance(processing_trend.get("series"), list) else []
         )
         processing_map = {str(row.get("bucket") or ""): row for row in processing_rows if isinstance(row, dict)}
+        processing_only_fields = (
+            "firstRespondedCount",
+            "processedCount",
+            "processedInNewCount",
+            "processRate",
+            "unprocessedBacklog",
+            "avgFirstResponseSeconds",
+            "avgFirstProcessSeconds",
+        )
         merged_rows = []
         seen_buckets = set()
         for row in base_rows:
@@ -175,7 +184,12 @@ class TicketProcessingStatsService:
                 continue
             bucket = str(row.get("bucket") or "")
             seen_buckets.add(bucket)
-            merged_rows.append({**row, **processing_map.get(bucket, {})})
+            merged_row = {**row}
+            processing_row = processing_map.get(bucket) or {}
+            for field_name in processing_only_fields:
+                if field_name in processing_row:
+                    merged_row[field_name] = processing_row[field_name]
+            merged_rows.append(merged_row)
         for row in processing_rows:
             bucket = str(row.get("bucket") or "")
             if bucket and bucket not in seen_buckets:
