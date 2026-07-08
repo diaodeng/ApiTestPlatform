@@ -63,6 +63,7 @@ from modules.ticket.controller.ticket_ai_controller import ticketAiController
 from modules.ticket.controller.ticket_config_controller import ticketConfigController
 from modules.ticket.controller.ticket_controller import ticketWebhookController
 from modules.ticket.controller.ticket_crud_controller import ticketCrudController
+from modules.ticket.controller.ticket_issue_controller import ticketIssueController
 from modules.ticket.controller.ticket_log_pull_controller import ticketLogPullController
 from modules.ticket.controller.ticket_sync_controller import ticketSyncController
 from modules.ticket.perms import register as register_ticket_permission_defs
@@ -183,6 +184,7 @@ controller_list = [
     {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
     {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
     {'router': ticketCrudController, 'tags': ['工单管理']},
+    {'router': ticketIssueController, 'tags': ['工单问题归因']},
     {'router': ticketSyncController, 'tags': ['工单同步']},
     {'router': ticketLogPullController, 'tags': ['工单日志拉取']},
     {'router': ticketAiController, 'tags': ['工单AI分析']},

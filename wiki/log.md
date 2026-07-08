@@ -8,6 +8,15 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-08] INGEST-CODE | 工单问题实例归因层第二阶段落地
+
+- 触发：用户要求按第二阶段计划实现真实问题实例归因层，并提供前端人工确认入口。
+- 架构层：工单域 / 工单核心数据模型 / Web 控制台 / 问题实例归因。
+- 创建的页面：`web/public/docs/2026-07-08-ticket-issue-attribution-implementation.md`
+- 更新的页面：`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：`ticket_issue` / `ticket.issue_id` / `ticket_relation` -> `TicketIssueDao` -> `TicketIssueService` / `TicketRelationService` -> `ticket_issue_controller` API -> 工单详情相似工单人工确认入口和列表 Issue 列。
+- 关键结论：`ticket.issue_id` 是主归因，`ticket_relation` 只保存补充关系；相似工单不会自动强绑定，只在用户点击“归入同一问题”后确认。
+
 ## [2026-07-08] INGEST-CODE | 工单提交时间、处理结论和版本治理第一阶段落地
 
 - 触发：用户要求按方案文件实现第一阶段内容，并强调项目分层、不要揉大文件。

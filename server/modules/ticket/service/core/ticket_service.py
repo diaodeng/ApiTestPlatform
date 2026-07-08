@@ -11,6 +11,7 @@ from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao, _date_end, _date_start
+from modules.ticket.dao.ticket_issue_dao import TicketIssueDao
 from modules.ticket.entity.do.ticket_do import (
     KnowledgeArticle,
     Ticket,
@@ -551,6 +552,36 @@ class TicketService:
         item["aiTranslationPromptCode"] = (extra_data or {}).get("ai_translation_prompt_code") or ""
         item["syncSummary"] = sync_summary
         return item
+
+    @classmethod
+    def _attach_issue_summary(cls, query_db: Session, items: list[dict[str, Any]]) -> None:
+        """
+        为工单列表或详情补充归属问题实例摘要字段。
+        :param query_db: 数据库会话
+        :param items: 工单字典列表
+        :return: 无
+        """
+        issue_ids = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            issue_id = item.get("issueId") or item.get("issue_id")
+            if issue_id and issue_id not in issue_ids:
+                issue_ids.append(issue_id)
+        issue_map = TicketIssueDao.list_issue_summary_by_ids(query_db, issue_ids)
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            issue = issue_map.get(item.get("issueId") or item.get("issue_id"))
+            if issue:
+                item["issueNo"] = issue.issue_no
+                item["issueTitle"] = issue.title
+                item["issueStatus"] = issue.status
+                item["issueAffectedTicketCount"] = issue.affected_ticket_count
+                item["issue"] = CamelCaseUtil.transform_result(issue)
+            else:
+                item["issueNo"] = item.get("issueNo") or ""
+                item["issueTitle"] = item.get("issueTitle") or ""
 
     @classmethod
     def _attach_relation_codes(cls, query_db: Session, item: dict[str, Any]) -> dict[str, Any]:
@@ -1140,6 +1171,7 @@ class TicketService:
                     cls._decorate_ticket_item(item)
                     item["latestLogPull"] = summary_map.get(item.get("ticketId"))
                     item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
+            cls._attach_issue_summary(query_db, rows)
             return result
         ticket_ids = [item.get("ticketId") for item in result if isinstance(item, dict) and item.get("ticketId")]
         summary_map = TicketLogPullService.get_latest_summary_map(query_db, ticket_ids)
@@ -1149,6 +1181,7 @@ class TicketService:
                 cls._decorate_ticket_item(item)
                 item["latestLogPull"] = summary_map.get(item.get("ticketId"))
                 item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
+        cls._attach_issue_summary(query_db, result)
         return result
 
     @classmethod
@@ -1164,6 +1197,7 @@ class TicketService:
             return None
         result = CamelCaseUtil.transform_result(ticket)
         cls._decorate_ticket_item(result)
+        cls._attach_issue_summary(query_db, [result])
         cls._attach_relation_codes(query_db, result)
         result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
         result["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(query_db, ticket_id)
@@ -1194,6 +1228,8 @@ class TicketService:
             data.pop("ticket_id", None)
             data.pop("project_code", None)
             data.pop("project_name", None)
+            data.pop("issue_no", None)
+            data.pop("issue_title", None)
             auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
             version_key = str(data.pop("version_key", "") or "").strip()

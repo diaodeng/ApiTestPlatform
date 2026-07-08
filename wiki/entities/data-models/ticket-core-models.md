@@ -8,10 +8,11 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-08
 created: 2026-05-20
-updated: 2026-07-07
+updated: 2026-07-08
 related_files:
   - server/modules/ticket/entity/do/ticket_do.py
   - server/modules/ticket/entity/do/ticket_log_pull_do.py
+  - server/modules/ticket/dao/ticket_issue_dao.py
 ---
 
 # 工单核心数据模型
@@ -29,6 +30,9 @@ erDiagram
   Ticket ||--o{ TicketSnapshot : versions
   Ticket ||--o{ TicketAiAnalysisTask : analyzed_by
   Ticket ||--o{ EmbeddingRecord : indexed_by
+  TicketIssue ||--o{ Ticket : owns
+  Ticket ||--o{ TicketRelation : relates_source
+  Ticket ||--o{ TicketRelation : relates_target
 ```
 
 ## 主要实体
@@ -38,6 +42,7 @@ erDiagram
 - `TicketMessage`、`TicketSnapshot`
 - `KnowledgeArticle`、`EmbeddingRecord`
 - `TicketAiRepoMapping`、`TicketAiAnalysisTask`
+- `TicketIssue`、`TicketRelation`
 - `WorkflowStatus`、`WorkflowTransition`
 - `TicketStatisticsDaily`、`UserStatisticsDaily`
 - `TicketLogPullRecord`
@@ -51,7 +56,8 @@ erDiagram
 - 2026-07-08 待实施方案确认 `Ticket.resolved_at` 保留当前终态写入逻辑，语义为“工单处置完成时间”；真实 Bug 修复统计应结合 `is_problem/solution_type/resolution_code/fixed_version/released_at/verified_at`。
 - 2026-07-08 第一阶段已新增 `affected_version/planned_fix_version/fixed_version/released_version/released_at/verified_at`；其中 `affected_version` 可兼容 `extra_data.version_key`，`planned_fix_version` 是治理排期字段，不应继续塞进 `extra_data.version_key`。
 - `Ticket` 新增索引 `idx_ticket_del_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version`，支撑提交时间、处理时间、处置/关闭时间和计划版本筛选。
-- 2026-07-08 待实施方案将 `ticket_issue`、`ticket.issue_id` 与 `ticket_relation` 降为第二阶段增强：现有根因、根因分类和细分问题字段先继续承担分类统计，Issue 层仅在需要“真实问题实例数、重复工单数、影响工单数”时实施。
+- 2026-07-08 第二阶段已新增 `TicketIssue`、`Ticket.issue_id/issue_relation_type/issue_confirmed` 和 `TicketRelation`：`Ticket.issue_id` 是主归因字段，`TicketRelation` 只保存补充关系，不替代主归因。
+- `TicketIssue.affected_ticket_count` 由 `TicketIssueService.refresh_affected_ticket_count` 按有效工单实时刷新，软删除工单不计入；解绑工单只清空主归因，不删除 Issue。
 - `Ticket.issue_type_id/issue_type_name`、`Ticket.is_problem`、`Ticket.root_cause_type`、`Ticket.solution_type`、`Ticket.resolution_code/resolution_name` 是工单统计与后续 AI 分析的结构化维度，不能塞进 `extra_data` 替代；`Ticket.module_id/module_name` 继续承担业务域维度。
 - `Ticket.problem_pattern_code/problem_pattern_name` 是长期治理用的细分问题类型字段，承载“内存泄露”“280开头券为纸质券规则说明”等固定问题模式；`problem_pattern_confidence/source/verified/verified_by/verified_at` 记录 AI 置信度、来源和人工确认状态。人工确认后的细分问题默认不被 AI 自动分类覆盖。
 - `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。
