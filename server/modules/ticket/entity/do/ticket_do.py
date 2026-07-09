@@ -543,17 +543,35 @@ class WorkflowTransition(Base):
 
 class TicketStatisticsDaily(Base):
     """
-    工单每日统计表，预留离线聚合结果。
+    工单每日统计表，按自然日冻结工单处理口径汇总结果。
     """
 
     __tablename__ = "ticket_statistics_daily"
+    __table_args__ = (
+        UniqueConstraint("statistics_date", name="uk_ticket_statistics_daily_date"),
+        Index("idx_ticket_statistics_daily_date", "statistics_date"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="统计ID")
     statistics_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True, comment="统计日期")
-    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增数量")
-    resolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="解决数量")
-    closed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="关闭数量")
-    avg_process_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处理秒数")
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="工单总数")
+    submitted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数")
+    first_responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已响应数")
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已处理数")
+    processed_in_new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单已处理数")
+    process_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment="新增工单处理率")
+    resolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="处置完成数")
+    closed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="关闭数")
+    unprocessed_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未处理存量")
+    open_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未关闭存量")
+    avg_first_response_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次响应耗时"
+    )
+    avg_first_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次处理耗时"
+    )
+    avg_resolve_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处置完成耗时")
+    avg_close_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均关闭耗时")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 

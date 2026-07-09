@@ -296,6 +296,7 @@ async def get_ticket_statistics(
             query.project_ids,
             query.module_ids,
             query.module_codes,
+            query.statistics_mode,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:
@@ -330,6 +331,7 @@ async def get_ticket_statistics_trend(
             query.module_codes,
             query.granularity,
             query.problem_pattern_codes,
+            query.statistics_mode,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:

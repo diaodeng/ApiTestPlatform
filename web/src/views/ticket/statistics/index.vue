@@ -91,6 +91,9 @@
       <el-form-item label="趋势粒度">
         <el-segmented v-model="trendGranularity" :options="trendGranularityOptions" />
       </el-form-item>
+      <el-form-item label="统计口径">
+        <el-segmented v-model="statisticsMode" :options="statisticsModeOptions" />
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">查询</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -124,6 +127,15 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-alert
+      v-if="statisticsMode === 'snapshot'"
+      type="info"
+      show-icon
+      :closable="false"
+      class="mb16"
+      title="当前使用快照口径，统计结果来自每日冻结快照；项目、模块和问题类型筛选在该口径下暂不参与快照聚合。"
+    />
 
     <el-row :gutter="16" class="stats-block-grid">
       <el-col
@@ -279,6 +291,7 @@
   const selectedModuleCodes = ref([]);
   const selectedProblemPatternCodes = ref([]);
   const trendGranularity = ref('week');
+  const statisticsMode = ref('realtime');
   const issueTypeOptions = ref([]);
   const workflowStatusOptions = ref([]);
   const rootCauseTypeOptions = ref([]);
@@ -300,6 +313,10 @@
     { label: '日', value: 'day' },
     { label: '周', value: 'week' },
     { label: '月', value: 'month' },
+  ];
+  const statisticsModeOptions = [
+    { label: '实时口径', value: 'realtime' },
+    { label: '快照口径', value: 'snapshot' },
   ];
   const trendBlockOptions = [
     { key: 'overallTrend', title: '整体趋势曲线' },
@@ -511,6 +528,7 @@
     return {
       ...queryParams.value,
       granularity: trendGranularity.value,
+      statisticsMode: statisticsMode.value,
       projectIds: selectedProjectIds.value.length ? selectedProjectIds.value.join(',') : undefined,
       moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined,
       moduleCodes: selectedModuleCodes.value.length
@@ -667,6 +685,7 @@
     selectedModuleCodes.value = [];
     selectedProblemPatternCodes.value = [];
     trendGranularity.value = 'week';
+    statisticsMode.value = 'realtime';
     queryParams.value = { beginTime: undefined, endTime: undefined };
     loadModuleOptions([]);
     getStatistics();

@@ -943,6 +943,7 @@ class TicketStatisticsQueryModel(QueryModel):
 
     begin_time: date | datetime | str | None = Field(default=None, description="开始时间")
     end_time: date | datetime | str | None = Field(default=None, description="结束时间")
+    statistics_mode: str | None = Field(default="realtime", description="统计口径：realtime/snapshot")
     project_ids: str | None = Field(default=None, description="项目ID多选，逗号分隔字符串")
     module_ids: str | None = Field(default=None, description="模块ID多选，逗号分隔字符串")
     module_codes: str | None = Field(default=None, description="模块业务码多选，逗号分隔字符串")

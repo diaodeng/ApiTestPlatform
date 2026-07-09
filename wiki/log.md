@@ -8,6 +8,15 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-10] INGEST-CODE | 工单统计第三阶段快照口径落地
+
+- 触发：用户要求继续根据方案文档实现第三阶段，补齐统计快照和周报稳定口径。
+- 架构层：工单域 / 统计服务 / 定时任务 / Web 统计页。
+- 创建的页面：`web/public/docs/2026-07-10-ticket-statistics-snapshot-phase3.md`
+- 更新的页面：`server/modules/ticket/entity/do/ticket_do.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_statistics_daily_dao.py`、`server/modules/ticket/service/stats/ticket_statistics_snapshot_service.py`、`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/modules/ticket/controller/ticket_config_controller.py`、`server/module_task/scheduler_maintenance.py`、`server/modules/ticket/service/sync/ticket_sync_config_service.py`、`server/modules/ticket/service/sync/ticket_sync_notification_job_service.py`、`web/src/views/ticket/statistics/index.vue`、`web/public/docs/update_history.md`
+- 变更传播链：`ticket_statistics_daily` 扩表 -> 每日快照任务 -> `TicketStatisticsSnapshotService` 冻结自然日统计 -> `TicketProcessingStatsService` 按 `statisticsMode` 切换实时/快照 -> 统计页口径切换 -> 汇总通知默认快照。
+- 关键结论：当前快照先按自然日整体冻结，不做项目/模块维度拆分；快照模式下统计页提示筛选维度暂不参与快照聚合，避免误读。
+
 ## [2026-07-10] INGEST-CODE | 工单第二阶段 Issue 前端入口补齐
 
 - 触发：用户要求继续实现第二阶段未完成部分，补齐工单真实问题实例归因层的可用入口。

@@ -19,6 +19,28 @@ related_files:
 
 工单核心数据模型覆盖工单本体、状态历史、指派历史、评论、事件、RCA、知识库、工作流、统计与日志拉取记录。
 
+## 统计快照
+
+`TicketStatisticsDaily` 现在承接自然日冻结统计结果，字段覆盖：
+
+- `statistics_date`
+- `total_count`
+- `submitted_count`
+- `first_responded_count`
+- `processed_count`
+- `processed_in_new_count`
+- `process_rate`
+- `resolved_count`
+- `closed_count`
+- `unprocessed_backlog`
+- `open_backlog`
+- `avg_first_response_seconds`
+- `avg_first_process_seconds`
+- `avg_resolve_seconds`
+- `avg_close_seconds`
+
+第三阶段统计页会优先通过 `statistics_mode=snapshot` 读取这类冻结结果，避免实时字段变化影响历史周报口径。
+
 ```mermaid
 erDiagram
   Ticket ||--o{ TicketStatusHistory : has

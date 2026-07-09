@@ -1452,6 +1452,7 @@ class TicketSyncConfigService:
         summary_report["endDelayMinutes"] = max(SyncUtil.safe_int(summary_report.get("endDelayMinutes")) or 0, 0)
         summary_report["startTime"] = str(summary_report.get("startTime") or "").strip()
         summary_report["endTime"] = str(summary_report.get("endTime") or "").strip()
+        summary_report["statisticsMode"] = str(summary_report.get("statisticsMode") or "snapshot").strip().lower()
         summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
         summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
         merged["summaryReport"] = summary_report

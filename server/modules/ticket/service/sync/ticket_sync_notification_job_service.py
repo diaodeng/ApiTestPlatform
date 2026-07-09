@@ -117,6 +117,7 @@ class TicketSyncNotificationJobService:
             "summaryReport",
             TicketSyncConfigService.default_summary_report_config(),
         )
+        summary_config["statisticsMode"] = str(summary_config.get("statisticsMode") or "snapshot").strip().lower()
         parsed_start_time = TicketSyncNotifyService.parse_datetime_value(start_time)
         parsed_end_time = TicketSyncNotifyService.parse_datetime_value(end_time)
         return TicketSyncNotifyService.run_ticket_summary_report(

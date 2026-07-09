@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from datetime import datetime
 from typing import Any
 
 from config.database import SessionLocal
@@ -8,6 +9,7 @@ from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
 from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
+from modules.ticket.service.stats.ticket_statistics_snapshot_service import TicketStatisticsSnapshotService
 from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicStatsService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
@@ -407,6 +409,33 @@ def ticket_summary_report(
         result.get("pushSuccessCount"),
         result.get("chatSuccessCount"),
         result.get("skipped"),
+    )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_daily_statistics_snapshot")
+def ticket_daily_statistics_snapshot(*args, statistics_date: str | None = None, **kwargs):
+    """
+    工单每日统计快照任务。
+
+    :param statistics_date: 快照日期，默认今天。
+    :return: 执行结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    snapshot_date = None
+    if statistics_date:
+        try:
+            snapshot_date = datetime.fromisoformat(str(statistics_date)).date()
+        except Exception:
+            snapshot_date = None
+    with SessionLocal() as db:
+        result = TicketStatisticsSnapshotService.build_daily_snapshot(db, snapshot_date)
+    logger.info(
+        f"工单每日统计快照任务执行完成 | statistics_date={result.get('statisticsDate')}, "
+        f"submitted_count={result.get('submitted_count')}, processed_count={result.get('processed_count')}"
     )
     return result
 

@@ -56,6 +56,13 @@ related_files:
 
 工单域负责工单生命周期、评论、事件、RCA、知识库、工作流、统计和日志拉取，是项目中的独立知识管理子系统。
 
+## 统计口径
+
+- `TicketProcessingStatsService` 支持 `statistics_mode=realtime/snapshot`。
+- `snapshot` 口径读取 `ticket_statistics_daily` 自然日冻结数据。
+- `realtime` 口径继续按主表和事件表实时计算。
+- 汇总通知默认走快照口径，统计页可显式切换。
+
 ```mermaid
 graph TD
   A[工单控制器] --> B[工单服务]

@@ -3,8 +3,16 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from modules.ticket.dao.ticket_dao import TicketDao, _date_end, _date_start, _normalize_granularity
+from modules.ticket.dao.ticket_dao import (
+    TicketDao,
+    _bucket_label,
+    _bucket_start,
+    _date_end,
+    _date_start,
+    _normalize_granularity,
+)
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
+from modules.ticket.dao.ticket_statistics_daily_dao import TicketStatisticsDailyDao
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from utils.common_util import CamelCaseUtil
 
@@ -75,6 +83,7 @@ class TicketProcessingStatsService:
         project_ids: Any = None,
         module_ids: Any = None,
         module_codes: Any = None,
+        statistics_mode: str | None = "realtime",
     ) -> dict:
         """
         获取处理口径 overview 统计。
@@ -91,6 +100,10 @@ class TicketProcessingStatsService:
         project_id_values = _normalize_int_list(project_ids)
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
+        normalized_mode = str(statistics_mode or "realtime").strip().lower()
+        if normalized_mode == "snapshot":
+            snapshot = cls.get_snapshot_statistics(query_db, start, finish)
+            return _camelize(snapshot)
         base_statistics = _camelize(
             TicketDao.get_ticket_statistics(
                 query_db,
@@ -298,7 +311,12 @@ class TicketProcessingStatsService:
             key = "true" if value is True else ("false" if value is False else "unknown")
             label = "真实问题" if value is True else ("非问题" if value is False else "未填写")
             if key not in row_map:
-                row_map[key] = {**row, "isProblem": value if isinstance(value, bool) else None, "label": label, "count": 0}
+                row_map[key] = {
+                    **row,
+                    "isProblem": value if isinstance(value, bool) else None,
+                    "label": label,
+                    "count": 0,
+                }
             row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
         return list(row_map.values())
 
@@ -351,6 +369,7 @@ class TicketProcessingStatsService:
         module_codes: Any = None,
         granularity: str | None = "week",
         problem_pattern_codes: Any = None,
+        statistics_mode: str | None = "realtime",
     ) -> dict:
         """
         获取处理口径趋势统计。
@@ -371,6 +390,15 @@ class TicketProcessingStatsService:
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
         problem_pattern_code_values = _normalize_text_list(problem_pattern_codes)
+        normalized_mode = str(statistics_mode or "realtime").strip().lower()
+        if normalized_mode == "snapshot":
+            snapshot_trend = cls.get_snapshot_trend(
+                query_db,
+                start,
+                finish,
+                normalized_granularity,
+            )
+            return _camelize(snapshot_trend)
         base_trend = _camelize(
             TicketDao.get_statistics_trend(
                 query_db,
@@ -393,6 +421,143 @@ class TicketProcessingStatsService:
         )
         processing_trend = _camelize(cls.build_trend_metrics(rows, start, finish, normalized_granularity))
         return cls.merge_trend_series(base_trend, processing_trend, normalized_granularity)
+
+    @classmethod
+    def get_snapshot_statistics(
+        cls,
+        query_db: Session,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+    ) -> dict:
+        """
+        获取每日快照口径的 overview 统计。
+        :param query_db: 数据库会话。
+        :param begin_time: 开始时间。
+        :param end_time: 结束时间。
+        :return: snake_case 统计结果。
+        """
+        begin_date = begin_time.date() if isinstance(begin_time, datetime) else None
+        end_date = end_time.date() if isinstance(end_time, datetime) else None
+        rows = TicketStatisticsDailyDao.list_between(query_db, begin_date, end_date)
+        if not rows:
+            return {
+                "total": 0,
+                "submitted_count": 0,
+                "first_responded_count": 0,
+                "processed_count": 0,
+                "processed_in_new_count": 0,
+                "process_rate": 0,
+                "resolved_count": 0,
+                "closed_count": 0,
+                "unprocessed_count": 0,
+                "processed_status_counts": [],
+                "avg_first_response_seconds": 0,
+                "avg_first_process_seconds": 0,
+                "avg_resolve_seconds": 0,
+                "avg_close_seconds": 0,
+            }
+        latest = rows[-1]
+        submitted_count = sum(int(row.submitted_count or 0) for row in rows)
+        first_responded_count = sum(int(row.first_responded_count or 0) for row in rows)
+        processed_count = sum(int(row.processed_count or 0) for row in rows)
+        processed_in_new_count = sum(int(row.processed_in_new_count or 0) for row in rows)
+        resolved_count = sum(int(row.resolved_count or 0) for row in rows)
+        closed_count = sum(int(row.closed_count or 0) for row in rows)
+        total_count = int(latest.total_count or 0)
+        return {
+            "total": total_count,
+            "submitted_count": submitted_count,
+            "first_responded_count": first_responded_count,
+            "processed_count": processed_count,
+            "processed_in_new_count": processed_in_new_count,
+            "process_rate": round(processed_in_new_count / submitted_count, 4) if submitted_count else 0,
+            "resolved_count": resolved_count,
+            "closed_count": closed_count,
+            "unprocessed_count": latest.unprocessed_backlog,
+            "processed_status_counts": [
+                {"status": "processed", "label": "已处理", "count": processed_in_new_count},
+                {"status": "unprocessed", "label": "未处理", "count": latest.unprocessed_backlog},
+            ],
+            "avg_first_response_seconds": cls._average_snapshot_seconds(rows, "avg_first_response_seconds"),
+            "avg_first_process_seconds": cls._average_snapshot_seconds(rows, "avg_first_process_seconds"),
+            "avg_resolve_seconds": cls._average_snapshot_seconds(rows, "avg_resolve_seconds"),
+            "avg_close_seconds": cls._average_snapshot_seconds(rows, "avg_close_seconds"),
+        }
+
+    @classmethod
+    def get_snapshot_trend(
+        cls,
+        query_db: Session,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        granularity: str,
+    ) -> dict:
+        """
+        获取每日快照口径的趋势统计。
+        :param query_db: 数据库会话。
+        :param begin_time: 开始时间。
+        :param end_time: 结束时间。
+        :param granularity: 趋势粒度。
+        :return: snake_case 趋势结果。
+        """
+        begin_date = begin_time.date() if isinstance(begin_time, datetime) else None
+        end_date = end_time.date() if isinstance(end_time, datetime) else None
+        rows = TicketStatisticsDailyDao.list_between(query_db, begin_date, end_date)
+        if not rows:
+            return {"granularity": granularity, "series": []}
+        bucket_map: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            bucket_date = _bucket_start(datetime.combine(row.statistics_date, time.min), granularity)
+            bucket_key = _bucket_label(bucket_date, granularity)
+            bucket = bucket_map.setdefault(
+                bucket_key,
+                {
+                    "bucket": bucket_key,
+                    "new_count": 0,
+                    "first_responded_count": 0,
+                    "processed_count": 0,
+                    "processed_in_new_count": 0,
+                    "resolved_count": 0,
+                    "closed_count": 0,
+                    "unprocessed_backlog": 0,
+                    "open_backlog": 0,
+                    "avg_first_response_seconds": 0,
+                    "avg_first_process_seconds": 0,
+                    "problem_count": 0,
+                    "non_problem_count": 0,
+                    "support_count": 0,
+                    "module_counts": [],
+                    "problem_pattern_counts": [],
+                },
+            )
+            bucket["new_count"] += int(row.submitted_count or 0)
+            bucket["first_responded_count"] += int(row.first_responded_count or 0)
+            bucket["processed_count"] += int(row.processed_count or 0)
+            bucket["processed_in_new_count"] += int(row.processed_in_new_count or 0)
+            bucket["resolved_count"] += int(row.resolved_count or 0)
+            bucket["closed_count"] += int(row.closed_count or 0)
+            bucket["unprocessed_backlog"] = int(row.unprocessed_backlog or 0)
+            bucket["open_backlog"] = int(row.open_backlog or 0)
+            bucket["avg_first_response_seconds"] = int(row.avg_first_response_seconds or 0)
+            bucket["avg_first_process_seconds"] = int(row.avg_first_process_seconds or 0)
+        series = list(bucket_map.values())
+        for bucket in series:
+            bucket["process_rate"] = (
+                round(bucket["processed_in_new_count"] / bucket["new_count"], 4) if bucket["new_count"] else 0
+            )
+            bucket["net_increase"] = bucket["new_count"] - bucket["closed_count"]
+        return {"granularity": granularity, "series": series}
+
+    @staticmethod
+    def _average_snapshot_seconds(rows: list[Any], field_name: str) -> int:
+        """
+        计算快照字段的平均耗时。
+        :param rows: 快照行列表。
+        :param field_name: 字段名。
+        :return: 平均秒数。
+        """
+        values = [int(getattr(row, field_name, 0) or 0) for row in rows if int(getattr(row, field_name, 0) or 0) > 0]
+        return int(sum(values) / len(values)) if values else 0
 
     @staticmethod
     def merge_trend_series(base_trend: dict, processing_trend: dict, granularity: str) -> dict:
