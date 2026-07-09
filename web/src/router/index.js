@@ -58,6 +58,12 @@ export const constantRoutes = [
         name: 'TicketDetail',
         meta: { title: '工单详情', activeMenu: '/ticket/ticket' },
       },
+      {
+        path: 'issue',
+        component: () => import('@/views/ticket/issue/index.vue'),
+        name: 'TicketIssue',
+        meta: { title: '问题实例管理', activeMenu: '/ticket/ticket' },
+      },
     ],
   },
   {

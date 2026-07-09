@@ -48,7 +48,24 @@ class TicketIssueService:
         if not issue:
             return None
         result = CamelCaseUtil.transform_result(issue)
-        result["tickets"] = CamelCaseUtil.transform_result(TicketIssueDao.list_tickets_by_issue_id(query_db, issue_id))
+        tickets = TicketIssueDao.list_tickets_by_issue_id(query_db, issue_id)
+        ticket_rows = CamelCaseUtil.transform_result(tickets)
+        result["tickets"] = ticket_rows
+
+        # 补充关系只展示当前 Issue 下工单之间的关系，避免把无关工单混入详情页。
+        ticket_map = {row["ticketId"]: row for row in ticket_rows if row.get("ticketId")}
+        relations = []
+        related_ticket_ids = [row["ticketId"] for row in ticket_rows if row.get("ticketId")]
+        for relation in TicketIssueDao.list_relations_by_ticket_ids(query_db, related_ticket_ids):
+            relation_row = CamelCaseUtil.transform_result(relation)
+            source_ticket = ticket_map.get(relation_row.get("sourceTicketId")) or {}
+            target_ticket = ticket_map.get(relation_row.get("targetTicketId")) or {}
+            relation_row["sourceTicketNo"] = source_ticket.get("ticketNo") or "-"
+            relation_row["sourceTicketTitle"] = source_ticket.get("title") or "-"
+            relation_row["targetTicketNo"] = target_ticket.get("ticketNo") or "-"
+            relation_row["targetTicketTitle"] = target_ticket.get("title") or "-"
+            relations.append(relation_row)
+        result["relations"] = relations
         return result
 
     @classmethod

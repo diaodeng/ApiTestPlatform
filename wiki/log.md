@@ -8,6 +8,15 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-10] INGEST-CODE | 工单第二阶段 Issue 前端入口补齐
+
+- 触发：用户要求继续实现第二阶段未完成部分，补齐工单真实问题实例归因层的可用入口。
+- 架构层：工单域 / Web 控制台 / 问题实例归因页面入口。
+- 创建的页面：`web/public/docs/2026-07-10-ticket-issue-ui-entry-completion.md`
+- 更新的页面：`web/src/views/ticket/issue/index.vue`、`web/src/views/ticket/index.vue`、`web/src/router/index.js`、`web/public/docs/update_history.md`
+- 变更传播链：`ticket_issue` / `ticket_relation` 后端能力 -> 独立 Issue 管理页 -> 工单列表入口 -> 工单详情内嵌归因入口保持不变。
+- 关键结论：第二阶段后端能力已经具备，这次补齐的是“独立管理视图 + 统一跳转入口”，不新增 Issue 统计看板。
+
 ## [2026-07-08] INGEST-CODE | 工单统计汇总块同名行合并修复
 
 - 触发：用户反馈工单统计汇总块中“解决方式”“关闭结果”“细分问题”存在重复展示行，例如两个“未填写”和两个“POS客户端支付”。

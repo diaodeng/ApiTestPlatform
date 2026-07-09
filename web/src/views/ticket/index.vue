@@ -351,6 +351,11 @@
         <el-col :span="1.5">
           <el-button plain icon="Setting" @click="columnConfigOpen = true">列设置</el-button>
         </el-col>
+        <el-col :span="1.5">
+          <el-button plain icon="Tickets" @click="openIssueManagement" v-hasPermi="['ticket:issue:list']">
+            问题实例管理
+          </el-button>
+        </el-col>
         <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
       </el-row>
 
@@ -4316,6 +4321,13 @@
     formVersionOptions.value = [];
     open.value = true;
     title.value = '新增工单';
+  }
+
+  function openIssueManagement() {
+    const resolved = router.resolve({
+      name: 'TicketIssue',
+    });
+    window.open(resolved.href, '_blank', 'noopener');
   }
 
   function handleUpdate(row) {

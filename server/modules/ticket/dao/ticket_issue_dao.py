@@ -282,3 +282,18 @@ class TicketIssueDao:
             .order_by(TicketRelation.create_time.desc(), TicketRelation.relation_id.desc())
             .all()
         )
+
+    @classmethod
+    def list_issue_related_relations(cls, db: Session, issue_id: int | None) -> list[TicketRelation]:
+        """
+        查询某个 Issue 下所有绑定工单之间的补充关系。
+        :param db: 数据库会话
+        :param issue_id: 问题实例ID
+        :return: 关系列表
+        """
+        if not issue_id:
+            return []
+        ticket_ids = [row.ticket_id for row in cls.list_tickets_by_issue_id(db, issue_id) if row.ticket_id]
+        if not ticket_ids:
+            return []
+        return cls.list_relations_by_ticket_ids(db, ticket_ids)
