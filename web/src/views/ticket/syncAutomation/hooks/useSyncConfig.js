@@ -309,6 +309,7 @@ export function useSyncConfig(proxy) {
         runOnExternalSync: false,
         runOnRemotePull: false,
         runOnManualCreate: false,
+        runOnBitablePull: false,
         runOnStatusChange: false,
         statusChangeTriggerStatuses: [],
         statusChangeForceReclassify: false,
@@ -654,6 +655,7 @@ export function useSyncConfig(proxy) {
       runOnExternalSync: Boolean(aiClassification.runOnExternalSync),
       runOnRemotePull: Boolean(aiClassification.runOnRemotePull),
       runOnManualCreate: Boolean(aiClassification.runOnManualCreate),
+      runOnBitablePull: Boolean(aiClassification.runOnBitablePull),
       runOnStatusChange: Boolean(aiClassification.runOnStatusChange),
       statusChangeTriggerStatuses: Array.isArray(aiClassification.statusChangeTriggerStatuses)
         ? aiClassification.statusChangeTriggerStatuses.map((item) => String(item || '').trim()).filter(Boolean)
@@ -911,6 +913,7 @@ export function useSyncConfig(proxy) {
         runOnExternalSync: Boolean(payload.aiClassification?.runOnExternalSync),
         runOnRemotePull: Boolean(payload.aiClassification?.runOnRemotePull),
         runOnManualCreate: Boolean(payload.aiClassification?.runOnManualCreate),
+        runOnBitablePull: Boolean(payload.aiClassification?.runOnBitablePull),
         runOnStatusChange: Boolean(payload.aiClassification?.runOnStatusChange),
         statusChangeTriggerStatuses: Array.isArray(payload.aiClassification?.statusChangeTriggerStatuses)
           ? Array.from(new Set(payload.aiClassification.statusChangeTriggerStatuses.map((item) => String(item || '').trim()).filter(Boolean)))

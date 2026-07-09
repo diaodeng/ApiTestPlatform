@@ -783,6 +783,16 @@
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="多维表格拉取执行">
+                    <el-switch
+                      v-model="form.aiClassification.runOnBitablePull"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="状态变更执行">
                     <el-switch
                       v-model="form.aiClassification.runOnStatusChange"

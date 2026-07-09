@@ -258,10 +258,11 @@
     getTicketStatClassificationOptions,
     getTicketStatistics,
     getTicketStatisticsTrend,
+    getTicketWorkflow,
     listTicketModuleOptions,
     listTicketProjectOptions,
   } from '@/api/ticket/ticket';
-  import { getOptionLabel, sourceOptions, ticketStatusOptions } from '../constants';
+  import { getOptionLabel, sourceOptions } from '../constants';
   import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig';
   import * as echarts from 'echarts';
 
@@ -279,6 +280,7 @@
   const selectedProblemPatternCodes = ref([]);
   const trendGranularity = ref('week');
   const issueTypeOptions = ref([]);
+  const workflowStatusOptions = ref([]);
   const rootCauseTypeOptions = ref([]);
   const solutionTypeOptions = ref([]);
   const resolutionOptions = ref([]);
@@ -318,7 +320,7 @@
       label: '状态',
       countLabel: '数量',
       span: 8,
-      format: (row) => getOptionLabel(ticketStatusOptions, row.status),
+      format: (row) => getOptionLabel(workflowStatusOptions.value, row.status),
     },
     {
       key: 'module',
@@ -754,8 +756,8 @@
 
   function formatTransition(row) {
     const fromStatus =
-      row.fromStatus === '创建' ? '创建' : getOptionLabel(ticketStatusOptions, row.fromStatus);
-    return `${fromStatus} -> ${getOptionLabel(ticketStatusOptions, row.toStatus)}`;
+      row.fromStatus === '创建' ? '创建' : getOptionLabel(workflowStatusOptions.value, row.fromStatus);
+    return `${fromStatus} -> ${getOptionLabel(workflowStatusOptions.value, row.toStatus)}`;
   }
 
   function isTrendBlockVisible(key) {
@@ -1035,7 +1037,19 @@
     { deep: true }
   );
 
+  // 加载工作流状态配置，用于状态分布显示
+  function loadWorkflowStatuses() {
+    getTicketWorkflow().then((response) => {
+      const statuses = response.data?.statuses || [];
+      workflowStatusOptions.value = statuses.map((item) => ({
+        label: item.name,
+        value: item.code,
+      }));
+    });
+  }
+
   onMounted(() => {
+    loadWorkflowStatuses();
     window.addEventListener('resize', resizeTrendCharts);
     nextTick(() => renderTrendCharts());
   });
