@@ -1228,6 +1228,7 @@ class TicketService:
             data.pop("ticket_id", None)
             data.pop("project_code", None)
             data.pop("project_name", None)
+            data.pop("module_code", None)
             data.pop("issue_no", None)
             data.pop("issue_title", None)
             auto_translate = _extract_ticket_manual_automation_config(data)
