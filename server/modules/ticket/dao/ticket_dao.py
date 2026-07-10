@@ -1406,6 +1406,7 @@ class TicketDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
     ) -> dict:
         """
         实时统计指定提交时间范围内的工单数量、分类和人员处理量。
@@ -1415,6 +1416,7 @@ class TicketDao:
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
+        :param issue_type_ids: 工单类型编码多选过滤
         :return: 统计结果
         """
         filters = [Ticket.del_flag == "0"]
@@ -1437,6 +1439,8 @@ class TicketDao:
                 filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
             else:
                 filters.append(Ticket.ticket_id == -1)
+        if issue_type_ids:
+            filters.append(Ticket.issue_type_id.in_(issue_type_ids))
 
         base_filter = and_(*filters)
         total = db.query(func.count(Ticket.ticket_id)).filter(base_filter).scalar() or 0
@@ -1530,6 +1534,8 @@ class TicketDao:
                 transition_filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
             else:
                 transition_filters.append(Ticket.ticket_id == -1)
+        if issue_type_ids:
+            transition_filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         transition_rows = (
             db.query(
                 TicketStatusHistory.from_status,
@@ -1614,6 +1620,7 @@ class TicketDao:
         module_codes: list[str] | None = None,
         granularity: str | None = "week",
         problem_pattern_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
     ) -> dict:
         """
         实时计算工单趋势，面向治理看板展示按提交时间归属的新增、关闭、存量和关键分类变化。
@@ -1625,6 +1632,7 @@ class TicketDao:
         :param module_codes: 模块业务码多选过滤
         :param granularity: 趋势粒度，day/week/month
         :param problem_pattern_codes: 细分问题类型编码过滤
+        :param issue_type_ids: 工单类型编码过滤
         :return: 趋势统计结果
         """
         normalized_granularity = _normalize_granularity(granularity)
@@ -1643,6 +1651,8 @@ class TicketDao:
                 filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
             else:
                 filters.append(Ticket.ticket_id == -1)
+        if issue_type_ids:
+            filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         if problem_pattern_codes:
             filters.append(Ticket.problem_pattern_code.in_(problem_pattern_codes))
         submit_time_expr = _ticket_submit_time_expr()

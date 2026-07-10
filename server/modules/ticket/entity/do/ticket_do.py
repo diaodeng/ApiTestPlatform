@@ -548,12 +548,35 @@ class TicketStatisticsDaily(Base):
 
     __tablename__ = "ticket_statistics_daily"
     __table_args__ = (
-        UniqueConstraint("statistics_date", name="uk_ticket_statistics_daily_date"),
+        UniqueConstraint(
+            "statistics_date",
+            "snapshot_scope",
+            "project_id",
+            "module_id",
+            "issue_type_id",
+            name="uk_ticket_statistics_daily_scope",
+        ),
         Index("idx_ticket_statistics_daily_date", "statistics_date"),
+        Index("idx_ticket_statistics_daily_scope_date", "snapshot_scope", "statistics_date"),
+        Index("idx_ticket_statistics_daily_project", "statistics_date", "project_id"),
+        Index("idx_ticket_statistics_daily_module", "statistics_date", "module_id", "module_code"),
+        Index("idx_ticket_statistics_daily_issue_type", "statistics_date", "issue_type_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="统计ID")
-    statistics_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True, comment="统计日期")
+    statistics_date: Mapped[date] = mapped_column(Date, nullable=False, comment="统计日期")
+    snapshot_scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all", comment="快照范围：all全局，leaf项目模块问题类型明细"
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID，0表示全局或未归属")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称快照")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID，0表示全局或未归属")
+    module_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块名称快照")
+    module_code: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块业务码快照")
+    issue_type_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="工单类型编码，空表示全局或未填写"
+    )
+    issue_type_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="工单类型名称快照")
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="工单总数")
     submitted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数")
     first_responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已响应数")

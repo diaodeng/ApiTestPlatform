@@ -246,3 +246,78 @@ def test_processing_trend_merge_keeps_base_trend_fields():
     assert row["unprocessedBacklog"] == 3
     assert row["avgFirstResponseSeconds"] == 600
     assert row["avgFirstProcessSeconds"] == 3600
+
+
+def test_snapshot_seconds_are_weighted_by_event_count():
+    """多维度快照合并平均耗时时，应按事件数量加权而不是按行数平均。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    rows = [
+        SimpleNamespace(avg_first_process_seconds=100, processed_count=1),
+        SimpleNamespace(avg_first_process_seconds=1000, processed_count=9),
+    ]
+
+    result = TicketProcessingStatsService._weighted_snapshot_seconds(
+        rows,
+        "avg_first_process_seconds",
+        "processed_count",
+    )
+
+    assert result == 910
+
+
+def test_latest_snapshot_rows_keep_all_dimensions_of_last_date():
+    """快照 overview 的存量应取最后日期所有维度行，而不是只取最后一行。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    rows = [
+        SimpleNamespace(statistics_date=datetime(2026, 7, 8).date(), unprocessed_backlog=5),
+        SimpleNamespace(statistics_date=datetime(2026, 7, 9).date(), unprocessed_backlog=2),
+        SimpleNamespace(statistics_date=datetime(2026, 7, 9).date(), unprocessed_backlog=3),
+    ]
+
+    latest_rows = TicketProcessingStatsService._latest_snapshot_rows(rows)
+
+    assert len(latest_rows) == 2
+    assert sum(row.unprocessed_backlog for row in latest_rows) == 5
+
+
+def test_snapshot_count_rows_group_dimension_total_count():
+    """快照维度行应能聚合成模块或工单类型分布。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    rows = [
+        SimpleNamespace(module_name="POS", total_count=2),
+        SimpleNamespace(module_name="POS", total_count=3),
+        SimpleNamespace(module_name="", total_count=1),
+    ]
+
+    result = TicketProcessingStatsService._snapshot_count_rows(rows, "module_name", "module")
+
+    assert result == [{"module": "POS", "count": 5}, {"module": "未填写", "count": 1}]
+
+
+def test_snapshot_code_name_rows_group_issue_type_by_stable_code():
+    """工单类型快照分布应优先按稳定编码合并。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    rows = [
+        SimpleNamespace(issue_type_id="bug", issue_type_name="缺陷旧名", total_count=2),
+        SimpleNamespace(issue_type_id="bug", issue_type_name="缺陷", total_count=3),
+        SimpleNamespace(issue_type_id="", issue_type_name="", total_count=1),
+    ]
+
+    result = TicketProcessingStatsService._snapshot_code_name_rows(
+        rows,
+        "issue_type_id",
+        "issue_type_name",
+    )
+
+    assert result == [
+        {"issue_type_id": "bug", "issue_type_name": "缺陷旧名", "count": 5},
+        {"issue_type_id": "", "issue_type_name": "未填写", "count": 1},
+    ]

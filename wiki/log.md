@@ -8,6 +8,15 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-10] INGEST-CODE | 工单统计第三阶段维度快照补齐
+
+- 触发：用户要求继续实现方案第三阶段未实现部分，并按项目、模块、问题类型分维度冻结快照。
+- 架构层：工单域 / 统计服务 / 数据模型 / Web 统计页。
+- 创建的页面：`server/sql/20260710_ticket_statistics_dimensional_snapshot.sql`
+- 更新的页面：`server/modules/ticket/entity/do/ticket_do.py`、`server/modules/ticket/entity/vo/ticket_vo.py`、`server/modules/ticket/dao/ticket_statistics_daily_dao.py`、`server/modules/ticket/dao/ticket_processing_stats_dao.py`、`server/modules/ticket/dao/ticket_dao.py`、`server/modules/ticket/service/stats/ticket_statistics_snapshot_service.py`、`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/modules/ticket/controller/ticket_config_controller.py`、`web/src/views/ticket/statistics/index.vue`、`web/public/docs/2026-07-10-ticket-statistics-snapshot-phase3.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：`ticket_statistics_daily.snapshot_scope` 与维度字段 -> 每日快照任务生成全局行和叶子维度行 -> 快照统计服务按筛选聚合叶子行 -> 统计页新增工单类型筛选并修正快照提示。
+- 关键结论：本次默认“问题类型”为 `issue_type_id/issue_type_name`；`problem_pattern_code` 细分问题暂不冻结，仍只参与实时口径筛选。
+
 ## [2026-07-10] INGEST-CODE | 工单统计第三阶段快照口径落地
 
 - 触发：用户要求继续根据方案文档实现第三阶段，补齐统计快照和周报稳定口径。

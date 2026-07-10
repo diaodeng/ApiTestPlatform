@@ -947,6 +947,7 @@ class TicketStatisticsQueryModel(QueryModel):
     project_ids: str | None = Field(default=None, description="项目ID多选，逗号分隔字符串")
     module_ids: str | None = Field(default=None, description="模块ID多选，逗号分隔字符串")
     module_codes: str | None = Field(default=None, description="模块业务码多选，逗号分隔字符串")
+    issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
     granularity: str | None = Field(default="week", description="趋势粒度：day/week/month")
     problem_pattern_codes: str | None = Field(
         default=None, description="细分问题类型编码多选，逗号分隔字符串"

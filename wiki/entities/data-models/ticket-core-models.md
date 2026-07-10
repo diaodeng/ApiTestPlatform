@@ -21,9 +21,13 @@ related_files:
 
 ## 统计快照
 
-`TicketStatisticsDaily` 现在承接自然日冻结统计结果，字段覆盖：
+`TicketStatisticsDaily` 现在承接自然日冻结统计结果，支持全局快照和项目/模块/工单类型叶子维度快照，字段覆盖：
 
 - `statistics_date`
+- `snapshot_scope`
+- `project_id/project_name`
+- `module_id/module_name/module_code`
+- `issue_type_id/issue_type_name`
 - `total_count`
 - `submitted_count`
 - `first_responded_count`
@@ -39,7 +43,7 @@ related_files:
 - `avg_resolve_seconds`
 - `avg_close_seconds`
 
-第三阶段统计页会优先通过 `statistics_mode=snapshot` 读取这类冻结结果，避免实时字段变化影响历史周报口径。
+第三阶段统计页会优先通过 `statistics_mode=snapshot` 读取这类冻结结果，避免实时字段变化影响历史周报口径。无筛选时读取 `snapshot_scope=all` 全局行；带项目、模块、模块 Code 或工单类型筛选时读取 `snapshot_scope=leaf` 并聚合叶子行。
 
 ```mermaid
 erDiagram
@@ -78,6 +82,7 @@ erDiagram
 - 2026-07-08 待实施方案确认 `Ticket.resolved_at` 保留当前终态写入逻辑，语义为“工单处置完成时间”；真实 Bug 修复统计应结合 `is_problem/solution_type/resolution_code/fixed_version/released_at/verified_at`。
 - 2026-07-08 第一阶段已新增 `affected_version/planned_fix_version/fixed_version/released_version/released_at/verified_at`；其中 `affected_version` 可兼容 `extra_data.version_key`，`planned_fix_version` 是治理排期字段，不应继续塞进 `extra_data.version_key`。
 - `Ticket` 新增索引 `idx_ticket_del_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version`，支撑提交时间、处理时间、处置/关闭时间和计划版本筛选。
+- 2026-07-10 第三阶段维度快照已补齐：`TicketStatisticsDaily.snapshot_scope='all'` 保存全局自然日快照，`snapshot_scope='leaf'` 保存 `project_id + module_id + issue_type_id` 叶子维度快照；唯一键为 `statistics_date/snapshot_scope/project_id/module_id/issue_type_id`。快照口径支持项目、模块、模块 Code 和工单类型筛选，细分问题 `problem_pattern_code` 暂不冻结。
 - 2026-07-08 第二阶段已新增 `TicketIssue`、`Ticket.issue_id/issue_relation_type/issue_confirmed` 和 `TicketRelation`：`Ticket.issue_id` 是主归因字段，`TicketRelation` 只保存补充关系，不替代主归因。
 - `TicketIssue.affected_ticket_count` 由 `TicketIssueService.refresh_affected_ticket_count` 按有效工单实时刷新，软删除工单不计入；解绑工单只清空主归因，不删除 Issue。
 - `Ticket.issue_type_id/issue_type_name`、`Ticket.is_problem`、`Ticket.root_cause_type`、`Ticket.solution_type`、`Ticket.resolution_code/resolution_name` 是工单统计与后续 AI 分析的结构化维度，不能塞进 `extra_data` 替代；`Ticket.module_id/module_name` 继续承担业务域维度。

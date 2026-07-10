@@ -17,6 +17,9 @@ class TicketStatisticsSnapshotService:
     工单每日快照服务。
     """
 
+    SCOPE_ALL = "all"
+    SCOPE_LEAF = "leaf"
+
     @classmethod
     def build_daily_snapshot(cls, db: Session, statistics_date: date | None = None) -> dict[str, Any]:
         """
@@ -35,7 +38,79 @@ class TicketStatisticsSnapshotService:
             module_ids=None,
             module_codes=None,
         )
-        total_count = db.query(Ticket.ticket_id).filter(Ticket.del_flag == "0").count()
+        module_code_map = TicketStatisticsDailyDao.build_module_code_map(
+            db,
+            [int(ticket.module_id) for ticket in rows if getattr(ticket, "module_id", None)],
+        )
+        project_name_map = TicketStatisticsDailyDao.build_project_name_map(
+            db,
+            [int(ticket.project_id) for ticket in rows if getattr(ticket, "project_id", None)],
+        )
+        all_payload = cls.build_metric_payload(rows, begin_time, end_time)
+        TicketStatisticsDailyDao.upsert_by_scope(
+            db,
+            target_date,
+            {
+                **all_payload,
+                "snapshot_scope": cls.SCOPE_ALL,
+                "project_id": 0,
+                "project_name": "",
+                "module_id": 0,
+                "module_name": "",
+                "module_code": "",
+                "issue_type_id": "",
+                "issue_type_name": "",
+            },
+            snapshot_scope=cls.SCOPE_ALL,
+        )
+        leaf_count = 0
+        for dimension_rows in cls.group_leaf_rows(rows).values():
+            sample = dimension_rows[0]
+            project_id = int(getattr(sample, "project_id", None) or 0)
+            module_id = int(getattr(sample, "module_id", None) or 0)
+            issue_type_id = str(getattr(sample, "issue_type_id", None) or "").strip()
+            payload = cls.build_metric_payload(dimension_rows, begin_time, end_time)
+            TicketStatisticsDailyDao.upsert_by_scope(
+                db,
+                target_date,
+                {
+                    **payload,
+                    "snapshot_scope": cls.SCOPE_LEAF,
+                    "project_id": project_id,
+                    "project_name": project_name_map.get(project_id, ""),
+                    "module_id": module_id,
+                    "module_name": str(getattr(sample, "module_name", None) or "").strip(),
+                    "module_code": module_code_map.get(module_id, ""),
+                    "issue_type_id": issue_type_id,
+                    "issue_type_name": str(getattr(sample, "issue_type_name", None) or "").strip(),
+                },
+                snapshot_scope=cls.SCOPE_LEAF,
+                project_id=project_id,
+                module_id=module_id,
+                issue_type_id=issue_type_id,
+            )
+            leaf_count += 1
+        db.commit()
+        logger.info(
+            f"工单每日快照已生成 | statistics_date={target_date}, "
+            f"submitted_count={all_payload['submitted_count']}, leaf_count={leaf_count}"
+        )
+        return {"statisticsDate": target_date.isoformat(), "leafCount": leaf_count, **all_payload}
+
+    @classmethod
+    def build_metric_payload(
+        cls,
+        rows: list[Ticket],
+        begin_time: datetime,
+        end_time: datetime,
+    ) -> dict[str, Any]:
+        """
+        按指定工单集合构造快照指标。
+        :param rows: 工单集合。
+        :param begin_time: 统计日开始时间。
+        :param end_time: 统计日结束时间。
+        :return: 可写入快照表的指标字典。
+        """
         submitted_rows = [
             ticket
             for ticket in rows
@@ -65,7 +140,11 @@ class TicketStatisticsSnapshotService:
             and (not isinstance(ticket.closed_at, datetime) or ticket.closed_at > end_time)
         )
         payload = {
-            "total_count": total_count,
+            "total_count": sum(
+                1
+                for ticket in rows
+                if cls._in_range(TicketProcessingStatsDao.resolve_submit_time(ticket), None, end_time)
+            ),
             "submitted_count": len(submitted_rows),
             "first_responded_count": len(first_responded_rows),
             "processed_count": len(processed_rows),
@@ -80,10 +159,24 @@ class TicketStatisticsSnapshotService:
             "avg_resolve_seconds": cls._average_seconds(resolved_rows, "resolved_at"),
             "avg_close_seconds": cls._average_seconds(closed_rows, "closed_at"),
         }
-        TicketStatisticsDailyDao.upsert_by_date(db, target_date, payload)
-        db.commit()
-        logger.info(f"工单每日快照已生成 | statistics_date={target_date}, submitted_count={len(submitted_rows)}")
-        return {"statisticsDate": target_date.isoformat(), **payload}
+        return payload
+
+    @classmethod
+    def group_leaf_rows(cls, rows: list[Ticket]) -> dict[tuple[int, int, str], list[Ticket]]:
+        """
+        按项目、模块、工单类型对工单分组。
+        :param rows: 工单集合。
+        :return: 叶子维度分组。
+        """
+        grouped: dict[tuple[int, int, str], list[Ticket]] = {}
+        for ticket in rows:
+            key = (
+                int(getattr(ticket, "project_id", None) or 0),
+                int(getattr(ticket, "module_id", None) or 0),
+                str(getattr(ticket, "issue_type_id", None) or "").strip(),
+            )
+            grouped.setdefault(key, []).append(ticket)
+        return grouped
 
     @staticmethod
     def _in_range(value: datetime | None, begin_time: datetime | None, end_time: datetime | None) -> bool:

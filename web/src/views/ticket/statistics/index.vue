@@ -69,6 +69,25 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="工单类型">
+        <el-select
+          v-model="selectedIssueTypeIds"
+          multiple
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          filterable
+          placeholder="工单类型"
+          style="width: 240px"
+        >
+          <el-option
+            v-for="item in issueTypeOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item label="细分问题">
         <el-select
           v-model="selectedProblemPatternCodes"
@@ -134,7 +153,7 @@
       show-icon
       :closable="false"
       class="mb16"
-      title="当前使用快照口径，统计结果来自每日冻结快照；项目、模块和问题类型筛选在该口径下暂不参与快照聚合。"
+      title="当前使用快照口径，统计结果来自每日冻结快照；项目、模块、模块Code和工单类型筛选参与快照聚合，细分问题筛选仅实时口径生效。"
     />
 
     <el-row :gutter="16" class="stats-block-grid">
@@ -289,6 +308,7 @@
   const selectedProjectIds = ref([]);
   const selectedModuleIds = ref([]);
   const selectedModuleCodes = ref([]);
+  const selectedIssueTypeIds = ref([]);
   const selectedProblemPatternCodes = ref([]);
   const trendGranularity = ref('week');
   const statisticsMode = ref('realtime');
@@ -534,6 +554,9 @@
       moduleCodes: selectedModuleCodes.value.length
         ? selectedModuleCodes.value.join(',')
         : undefined,
+      issueTypeIds: selectedIssueTypeIds.value.length
+        ? selectedIssueTypeIds.value.join(',')
+        : undefined,
       problemPatternCodes: selectedProblemPatternCodes.value.length
         ? selectedProblemPatternCodes.value.join(',')
         : undefined,
@@ -683,6 +706,7 @@
     selectedProjectIds.value = [];
     selectedModuleIds.value = [];
     selectedModuleCodes.value = [];
+    selectedIssueTypeIds.value = [];
     selectedProblemPatternCodes.value = [];
     trendGranularity.value = 'week';
     statisticsMode.value = 'realtime';

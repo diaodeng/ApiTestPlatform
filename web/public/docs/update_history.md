@@ -3,6 +3,9 @@
 1. 工单统计第三阶段补齐快照口径：新增自然日快照任务，`ticket_statistics_daily` 扩展为提交、响应、处理率、未处理存量等冻结字段。
 2. 工单统计页新增“实时口径 / 快照口径”切换，快照模式下提示当前结果来自冻结快照。
 3. 汇总通知默认使用快照口径，避免后续分类和状态口径变更影响历史周报。
+4. 工单统计快照继续补齐项目、模块、模块 Code、工单类型维度：`ticket_statistics_daily` 新增 `snapshot_scope/project_id/module_id/module_code/issue_type_id` 等字段，快照口径下对应筛选会参与聚合。
+5. 统计页新增“工单类型”筛选；细分问题筛选仍仅实时口径生效，避免把未冻结维度和快照数据混用。
+6. 新增维度快照迁移脚本：`server/sql/20260710_ticket_statistics_dimensional_snapshot.sql`。
 
 ## 2026-07-08
 

@@ -59,7 +59,7 @@ related_files:
 ## 统计口径
 
 - `TicketProcessingStatsService` 支持 `statistics_mode=realtime/snapshot`。
-- `snapshot` 口径读取 `ticket_statistics_daily` 自然日冻结数据。
+- `snapshot` 口径读取 `ticket_statistics_daily` 自然日冻结数据；无筛选时读取全局行，带项目、模块、模块 Code 或工单类型筛选时聚合叶子维度行。
 - `realtime` 口径继续按主表和事件表实时计算。
 - 汇总通知默认走快照口径，统计页可显式切换。
 
@@ -109,6 +109,7 @@ graph TD
 - 处理统计已下沉到 `service/stats/TicketProcessingStatsService`，控制器 `/ticket/statistics/overview` 和 `/ticket/statistics/trend` 直接调用该服务；DAO 层仅通过 `TicketProcessingStatsDao` 提供范围查询，不在 `TicketService` 中继续增加统计门面。
 - 工单统计页趋势必须保留原有整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；新增处理口径时只增加独立“处理率与存量趋势”图，`TicketProcessingStatsService.get_statistics_trend` 需要合并 `TicketDao.get_statistics_trend` 的旧趋势字段和新增处理字段，不能用处理口径结果覆盖旧曲线数据。历史用户的 `ticket_statistics_blocks.visibleTrendBlocks` 缺少 `processingTrend` 时，前端按 `configVersion` 自动补齐一次，之后保存为新版配置并尊重用户手动隐藏选择。
 - 工单统计接口返回给前端前必须递归转小驼峰；`CamelCaseUtil.transform_result` 只转换最外层字段，不能直接用于 `/ticket/statistics/overview` 和 `/ticket/statistics/trend` 这类包含嵌套数组的响应，否则趋势桶中的 `newCount/problemCount/moduleCounts` 和统计块中的 `issueTypeName/isProblem/rootCauseType` 会被前端读成空值。
+- 2026-07-10 第三阶段维度快照已补齐：每日快照任务会生成 `snapshot_scope=all` 全局行和 `snapshot_scope=leaf` 项目/模块/工单类型叶子行；统计页快照口径下项目、模块、模块 Code、工单类型筛选参与聚合，细分问题筛选仍只对实时口径生效。多维度平均耗时按事件数量加权，周/月存量取桶内最后一天各维度存量后求和。
 - 工单统计 overview 汇总口径优先在后端归一：`null`、空字符串、空白和 `未填写` 统一为“未填写”；`issueTypeCounts`、`resolutionCounts`、`problemPatternCounts` 等 code/name 维度按稳定 code 汇总并使用当前枚举 label 展示，code 为空的历史数据再按名称汇总。前端统计块仍按最终展示文案做兜底合并，避免“解决方式”“关闭结果”“细分问题”出现重复同名行。
 - 2026-07-08 第二阶段 Issue 归因层已落地：`ticket_issue` 承载真实问题实例，`ticket.issue_id/issue_relation_type/issue_confirmed` 保存工单主归因，`ticket_relation` 只保留相似、重复、相关等补充关系。相似工单只提供人工确认入口，不根据相似度自动强绑定；本次未新增 Issue 统计看板。
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。

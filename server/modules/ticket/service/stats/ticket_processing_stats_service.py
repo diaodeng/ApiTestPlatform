@@ -83,6 +83,7 @@ class TicketProcessingStatsService:
         project_ids: Any = None,
         module_ids: Any = None,
         module_codes: Any = None,
+        issue_type_ids: Any = None,
         statistics_mode: str | None = "realtime",
     ) -> dict:
         """
@@ -93,6 +94,7 @@ class TicketProcessingStatsService:
         :param project_ids: 项目ID多选。
         :param module_ids: 模块ID多选。
         :param module_codes: 模块业务码多选。
+        :param issue_type_ids: 工单类型编码多选。
         :return: 小驼峰统计结果。
         """
         start = _date_start(begin_time)
@@ -100,18 +102,28 @@ class TicketProcessingStatsService:
         project_id_values = _normalize_int_list(project_ids)
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
+        issue_type_id_values = _normalize_text_list(issue_type_ids)
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
         if normalized_mode == "snapshot":
-            snapshot = cls.get_snapshot_statistics(query_db, start, finish)
-            return _camelize(snapshot)
-        base_statistics = _camelize(
-            TicketDao.get_ticket_statistics(
+            snapshot = cls.get_snapshot_statistics(
                 query_db,
                 start,
                 finish,
                 project_id_values,
                 module_id_values,
                 module_code_values,
+                issue_type_id_values,
+            )
+            return _camelize(snapshot)
+        base_statistics = _camelize(
+            TicketDao.get_ticket_statistics(
+                db=query_db,
+                begin_time=start,
+                end_time=finish,
+                project_ids=project_id_values,
+                module_ids=module_id_values,
+                module_codes=module_code_values,
+                issue_type_ids=issue_type_id_values,
             )
         )
         stat_options = TicketSyncConfigService.get_ticket_stat_classification_options(query_db)
@@ -123,6 +135,7 @@ class TicketProcessingStatsService:
             project_ids=project_id_values,
             module_ids=module_id_values,
             module_codes=module_code_values,
+            issue_type_ids=issue_type_id_values,
         )
         metrics = cls.build_overview_metrics(rows, start, finish)
         return {**base_statistics, **_camelize(metrics)}
@@ -368,6 +381,7 @@ class TicketProcessingStatsService:
         module_ids: Any = None,
         module_codes: Any = None,
         granularity: str | None = "week",
+        issue_type_ids: Any = None,
         problem_pattern_codes: Any = None,
         statistics_mode: str | None = "realtime",
     ) -> dict:
@@ -380,6 +394,7 @@ class TicketProcessingStatsService:
         :param module_ids: 模块ID多选。
         :param module_codes: 模块业务码多选。
         :param granularity: day/week/month。
+        :param issue_type_ids: 工单类型编码多选。
         :param problem_pattern_codes: 细分问题编码多选。
         :return: 小驼峰趋势结果。
         """
@@ -389,6 +404,7 @@ class TicketProcessingStatsService:
         project_id_values = _normalize_int_list(project_ids)
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
+        issue_type_id_values = _normalize_text_list(issue_type_ids)
         problem_pattern_code_values = _normalize_text_list(problem_pattern_codes)
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
         if normalized_mode == "snapshot":
@@ -397,18 +413,23 @@ class TicketProcessingStatsService:
                 start,
                 finish,
                 normalized_granularity,
+                project_id_values,
+                module_id_values,
+                module_code_values,
+                issue_type_id_values,
             )
             return _camelize(snapshot_trend)
         base_trend = _camelize(
             TicketDao.get_statistics_trend(
-                query_db,
-                start,
-                finish,
-                project_id_values,
-                module_id_values,
-                module_code_values,
-                normalized_granularity,
-                problem_pattern_code_values,
+                db=query_db,
+                begin_time=start,
+                end_time=finish,
+                project_ids=project_id_values,
+                module_ids=module_id_values,
+                module_codes=module_code_values,
+                granularity=normalized_granularity,
+                problem_pattern_codes=problem_pattern_code_values,
+                issue_type_ids=issue_type_id_values,
             )
         )
         rows = TicketProcessingStatsDao.list_trend_tickets(
@@ -417,6 +438,7 @@ class TicketProcessingStatsService:
             project_ids=project_id_values,
             module_ids=module_id_values,
             module_codes=module_code_values,
+            issue_type_ids=issue_type_id_values,
             problem_pattern_codes=problem_pattern_code_values,
         )
         processing_trend = _camelize(cls.build_trend_metrics(rows, start, finish, normalized_granularity))
@@ -428,17 +450,41 @@ class TicketProcessingStatsService:
         query_db: Session,
         begin_time: datetime | None,
         end_time: datetime | None,
+        project_ids: list[int] | None = None,
+        module_ids: list[int] | None = None,
+        module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
     ) -> dict:
         """
         获取每日快照口径的 overview 统计。
         :param query_db: 数据库会话。
         :param begin_time: 开始时间。
         :param end_time: 结束时间。
+        :param project_ids: 项目ID过滤。
+        :param module_ids: 模块ID过滤。
+        :param module_codes: 模块业务码过滤。
+        :param issue_type_ids: 工单类型编码过滤。
         :return: snake_case 统计结果。
         """
         begin_date = begin_time.date() if isinstance(begin_time, datetime) else None
         end_date = end_time.date() if isinstance(end_time, datetime) else None
-        rows = TicketStatisticsDailyDao.list_between(query_db, begin_date, end_date)
+        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        rows = TicketStatisticsDailyDao.list_between(
+            query_db,
+            begin_date,
+            end_date,
+            snapshot_scope="leaf" if use_leaf_scope else "all",
+            project_ids=project_ids if use_leaf_scope else None,
+            module_ids=module_ids if use_leaf_scope else None,
+            module_codes=module_codes if use_leaf_scope else None,
+            issue_type_ids=issue_type_ids if use_leaf_scope else None,
+        )
+        leaf_rows = rows if use_leaf_scope else TicketStatisticsDailyDao.list_between(
+            query_db,
+            begin_date,
+            end_date,
+            snapshot_scope="leaf",
+        )
         if not rows:
             return {
                 "total": 0,
@@ -456,14 +502,16 @@ class TicketProcessingStatsService:
                 "avg_resolve_seconds": 0,
                 "avg_close_seconds": 0,
             }
-        latest = rows[-1]
+        latest_rows = cls._latest_snapshot_rows(rows)
+        latest_leaf_rows = cls._latest_snapshot_rows(leaf_rows)
         submitted_count = sum(int(row.submitted_count or 0) for row in rows)
         first_responded_count = sum(int(row.first_responded_count or 0) for row in rows)
         processed_count = sum(int(row.processed_count or 0) for row in rows)
         processed_in_new_count = sum(int(row.processed_in_new_count or 0) for row in rows)
         resolved_count = sum(int(row.resolved_count or 0) for row in rows)
         closed_count = sum(int(row.closed_count or 0) for row in rows)
-        total_count = int(latest.total_count or 0)
+        total_count = sum(int(row.total_count or 0) for row in latest_rows)
+        unprocessed_backlog = sum(int(row.unprocessed_backlog or 0) for row in latest_rows)
         return {
             "total": total_count,
             "submitted_count": submitted_count,
@@ -473,15 +521,21 @@ class TicketProcessingStatsService:
             "process_rate": round(processed_in_new_count / submitted_count, 4) if submitted_count else 0,
             "resolved_count": resolved_count,
             "closed_count": closed_count,
-            "unprocessed_count": latest.unprocessed_backlog,
+            "unprocessed_count": unprocessed_backlog,
             "processed_status_counts": [
                 {"status": "processed", "label": "已处理", "count": processed_in_new_count},
-                {"status": "unprocessed", "label": "未处理", "count": latest.unprocessed_backlog},
+                {"status": "unprocessed", "label": "未处理", "count": unprocessed_backlog},
             ],
-            "avg_first_response_seconds": cls._average_snapshot_seconds(rows, "avg_first_response_seconds"),
-            "avg_first_process_seconds": cls._average_snapshot_seconds(rows, "avg_first_process_seconds"),
-            "avg_resolve_seconds": cls._average_snapshot_seconds(rows, "avg_resolve_seconds"),
-            "avg_close_seconds": cls._average_snapshot_seconds(rows, "avg_close_seconds"),
+            "avg_first_response_seconds": cls._weighted_snapshot_seconds(
+                rows, "avg_first_response_seconds", "first_responded_count"
+            ),
+            "avg_first_process_seconds": cls._weighted_snapshot_seconds(
+                rows, "avg_first_process_seconds", "processed_count"
+            ),
+            "avg_resolve_seconds": cls._weighted_snapshot_seconds(rows, "avg_resolve_seconds", "resolved_count"),
+            "avg_close_seconds": cls._weighted_snapshot_seconds(rows, "avg_close_seconds", "closed_count"),
+            "module_counts": cls._snapshot_count_rows(latest_leaf_rows, "module_name", "module"),
+            "issue_type_counts": cls._snapshot_code_name_rows(latest_leaf_rows, "issue_type_id", "issue_type_name"),
         }
 
     @classmethod
@@ -491,6 +545,10 @@ class TicketProcessingStatsService:
         begin_time: datetime | None,
         end_time: datetime | None,
         granularity: str,
+        project_ids: list[int] | None = None,
+        module_ids: list[int] | None = None,
+        module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
     ) -> dict:
         """
         获取每日快照口径的趋势统计。
@@ -498,14 +556,36 @@ class TicketProcessingStatsService:
         :param begin_time: 开始时间。
         :param end_time: 结束时间。
         :param granularity: 趋势粒度。
+        :param project_ids: 项目ID过滤。
+        :param module_ids: 模块ID过滤。
+        :param module_codes: 模块业务码过滤。
+        :param issue_type_ids: 工单类型编码过滤。
         :return: snake_case 趋势结果。
         """
         begin_date = begin_time.date() if isinstance(begin_time, datetime) else None
         end_date = end_time.date() if isinstance(end_time, datetime) else None
-        rows = TicketStatisticsDailyDao.list_between(query_db, begin_date, end_date)
+        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        rows = TicketStatisticsDailyDao.list_between(
+            query_db,
+            begin_date,
+            end_date,
+            snapshot_scope="leaf" if use_leaf_scope else "all",
+            project_ids=project_ids if use_leaf_scope else None,
+            module_ids=module_ids if use_leaf_scope else None,
+            module_codes=module_codes if use_leaf_scope else None,
+            issue_type_ids=issue_type_ids if use_leaf_scope else None,
+        )
+        leaf_rows = rows if use_leaf_scope else TicketStatisticsDailyDao.list_between(
+            query_db,
+            begin_date,
+            end_date,
+            snapshot_scope="leaf",
+        )
         if not rows:
             return {"granularity": granularity, "series": []}
         bucket_map: dict[str, dict[str, Any]] = {}
+        bucket_rows: dict[str, list[Any]] = {}
+        bucket_leaf_rows: dict[str, list[Any]] = {}
         for row in rows:
             bucket_date = _bucket_start(datetime.combine(row.statistics_date, time.min), granularity)
             bucket_key = _bucket_label(bucket_date, granularity)
@@ -527,21 +607,38 @@ class TicketProcessingStatsService:
                     "non_problem_count": 0,
                     "support_count": 0,
                     "module_counts": [],
+                    "issue_type_counts": [],
                     "problem_pattern_counts": [],
                 },
             )
+            bucket_rows.setdefault(bucket_key, []).append(row)
             bucket["new_count"] += int(row.submitted_count or 0)
             bucket["first_responded_count"] += int(row.first_responded_count or 0)
             bucket["processed_count"] += int(row.processed_count or 0)
             bucket["processed_in_new_count"] += int(row.processed_in_new_count or 0)
             bucket["resolved_count"] += int(row.resolved_count or 0)
             bucket["closed_count"] += int(row.closed_count or 0)
-            bucket["unprocessed_backlog"] = int(row.unprocessed_backlog or 0)
-            bucket["open_backlog"] = int(row.open_backlog or 0)
-            bucket["avg_first_response_seconds"] = int(row.avg_first_response_seconds or 0)
-            bucket["avg_first_process_seconds"] = int(row.avg_first_process_seconds or 0)
+        for row in leaf_rows:
+            bucket_date = _bucket_start(datetime.combine(row.statistics_date, time.min), granularity)
+            bucket_key = _bucket_label(bucket_date, granularity)
+            bucket_leaf_rows.setdefault(bucket_key, []).append(row)
         series = list(bucket_map.values())
         for bucket in series:
+            bucket_key = str(bucket.get("bucket") or "")
+            rows_in_bucket = bucket_rows.get(bucket_key, [])
+            leaf_rows_in_bucket = bucket_leaf_rows.get(bucket_key, [])
+            latest_rows = cls._latest_snapshot_rows(rows_in_bucket)
+            latest_leaf_rows = cls._latest_snapshot_rows(leaf_rows_in_bucket)
+            bucket["unprocessed_backlog"] = sum(int(row.unprocessed_backlog or 0) for row in latest_rows)
+            bucket["open_backlog"] = sum(int(row.open_backlog or 0) for row in latest_rows)
+            bucket["avg_first_response_seconds"] = cls._weighted_snapshot_seconds(
+                rows_in_bucket, "avg_first_response_seconds", "first_responded_count"
+            )
+            bucket["avg_first_process_seconds"] = cls._weighted_snapshot_seconds(
+                rows_in_bucket, "avg_first_process_seconds", "processed_count"
+            )
+            bucket["module_counts"] = cls._snapshot_count_rows(latest_leaf_rows, "module_name", "name")
+            bucket["issue_type_counts"] = cls._snapshot_count_rows(latest_leaf_rows, "issue_type_name", "name")
             bucket["process_rate"] = (
                 round(bucket["processed_in_new_count"] / bucket["new_count"], 4) if bucket["new_count"] else 0
             )
@@ -549,15 +646,75 @@ class TicketProcessingStatsService:
         return {"granularity": granularity, "series": series}
 
     @staticmethod
-    def _average_snapshot_seconds(rows: list[Any], field_name: str) -> int:
+    def _weighted_snapshot_seconds(rows: list[Any], field_name: str, weight_field_name: str) -> int:
         """
-        计算快照字段的平均耗时。
+        按事件数量加权计算快照耗时。
         :param rows: 快照行列表。
         :param field_name: 字段名。
+        :param weight_field_name: 权重字段名。
         :return: 平均秒数。
         """
-        values = [int(getattr(row, field_name, 0) or 0) for row in rows if int(getattr(row, field_name, 0) or 0) > 0]
-        return int(sum(values) / len(values)) if values else 0
+        total_weight = 0
+        total_seconds = 0
+        for row in rows:
+            seconds = int(getattr(row, field_name, 0) or 0)
+            weight = int(getattr(row, weight_field_name, 0) or 0)
+            if seconds <= 0 or weight <= 0:
+                continue
+            total_weight += weight
+            total_seconds += seconds * weight
+        return int(total_seconds / total_weight) if total_weight else 0
+
+    @staticmethod
+    def _latest_snapshot_rows(rows: list[Any]) -> list[Any]:
+        """
+        获取快照集合中最后日期的所有维度行。
+        :param rows: 快照行列表。
+        :return: 最后日期对应的行列表。
+        """
+        if not rows:
+            return []
+        latest_date = max(row.statistics_date for row in rows)
+        return [row for row in rows if row.statistics_date == latest_date]
+
+    @classmethod
+    def _snapshot_count_rows(cls, rows: list[Any], field_name: str, result_field_name: str) -> list[dict[str, Any]]:
+        """
+        把快照维度字段聚合为统计行。
+        :param rows: 快照行列表。
+        :param field_name: 维度字段名。
+        :param result_field_name: 返回统计字段名。
+        :return: 统计行。
+        """
+        counter: dict[str, int] = {}
+        for row in rows:
+            label = cls.normalize_count_text(getattr(row, field_name, ""), "未填写")
+            counter[label] = counter.get(label, 0) + int(getattr(row, "total_count", 0) or 0)
+        return [{result_field_name: key, "count": value} for key, value in counter.items()]
+
+    @classmethod
+    def _snapshot_code_name_rows(
+        cls,
+        rows: list[Any],
+        code_field_name: str,
+        name_field_name: str,
+    ) -> list[dict[str, Any]]:
+        """
+        把快照 code/name 维度聚合为统计行。
+        :param rows: 快照行列表。
+        :param code_field_name: 编码字段名。
+        :param name_field_name: 名称字段名。
+        :return: code/name 统计行。
+        """
+        row_map: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            code = str(getattr(row, code_field_name, "") or "").strip()
+            name = cls.normalize_count_text(getattr(row, name_field_name, "") or code, "未填写")
+            key = f"code:{code}" if code else f"name:{name}"
+            if key not in row_map:
+                row_map[key] = {"issue_type_id": code, "issue_type_name": name, "count": 0}
+            row_map[key]["count"] += int(getattr(row, "total_count", 0) or 0)
+        return list(row_map.values())
 
     @staticmethod
     def merge_trend_series(base_trend: dict, processing_trend: dict, granularity: str) -> dict:

@@ -27,6 +27,7 @@ class TicketProcessingStatsDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
     ) -> list[Any]:
         """
@@ -35,6 +36,7 @@ class TicketProcessingStatsDao:
         :param project_ids: 项目ID列表。
         :param module_ids: 模块ID列表。
         :param module_codes: 模块业务码列表。
+        :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
         :return: SQLAlchemy 过滤条件列表。
         """
@@ -46,6 +48,8 @@ class TicketProcessingStatsDao:
         if module_codes:
             matched_module_ids = _resolve_module_ids_by_codes(db, module_codes, project_ids or None)
             filters.append(Ticket.module_id.in_(matched_module_ids) if matched_module_ids else Ticket.ticket_id == -1)
+        if issue_type_ids:
+            filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         if problem_pattern_codes:
             filters.append(Ticket.problem_pattern_code.in_(problem_pattern_codes))
         return filters
@@ -60,6 +64,7 @@ class TicketProcessingStatsDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
     ) -> list[Ticket]:
         """
@@ -70,6 +75,7 @@ class TicketProcessingStatsDao:
         :param project_ids: 项目ID列表。
         :param module_ids: 模块ID列表。
         :param module_codes: 模块业务码列表。
+        :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
         :return: 工单列表。
         """
@@ -79,6 +85,7 @@ class TicketProcessingStatsDao:
             project_ids=project_ids,
             module_ids=module_ids,
             module_codes=module_codes,
+            issue_type_ids=issue_type_ids,
             problem_pattern_codes=problem_pattern_codes,
         )
         if begin_time or end_time:
@@ -108,6 +115,7 @@ class TicketProcessingStatsDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
     ) -> list[Ticket]:
         """
@@ -117,6 +125,7 @@ class TicketProcessingStatsDao:
         :param project_ids: 项目ID列表。
         :param module_ids: 模块ID列表。
         :param module_codes: 模块业务码列表。
+        :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
         :return: 工单列表。
         """
@@ -126,6 +135,7 @@ class TicketProcessingStatsDao:
             project_ids=project_ids,
             module_ids=module_ids,
             module_codes=module_codes,
+            issue_type_ids=issue_type_ids,
             problem_pattern_codes=problem_pattern_codes,
         )
         if end_time:
