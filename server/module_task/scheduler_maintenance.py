@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import date, timedelta
 from typing import Any
 
 from config.database import SessionLocal
@@ -414,30 +414,104 @@ def ticket_summary_report(
 
 
 @register_job("module_task.scheduler_maintenance.ticket_daily_statistics_snapshot")
-def ticket_daily_statistics_snapshot(*args, statistics_date: str | None = None, **kwargs):
+def ticket_daily_statistics_snapshot(
+    *args,
+    statistics_date: str | None = None,
+    begin_date: str | None = None,
+    end_date: str | None = None,
+    **kwargs,
+):
     """
-    工单每日统计快照任务。
+    工单每日统计快照任务，支持三种调用模式：
+    1. 默认模式（不传参）：统计昨天的快照数据。
+    2. 单日模式（传 statistics_date）：统计指定日期的快照数据。
+    3. 范围模式（传 begin_date + end_date）：逐日统计指定日期范围内的快照数据。
 
-    :param statistics_date: 快照日期，默认今天。
-    :return: 执行结果摘要。
+    :param statistics_date: 单日日期，格式 YYYY-MM-DD；与 begin_date/end_date 互斥。
+    :param begin_date: 范围开始日期（含），格式 YYYY-MM-DD。
+    :param end_date: 范围结束日期（含），格式 YYYY-MM-DD。
+    :return: 单日模式返回单日执行摘要；范围模式返回汇总（处理天数、总 leaf 数）。
     """
     task_id = int(kwargs.pop("_task_id", 0) or 0)
     if task_id and is_task_stop_requested(task_id):
         raise TaskStopRequestedError("任务已手动终止")
 
-    snapshot_date = None
+    # 范围模式：逐日循环生成快照
+    if begin_date and end_date:
+        return _run_snapshot_range(task_id, begin_date, end_date)
+
+    # 单日模式：统计指定日期
     if statistics_date:
-        try:
-            snapshot_date = datetime.fromisoformat(str(statistics_date)).date()
-        except Exception:
-            snapshot_date = None
+        return _run_snapshot_single(statistics_date)
+
+    # 默认模式：统计昨天
+    return _run_snapshot_single((date.today() - timedelta(days=1)).isoformat())
+
+
+def _run_snapshot_single(date_str: str) -> dict[str, Any]:
+    """
+    执行单日快照生成。
+
+    :param date_str: 目标日期字符串，格式 YYYY-MM-DD。
+    :return: 快照执行结果摘要。
+    """
+    target_date = date.fromisoformat(date_str)
+    logger.info(f"工单每日统计快照任务开始执行 | target_date={target_date}")
     with SessionLocal() as db:
-        result = TicketStatisticsSnapshotService.build_daily_snapshot(db, snapshot_date)
+        result = TicketStatisticsSnapshotService.build_daily_snapshot(db, target_date)
     logger.info(
         f"工单每日统计快照任务执行完成 | statistics_date={result.get('statisticsDate')}, "
         f"submitted_count={result.get('submitted_count')}, processed_count={result.get('processed_count')}"
     )
     return result
+
+
+def _run_snapshot_range(task_id: int, begin_date: str, end_date: str) -> dict[str, Any]:
+    """
+    按日期范围逐日生成快照，每天独立 commit，某天失败不影响其他天。
+
+    :param task_id: 任务 ID，用于检查终止标记。
+    :param begin_date: 范围开始日期字符串，格式 YYYY-MM-DD。
+    :param end_date: 范围结束日期字符串，格式 YYYY-MM-DD。
+    :return: 范围执行汇总。
+    """
+    current = date.fromisoformat(begin_date)
+    end = date.fromisoformat(end_date)
+    total_days = 0
+    total_leaf = 0
+    failed_days: list[str] = []
+    logger.info(f"工单每日统计快照任务开始范围执行 | begin_date={begin_date}, end_date={end_date}")
+    while current <= end:
+        # 检查任务终止标记
+        if task_id and is_task_stop_requested(task_id):
+            logger.info(f"工单每日统计快照范围任务已手动终止 | 已处理天数={total_days}, 当前日期={current}")
+            raise TaskStopRequestedError("任务已手动终止")
+        try:
+            logger.info(f"工单每日统计快照范围执行中 | current_date={current}")
+            with SessionLocal() as db:
+                result = TicketStatisticsSnapshotService.build_daily_snapshot(db, current)
+            total_days += 1
+            total_leaf += result.get("leafCount", 0)
+        except TaskStopRequestedError:
+            raise
+        except Exception as e:
+            # 某天失败记录异常，继续下一天
+            logger.error(f"工单每日统计快照范围执行失败 | current_date={current}, error={e}")
+            failed_days.append(current.isoformat())
+        current += timedelta(days=1)
+    summary = {
+        "mode": "range",
+        "begin_date": begin_date,
+        "end_date": end_date,
+        "total_days": total_days,
+        "total_leaf_count": total_leaf,
+        "failed_days": failed_days,
+    }
+    logger.info(
+        f"工单每日统计快照范围任务执行完成 | total_days={total_days}, "
+        f"total_leaf_count={total_leaf}, failed_days={failed_days}"
+    )
+    return summary
 
 
 @register_job("module_task.scheduler_maintenance.ticket_topic_stats_report")
