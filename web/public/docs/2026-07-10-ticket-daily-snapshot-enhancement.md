@@ -79,3 +79,186 @@
 - N 条叶子维度快照（`snapshot_scope=leaf`，按 `项目+模块+工单类型` 分组）
 
 只需 1 个定时任务即可。
+
+---
+
+## 补充修复（2026-07-10 14:17）
+
+### 问题
+
+执行统计任务时报错：
+```
+(pymysql.err.OperationalError) (1364, "Field 'new_count' doesn't have a default value")
+```
+
+### 根因
+
+数据库表 `ticket_statistics_daily` 有一个旧字段 `new_count`（等同于 `submitted_count`，表示新增工单数），但 SQLAlchemy 模型 `TicketStatisticsDaily` 中没有定义该字段。
+
+当快照任务创建新记录时，SQLAlchemy 不会在 INSERT 语句中包含 `new_count`，而该字段在数据库中是 `NOT NULL` 且没有默认值，导致 MySQL 报错。
+
+### 修复方案
+
+**1. 模型层：添加 `new_count` 字段**
+
+文件：`server/modules/ticket/entity/do/ticket_do.py`
+
+```python
+new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数（兼容旧字段）")
+```
+
+**2. 快照服务：在 payload 中包含 `new_count`**
+
+文件：`server/modules/ticket/service/stats/ticket_statistics_snapshot_service.py`
+
+在 `build_metric_payload` 方法中，将 `new_count` 设置为与 `submitted_count` 相同的值：
+
+```python
+submitted_count = len(submitted_rows)
+payload = {
+    "total_count": ...,
+    "submitted_count": submitted_count,
+    "new_count": submitted_count,  # 兼容旧字段
+    ...
+}
+```
+
+**3. 数据库迁移：添加默认值**
+
+文件：`server/sql/20260710_ticket_statistics_new_count_default.sql`
+
+```sql
+ALTER TABLE ticket_statistics_daily
+    MODIFY COLUMN new_count INT NOT NULL DEFAULT 0 COMMENT '新增工单数（兼容旧字段，值同 submitted_count）';
+```
+
+**执行顺序**：
+1. 先执行 SQL 迁移脚本，为 `new_count` 添加默认值
+2. 重启后端服务，使模型变更生效
+
+### 验证结果
+
+- `ruff check` 语法检查通过
+- 导入验证通过（`new_count` 字段已添加到模型）
+
+---
+
+## 补充修复：遗留字段默认值问题（2026-07-10 15:05）
+
+### 问题
+
+执行快照任务时连续报错：
+```
+(pymysql.err.OperationalError) (1364, "Field 'new_count' doesn't have a default value")
+(pymysql.err.OperationalError) (1364, "Field 'avg_process_seconds' doesn't have a default value")
+```
+
+### 根因分析
+
+通过 git 历史对比发现，`ticket_statistics_daily` 表在最初创建时有以下字段：
+- id, statistics_date, **new_count**, resolved_count, closed_count, **avg_process_seconds**, create_time
+
+第三阶段改造（phase3）时，模型重构移除了 `new_count` 和 `avg_process_seconds` 两个旧字段，新增了 `submitted_count` 和更细粒度的 avg 字段。但数据库表中这两个列仍然存在，且是 `NOT NULL` 无默认值。
+
+当快照任务 INSERT 新记录时，SQLAlchemy 不会为模型中不存在的字段生成 INSERT 语句，MySQL 因此报错。
+
+### 修复方案
+
+**1. 模型层：重新添加两个旧字段**
+
+文件：`server/modules/ticket/entity/do/ticket_do.py`
+
+```python
+new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数（兼容旧字段）")
+avg_process_seconds: Mapped[int] = mapped_column(
+    BigInteger, nullable=False, default=0, comment="平均处理秒数（旧字段，兼容保留）"
+)
+```
+
+**2. 快照服务：在 payload 中包含这两个字段**
+
+文件：`server/modules/ticket/service/stats/ticket_statistics_snapshot_service.py`
+
+- `new_count` = `submitted_count`（值相同，兼容旧字段）
+- `avg_process_seconds` = `avg_first_process_seconds`（语义相近，向后兼容）
+
+**3. 数据库迁移：为两个字段添加 DEFAULT**
+
+文件：`server/sql/20260710_ticket_statistics_new_count_default.sql`
+
+```sql
+ALTER TABLE ticket_statistics_daily
+    MODIFY COLUMN new_count INT NOT NULL DEFAULT 0 COMMENT '新增工单数（兼容旧字段）';
+
+ALTER TABLE ticket_statistics_daily
+    MODIFY COLUMN avg_process_seconds BIGINT NOT NULL DEFAULT 0 COMMENT '平均处理秒数（兼容旧字段）';
+```
+
+### 排查方法
+
+通过 git 历史对比找到问题：
+
+```bash
+# 查看最初创建时的模型定义
+git show babc492:modules/ticket/entity/do/ticket_do.py | grep -A 20 "class TicketStatisticsDaily"
+
+# 查看最新版本
+git show HEAD:modules/ticket/entity/do/ticket_do.py | grep -A 60 "class TicketStatisticsDaily"
+
+# 对比发现移除了 new_count 和 avg_process_seconds
+```
+
+### 验证结果
+
+- `ruff check` 语法检查通过
+- 导入验证通过（两个字段都已添加到模型）
+- 等待用户重新执行快照任务验证
+
+---
+
+## 补充修复：旧唯一索引导致重复键冲突（2026-07-10 15:10）
+
+### 问题
+
+```
+sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError)
+(1062, "Duplicate entry '2026-07-09' for key 'ticket_statistics_daily.statistics_date'")
+```
+
+### 根因
+
+原始表定义中 `statistics_date` 使用了 `unique=True`，MySQL 自动生成了一个名为 `statistics_date` 的**单列唯一索引**。
+
+第三阶段改造时：
+- `phase3.sql` 创建了 `uk_ticket_statistics_daily_date`（另一个唯一索引）
+- `dimensional.sql` 只删除了 `uk_ticket_statistics_daily_date` 和 `idx_ticket_statistics_daily_date`
+- **遗漏了原始的 `statistics_date` 唯一索引**
+
+结果：同一日期只能有一条记录，无法同时写入全局快照（scope=all）和叶子维度快照（scope=leaf）。
+
+### 修复方案
+
+**文件**：`server/sql/20260710_ticket_statistics_fix_all.sql`
+
+核心操作：
+```sql
+ALTER TABLE ticket_statistics_daily DROP INDEX `statistics_date`;
+```
+
+同时包含：
+- 删除旧唯一索引
+- 为 `new_count` 和 `avg_process_seconds` 添加 DEFAULT 值（合并之前的修复）
+
+### 执行步骤
+
+1. 先执行确认：
+   ```sql
+   SHOW INDEX FROM ticket_statistics_daily WHERE Key_name = 'statistics_date';
+   ```
+2. 执行修复脚本
+3. 验证：
+   ```sql
+   SHOW INDEX FROM ticket_statistics_daily;
+   ```
+   确认不再有 `statistics_date` 单列唯一索引，只剩 `uk_ticket_statistics_daily_scope` 复合唯一索引。
+4. 重启后端，重新执行快照任务

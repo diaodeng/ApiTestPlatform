@@ -579,6 +579,7 @@ class TicketStatisticsDaily(Base):
     issue_type_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="工单类型名称快照")
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="工单总数")
     submitted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数")
+    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数（兼容旧字段）")
     first_responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已响应数")
     processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已处理数")
     processed_in_new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单已处理数")
@@ -595,6 +596,9 @@ class TicketStatisticsDaily(Base):
     )
     avg_resolve_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处置完成耗时")
     avg_close_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均关闭耗时")
+    avg_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均处理秒数（旧字段，兼容保留）"
+    )
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 

@@ -139,13 +139,15 @@ class TicketStatisticsSnapshotService:
             if cls._in_range(TicketProcessingStatsDao.resolve_submit_time(ticket), None, end_time)
             and (not isinstance(ticket.closed_at, datetime) or ticket.closed_at > end_time)
         )
+        submitted_count = len(submitted_rows)
         payload = {
             "total_count": sum(
                 1
                 for ticket in rows
                 if cls._in_range(TicketProcessingStatsDao.resolve_submit_time(ticket), None, end_time)
             ),
-            "submitted_count": len(submitted_rows),
+            "submitted_count": submitted_count,
+            "new_count": submitted_count,
             "first_responded_count": len(first_responded_rows),
             "processed_count": len(processed_rows),
             "processed_in_new_count": len(processed_in_new_rows),
@@ -158,6 +160,7 @@ class TicketStatisticsSnapshotService:
             "avg_first_process_seconds": cls._average_seconds(processed_rows, "processed_at"),
             "avg_resolve_seconds": cls._average_seconds(resolved_rows, "resolved_at"),
             "avg_close_seconds": cls._average_seconds(closed_rows, "closed_at"),
+            "avg_process_seconds": cls._average_seconds(processed_rows, "processed_at"),
         }
         return payload
 
