@@ -21,6 +21,7 @@ from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingSe
 from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -272,6 +273,26 @@ async def get_ticket_stat_classification_options(request: Request, query_db: Ses
 
 
 @ticketConfigController.get(
+    "/statistics/time-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))],
+)
+async def get_ticket_statistics_time_config(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单统计页默认时间配置接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 规范化配置、默认时间范围和展示文案
+    """
+    try:
+        config = await run_in_threadpool(TicketStatisticsTimeUtil.ensure_default_config, query_db)
+        return ResponseUtil.success(data=config)
+    except Exception as e:
+        query_db.rollback()
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketConfigController.get(
     "/statistics/overview",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))],
 )
@@ -298,6 +319,7 @@ async def get_ticket_statistics(
             query.module_codes,
             query.issue_type_ids,
             query.statistics_mode,
+            query.week_bucket_mode,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:
@@ -334,6 +356,7 @@ async def get_ticket_statistics_trend(
             query.issue_type_ids,
             query.problem_pattern_codes,
             query.statistics_mode,
+            query.week_bucket_mode,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:

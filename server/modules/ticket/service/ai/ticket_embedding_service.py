@@ -775,6 +775,169 @@ class TicketEmbeddingService:
         return cls._build_ticket_search_result(query_db, scored, safe_limit, config)
 
     @classmethod
+    def get_ticket_embedding_context(
+        cls,
+        query_db: Session,
+        ticket: Ticket,
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        读取当前工单可复用的向量上下文，不触发外部 Embedding。
+        :param query_db: 数据库会话
+        :param ticket: 当前工单
+        :param config: 相似度配置
+        :return: 状态、消息、向量记录和向量身份信息
+        """
+        active_config = config or cls.get_similarity_config(query_db)
+        if not active_config.get("enabled", True):
+            return {"status": "disabled", "message": "相似工单检索未启用"}
+        provider = cls._normalize_provider(active_config.get("provider"))
+        vector_config = cls._config_for_vector_provider(active_config, provider)
+        embedding_config = vector_config.get("embedding") if isinstance(vector_config.get("embedding"), dict) else {}
+        model = str(embedding_config.get("model") or cls.MODEL)
+        version = str(embedding_config.get("version") or cls.VERSION)
+        dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        rca_map = TicketDao.list_rca_by_ticket_ids(query_db, [ticket.ticket_id])
+        text = cls.build_ticket_text(ticket, rca=rca_map.get(ticket.ticket_id), config=active_config)
+        content_hash = cls._embedding_content_hash(text, active_config)
+        record = TicketDao.get_embedding_record(query_db, "ticket", ticket.ticket_id, model, version)
+        if not record or not isinstance(record.embedding, list):
+            return {
+                "status": "missing",
+                "message": "当前工单向量未生成，等待自动刷新或手动重建后可查看相似工单。",
+                "provider": provider,
+                "model": model,
+                "version": version,
+                "dimension": dimension,
+                "contentHash": content_hash,
+            }
+        if (
+            str(record.content_hash or "") != content_hash
+            or int(record.embedding_dimension or 0) != dimension
+            or len(record.embedding) != dimension
+        ):
+            return {
+                "status": "stale",
+                "message": "当前工单向量已过期，等待自动刷新或手动重建后可查看相似工单。",
+                "provider": provider,
+                "model": model,
+                "version": version,
+                "dimension": dimension,
+                "contentHash": content_hash,
+                "record": record,
+            }
+        return {
+            "status": "ready",
+            "message": "",
+            "provider": provider,
+            "model": model,
+            "version": version,
+            "dimension": dimension,
+            "contentHash": content_hash,
+            "record": record,
+            "vector": record.embedding,
+            "config": active_config,
+        }
+
+    @classmethod
+    def search_tickets_by_vector(
+        cls,
+        query_db: Session,
+        query_vector: list[float],
+        limit: int,
+        config: dict[str, Any],
+        exclude_ticket_id: int | None = None,
+    ) -> list[dict]:
+        """
+        使用已保存向量查询相似工单，不触发外部 Embedding。
+        :param query_db: 数据库会话
+        :param query_vector: 当前工单已保存向量
+        :param limit: 返回数量
+        :param config: 相似度配置
+        :param exclude_ticket_id: 排除当前工单ID
+        :return: 带 score 的工单列表
+        """
+        provider = cls._normalize_provider(config.get("provider"))
+        safe_limit = min(max(limit or 5, 1), 100)
+        if provider == cls.PROVIDER_QDRANT:
+            scored = cls.search_qdrant_by_vector(query_vector, safe_limit + 1, config)
+        else:
+            scored = cls.search_embedding_records_by_vector(query_db, query_vector, safe_limit + 1, config, provider)
+        if exclude_ticket_id:
+            scored.pop(int(exclude_ticket_id), None)
+        return cls._build_ticket_search_result(query_db, scored, safe_limit, config)
+
+    @classmethod
+    def search_embedding_records_by_vector(
+        cls,
+        query_db: Session,
+        query_vector: list[float],
+        limit: int,
+        config: dict[str, Any],
+        provider: str,
+    ) -> dict[int, float]:
+        """
+        使用数据库中保存的向量记录计算相似度。
+        :param query_db: 数据库会话
+        :param query_vector: 查询向量
+        :param limit: 返回数量
+        :param config: 相似度配置
+        :param provider: local_hash 或 embedding
+        :return: 工单ID到分数的映射
+        """
+        vector_config = cls._config_for_vector_provider(config, provider)
+        embedding_config = vector_config.get("embedding") if isinstance(vector_config.get("embedding"), dict) else {}
+        model = str(embedding_config.get("model") or cls.MODEL)
+        version = str(embedding_config.get("version") or cls.VERSION)
+        scored: dict[int, float] = {}
+        for record in TicketDao.list_ticket_embedding_records(query_db, model, version):
+            if not isinstance(record.embedding, list):
+                continue
+            score = cls._cosine(query_vector, record.embedding)
+            if score > config.get("threshold", 0.05):
+                scored[record.object_id] = max(scored.get(record.object_id, 0.0), score)
+        return dict(sorted(scored.items(), key=lambda item: item[1], reverse=True)[:limit])
+
+    @classmethod
+    def search_qdrant_by_vector(
+        cls,
+        query_vector: list[float],
+        limit: int,
+        config: dict[str, Any],
+    ) -> dict[int, float]:
+        """
+        使用已保存向量查询 Qdrant，不调用外部 Embedding。
+        :param query_vector: 查询向量
+        :param limit: 返回数量
+        :param config: 相似度配置
+        :return: 工单ID到分数的映射
+        """
+        qdrant_config = config.get("qdrant") if isinstance(config.get("qdrant"), dict) else {}
+        cls._ensure_qdrant_collection(config, expected_dimension=len(query_vector), allow_recreate=False)
+        url = cls._qdrant_url(qdrant_config, f"/collections/{qdrant_config.get('collection')}/points/search")
+        payload = {
+            "vector": query_vector,
+            "limit": limit,
+            "with_payload": True,
+            "score_threshold": config.get("threshold", 0.05),
+        }
+        response = requests.post(
+            url,
+            headers=cls._qdrant_headers(qdrant_config),
+            json=payload,
+            timeout=cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120),
+        )
+        cls._raise_for_qdrant_status(response, "使用缓存向量查询相似工单")
+        rows = response.json().get("result") or []
+        scored: dict[int, float] = {}
+        for row in rows:
+            payload_data = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            ticket_id = cls._safe_int(payload_data.get("ticketId") or row.get("id"), 0, 0, 9223372036854775807)
+            if ticket_id > 0:
+                scored[ticket_id] = max(scored.get(ticket_id, 0.0), float(row.get("score") or 0.0))
+        return scored
+
+    @classmethod
     def _search_local_hash(
         cls,
         query_db: Session,

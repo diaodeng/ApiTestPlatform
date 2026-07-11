@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/{ticket_id}/ai-analysis
     trigger: 手工或日志拉取成功后触发AI分析任务
 created: 2026-05-22
-updated: 2026-07-05
+updated: 2026-07-11
 ---
 
 # 工单自动化链路流程
@@ -83,6 +83,7 @@ sequenceDiagram
 | 10 | AI 分析成功后写回 `ticket.ai_analysis`、RCA、AI 消息和 `ticket_snapshot`；工单关闭时自动提炼 `knowledge_article` 供后续相似工单检索。 |
 | 11 | 历史工单可通过 `POST /ticket/similarity/rebuild` 批量重建向量，重建文本包含标题、描述、AI 摘要和 RCA；手动指定范围使用 `ticketNos` 传业务工单号，服务端解析为系统 `ticket_id` 后复用重建流程。当前是一条工单一次外部 Embedding 请求，不合并多工单请求。`provider=local_hash` 只写数据库 `embedding_record` 的本地 hash，`provider=embedding` 只写数据库 `embedding_record` 的外部向量，`provider=qdrant` 只同步 Qdrant。同步 Qdrant 前会校验本次实际向量维度与 collection 维度，失败日志会带 Qdrant 响应体；开启 `recreateCollectionOnDimensionMismatch` 时，写入链路会删除旧 collection 并重建。外部异常会熔断后续批量请求。默认 `forceRebuild=false`，同一模型、版本、维度、字段列表和最终文本未变化时会复用本地向量；只有手动开启强制重建才重新请求外部接口。 |
 | 12 | 相似工单配置页面可保存 `sceneTriggers`；外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按开关决定是否自动调用向量化。 |
+| 13 | 工单详情页相似推荐优先读取当前工单已保存向量并查询库内向量或 Qdrant；当前工单向量缺失或过期时，会按当前 Provider 配置同步刷新向量后再查询相似工单。 |
 
 ## 错误处理
 

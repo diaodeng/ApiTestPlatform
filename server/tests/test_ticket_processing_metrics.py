@@ -321,3 +321,151 @@ def test_snapshot_code_name_rows_group_issue_type_by_stable_code():
         {"issue_type_id": "bug", "issue_type_name": "缺陷旧名", "count": 5},
         {"issue_type_id": "", "issue_type_name": "未填写", "count": 1},
     ]
+
+
+def test_business_week_snapshot_trend_builds_period_bucket(monkeypatch):
+    """快照口径业务周趋势应读取周期快照，并使用业务周标签。"""
+    if TicketProcessingStatsService is None:
+        return
+    from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
+
+    period_start = datetime(2026, 7, 9, 18, 0, 0)
+    all_rows = [
+        SimpleNamespace(
+            period_start_time=period_start,
+            submitted_count=4,
+            first_responded_count=3,
+            processed_count=2,
+            processed_in_new_count=2,
+            resolved_count=1,
+            closed_count=1,
+            unprocessed_backlog=2,
+            open_backlog=3,
+            avg_first_response_seconds=300,
+            avg_first_process_seconds=1200,
+        )
+    ]
+    leaf_rows = [
+        SimpleNamespace(
+            period_start_time=period_start,
+            module_name="POS",
+            issue_type_name="缺陷",
+            total_count=4,
+        )
+    ]
+
+    def fake_list_between(*args, **kwargs):
+        return leaf_rows if kwargs.get("snapshot_scope") == "leaf" else all_rows
+
+    monkeypatch.setattr(TicketStatisticsPeriodSnapshotDao, "list_between", fake_list_between)
+
+    result = TicketProcessingStatsService.get_business_week_snapshot_trend(
+        query_db=SimpleNamespace(),
+        begin_time=datetime(2026, 7, 9, 18, 0, 0),
+        end_time=datetime(2026, 7, 16, 17, 59, 59),
+    )
+    row = result["series"][0]
+
+    assert result["granularity"] == "week"
+    assert row["bucket"] == "2026-07-09业务周"
+    assert row["new_count"] == 4
+    assert row["process_rate"] == 0.5
+    assert row["module_counts"] == [{"name": "POS", "count": 4}]
+    assert row["issue_type_counts"] == [{"name": "缺陷", "count": 4}]
+
+
+def test_business_week_snapshot_overview_uses_latest_backlog(monkeypatch):
+    """业务周快照 overview 的总量和存量应取最后业务周，流量指标按范围累加。"""
+    if TicketProcessingStatsService is None:
+        return
+    from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
+
+    first_start = datetime(2026, 7, 2, 18, 0, 0)
+    second_start = datetime(2026, 7, 9, 18, 0, 0)
+    all_rows = [
+        SimpleNamespace(
+            period_start_time=first_start,
+            total_count=10,
+            submitted_count=3,
+            first_responded_count=2,
+            processed_count=2,
+            processed_in_new_count=1,
+            resolved_count=1,
+            closed_count=1,
+            unprocessed_backlog=9,
+            avg_first_response_seconds=100,
+            avg_first_process_seconds=200,
+            avg_resolve_seconds=300,
+            avg_close_seconds=400,
+        ),
+        SimpleNamespace(
+            period_start_time=second_start,
+            total_count=12,
+            submitted_count=5,
+            first_responded_count=4,
+            processed_count=3,
+            processed_in_new_count=3,
+            resolved_count=2,
+            closed_count=2,
+            unprocessed_backlog=6,
+            avg_first_response_seconds=200,
+            avg_first_process_seconds=400,
+            avg_resolve_seconds=600,
+            avg_close_seconds=800,
+        ),
+    ]
+    leaf_rows = [
+        SimpleNamespace(
+            period_start_time=second_start,
+            module_name="支付",
+            issue_type_id="bug",
+            issue_type_name="缺陷",
+            total_count=12,
+        )
+    ]
+
+    def fake_list_between(*args, **kwargs):
+        return leaf_rows if kwargs.get("snapshot_scope") == "leaf" else all_rows
+
+    monkeypatch.setattr(TicketStatisticsPeriodSnapshotDao, "list_between", fake_list_between)
+
+    result = TicketProcessingStatsService.get_business_week_snapshot_statistics(
+        query_db=SimpleNamespace(),
+        begin_time=first_start,
+        end_time=second_start,
+    )
+
+    assert result["total"] == 12
+    assert result["submitted_count"] == 8
+    assert result["processed_in_new_count"] == 4
+    assert result["process_rate"] == 0.5
+    assert result["unprocessed_count"] == 6
+    assert result["module_counts"] == [{"module": "支付", "count": 12}]
+    assert result["issue_type_counts"] == [{"issue_type_id": "bug", "issue_type_name": "缺陷", "count": 12}]
+
+
+def test_snapshot_business_week_trend_no_longer_returns_not_supported_warning(monkeypatch):
+    """snapshot + week + business_week 应切换到业务周快照，不再返回旧不支持提示。"""
+    if TicketProcessingStatsService is None:
+        return
+
+    monkeypatch.setattr(
+        TicketProcessingStatsService,
+        "get_business_week_snapshot_trend",
+        lambda *args, **kwargs: {"granularity": "week", "series": []},
+    )
+    monkeypatch.setattr(
+        "modules.ticket.service.stats.ticket_processing_stats_service.TicketStatisticsTimeUtil.get_config",
+        lambda db: {},
+    )
+
+    result = TicketProcessingStatsService.get_statistics_trend(
+        query_db=SimpleNamespace(),
+        begin_time=datetime(2026, 7, 9, 18, 0, 0),
+        end_time=datetime(2026, 7, 16, 17, 59, 59),
+        granularity="week",
+        statistics_mode="snapshot",
+        week_bucket_mode="business_week",
+    )
+
+    assert result == {"granularity": "week", "series": []}

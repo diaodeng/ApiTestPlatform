@@ -4,11 +4,12 @@
       <el-form-item label="提交时间范围">
         <el-date-picker
           v-model="dateRange"
-          value-format="YYYY-MM-DD"
-          type="daterange"
+          value-format="YYYY-MM-DD HH:mm:ss"
+          type="datetimerange"
           range-separator="-"
           start-placeholder="开始日期"
           end-placeholder="结束日期"
+          :default-time="defaultDateRangeTimes"
         />
       </el-form-item>
       <el-form-item label="项目">
@@ -110,6 +111,9 @@
       <el-form-item label="趋势粒度">
         <el-segmented v-model="trendGranularity" :options="trendGranularityOptions" />
       </el-form-item>
+      <el-form-item v-if="trendGranularity === 'week'" label="周分桶">
+        <el-segmented v-model="weekBucketMode" :options="weekBucketModeOptions" />
+      </el-form-item>
       <el-form-item label="统计口径">
         <el-segmented v-model="statisticsMode" :options="statisticsModeOptions" />
       </el-form-item>
@@ -154,6 +158,25 @@
       :closable="false"
       class="mb16"
       title="当前使用快照口径，统计结果来自每日冻结快照；项目、模块、模块Code和工单类型筛选参与快照聚合，细分问题筛选仅实时口径生效。"
+    />
+
+    <el-alert
+      v-if="timeConfigRangeLabel"
+      type="success"
+      show-icon
+      :closable="false"
+      class="mb16"
+      :title="`当前默认时间范围：${timeConfigRangeLabel}`"
+    />
+
+    <el-alert
+      v-for="warning in trendWarnings"
+      :key="warning.code || warning.message"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="mb16"
+      :title="warning.message"
     />
 
     <el-row :gutter="16" class="stats-block-grid">
@@ -231,32 +254,32 @@
     <el-card v-show="isTrendBlockVisible('trendDetail')" shadow="never" class="mt16">
       <template #header>趋势明细</template>
       <el-table v-loading="loading" :data="trend.series || []">
-        <el-table-column label="周期" prop="bucket" width="120" />
-        <el-table-column label="新增" prop="newCount" width="90" align="center" />
-        <el-table-column label="已响应" prop="firstRespondedCount" width="90" align="center" />
-        <el-table-column label="已处理" prop="processedCount" width="90" align="center" />
-        <el-table-column label="新增已处理" prop="processedInNewCount" width="110" align="center" />
-        <el-table-column label="处理率" width="90" align="center">
+        <el-table-column v-if="isTrendDetailColumnVisible('bucket')" label="周期" prop="bucket" width="140" />
+        <el-table-column v-if="isTrendDetailColumnVisible('newCount')" label="新增" prop="newCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('firstRespondedCount')" label="已响应" prop="firstRespondedCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('processedCount')" label="已处理" prop="processedCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('processedInNewCount')" label="新增已处理" prop="processedInNewCount" width="110" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('processRate')" label="处理率" width="90" align="center">
           <template #default="scope">{{ formatPercent(scope.row.processRate) }}</template>
         </el-table-column>
-        <el-table-column label="处置完成" prop="resolvedCount" width="100" align="center" />
-        <el-table-column label="关闭" prop="closedCount" width="90" align="center" />
-        <el-table-column label="净增" prop="netIncrease" width="90" align="center" />
-        <el-table-column label="未处理存量" prop="unprocessedBacklog" width="110" align="center" />
-        <el-table-column label="未关闭存量" prop="openBacklog" width="110" align="center" />
-        <el-table-column label="Bug" prop="problemCount" width="90" align="center" />
-        <el-table-column label="非Bug" prop="nonProblemCount" width="90" align="center" />
-        <el-table-column label="支持类" prop="supportCount" width="90" align="center" />
-        <el-table-column label="平均响应耗时" width="130" align="center">
+        <el-table-column v-if="isTrendDetailColumnVisible('resolvedCount')" label="处置完成" prop="resolvedCount" width="100" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('closedCount')" label="关闭" prop="closedCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('netIncrease')" label="净增" prop="netIncrease" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('unprocessedBacklog')" label="未处理存量" prop="unprocessedBacklog" width="110" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('openBacklog')" label="未关闭存量" prop="openBacklog" width="110" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('problemCount')" label="Bug" prop="problemCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('nonProblemCount')" label="非Bug" prop="nonProblemCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('supportCount')" label="支持类" prop="supportCount" width="90" align="center" />
+        <el-table-column v-if="isTrendDetailColumnVisible('avgFirstResponseSeconds')" label="平均响应耗时" width="130" align="center">
           <template #default="scope">{{ formatSeconds(scope.row.avgFirstResponseSeconds) }}</template>
         </el-table-column>
-        <el-table-column label="平均处理耗时" width="130" align="center">
+        <el-table-column v-if="isTrendDetailColumnVisible('avgFirstProcessSeconds')" label="平均处理耗时" width="130" align="center">
           <template #default="scope">{{ formatSeconds(scope.row.avgFirstProcessSeconds) }}</template>
         </el-table-column>
-        <el-table-column label="Top细分问题" min-width="220" show-overflow-tooltip>
+        <el-table-column v-if="isTrendDetailColumnVisible('problemPatternCounts')" label="Top细分问题" min-width="220" show-overflow-tooltip>
           <template #default="scope">{{ formatTopRows(scope.row.problemPatternCounts) }}</template>
         </el-table-column>
-        <el-table-column label="Top模块" min-width="180" show-overflow-tooltip>
+        <el-table-column v-if="isTrendDetailColumnVisible('moduleCounts')" label="Top模块" min-width="180" show-overflow-tooltip>
           <template #default="scope">{{ formatTopRows(scope.row.moduleCounts) }}</template>
         </el-table-column>
       </el-table>
@@ -276,6 +299,18 @@
           {{ item.title }}
         </el-checkbox>
       </el-checkbox-group>
+      <el-divider />
+      <div class="config-section-title">趋势明细列</div>
+      <el-checkbox-group v-model="visibleTrendDetailColumnKeys" class="statistics-block-config">
+        <el-checkbox
+          v-for="item in trendDetailColumnOptions"
+          :key="item.key"
+          :label="item.key"
+          :disabled="item.required"
+        >
+          {{ item.title }}
+        </el-checkbox>
+      </el-checkbox-group>
       <template #footer>
         <el-button @click="resetStatisticsBlockConfig">恢复默认</el-button>
         <el-button type="primary" @click="saveStatisticsBlockConfig">保存</el-button>
@@ -288,6 +323,7 @@
   import {
     getTicketStatClassificationOptions,
     getTicketStatistics,
+    getTicketStatisticsTimeConfig,
     getTicketStatisticsTrend,
     getTicketWorkflow,
     listTicketModuleOptions,
@@ -300,6 +336,7 @@
   const { proxy } = getCurrentInstance();
   const loading = ref(false);
   const dateRange = ref([]);
+  const defaultDateRangeTimes = [new Date(2000, 0, 1, 0, 0, 0), new Date(2000, 0, 1, 23, 59, 59)];
   const overview = ref({});
   const trend = ref({ series: [] });
   const projectOptions = ref([]);
@@ -311,7 +348,10 @@
   const selectedIssueTypeIds = ref([]);
   const selectedProblemPatternCodes = ref([]);
   const trendGranularity = ref('week');
+  const weekBucketMode = ref('calendar_week');
   const statisticsMode = ref('realtime');
+  const timeConfigPayload = ref(null);
+  const timeConfigRangeLabel = ref('');
   const issueTypeOptions = ref([]);
   const workflowStatusOptions = ref([]);
   const rootCauseTypeOptions = ref([]);
@@ -333,6 +373,10 @@
     { label: '日', value: 'day' },
     { label: '周', value: 'week' },
     { label: '月', value: 'month' },
+  ];
+  const weekBucketModeOptions = [
+    { label: '自然周', value: 'calendar_week' },
+    { label: '业务周', value: 'business_week' },
   ];
   const statisticsModeOptions = [
     { label: '实时口径', value: 'realtime' },
@@ -479,13 +523,41 @@
   ];
   const defaultStatisticsBlockKeys = statisticsBlockOptions.map((item) => item.key);
   const defaultTrendBlockKeys = trendBlockOptions.map((item) => item.key);
+  const trendDetailColumnOptions = [
+    { key: 'bucket', title: '周期', required: true },
+    { key: 'newCount', title: '新增' },
+    { key: 'firstRespondedCount', title: '已响应' },
+    { key: 'processedCount', title: '已处理' },
+    { key: 'processedInNewCount', title: '新增已处理' },
+    { key: 'processRate', title: '处理率' },
+    { key: 'resolvedCount', title: '处置完成' },
+    { key: 'closedCount', title: '关闭' },
+    { key: 'netIncrease', title: '净增' },
+    { key: 'unprocessedBacklog', title: '未处理存量' },
+    { key: 'openBacklog', title: '未关闭存量' },
+    { key: 'problemCount', title: 'Bug' },
+    { key: 'nonProblemCount', title: '非Bug' },
+    { key: 'supportCount', title: '支持类' },
+    { key: 'avgFirstResponseSeconds', title: '平均响应耗时' },
+    { key: 'avgFirstProcessSeconds', title: '平均处理耗时' },
+    { key: 'problemPatternCounts', title: 'Top细分问题' },
+    { key: 'moduleCounts', title: 'Top模块' },
+  ];
+  const defaultTrendDetailColumnKeys = trendDetailColumnOptions.map((item) => item.key);
   const visibleStatisticsBlockKeys = ref([...defaultStatisticsBlockKeys]);
   const visibleTrendBlockKeys = ref([...defaultTrendBlockKeys]);
+  const visibleTrendDetailColumnKeys = ref([...defaultTrendDetailColumnKeys]);
   const visibleStatisticsBlocks = computed(() => {
     const visibleKeys = new Set(visibleStatisticsBlockKeys.value);
     return statisticsBlockOptions.filter((item) => visibleKeys.has(item.key));
   });
   const visibleTrendBlockKeySet = computed(() => new Set(visibleTrendBlockKeys.value));
+  const visibleTrendDetailColumnKeySet = computed(
+    () => new Set(normalizeTrendDetailColumnKeys(visibleTrendDetailColumnKeys.value))
+  );
+  const trendWarnings = computed(() =>
+    Array.isArray(trend.value?.warnings) ? trend.value.warnings.filter((item) => item?.message) : []
+  );
   const hasVisibleTrendCharts = computed(
     () =>
       isTrendBlockVisible('overallTrend') ||
@@ -549,6 +621,7 @@
       ...queryParams.value,
       granularity: trendGranularity.value,
       statisticsMode: statisticsMode.value,
+      weekBucketMode: trendGranularity.value === 'week' ? weekBucketMode.value : undefined,
       projectIds: selectedProjectIds.value.length ? selectedProjectIds.value.join(',') : undefined,
       moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined,
       moduleCodes: selectedModuleCodes.value.length
@@ -625,21 +698,57 @@
       });
   }
 
+  function normalizeTrendDetailColumnKeys(value) {
+    const validKeys = new Set(trendDetailColumnOptions.map((item) => item.key));
+    const rawKeys = Array.isArray(value?.visibleColumns) ? value.visibleColumns : value;
+    const normalized = (Array.isArray(rawKeys) ? rawKeys : defaultTrendDetailColumnKeys)
+      .map((item) => String(item || '').trim())
+      .filter((item) => validKeys.has(item));
+    const result = normalized.length ? normalized : [...defaultTrendDetailColumnKeys];
+    if (!result.includes('bucket')) {
+      result.unshift('bucket');
+    }
+    return result;
+  }
+
+  function loadTrendDetailColumnConfig() {
+    return getCurrentUserConfig('ticket', 'ticket_statistics_detail_columns')
+      .then((response) => {
+        visibleTrendDetailColumnKeys.value = normalizeTrendDetailColumnKeys(response.data?.configValue);
+      })
+      .catch(() => {
+        visibleTrendDetailColumnKeys.value = [...defaultTrendDetailColumnKeys];
+      });
+  }
+
   function saveStatisticsBlockConfig() {
     visibleStatisticsBlockKeys.value = normalizeStatisticsBlockKeys(
       visibleStatisticsBlockKeys.value
     );
     visibleTrendBlockKeys.value = normalizeTrendBlockKeys(visibleTrendBlockKeys.value);
-    saveCurrentUserConfig({
-      configType: 'ticket',
-      configKey: 'ticket_statistics_blocks',
-      configValue: {
-        configVersion: statisticsBlockConfigVersion,
-        visibleBlocks: visibleStatisticsBlockKeys.value,
-        visibleTrendBlocks: visibleTrendBlockKeys.value,
-      },
-      remark: '工单统计页面显示块配置',
-    }).then(() => {
+    visibleTrendDetailColumnKeys.value = normalizeTrendDetailColumnKeys(
+      visibleTrendDetailColumnKeys.value
+    );
+    Promise.all([
+      saveCurrentUserConfig({
+        configType: 'ticket',
+        configKey: 'ticket_statistics_blocks',
+        configValue: {
+          configVersion: statisticsBlockConfigVersion,
+          visibleBlocks: visibleStatisticsBlockKeys.value,
+          visibleTrendBlocks: visibleTrendBlockKeys.value,
+        },
+        remark: '工单统计页面显示块配置',
+      }),
+      saveCurrentUserConfig({
+        configType: 'ticket',
+        configKey: 'ticket_statistics_detail_columns',
+        configValue: {
+          visibleColumns: visibleTrendDetailColumnKeys.value,
+        },
+        remark: '工单统计趋势明细列配置',
+      }),
+    ]).then(() => {
       blockConfigOpen.value = false;
       nextTick(() => {
         renderTrendCharts();
@@ -652,6 +761,7 @@
   function resetStatisticsBlockConfig() {
     visibleStatisticsBlockKeys.value = [...defaultStatisticsBlockKeys];
     visibleTrendBlockKeys.value = [...defaultTrendBlockKeys];
+    visibleTrendDetailColumnKeys.value = [...defaultTrendDetailColumnKeys];
     nextTick(() => {
       renderTrendCharts();
       resizeTrendCharts();
@@ -702,17 +812,70 @@
   }
 
   function resetQuery() {
-    dateRange.value = [];
+    applyDefaultTimeConfig();
     selectedProjectIds.value = [];
     selectedModuleIds.value = [];
     selectedModuleCodes.value = [];
     selectedIssueTypeIds.value = [];
     selectedProblemPatternCodes.value = [];
     trendGranularity.value = 'week';
+    weekBucketMode.value = normalizeWeekBucketMode(
+      timeConfigPayload.value?.config?.trendWeekBucketMode || 'business_week'
+    );
     statisticsMode.value = 'realtime';
-    queryParams.value = { beginTime: undefined, endTime: undefined };
     loadModuleOptions([]);
     getStatistics();
+  }
+
+  function loadTimeConfig() {
+    return getTicketStatisticsTimeConfig()
+      .then((response) => {
+        timeConfigPayload.value = response.data || {};
+        timeConfigRangeLabel.value = timeConfigPayload.value.rangeLabel || '';
+        applyDefaultTimeConfig();
+        weekBucketMode.value = normalizeWeekBucketMode(
+          timeConfigPayload.value?.config?.trendWeekBucketMode || 'business_week'
+        );
+      })
+      .catch(() => {
+        timeConfigPayload.value = null;
+        timeConfigRangeLabel.value = '';
+        applyFallbackDefaultDateRange();
+      });
+  }
+
+  function applyDefaultTimeConfig() {
+    const defaultRange = timeConfigPayload.value?.defaultRange || {};
+    if (defaultRange.beginTime && defaultRange.endTime) {
+      dateRange.value = [defaultRange.beginTime, defaultRange.endTime];
+      queryParams.value = {
+        beginTime: defaultRange.beginTime,
+        endTime: defaultRange.endTime,
+      };
+      return;
+    }
+    applyFallbackDefaultDateRange();
+  }
+
+  function applyFallbackDefaultDateRange() {
+    const endDate = new Date();
+    const beginDate = new Date();
+    beginDate.setDate(endDate.getDate() - 6);
+    const beginTime = formatDate(beginDate);
+    const endTime = formatDate(endDate);
+    dateRange.value = [beginTime, endTime];
+    queryParams.value = { beginTime, endTime };
+  }
+
+  function formatDate(value) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function normalizeWeekBucketMode(value) {
+    return ['calendar_week', 'business_week'].includes(value) ? value : 'calendar_week';
   }
 
   function formatSeconds(seconds) {
@@ -805,6 +968,10 @@
 
   function isTrendBlockVisible(key) {
     return visibleTrendBlockKeySet.value.has(key);
+  }
+
+  function isTrendDetailColumnVisible(key) {
+    return visibleTrendDetailColumnKeySet.value.has(key);
   }
 
   function getTrendSeries() {
@@ -1066,8 +1233,9 @@
 
   loadProjectOptions().then(() => loadModuleOptions([]));
   loadStatClassificationOptions();
-  loadStatisticsBlockConfig();
-  getStatistics();
+  Promise.all([loadStatisticsBlockConfig(), loadTrendDetailColumnConfig(), loadTimeConfig()]).finally(() => {
+    getStatistics();
+  });
 
   watch(
     visibleTrendBlockKeys,

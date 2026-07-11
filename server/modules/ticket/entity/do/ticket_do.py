@@ -602,6 +602,71 @@ class TicketStatisticsDaily(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
+class TicketStatisticsPeriodSnapshot(Base):
+    """
+    工单周期统计快照表，用于冻结非自然日周期，例如周四 18:00 开始的业务周。
+    """
+
+    __tablename__ = "ticket_statistics_period_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "period_type",
+            "period_start_time",
+            "snapshot_scope",
+            "project_id",
+            "module_id",
+            "issue_type_id",
+            name="uk_ticket_statistics_period_scope",
+        ),
+        Index("idx_ticket_statistics_period_start", "period_type", "period_start_time"),
+        Index("idx_ticket_statistics_period_scope_start", "snapshot_scope", "period_type", "period_start_time"),
+        Index("idx_ticket_statistics_period_project", "period_start_time", "project_id"),
+        Index("idx_ticket_statistics_period_module", "period_start_time", "module_id", "module_code"),
+        Index("idx_ticket_statistics_period_issue_type", "period_start_time", "issue_type_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="统计ID")
+    period_type: Mapped[str] = mapped_column(String(32), nullable=False, default="business_week", comment="周期类型")
+    period_key: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="周期键，如业务周开始日期")
+    period_start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="周期开始时间")
+    period_end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="周期结束时间")
+    snapshot_scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all", comment="快照范围：all全局，leaf项目模块问题类型明细"
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID，0表示全局或未归属")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称快照")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID，0表示全局或未归属")
+    module_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块名称快照")
+    module_code: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块业务码快照")
+    issue_type_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="工单类型编码，空表示全局或未填写"
+    )
+    issue_type_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="工单类型名称快照")
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="工单总数")
+    submitted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数")
+    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数（兼容旧字段）")
+    first_responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已响应数")
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已处理数")
+    processed_in_new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单已处理数")
+    process_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment="新增工单处理率")
+    resolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="处置完成数")
+    closed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="关闭数")
+    unprocessed_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未处理存量")
+    open_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未关闭存量")
+    avg_first_response_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次响应耗时"
+    )
+    avg_first_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次处理耗时"
+    )
+    avg_resolve_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处置完成耗时")
+    avg_close_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均关闭耗时")
+    avg_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均处理秒数（旧字段，兼容保留）"
+    )
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+
 class UserStatisticsDaily(Base):
     """
     用户每日工单统计表，预留处理量和耗时聚合结果。

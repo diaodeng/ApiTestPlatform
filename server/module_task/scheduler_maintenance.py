@@ -1,7 +1,8 @@
 import asyncio
 import json
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as datetime_time
 from typing import Any
 
 from config.database import SessionLocal
@@ -14,6 +15,7 @@ from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicS
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
 from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
+from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
 
 from .task_register import register_job
@@ -448,6 +450,37 @@ def ticket_daily_statistics_snapshot(
     return _run_snapshot_single((date.today() - timedelta(days=1)).isoformat())
 
 
+@register_job("module_task.scheduler_maintenance.ticket_business_week_statistics_snapshot")
+def ticket_business_week_statistics_snapshot(
+    *args,
+    period_start_time: str | None = None,
+    business_week_start: str | None = None,
+    begin_time: str | None = None,
+    end_time: str | None = None,
+    **kwargs,
+):
+    """
+    工单业务周统计快照任务，支持默认上一完整业务周、单个业务周和范围补跑。
+
+    :param period_start_time: 单个业务周开始时间，格式 YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DD。
+    :param business_week_start: period_start_time 的别名。
+    :param begin_time: 范围补跑开始时间，按 7 天步进。
+    :param end_time: 范围补跑结束时间，按 7 天步进。
+    :return: 单个业务周或范围补跑摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    resolved_start = period_start_time or business_week_start or kwargs.pop("periodStartTime", None)
+    resolved_begin = begin_time or kwargs.pop("beginTime", None)
+    resolved_end = end_time or kwargs.pop("endTime", None)
+    if resolved_begin and resolved_end:
+        return _run_business_week_snapshot_range(task_id, resolved_begin, resolved_end)
+    if resolved_start:
+        return _run_business_week_snapshot_single(resolved_start)
+    return _run_business_week_snapshot_single(None)
+
+
 def _run_snapshot_single(date_str: str) -> dict[str, Any]:
     """
     执行单日快照生成。
@@ -510,6 +543,96 @@ def _run_snapshot_range(task_id: int, begin_date: str, end_date: str) -> dict[st
     logger.info(
         f"工单每日统计快照范围任务执行完成 | total_days={total_days}, "
         f"total_leaf_count={total_leaf}, failed_days={failed_days}"
+    )
+    return summary
+
+
+def _parse_business_week_start(value: str | None, config: dict[str, Any] | None = None) -> datetime | None:
+    """
+    解析业务周开始时间，日期字符串会使用业务周配置中的开始时刻。
+
+    :param value: 时间字符串。
+    :param config: 业务周配置，日期字符串补齐时刻时使用。
+    :return: datetime；空值返回 None。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        active_config = TicketStatisticsTimeUtil.normalize_config(config)
+        return datetime.combine(
+            date.fromisoformat(text),
+            datetime_time.fromisoformat(active_config["businessWeekStartTime"]),
+        )
+
+
+def _run_business_week_snapshot_single(period_start_time: str | None) -> dict[str, Any]:
+    """
+    执行单个业务周快照生成。
+
+    :param period_start_time: 业务周开始时间字符串；为空时由服务取上一完整业务周。
+    :return: 快照执行结果摘要。
+    """
+    with SessionLocal() as db:
+        config = TicketStatisticsTimeUtil.get_config(db)
+        start_time = _parse_business_week_start(period_start_time, config)
+        logger.info(f"工单业务周统计快照任务开始执行 | period_start_time={start_time or 'previous_completed'}")
+        result = TicketStatisticsSnapshotService.build_business_week_snapshot(db, start_time, config)
+    logger.info(
+        f"工单业务周统计快照任务执行完成 | period_start={result.get('periodStartTime')}, "
+        f"submitted_count={result.get('submitted_count')}, processed_count={result.get('processed_count')}"
+    )
+    return result
+
+
+def _run_business_week_snapshot_range(task_id: int, begin_time: str, end_time: str) -> dict[str, Any]:
+    """
+    按业务周开始时间范围逐周生成快照，每周独立 commit，某周失败不影响其他周。
+
+    :param task_id: 任务 ID，用于检查终止标记。
+    :param begin_time: 范围开始时间字符串。
+    :param end_time: 范围结束时间字符串。
+    :return: 范围执行汇总。
+    """
+    with SessionLocal() as db:
+        config = TicketStatisticsTimeUtil.get_config(db)
+    current = _parse_business_week_start(begin_time, config)
+    end = _parse_business_week_start(end_time, config)
+    if current is None or end is None:
+        raise ValueError("begin_time 和 end_time 不能为空")
+    total_weeks = 0
+    total_leaf = 0
+    failed_weeks: list[str] = []
+    logger.info(f"工单业务周统计快照任务开始范围执行 | begin_time={begin_time}, end_time={end_time}")
+    while current <= end:
+        if task_id and is_task_stop_requested(task_id):
+            logger.info(f"工单业务周统计快照范围任务已手动终止 | 已处理周数={total_weeks}, 当前开始={current}")
+            raise TaskStopRequestedError("任务已手动终止")
+        try:
+            logger.info(f"工单业务周统计快照范围执行中 | period_start_time={current}")
+            with SessionLocal() as db:
+                result = TicketStatisticsSnapshotService.build_business_week_snapshot(db, current)
+            total_weeks += 1
+            total_leaf += int(result.get("leafCount") or 0)
+        except TaskStopRequestedError:
+            raise
+        except Exception as e:
+            logger.error(f"工单业务周统计快照范围执行失败 | period_start_time={current}, error={e}")
+            failed_weeks.append(current.strftime("%Y-%m-%d %H:%M:%S"))
+        current += timedelta(days=7)
+    summary = {
+        "mode": "business_week_range",
+        "begin_time": begin_time,
+        "end_time": end_time,
+        "total_weeks": total_weeks,
+        "total_leaf_count": total_leaf,
+        "failed_weeks": failed_weeks,
+    }
+    logger.info(
+        f"工单业务周统计快照范围任务执行完成 | total_weeks={total_weeks}, "
+        f"total_leaf_count={total_leaf}, failed_weeks={failed_weeks}"
     )
     return summary
 

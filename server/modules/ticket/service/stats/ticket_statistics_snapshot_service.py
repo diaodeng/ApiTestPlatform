@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from modules.ticket.dao.ticket_dao import _date_end
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
 from modules.ticket.dao.ticket_statistics_daily_dao import TicketStatisticsDailyDao
+from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
 from modules.ticket.entity.do.ticket_do import Ticket
+from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
 
 
@@ -19,6 +21,7 @@ class TicketStatisticsSnapshotService:
 
     SCOPE_ALL = "all"
     SCOPE_LEAF = "leaf"
+    PERIOD_TYPE_BUSINESS_WEEK = "business_week"
 
     @classmethod
     def build_daily_snapshot(cls, db: Session, statistics_date: date | None = None) -> dict[str, Any]:
@@ -96,6 +99,109 @@ class TicketStatisticsSnapshotService:
             f"submitted_count={all_payload['submitted_count']}, leaf_count={leaf_count}"
         )
         return {"statisticsDate": target_date.isoformat(), "leafCount": leaf_count, **all_payload}
+
+    @classmethod
+    def build_business_week_snapshot(
+        cls,
+        db: Session,
+        period_start_time: datetime | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        生成并落库一个完整业务周的工单快照。
+        :param db: 数据库会话。
+        :param period_start_time: 业务周开始时间；为空时取上一完整业务周。
+        :param config: 业务周配置；为空时读取系统参数。
+        :return: 写入摘要。
+        """
+        active_config = TicketStatisticsTimeUtil.normalize_config(config or TicketStatisticsTimeUtil.get_config(db))
+        if isinstance(period_start_time, datetime):
+            start_time = period_start_time.replace(microsecond=0)
+        else:
+            start_time, _ = TicketStatisticsTimeUtil.get_business_week_range(
+                active_config,
+                datetime.now(),
+                "previous_completed",
+            )
+        period_end_time = start_time + timedelta(days=7) - timedelta(seconds=1)
+        rows = TicketProcessingStatsDao.list_trend_tickets(
+            db,
+            end_time=period_end_time,
+            project_ids=None,
+            module_ids=None,
+            module_codes=None,
+        )
+        module_code_map = TicketStatisticsPeriodSnapshotDao.build_module_code_map(
+            db,
+            [int(ticket.module_id) for ticket in rows if getattr(ticket, "module_id", None)],
+        )
+        project_name_map = TicketStatisticsPeriodSnapshotDao.build_project_name_map(
+            db,
+            [int(ticket.project_id) for ticket in rows if getattr(ticket, "project_id", None)],
+        )
+        all_payload = cls.build_metric_payload(rows, start_time, period_end_time)
+        TicketStatisticsPeriodSnapshotDao.upsert_by_scope(
+            db,
+            cls.PERIOD_TYPE_BUSINESS_WEEK,
+            start_time,
+            period_end_time,
+            {
+                **all_payload,
+                "period_key": start_time.date().isoformat(),
+                "snapshot_scope": cls.SCOPE_ALL,
+                "project_id": 0,
+                "project_name": "",
+                "module_id": 0,
+                "module_name": "",
+                "module_code": "",
+                "issue_type_id": "",
+                "issue_type_name": "",
+            },
+            snapshot_scope=cls.SCOPE_ALL,
+        )
+        leaf_count = 0
+        for dimension_rows in cls.group_leaf_rows(rows).values():
+            sample = dimension_rows[0]
+            project_id = int(getattr(sample, "project_id", None) or 0)
+            module_id = int(getattr(sample, "module_id", None) or 0)
+            issue_type_id = str(getattr(sample, "issue_type_id", None) or "").strip()
+            payload = cls.build_metric_payload(dimension_rows, start_time, period_end_time)
+            TicketStatisticsPeriodSnapshotDao.upsert_by_scope(
+                db,
+                cls.PERIOD_TYPE_BUSINESS_WEEK,
+                start_time,
+                period_end_time,
+                {
+                    **payload,
+                    "period_key": start_time.date().isoformat(),
+                    "snapshot_scope": cls.SCOPE_LEAF,
+                    "project_id": project_id,
+                    "project_name": project_name_map.get(project_id, ""),
+                    "module_id": module_id,
+                    "module_name": str(getattr(sample, "module_name", None) or "").strip(),
+                    "module_code": module_code_map.get(module_id, ""),
+                    "issue_type_id": issue_type_id,
+                    "issue_type_name": str(getattr(sample, "issue_type_name", None) or "").strip(),
+                },
+                snapshot_scope=cls.SCOPE_LEAF,
+                project_id=project_id,
+                module_id=module_id,
+                issue_type_id=issue_type_id,
+            )
+            leaf_count += 1
+        db.commit()
+        logger.info(
+            f"工单业务周快照已生成 | period_start={start_time}, period_end={period_end_time}, "
+            f"submitted_count={all_payload['submitted_count']}, leaf_count={leaf_count}"
+        )
+        return {
+            "periodType": cls.PERIOD_TYPE_BUSINESS_WEEK,
+            "periodStartTime": start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "periodEndTime": period_end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "periodKey": start_time.date().isoformat(),
+            "leafCount": leaf_count,
+            **all_payload,
+        }
 
     @classmethod
     def build_metric_payload(

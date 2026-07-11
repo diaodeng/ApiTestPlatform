@@ -1,3 +1,20 @@
+## 2026-07-11
+
+1. 工单统计新增业务周周期快照：新增 `ticket_statistics_period_snapshot`、业务周快照 DAO、SQL 迁移和定时任务 `ticket_business_week_statistics_snapshot`。
+2. 快照口径下 `granularity=week&weekBucketMode=business_week` 改为读取业务周周期快照，overview 和 trend 均按周四 18:00 等业务周边界精确统计，不再返回自然日快照限制提示。
+3. 新增说明文档：`web/public/docs/2026-07-11-ticket-business-week-period-snapshot.md`。
+
+## 2026-07-11
+
+1. 工单统计与相似工单第一、二阶段落地：统计页新增默认时间配置、业务周趋势分桶、快照业务周限制提示和趋势明细列用户配置；详情页相似工单优先复用当前工单已保存向量，向量缺失或过期时同步刷新向量后再查询。
+2. `#/ticket/detail/:ticketId` 改为独立详情页组件，不再复用工单列表页入口，避免打开相似工单系统详情时加载列表状态或请求 `/ticket/list`。
+3. 新增说明文档：`web/public/docs/2026-07-11-ticket-statistics-similarity-phase1-2.md`。
+
+## 2026-07-11
+
+1. 新增工单统计、相似工单、版本治理与独立详情页后续实施方案文档：明确详情页相似查询应复用已保存向量，不再每次同步调用外部 Embedding；统计默认时间支持“最近 N 天”和按周四 18:00 等业务周起点配置；说明当前自然日快照无法精确支撑非自然日业务周，正式周报需新增业务周期快照。
+2. 方案同时覆盖版本批量维护、版本统计、统计页趋势明细列持久化配置和真正独立的工单详情页拆分路径。
+
 ## 2026-07-10
 
 1. 工单统计第三阶段补齐快照口径：新增自然日快照任务，`ticket_statistics_daily` 扩展为提交、响应、处理率、未处理存量等冻结字段。

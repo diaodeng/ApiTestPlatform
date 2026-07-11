@@ -25,6 +25,7 @@ from modules.ticket.entity.do.ticket_do import (
 )
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
 from modules.ticket.entity.vo.ticket_vo import KnowledgeArticleQueryModel, TicketQueryModel
+from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.page_util import PageUtil
 
 
@@ -40,7 +41,13 @@ def _date_start(value: date | datetime | str | None) -> datetime | None:
         return value
     if isinstance(value, date):
         return datetime.combine(value, time.min)
-    return datetime.combine(date.fromisoformat(str(value)[:10]), time.min)
+    text = str(value).strip()
+    if len(text) > 10:
+        try:
+            return datetime.fromisoformat(text.replace("T", " "))
+        except ValueError:
+            pass
+    return datetime.combine(date.fromisoformat(text[:10]), time.min)
 
 
 def _date_end(value: date | datetime | str | None) -> datetime | None:
@@ -55,7 +62,13 @@ def _date_end(value: date | datetime | str | None) -> datetime | None:
         return value
     if isinstance(value, date):
         return datetime.combine(value, time.max)
-    return datetime.combine(date.fromisoformat(str(value)[:10]), time.max)
+    text = str(value).strip()
+    if len(text) > 10:
+        try:
+            return datetime.fromisoformat(text.replace("T", " "))
+        except ValueError:
+            pass
+    return datetime.combine(date.fromisoformat(text[:10]), time.max)
 
 
 def _parse_sync_time(value: Any) -> datetime | None:
@@ -1621,6 +1634,8 @@ class TicketDao:
         granularity: str | None = "week",
         problem_pattern_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
+        week_bucket_mode: str | None = "calendar_week",
+        week_bucket_config: dict[str, Any] | None = None,
     ) -> dict:
         """
         实时计算工单趋势，面向治理看板展示按提交时间归属的新增、关闭、存量和关键分类变化。
@@ -1633,9 +1648,18 @@ class TicketDao:
         :param granularity: 趋势粒度，day/week/month
         :param problem_pattern_codes: 细分问题类型编码过滤
         :param issue_type_ids: 工单类型编码过滤
+        :param week_bucket_mode: 周趋势分桶模式，支持自然周和业务周
+        :param week_bucket_config: 业务周配置
         :return: 趋势统计结果
         """
         normalized_granularity = _normalize_granularity(granularity)
+        normalized_week_bucket_mode = (
+            str(week_bucket_mode or "calendar_week").strip().lower()
+            if normalized_granularity == "week"
+            else "calendar_week"
+        )
+        if normalized_week_bucket_mode not in {"calendar_week", "business_week"}:
+            normalized_week_bucket_mode = "calendar_week"
         matched_module_ids_by_code = (
             _resolve_module_ids_by_codes(db, module_codes or [], project_ids or None)
             if module_codes
@@ -1677,12 +1701,16 @@ class TicketDao:
             return {"granularity": normalized_granularity, "series": []}
         start_time = begin_time or min(event_times)
         finish_time = end_time or max(event_times)
-        start_bucket = _bucket_start(start_time, normalized_granularity)
-        finish_bucket = _bucket_start(finish_time, normalized_granularity)
+        start_bucket = cls._trend_bucket_start(
+            start_time, normalized_granularity, normalized_week_bucket_mode, week_bucket_config
+        )
+        finish_bucket = cls._trend_bucket_start(
+            finish_time, normalized_granularity, normalized_week_bucket_mode, week_bucket_config
+        )
         current_bucket = start_bucket
         while current_bucket <= finish_bucket:
             bucket_map[current_bucket] = {
-                "bucket": _bucket_label(current_bucket, normalized_granularity),
+                "bucket": cls._trend_bucket_label(current_bucket, normalized_granularity, normalized_week_bucket_mode),
                 "bucket_start": current_bucket.isoformat(),
                 "new_count": 0,
                 "closed_count": 0,
@@ -1711,7 +1739,11 @@ class TicketDao:
                 return None
             if end_time and value > end_time:
                 return None
-            return bucket_map.get(_bucket_start(value, normalized_granularity))
+            return bucket_map.get(
+                cls._trend_bucket_start(
+                    value, normalized_granularity, normalized_week_bucket_mode, week_bucket_config
+                )
+            )
 
         for ticket in rows:
             create_bucket = get_bucket_for_time(submit_time_map.get(ticket.ticket_id))
@@ -1757,7 +1789,9 @@ class TicketDao:
         for bucket_date in sorted(bucket_map):
             bucket = bucket_map[bucket_date]
             next_bucket = _next_bucket_start(bucket_date, normalized_granularity)
-            next_bucket_time = datetime.combine(next_bucket, time.min)
+            next_bucket_time = cls._trend_next_bucket_boundary(
+                next_bucket, normalized_granularity, normalized_week_bucket_mode, week_bucket_config
+            )
             backlog_count = sum(
                 1
                 for ticket in rows
@@ -1781,6 +1815,58 @@ class TicketDao:
             "granularity": normalized_granularity,
             "series": series,
         }
+
+    @staticmethod
+    def _trend_bucket_start(
+        value: datetime,
+        granularity: str,
+        week_bucket_mode: str,
+        week_bucket_config: dict[str, Any] | None = None,
+    ) -> date:
+        """
+        计算趋势桶开始日期，周粒度可按业务周起点归属。
+        :param value: 事件时间
+        :param granularity: day/week/month
+        :param week_bucket_mode: calendar_week/business_week
+        :param week_bucket_config: 业务周配置
+        :return: 桶开始日期
+        """
+        if granularity == "week" and week_bucket_mode == "business_week":
+            return TicketStatisticsTimeUtil.business_week_bucket_key(value, week_bucket_config)
+        return _bucket_start(value, granularity)
+
+    @staticmethod
+    def _trend_bucket_label(bucket_date: date, granularity: str, week_bucket_mode: str) -> str:
+        """
+        格式化趋势桶标签，业务周显示业务周开始日期。
+        :param bucket_date: 桶开始日期
+        :param granularity: day/week/month
+        :param week_bucket_mode: calendar_week/business_week
+        :return: 展示标签
+        """
+        if granularity == "week" and week_bucket_mode == "business_week":
+            return f"{bucket_date.isoformat()}业务周"
+        return _bucket_label(bucket_date, granularity)
+
+    @staticmethod
+    def _trend_next_bucket_boundary(
+        next_bucket_date: date,
+        granularity: str,
+        week_bucket_mode: str,
+        week_bucket_config: dict[str, Any] | None = None,
+    ) -> datetime:
+        """
+        计算下一个趋势桶边界时间，用于存量统计。
+        :param next_bucket_date: 下一个桶开始日期
+        :param granularity: day/week/month
+        :param week_bucket_mode: calendar_week/business_week
+        :param week_bucket_config: 业务周配置
+        :return: 边界时间
+        """
+        if granularity == "week" and week_bucket_mode == "business_week":
+            config = TicketStatisticsTimeUtil.normalize_config(week_bucket_config)
+            return datetime.combine(next_bucket_date, time.fromisoformat(config["businessWeekStartTime"]))
+        return datetime.combine(next_bucket_date, time.min)
 
     @staticmethod
     def _increase_counter(counter: dict[str, int], key: str):

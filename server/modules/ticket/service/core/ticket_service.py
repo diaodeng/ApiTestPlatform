@@ -49,6 +49,7 @@ from modules.ticket.service.ai.ticket_auto_classification_service import TicketA
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimilarityQueryService
 from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
@@ -1206,6 +1207,8 @@ class TicketService:
         result["snapshots"] = message_bundle.get("snapshots") or []
         result["latestSnapshot"] = message_bundle.get("latestSnapshot")
         result["similarTickets"] = message_bundle.get("similarTickets") or []
+        result["similarEmbeddingStatus"] = message_bundle.get("similarEmbeddingStatus") or "disabled"
+        result["similarEmbeddingMessage"] = message_bundle.get("similarEmbeddingMessage") or ""
         result["aiPromptLayers"] = TicketPromptService.resolve_prompt_layers(query_db, ticket)
         return result
 
@@ -1997,29 +2000,15 @@ class TicketService:
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
             return None
-        search_text = " ".join(
-            str(item)
-            for item in [
-                ticket.title,
-                ticket.description,
-                ticket.root_cause,
-                ticket.solution,
-                ticket.module_name,
-                ticket.category_name,
-            ]
-            if item
-        )
-        similar_tickets = [
-            item
-            for item in TicketEmbeddingService.search_tickets(query_db, search_text, 6)
-            if item.get("ticketId") != ticket_id
-        ]
+        similarity_result = TicketSimilarityQueryService.search_similar_tickets_by_ticket(query_db, ticket_id, limit=5)
         snapshots = TicketDao.list_snapshots(query_db, ticket_id)
         return {
             "messages": CamelCaseUtil.transform_result(TicketDao.list_messages(query_db, ticket_id)),
             "snapshots": CamelCaseUtil.transform_result(snapshots),
             "latestSnapshot": CamelCaseUtil.transform_result(snapshots[0]) if snapshots else None,
-            "similarTickets": similar_tickets[:5],
+            "similarTickets": similarity_result.get("similarTickets") or [],
+            "similarEmbeddingStatus": similarity_result.get("similarEmbeddingStatus") or "disabled",
+            "similarEmbeddingMessage": similarity_result.get("similarEmbeddingMessage") or "",
         }
 
     @classmethod

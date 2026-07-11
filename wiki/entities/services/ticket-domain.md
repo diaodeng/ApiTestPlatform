@@ -6,15 +6,16 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-08
+freshness: 2026-07-11
 created: 2026-05-20
-updated: 2026-07-08
+updated: 2026-07-11
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
   - server/modules/ticket/service/core/ticket_import_service.py
   - server/modules/ticket/service/core/ticket_processing_metric_service.py
   - server/modules/ticket/service/stats/ticket_processing_stats_service.py
+  - server/modules/ticket/util/ticket_statistics_time_util.py
   - server/modules/ticket/service/issue/ticket_issue_service.py
   - server/modules/ticket/service/issue/ticket_relation_service.py
   - server/modules/ticket/service/sync/ticket_sync_service.py
@@ -32,6 +33,7 @@ related_files:
   - server/modules/ticket/service/ai/ticket_light_ai_service.py
   - server/modules/ticket/service/ai/ticket_ai_analysis_service.py
   - server/modules/ticket/service/ai/ticket_embedding_service.py
+  - server/modules/ticket/service/ai/ticket_similarity_query_service.py
   - server/modules/ticket/service/log_pull/ticket_log_pull_service.py
   - server/modules/ticket/service/log_pull/ticket_log_service.py
   - server/modules/ticket/service/collaboration/ticket_comment_core_service.py
@@ -59,7 +61,7 @@ related_files:
 ## 统计口径
 
 - `TicketProcessingStatsService` 支持 `statistics_mode=realtime/snapshot`。
-- `snapshot` 口径读取 `ticket_statistics_daily` 自然日冻结数据；无筛选时读取全局行，带项目、模块、模块 Code 或工单类型筛选时聚合叶子维度行。
+- `snapshot` 口径读取冻结快照；自然日、自然周和自然月读取 `ticket_statistics_daily` 自然日快照，业务周读取 `ticket_statistics_period_snapshot` 周期快照。无筛选时读取全局行，带项目、模块、模块 Code 或工单类型筛选时聚合叶子维度行。
 - `realtime` 口径继续按主表和事件表实时计算。
 - 汇总通知默认走快照口径，统计页可显式切换。
 
@@ -103,6 +105,11 @@ graph TD
 
 ## 当前关键约束
 
+- 2026-07-11 工单统计第一、二阶段落地：新增系统参数 `ticket.statistics.time.config` 和接口 `GET /ticket/statistics/time-config`，统计页首次进入和重置都会恢复后端返回的默认范围。默认配置按周四 18:00 的当前业务周计算，`rolling_days` 模式文案显示“最近 N 天”，不再称为“最近一周”。
+- `GET /ticket/statistics/trend` 新增 `weekBucketMode=calendar_week/business_week`。实时口径周粒度可按业务周起点分桶，旧整体趋势、问题性质趋势、Top 模块、Top 细分问题和新增处理趋势共享同一分桶。快照口径在 `granularity=week&weekBucketMode=business_week` 时读取 `ticket_statistics_period_snapshot`，按周四 18:00 等业务周边界精确统计，不再返回自然日快照限制提示。
+- 工单统计页新增用户配置 `ticket/ticket_statistics_detail_columns` 控制趋势明细列，`bucket` 为必选列；统计块和趋势块继续使用 `ticket_statistics_blocks`。
+- 工单详情相似推荐优先复用当前工单已保存向量：`TicketSimilarityQueryService.search_similar_tickets_by_ticket` 读取 `embedding_record` 并校验 `content_hash/model/version/dimension`，`provider=embedding` 用缓存向量与库内向量计算，`provider=qdrant` 用缓存向量查询 Qdrant；`TicketService.get_messages_services` 只调用该子服务并组装详情响应。向量缺失或过期时，详情链路会按当前 Provider 配置同步调用 `vectorize_ticket` 刷新向量，刷新成功后返回 `similarEmbeddingStatus=ready` 和相似工单，刷新失败才返回 `similarEmbeddingStatus=error`。
+- `#/ticket/detail/:ticketId` 已切到独立详情页 `web/src/views/ticket/detail/index.vue`，页面复用 `TicketDetailView` 并只请求详情、评论和时间线等详情接口，不加载 `useTicketList`，不请求 `/ticket/list`。
 - 2026-07-08 第一阶段已落地：`Ticket.submit_time` 作为统计主时间，`Ticket.processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，前端 `processStatus` 文案已改为“日志/AI进度”，业务处理结论通过 `processingConclusionStatus/processedAt` 展示。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)，实现记录见 [工单提交时间、处理结论和版本治理第一阶段实现记录](../../../../web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md)。
 - 同一方案确认保留当前 `resolved_at` 终态写入逻辑，但语义明确为“工单处置完成时间”，不是只代表真实 Bug 修复完成；真实 Bug 修复统计应结合 `is_problem`、`solution_type`、`resolution_code`、`fixed_version`、`released_at` 和 `verified_at`。
 - 版本治理字段已从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`extra_data.version_key` 暂保留供 AI 仓库映射兼容。
@@ -110,6 +117,7 @@ graph TD
 - 工单统计页趋势必须保留原有整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；新增处理口径时只增加独立“处理率与存量趋势”图，`TicketProcessingStatsService.get_statistics_trend` 需要合并 `TicketDao.get_statistics_trend` 的旧趋势字段和新增处理字段，不能用处理口径结果覆盖旧曲线数据。历史用户的 `ticket_statistics_blocks.visibleTrendBlocks` 缺少 `processingTrend` 时，前端按 `configVersion` 自动补齐一次，之后保存为新版配置并尊重用户手动隐藏选择。
 - 工单统计接口返回给前端前必须递归转小驼峰；`CamelCaseUtil.transform_result` 只转换最外层字段，不能直接用于 `/ticket/statistics/overview` 和 `/ticket/statistics/trend` 这类包含嵌套数组的响应，否则趋势桶中的 `newCount/problemCount/moduleCounts` 和统计块中的 `issueTypeName/isProblem/rootCauseType` 会被前端读成空值。
 - 2026-07-10 第三阶段维度快照已补齐：每日快照任务会生成 `snapshot_scope=all` 全局行和 `snapshot_scope=leaf` 项目/模块/工单类型叶子行；统计页快照口径下项目、模块、模块 Code、工单类型筛选参与聚合，细分问题筛选仍只对实时口径生效。多维度平均耗时按事件数量加权，周/月存量取桶内最后一天各维度存量后求和。
+- 2026-07-11 业务周周期快照已补齐：`TicketStatisticsPeriodSnapshot` 保存 `business_week` 周期开始/结束时间、全局行和叶子维度行；定时任务 `ticket_business_week_statistics_snapshot` 默认生成上一完整业务周，也支持 `period_start_time` 和 `begin_time/end_time` 补跑。统计页快照口径选择业务周时，overview 和 trend 都读取该周期表。
 - 工单统计 overview 汇总口径优先在后端归一：`null`、空字符串、空白和 `未填写` 统一为“未填写”；`issueTypeCounts`、`resolutionCounts`、`problemPatternCounts` 等 code/name 维度按稳定 code 汇总并使用当前枚举 label 展示，code 为空的历史数据再按名称汇总。前端统计块仍按最终展示文案做兜底合并，避免“解决方式”“关闭结果”“细分问题”出现重复同名行。
 - 2026-07-08 第二阶段 Issue 归因层已落地：`ticket_issue` 承载真实问题实例，`ticket.issue_id/issue_relation_type/issue_confirmed` 保存工单主归因，`ticket_relation` 只保留相似、重复、相关等补充关系。相似工单只提供人工确认入口，不根据相似度自动强绑定；本次未新增 Issue 统计看板。
 - 2026-07-04 工单拆分后保留多个控制器和子服务：CRUD、同步、日志拉取、AI、配置和 Webhook 路由分别注册；`TicketSyncService` 中仅为兼容拆分前私有入口存在的门面已清理，配置、主动拉取、评论同步、发布状态收敛和 AI 分类统计均直接调用对应子服务。

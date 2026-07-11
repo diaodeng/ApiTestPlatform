@@ -54,7 +54,7 @@ export const constantRoutes = [
     children: [
       {
         path: 'detail/:ticketId(\\d+)',
-        component: () => import('@/views/ticket/index.vue'),
+        component: () => import('@/views/ticket/detail/index.vue'),
         name: 'TicketDetail',
         meta: { title: '工单详情', activeMenu: '/ticket/ticket' },
       },

@@ -1150,8 +1150,12 @@ class TicketAiAnalysisService:
         )
         if selected_provider_code:
             snapshot["selectedAiProviderCode"] = selected_provider_code
-            snapshot["selectedAiProviderName"] = str(context_payload.get("selectedAiProviderName") or "").strip() or None
-            snapshot["selectedAiProviderType"] = str(context_payload.get("selectedAiProviderType") or "").strip() or None
+            snapshot["selectedAiProviderName"] = (
+                str(context_payload.get("selectedAiProviderName") or "").strip() or None
+            )
+            snapshot["selectedAiProviderType"] = (
+                str(context_payload.get("selectedAiProviderType") or "").strip() or None
+            )
             snapshot["selectedWorkerModel"] = str(context_payload.get("selectedWorkerModel") or "").strip() or None
 
         if isinstance(context_payload.get("promptLayers"), dict):

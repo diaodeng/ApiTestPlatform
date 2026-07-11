@@ -347,7 +347,11 @@ class TicketSyncAutomationService:
             if isinstance(sync_object.extra_data, dict)
             else {}
         )
-        ai_version_key = str(ai_extract_payload.get("versionKey") or "").strip() if isinstance(ai_extract_payload, dict) else ""
+        ai_version_key = (
+            str(ai_extract_payload.get("versionKey") or "").strip()
+            if isinstance(ai_extract_payload, dict)
+            else ""
+        )
         version_key = (
             str(sync_object.version_key or "").strip()
             or _extract_ticket_version_key(sync_object.extra_data)

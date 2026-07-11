@@ -83,8 +83,14 @@
 
 趋势分析支持三种时间粒度：
 - **天（Day）**：按自然日分桶
-- **周（Week）**：按 ISO 周分桶（周一为一周开始）
+- **周（Week）**：默认可按系统参数选择自然周或业务周分桶
 - **月（Month）**：按自然月分桶
+
+周粒度新增“周分桶”选项：
+- **自然周**：按 ISO 周分桶，周一为一周开始。
+- **业务周**：按系统参数 `ticket.statistics.time.config` 中的业务周起点分桶，默认周四 18:00。
+
+快照口径下，自然日、自然周和自然月继续读取 `ticket_statistics_daily` 自然日快照后聚合；`快照口径 + 周粒度 + 业务周` 读取 `ticket_statistics_period_snapshot` 业务周周期快照，可按周四 18:00 等非自然日边界精确统计。
 
 ---
 
@@ -226,6 +232,44 @@
 - **关键点**：任务默认目标是"昨天"而非"今天"，因此无论 23:55 还是次日凌晨执行，都能正确覆盖完整自然日数据。
 - **不推荐"统计今天"**：如果任务在 23:55 执行但统计"今天"，会丢失 23:55~24:00 之间提交的数据。统计"昨天"则无此问题。
 
+### 5.6 业务周快照任务
+
+**任务名称**：`ticket_business_week_statistics_snapshot`
+
+**默认统计**：上一完整业务周，业务周起点来自系统参数 `ticket.statistics.time.config`，默认周四 18:00。
+
+**任务职责**：
+1. 按业务周开始和结束时间统计完整周期。
+2. 写入 `ticket_statistics_period_snapshot` 表。
+3. 生成全局行和 `项目 + 模块 + 工单类型` 叶子维度行。
+
+手动执行示例：
+
+```json
+{}
+```
+
+补跑单个业务周：
+
+```json
+{
+  "period_start_time": "2026-07-09 18:00:00"
+}
+```
+
+如果只传日期，例如 `"2026-07-09"`，任务会自动使用当前配置的 `businessWeekStartTime` 补齐为 `2026-07-09 18:00:00`。
+
+范围补跑：
+
+```json
+{
+  "begin_time": "2026-06-25 18:00:00",
+  "end_time": "2026-07-09 18:00:00"
+}
+```
+
+范围模式按 7 天步进，每个业务周独立 commit，某周失败不影响后续业务周。
+
 ---
 
 ## 六、数据流转流程
@@ -280,8 +324,29 @@ TicketStatisticsSnapshotService.build_daily_snapshot()
 调用统计服务获取快照口径数据
     ↓
 生成通知内容
-    ↓
+↓
 推送到指定飞书群
+```
+
+### 6.4 业务周快照统计流程
+
+```
+业务周结束后定时任务触发
+    ↓
+TicketStatisticsSnapshotService.build_business_week_snapshot()
+    ↓
+按业务周开始/结束时间统计完整周期
+    ↓
+写入 ticket_statistics_period_snapshot 表（全局 + 叶子维度）
+    ↓
+用户查询统计页（快照口径 + 周粒度 + 业务周）
+    ↓
+GET /ticket/statistics/overview?statisticsMode=snapshot&weekBucketMode=business_week
+GET /ticket/statistics/trend?statisticsMode=snapshot&granularity=week&weekBucketMode=business_week
+    ↓
+后端查询 ticket_statistics_period_snapshot 表
+    ↓
+返回精确业务周快照结果
 ```
 
 ---
@@ -299,6 +364,8 @@ TicketStatisticsSnapshotService.build_daily_snapshot()
 ### Q3: 如何确保快照数据完整？
 
 **A**: 确保 `ticket_daily_statistics_snapshot` 定时任务正常运行。如果某天缺失快照，可以手动执行任务并指定日期参数。如需批量补跑，使用 `begin_date` 和 `end_date` 参数一次补跑多天。
+
+业务周统计还需要确保 `ticket_business_week_statistics_snapshot` 正常运行。历史业务周缺失时，使用 `period_start_time` 或 `begin_time/end_time` 补跑。
 
 ### Q4: 处理率的计算口径是什么？
 
@@ -367,6 +434,7 @@ TicketStatisticsSnapshotService.build_daily_snapshot()
 
 ### 9.1 相关接口
 
+- `GET /ticket/statistics/time-config`：统计默认时间配置
 - `GET /ticket/statistics/overview`：统计概览
 - `GET /ticket/statistics/trend`：趋势统计
 
@@ -383,6 +451,31 @@ TicketStatisticsSnapshotService.build_daily_snapshot()
 | `issueTypeIds` | string | 工单类型编码，逗号分隔 |
 | `problemPatternCodes` | string | 细分问题类型编码，逗号分隔（仅实时口径生效） |
 | `granularity` | string | 趋势粒度：`day`、`week`、`month` |
+| `weekBucketMode` | string | 周分桶：`calendar_week`、`business_week` |
+
+### 9.4 默认时间配置
+
+系统参数：`ticket.statistics.time.config`
+
+默认值：
+
+```json
+{
+  "defaultRangeMode": "business_week",
+  "rollingDays": 7,
+  "businessWeekStartWeekday": 4,
+  "businessWeekStartTime": "18:00:00",
+  "businessWeekDefaultWindow": "current",
+  "trendWeekBucketMode": "business_week"
+}
+```
+
+说明：
+- `rolling_days` 文案显示“最近 N 天”，不再称为“最近一周”。
+- `business_week + current` 显示“当前业务周”。
+- `business_week + previous_completed` 显示“上一完整业务周”。
+- 页面首次进入和点击“重置”都会恢复该默认范围。
+- 业务周默认范围会保留具体时分秒，例如 `2026-07-09 18:00:00` 至 `2026-07-16 17:59:59`。
 
 ### 9.3 相关文件
 
@@ -390,7 +483,8 @@ TicketStatisticsSnapshotService.build_daily_snapshot()
 - `server/modules/ticket/service/stats/ticket_processing_stats_service.py`：统计服务
 - `server/modules/ticket/service/stats/ticket_statistics_snapshot_service.py`：快照服务
 - `server/modules/ticket/dao/ticket_statistics_daily_dao.py`：快照数据访问
-- `server/modules/ticket/entity/do/ticket_do.py`：`TicketStatisticsDaily` 模型
+- `server/modules/ticket/dao/ticket_statistics_period_snapshot_dao.py`：业务周期快照数据访问
+- `server/modules/ticket/entity/do/ticket_do.py`：`TicketStatisticsDaily`、`TicketStatisticsPeriodSnapshot` 模型
 
 **前端**：
 - `web/src/views/ticket/statistics/index.vue`：统计页面
@@ -403,6 +497,8 @@ TicketStatisticsSnapshotService.build_daily_snapshot()
 
 ## 十、更新日志
 
+- **2026-07-11**：新增 `ticket_statistics_period_snapshot` 业务周周期快照表、业务周快照任务和快照口径业务周精确统计
 - **2026-07-10**：快照任务增强，默认统计昨天、支持日期范围批量补跑、新增调度时间建议
+- **2026-07-11**：新增统计默认时间配置、业务周趋势分桶和趋势明细列用户配置
 - **2026-07-10**：完成第三阶段实现，支持实时/快照双口径，新增每日快照任务
 - **2026-07-08**：完成第一阶段实现，新增 `submit_time`、`processed_at` 等时间字段

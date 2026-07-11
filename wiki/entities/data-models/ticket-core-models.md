@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-08
+freshness: 2026-07-11
 created: 2026-05-20
-updated: 2026-07-08
+updated: 2026-07-11
 related_files:
   - server/modules/ticket/entity/do/ticket_do.py
   - server/modules/ticket/entity/do/ticket_log_pull_do.py
@@ -45,6 +45,19 @@ related_files:
 
 第三阶段统计页会优先通过 `statistics_mode=snapshot` 读取这类冻结结果，避免实时字段变化影响历史周报口径。无筛选时读取 `snapshot_scope=all` 全局行；带项目、模块、模块 Code 或工单类型筛选时读取 `snapshot_scope=leaf` 并聚合叶子行。
 
+`TicketStatisticsPeriodSnapshot` 承接非自然日周期快照，当前用于业务周精确统计。核心字段包括：
+
+- `period_type`
+- `period_key`
+- `period_start_time/period_end_time`
+- `snapshot_scope`
+- `project_id/project_name`
+- `module_id/module_name/module_code`
+- `issue_type_id/issue_type_name`
+- 与 `TicketStatisticsDaily` 一致的提交、响应、处理、关闭、存量和平均耗时指标
+
+`period_type=business_week` 的记录由 `ticket_business_week_statistics_snapshot` 任务生成，默认统计上一完整业务周；`statisticsMode=snapshot&granularity=week&weekBucketMode=business_week` 会读取该表，不再用自然日快照模拟业务周。
+
 ```mermaid
 erDiagram
   Ticket ||--o{ TicketStatusHistory : has
@@ -71,6 +84,7 @@ erDiagram
 - `TicketIssue`、`TicketRelation`
 - `WorkflowStatus`、`WorkflowTransition`
 - `TicketStatisticsDaily`、`UserStatisticsDaily`
+- `TicketStatisticsPeriodSnapshot`
 - `TicketLogPullRecord`
 
 ## 关键字段约束
@@ -102,7 +116,9 @@ erDiagram
 - `TicketSnapshot` 是 ACR 当前快照版本，字段包含 `version`、`summary`、`root_cause`、`solution`、`prevention`、`risk`、`owner`、`source_type` 和结构化数据。
 - `EmbeddingRecord` 继续保存工单本地向量兜底索引，唯一键为 `object_type/object_id/embedding_model/embedding_version`；当 `ticket.similarity.config.provider=qdrant` 时，Qdrant 作为主检索索引，本表仍用于回退和审计。
 - 相似度重建会按工单标题、描述、AI 摘要、根因、解决方案和 RCA 重新计算 `EmbeddingRecord.embedding/content_hash`，并可同步写入 Qdrant payload。
+- 2026-07-11 起，工单详情页相似查询优先复用当前工单已保存的 `EmbeddingRecord.embedding`。查询前会按当前配置重新计算标准文本 `content_hash`，并校验模型、版本和维度；缺失或过期时同步刷新当前工单向量，刷新成功后继续使用新向量查询相似工单。
 - `ticket.similarity.config` 是系统参数 JSON，不新增业务表；其中 `sceneTriggers` 控制外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀是否自动刷新向量。
+- `ticket.statistics.time.config` 是系统参数 JSON，用于配置统计页默认时间范围和周趋势分桶；自然日快照由 `TicketStatisticsDaily` 承载，业务周快照由 `TicketStatisticsPeriodSnapshot` 承载。
 
 ## 参见
 

@@ -13,7 +13,9 @@ from modules.ticket.dao.ticket_dao import (
 )
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
 from modules.ticket.dao.ticket_statistics_daily_dao import TicketStatisticsDailyDao
+from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.common_util import CamelCaseUtil
 
 
@@ -85,6 +87,7 @@ class TicketProcessingStatsService:
         module_codes: Any = None,
         issue_type_ids: Any = None,
         statistics_mode: str | None = "realtime",
+        week_bucket_mode: str | None = "calendar_week",
     ) -> dict:
         """
         获取处理口径 overview 统计。
@@ -95,6 +98,7 @@ class TicketProcessingStatsService:
         :param module_ids: 模块ID多选。
         :param module_codes: 模块业务码多选。
         :param issue_type_ids: 工单类型编码多选。
+        :param week_bucket_mode: 周趋势分桶模式，快照 overview 在业务周下读取周期快照。
         :return: 小驼峰统计结果。
         """
         start = _date_start(begin_time)
@@ -104,7 +108,19 @@ class TicketProcessingStatsService:
         module_code_values = _normalize_text_list(module_codes)
         issue_type_id_values = _normalize_text_list(issue_type_ids)
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
+        normalized_week_bucket_mode = cls.normalize_week_bucket_mode(week_bucket_mode)
         if normalized_mode == "snapshot":
+            if normalized_week_bucket_mode == "business_week":
+                snapshot = cls.get_business_week_snapshot_statistics(
+                    query_db,
+                    start,
+                    finish,
+                    project_id_values,
+                    module_id_values,
+                    module_code_values,
+                    issue_type_id_values,
+                )
+                return _camelize(snapshot)
             snapshot = cls.get_snapshot_statistics(
                 query_db,
                 start,
@@ -384,6 +400,7 @@ class TicketProcessingStatsService:
         issue_type_ids: Any = None,
         problem_pattern_codes: Any = None,
         statistics_mode: str | None = "realtime",
+        week_bucket_mode: str | None = "calendar_week",
     ) -> dict:
         """
         获取处理口径趋势统计。
@@ -396,18 +413,33 @@ class TicketProcessingStatsService:
         :param granularity: day/week/month。
         :param issue_type_ids: 工单类型编码多选。
         :param problem_pattern_codes: 细分问题编码多选。
+        :param week_bucket_mode: 周趋势分桶模式。
         :return: 小驼峰趋势结果。
         """
         start = _date_start(begin_time)
         finish = _date_end(end_time)
         normalized_granularity = _normalize_granularity(granularity)
+        normalized_week_bucket_mode = cls.normalize_week_bucket_mode(week_bucket_mode)
         project_id_values = _normalize_int_list(project_ids)
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
         issue_type_id_values = _normalize_text_list(issue_type_ids)
         problem_pattern_code_values = _normalize_text_list(problem_pattern_codes)
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
+        time_config = TicketStatisticsTimeUtil.get_config(query_db)
         if normalized_mode == "snapshot":
+            if normalized_granularity == "week" and normalized_week_bucket_mode == "business_week":
+                return _camelize(
+                    cls.get_business_week_snapshot_trend(
+                        query_db,
+                        start,
+                        finish,
+                        project_id_values,
+                        module_id_values,
+                        module_code_values,
+                        issue_type_id_values,
+                    )
+                )
             snapshot_trend = cls.get_snapshot_trend(
                 query_db,
                 start,
@@ -430,6 +462,8 @@ class TicketProcessingStatsService:
                 granularity=normalized_granularity,
                 problem_pattern_codes=problem_pattern_code_values,
                 issue_type_ids=issue_type_id_values,
+                week_bucket_mode=normalized_week_bucket_mode,
+                week_bucket_config=time_config,
             )
         )
         rows = TicketProcessingStatsDao.list_trend_tickets(
@@ -441,8 +475,27 @@ class TicketProcessingStatsService:
             issue_type_ids=issue_type_id_values,
             problem_pattern_codes=problem_pattern_code_values,
         )
-        processing_trend = _camelize(cls.build_trend_metrics(rows, start, finish, normalized_granularity))
+        processing_trend = _camelize(
+            cls.build_trend_metrics(
+                rows,
+                start,
+                finish,
+                normalized_granularity,
+                week_bucket_mode=normalized_week_bucket_mode,
+                week_bucket_config=time_config,
+            )
+        )
         return cls.merge_trend_series(base_trend, processing_trend, normalized_granularity)
+
+    @staticmethod
+    def normalize_week_bucket_mode(value: str | None) -> str:
+        """
+        归一化周趋势分桶模式。
+        :param value: 原始分桶模式。
+        :return: calendar_week 或 business_week。
+        """
+        text = str(value or "").strip().lower()
+        return text if text in {"calendar_week", "business_week"} else "calendar_week"
 
     @classmethod
     def get_snapshot_statistics(
@@ -645,6 +698,181 @@ class TicketProcessingStatsService:
             bucket["net_increase"] = bucket["new_count"] - bucket["closed_count"]
         return {"granularity": granularity, "series": series}
 
+    @classmethod
+    def get_business_week_snapshot_statistics(
+        cls,
+        query_db: Session,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        project_ids: list[int] | None = None,
+        module_ids: list[int] | None = None,
+        module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
+    ) -> dict:
+        """
+        获取业务周周期快照口径的 overview 统计。
+        :param query_db: 数据库会话。
+        :param begin_time: 开始时间。
+        :param end_time: 结束时间。
+        :param project_ids: 项目ID过滤。
+        :param module_ids: 模块ID过滤。
+        :param module_codes: 模块业务码过滤。
+        :param issue_type_ids: 工单类型编码过滤。
+        :return: snake_case 统计结果。
+        """
+        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        rows = TicketStatisticsPeriodSnapshotDao.list_between(
+            query_db,
+            begin_time,
+            end_time,
+            period_type=TicketStatisticsPeriodSnapshotDao.PERIOD_TYPE_BUSINESS_WEEK,
+            snapshot_scope="leaf" if use_leaf_scope else "all",
+            project_ids=project_ids if use_leaf_scope else None,
+            module_ids=module_ids if use_leaf_scope else None,
+            module_codes=module_codes if use_leaf_scope else None,
+            issue_type_ids=issue_type_ids if use_leaf_scope else None,
+        )
+        leaf_rows = rows if use_leaf_scope else TicketStatisticsPeriodSnapshotDao.list_between(
+            query_db,
+            begin_time,
+            end_time,
+            period_type=TicketStatisticsPeriodSnapshotDao.PERIOD_TYPE_BUSINESS_WEEK,
+            snapshot_scope="leaf",
+        )
+        if not rows:
+            return {
+                "total": 0,
+                "submitted_count": 0,
+                "first_responded_count": 0,
+                "processed_count": 0,
+                "processed_in_new_count": 0,
+                "process_rate": 0,
+                "resolved_count": 0,
+                "closed_count": 0,
+                "unprocessed_count": 0,
+                "processed_status_counts": [],
+                "avg_first_response_seconds": 0,
+                "avg_first_process_seconds": 0,
+                "avg_resolve_seconds": 0,
+                "avg_close_seconds": 0,
+                "module_counts": [],
+                "issue_type_counts": [],
+            }
+        latest_rows = cls._latest_period_snapshot_rows(rows)
+        latest_leaf_rows = cls._latest_period_snapshot_rows(leaf_rows)
+        submitted_count = sum(int(row.submitted_count or 0) for row in rows)
+        first_responded_count = sum(int(row.first_responded_count or 0) for row in rows)
+        processed_count = sum(int(row.processed_count or 0) for row in rows)
+        processed_in_new_count = sum(int(row.processed_in_new_count or 0) for row in rows)
+        resolved_count = sum(int(row.resolved_count or 0) for row in rows)
+        closed_count = sum(int(row.closed_count or 0) for row in rows)
+        total_count = sum(int(row.total_count or 0) for row in latest_rows)
+        unprocessed_backlog = sum(int(row.unprocessed_backlog or 0) for row in latest_rows)
+        return {
+            "total": total_count,
+            "submitted_count": submitted_count,
+            "first_responded_count": first_responded_count,
+            "processed_count": processed_count,
+            "processed_in_new_count": processed_in_new_count,
+            "process_rate": round(processed_in_new_count / submitted_count, 4) if submitted_count else 0,
+            "resolved_count": resolved_count,
+            "closed_count": closed_count,
+            "unprocessed_count": unprocessed_backlog,
+            "processed_status_counts": [
+                {"status": "processed", "label": "已处理", "count": processed_in_new_count},
+                {"status": "unprocessed", "label": "未处理", "count": unprocessed_backlog},
+            ],
+            "avg_first_response_seconds": cls._weighted_snapshot_seconds(
+                rows, "avg_first_response_seconds", "first_responded_count"
+            ),
+            "avg_first_process_seconds": cls._weighted_snapshot_seconds(
+                rows, "avg_first_process_seconds", "processed_count"
+            ),
+            "avg_resolve_seconds": cls._weighted_snapshot_seconds(rows, "avg_resolve_seconds", "resolved_count"),
+            "avg_close_seconds": cls._weighted_snapshot_seconds(rows, "avg_close_seconds", "closed_count"),
+            "module_counts": cls._snapshot_count_rows(latest_leaf_rows, "module_name", "module"),
+            "issue_type_counts": cls._snapshot_code_name_rows(latest_leaf_rows, "issue_type_id", "issue_type_name"),
+        }
+
+    @classmethod
+    def get_business_week_snapshot_trend(
+        cls,
+        query_db: Session,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        project_ids: list[int] | None = None,
+        module_ids: list[int] | None = None,
+        module_codes: list[str] | None = None,
+        issue_type_ids: list[str] | None = None,
+    ) -> dict:
+        """
+        获取业务周周期快照口径的趋势统计。
+        :param query_db: 数据库会话。
+        :param begin_time: 开始时间。
+        :param end_time: 结束时间。
+        :param project_ids: 项目ID过滤。
+        :param module_ids: 模块ID过滤。
+        :param module_codes: 模块业务码过滤。
+        :param issue_type_ids: 工单类型编码过滤。
+        :return: snake_case 趋势结果。
+        """
+        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        rows = TicketStatisticsPeriodSnapshotDao.list_between(
+            query_db,
+            begin_time,
+            end_time,
+            period_type=TicketStatisticsPeriodSnapshotDao.PERIOD_TYPE_BUSINESS_WEEK,
+            snapshot_scope="leaf" if use_leaf_scope else "all",
+            project_ids=project_ids if use_leaf_scope else None,
+            module_ids=module_ids if use_leaf_scope else None,
+            module_codes=module_codes if use_leaf_scope else None,
+            issue_type_ids=issue_type_ids if use_leaf_scope else None,
+        )
+        leaf_rows = rows if use_leaf_scope else TicketStatisticsPeriodSnapshotDao.list_between(
+            query_db,
+            begin_time,
+            end_time,
+            period_type=TicketStatisticsPeriodSnapshotDao.PERIOD_TYPE_BUSINESS_WEEK,
+            snapshot_scope="leaf",
+        )
+        if not rows:
+            return {"granularity": "week", "series": []}
+        leaf_rows_by_start: dict[datetime, list[Any]] = {}
+        for row in leaf_rows:
+            leaf_rows_by_start.setdefault(row.period_start_time, []).append(row)
+        series: list[dict[str, Any]] = []
+        for row in rows:
+            bucket_key = row.period_start_time.date().isoformat()
+            leaf_rows_in_bucket = leaf_rows_by_start.get(row.period_start_time, [])
+            new_count = int(row.submitted_count or 0)
+            processed_in_new_count = int(row.processed_in_new_count or 0)
+            closed_count = int(row.closed_count or 0)
+            series.append(
+                {
+                    "bucket": f"{bucket_key}业务周",
+                    "bucket_start": bucket_key,
+                    "new_count": new_count,
+                    "first_responded_count": int(row.first_responded_count or 0),
+                    "processed_count": int(row.processed_count or 0),
+                    "processed_in_new_count": processed_in_new_count,
+                    "process_rate": round(processed_in_new_count / new_count, 4) if new_count else 0,
+                    "resolved_count": int(row.resolved_count or 0),
+                    "closed_count": closed_count,
+                    "net_increase": new_count - closed_count,
+                    "unprocessed_backlog": int(row.unprocessed_backlog or 0),
+                    "open_backlog": int(row.open_backlog or 0),
+                    "avg_first_response_seconds": int(row.avg_first_response_seconds or 0),
+                    "avg_first_process_seconds": int(row.avg_first_process_seconds or 0),
+                    "problem_count": 0,
+                    "non_problem_count": 0,
+                    "support_count": 0,
+                    "module_counts": cls._snapshot_count_rows(leaf_rows_in_bucket, "module_name", "name"),
+                    "issue_type_counts": cls._snapshot_count_rows(leaf_rows_in_bucket, "issue_type_name", "name"),
+                    "problem_pattern_counts": [],
+                }
+            )
+        return {"granularity": "week", "series": series}
+
     @staticmethod
     def _weighted_snapshot_seconds(rows: list[Any], field_name: str, weight_field_name: str) -> int:
         """
@@ -676,6 +904,18 @@ class TicketProcessingStatsService:
             return []
         latest_date = max(row.statistics_date for row in rows)
         return [row for row in rows if row.statistics_date == latest_date]
+
+    @staticmethod
+    def _latest_period_snapshot_rows(rows: list[Any]) -> list[Any]:
+        """
+        获取周期快照集合中最后周期的所有维度行。
+        :param rows: 周期快照行列表。
+        :return: 最后周期对应的行列表。
+        """
+        if not rows:
+            return []
+        latest_start_time = max(row.period_start_time for row in rows)
+        return [row for row in rows if row.period_start_time == latest_start_time]
 
     @classmethod
     def _snapshot_count_rows(cls, rows: list[Any], field_name: str, result_field_name: str) -> list[dict[str, Any]]:
@@ -813,6 +1053,8 @@ class TicketProcessingStatsService:
         begin_time: datetime | None,
         end_time: datetime | None,
         granularity: str,
+        week_bucket_mode: str = "calendar_week",
+        week_bucket_config: dict[str, Any] | None = None,
     ) -> dict:
         """
         基于工单列表计算处理趋势。
@@ -820,6 +1062,8 @@ class TicketProcessingStatsService:
         :param begin_time: 开始时间。
         :param end_time: 结束时间。
         :param granularity: day/week/month。
+        :param week_bucket_mode: 周趋势分桶模式。
+        :param week_bucket_config: 业务周配置。
         :return: snake_case 趋势结果。
         """
         event_times = [
@@ -838,10 +1082,24 @@ class TicketProcessingStatsService:
             return {"granularity": granularity, "series": []}
         start_time = begin_time or min(event_times)
         finish_time = end_time or max(event_times)
-        bucket_map = cls.init_bucket_map(start_time, finish_time, granularity)
+        bucket_map = cls.init_bucket_map(
+            start_time,
+            finish_time,
+            granularity,
+            week_bucket_mode=week_bucket_mode,
+            week_bucket_config=week_bucket_config,
+        )
         for ticket in rows:
             submit_time = cls.submit_time(ticket)
-            submit_bucket = cls.bucket_for_time(bucket_map, submit_time, granularity, begin_time, end_time)
+            submit_bucket = cls.bucket_for_time(
+                bucket_map,
+                submit_time,
+                granularity,
+                begin_time,
+                end_time,
+                week_bucket_mode=week_bucket_mode,
+                week_bucket_config=week_bucket_config,
+            )
             if submit_bucket:
                 submit_bucket["new_count"] += 1
                 if ticket.processed_at is not None:
@@ -852,13 +1110,26 @@ class TicketProcessingStatsService:
                 ("resolved_at", "resolved_count"),
                 ("closed_at", "closed_count"),
             ):
-                bucket = cls.bucket_for_time(bucket_map, getattr(ticket, field_name), granularity, begin_time, end_time)
+                bucket = cls.bucket_for_time(
+                    bucket_map,
+                    getattr(ticket, field_name),
+                    granularity,
+                    begin_time,
+                    end_time,
+                    week_bucket_mode=week_bucket_mode,
+                    week_bucket_config=week_bucket_config,
+                )
                 if bucket:
                     bucket[count_name] += 1
         series = []
         for bucket_date in sorted(bucket_map):
             bucket = bucket_map[bucket_date]
-            next_bucket_time = datetime.combine(cls.next_bucket_start(bucket_date, granularity), time.min)
+            next_bucket_time = cls.next_bucket_boundary(
+                bucket_date,
+                granularity,
+                week_bucket_mode=week_bucket_mode,
+                week_bucket_config=week_bucket_config,
+            )
             bucket["process_rate"] = (
                 round(bucket["processed_in_new_count"] / bucket["new_count"], 4) if bucket["new_count"] else 0
             )
@@ -881,14 +1152,28 @@ class TicketProcessingStatsService:
                 ticket
                 for ticket in rows
                 if cls.bucket_for_time(
-                    bucket_map, ticket.first_response_at, granularity, begin_time, end_time
+                    bucket_map,
+                    ticket.first_response_at,
+                    granularity,
+                    begin_time,
+                    end_time,
+                    week_bucket_mode=week_bucket_mode,
+                    week_bucket_config=week_bucket_config,
                 )
                 is bucket
             ]
             process_rows = [
                 ticket
                 for ticket in rows
-                if cls.bucket_for_time(bucket_map, ticket.processed_at, granularity, begin_time, end_time)
+                if cls.bucket_for_time(
+                    bucket_map,
+                    ticket.processed_at,
+                    granularity,
+                    begin_time,
+                    end_time,
+                    week_bucket_mode=week_bucket_mode,
+                    week_bucket_config=week_bucket_config,
+                )
                 is bucket
             ]
             bucket["avg_first_response_seconds"] = cls.average_seconds(response_rows, "first_response_at")
@@ -944,20 +1229,24 @@ class TicketProcessingStatsService:
         start_time: datetime,
         finish_time: datetime,
         granularity: str,
+        week_bucket_mode: str = "calendar_week",
+        week_bucket_config: dict[str, Any] | None = None,
     ) -> dict[date, dict[str, Any]]:
         """
         初始化趋势桶。
         :param start_time: 开始时间。
         :param finish_time: 结束时间。
         :param granularity: day/week/month。
+        :param week_bucket_mode: 周趋势分桶模式。
+        :param week_bucket_config: 业务周配置。
         :return: 趋势桶映射。
         """
         bucket_map: dict[date, dict[str, Any]] = {}
-        current_bucket = cls.bucket_start(start_time, granularity)
-        finish_bucket = cls.bucket_start(finish_time, granularity)
+        current_bucket = cls.bucket_start(start_time, granularity, week_bucket_mode, week_bucket_config)
+        finish_bucket = cls.bucket_start(finish_time, granularity, week_bucket_mode, week_bucket_config)
         while current_bucket <= finish_bucket:
             bucket_map[current_bucket] = {
-                "bucket": cls.bucket_label(current_bucket, granularity),
+                "bucket": cls.bucket_label(current_bucket, granularity, week_bucket_mode),
                 "bucket_start": current_bucket.isoformat(),
                 "new_count": 0,
                 "first_responded_count": 0,
@@ -976,31 +1265,43 @@ class TicketProcessingStatsService:
         return bucket_map
 
     @staticmethod
-    def bucket_start(value: datetime, granularity: str) -> date:
+    def bucket_start(
+        value: datetime,
+        granularity: str,
+        week_bucket_mode: str = "calendar_week",
+        week_bucket_config: dict[str, Any] | None = None,
+    ) -> date:
         """
         计算时间桶开始日期。
         :param value: 原始时间。
         :param granularity: day/week/month。
+        :param week_bucket_mode: 周趋势分桶模式。
+        :param week_bucket_config: 业务周配置。
         :return: 桶开始日期。
         """
         current_date = value.date()
         if granularity == "month":
             return current_date.replace(day=1)
         if granularity == "week":
+            if week_bucket_mode == "business_week":
+                return TicketStatisticsTimeUtil.business_week_bucket_key(value, week_bucket_config)
             return current_date - timedelta(days=current_date.weekday())
         return current_date
 
     @staticmethod
-    def bucket_label(bucket_date: date, granularity: str) -> str:
+    def bucket_label(bucket_date: date, granularity: str, week_bucket_mode: str = "calendar_week") -> str:
         """
         格式化时间桶标签。
         :param bucket_date: 桶日期。
         :param granularity: day/week/month。
+        :param week_bucket_mode: 周趋势分桶模式。
         :return: 标签。
         """
         if granularity == "month":
             return bucket_date.strftime("%Y-%m")
         if granularity == "week":
+            if week_bucket_mode == "business_week":
+                return f"{bucket_date.isoformat()}业务周"
             iso_year, iso_week, _ = bucket_date.isocalendar()
             return f"{iso_year}-W{iso_week:02d}"
         return bucket_date.strftime("%Y-%m-%d")
@@ -1022,6 +1323,28 @@ class TicketProcessingStatsService:
         return bucket_date + timedelta(days=1)
 
     @classmethod
+    def next_bucket_boundary(
+        cls,
+        bucket_date: date,
+        granularity: str,
+        week_bucket_mode: str = "calendar_week",
+        week_bucket_config: dict[str, Any] | None = None,
+    ) -> datetime:
+        """
+        计算下一个趋势桶边界时间，用于存量统计。
+        :param bucket_date: 当前桶日期。
+        :param granularity: 趋势粒度。
+        :param week_bucket_mode: 周趋势分桶模式。
+        :param week_bucket_config: 业务周配置。
+        :return: 下个桶开始 datetime。
+        """
+        next_date = cls.next_bucket_start(bucket_date, granularity)
+        if granularity == "week" and week_bucket_mode == "business_week":
+            config = TicketStatisticsTimeUtil.normalize_config(week_bucket_config)
+            return datetime.combine(next_date, time.fromisoformat(config["businessWeekStartTime"]))
+        return datetime.combine(next_date, time.min)
+
+    @classmethod
     def bucket_for_time(
         cls,
         bucket_map: dict[date, dict[str, Any]],
@@ -1029,6 +1352,8 @@ class TicketProcessingStatsService:
         granularity: str,
         begin_time: datetime | None,
         end_time: datetime | None,
+        week_bucket_mode: str = "calendar_week",
+        week_bucket_config: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """
         获取指定时间所属趋势桶。
@@ -1037,8 +1362,10 @@ class TicketProcessingStatsService:
         :param granularity: day/week/month。
         :param begin_time: 开始时间。
         :param end_time: 结束时间。
+        :param week_bucket_mode: 周趋势分桶模式。
+        :param week_bucket_config: 业务周配置。
         :return: 趋势桶或 None。
         """
         if not cls.time_in_range(value, begin_time, end_time):
             return None
-        return bucket_map.get(cls.bucket_start(value, granularity))
+        return bucket_map.get(cls.bucket_start(value, granularity, week_bucket_mode, week_bucket_config))

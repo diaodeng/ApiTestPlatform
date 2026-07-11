@@ -765,6 +765,14 @@ export function listTicketModuleOptions(query) {
 }
 
 // 查询工单统计
+export function getTicketStatisticsTimeConfig() {
+  return request({
+    url: '/ticket/statistics/time-config',
+    method: 'get',
+  });
+}
+
+// 查询工单统计
 export function getTicketStatistics(query) {
   return request({
     url: '/ticket/statistics/overview',

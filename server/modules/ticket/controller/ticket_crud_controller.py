@@ -127,7 +127,11 @@ async def search_ticket_natural_language(
             return ResponseUtil.success(data=[])
         
         # 提取工单ID列表和分数映射
-        ticket_id_score_map = {item.get("ticketId"): item.get("score", 0) for item in search_results if item.get("ticketId")}
+        ticket_id_score_map = {
+            item.get("ticketId"): item.get("score", 0)
+            for item in search_results
+            if item.get("ticketId")
+        }
         ticket_ids = list(ticket_id_score_map.keys())
         
         if not ticket_ids:
@@ -142,7 +146,11 @@ async def search_ticket_natural_language(
         query.is_page = False
         query_result = TicketService.get_ticket_list_services(query_db, query)
         
-        rows = query_result if isinstance(query_result, list) else (query_result.rows if hasattr(query_result, "rows") and query_result.rows else [])
+        rows = (
+            query_result
+            if isinstance(query_result, list)
+            else (query_result.rows if hasattr(query_result, "rows") and query_result.rows else [])
+        )
         # 为结果添加相似度分数
         for item in rows:
             if isinstance(item, dict):
@@ -480,7 +488,7 @@ async def get_ticket_messages(request: Request, ticket_id: int, query_db: Sessio
     :return: 工单消息流、ACR快照和相似工单推荐
     """
     try:
-        result = TicketService.get_messages_services(query_db, ticket_id)
+        result = await run_in_threadpool(TicketService.get_messages_services, query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
     except Exception as e:
         logger.exception(e)

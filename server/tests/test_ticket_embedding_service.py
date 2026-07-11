@@ -6,6 +6,7 @@ import requests
 
 from modules.ticket.entity.vo.ticket_vo import TicketEmbeddingRebuildRequestModel
 from modules.ticket.service.ai.ticket_embedding_service import ExternalEmbeddingUnavailableError, TicketEmbeddingService
+from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimilarityQueryService
 
 
 class TicketEmbeddingServiceTests(unittest.TestCase):
@@ -328,6 +329,150 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
 
         with patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response):
             TicketEmbeddingService._validate_similarity_config(config)
+
+    def test_cache_vector_similarity_search_does_not_call_external_embedding(self):
+        """详情页使用当前工单缓存向量查询时，不应调用外部 Embedding。"""
+        config = TicketEmbeddingService._normalize_config_for_save(
+            {
+                "provider": "embedding",
+                "threshold": 0,
+                "embedding": {
+                    "provider": "openai_compatible",
+                    "endpoint": "http://embedding.local/v1/embeddings",
+                    "model": "mock-embedding",
+                    "version": "v1",
+                    "dimension": 3,
+                },
+            }
+        )
+        records = [
+            type("Record", (), {"object_id": 1, "embedding": [1.0, 0.0, 0.0]})(),
+            type("Record", (), {"object_id": 2, "embedding": [0.9, 0.1, 0.0]})(),
+        ]
+
+        with (
+            patch.object(TicketEmbeddingService, "_embed_text_openai_compatible") as embed_mock,
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.list_ticket_embedding_records",
+                return_value=records,
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketEmbeddingService._build_ticket_search_result",
+                return_value=[],
+            ),
+        ):
+            TicketEmbeddingService.search_tickets_by_vector(
+                query_db=object(),
+                query_vector=[1.0, 0.0, 0.0],
+                limit=5,
+                config=config,
+                exclude_ticket_id=1,
+            )
+
+        embed_mock.assert_not_called()
+
+    def test_similarity_query_service_uses_cached_vector_context(self):
+        """按工单查相似工单应复用缓存向量上下文，不应调用外部 Embedding。"""
+        ticket = type("Ticket", (), {"ticket_id": 1})()
+        config = {"provider": "embedding", "threshold": 0}
+        with (
+            patch.object(TicketEmbeddingService, "_embed_text_openai_compatible") as embed_mock,
+            patch(
+                "modules.ticket.service.ai.ticket_similarity_query_service.TicketDao.get_ticket_by_id",
+                return_value=ticket,
+            ),
+            patch.object(TicketEmbeddingService, "get_similarity_config", return_value=config),
+            patch.object(
+                TicketEmbeddingService,
+                "get_ticket_embedding_context",
+                return_value={"status": "ready", "message": "", "vector": [1.0, 0.0, 0.0]},
+            ),
+            patch.object(
+                TicketEmbeddingService,
+                "search_tickets_by_vector",
+                return_value=[{"ticketId": 2, "score": 0.9}],
+            ) as search_mock,
+        ):
+            result = TicketSimilarityQueryService.search_similar_tickets_by_ticket(object(), 1, limit=5)
+
+        embed_mock.assert_not_called()
+        search_mock.assert_called_once()
+        self.assertEqual(result["similarEmbeddingStatus"], "ready")
+        self.assertEqual(result["similarTickets"], [{"ticketId": 2, "score": 0.9}])
+
+    def test_similarity_query_service_refreshes_missing_vector(self):
+        """当前工单向量缺失时，详情相似查询应刷新向量后再检索。"""
+        ticket = type("Ticket", (), {"ticket_id": 1})()
+        record = type("Record", (), {"embedding": [1.0, 0.0, 0.0]})()
+        query_db = type(
+            "QueryDb",
+            (),
+            {
+                "commit": lambda self: None,
+                "rollback": lambda self: None,
+            },
+        )()
+        config = {"provider": "embedding", "threshold": 0}
+        with (
+            patch(
+                "modules.ticket.service.ai.ticket_similarity_query_service.TicketDao.get_ticket_by_id",
+                return_value=ticket,
+            ),
+            patch.object(TicketEmbeddingService, "get_similarity_config", return_value=config),
+            patch.object(
+                TicketEmbeddingService,
+                "get_ticket_embedding_context",
+                return_value={"status": "missing", "message": "当前工单向量未生成"},
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_similarity_query_service.TicketDao.list_rca_by_ticket_ids",
+                return_value={},
+            ),
+            patch.object(TicketEmbeddingService, "vectorize_ticket", return_value=record) as vectorize_mock,
+            patch.object(
+                TicketEmbeddingService,
+                "search_tickets_by_vector",
+                return_value=[{"ticketId": 2, "score": 0.9}],
+            ) as search_mock,
+        ):
+            result = TicketSimilarityQueryService.search_similar_tickets_by_ticket(query_db, 1, limit=5)
+
+        vectorize_mock.assert_called_once_with(query_db, ticket, rca=None, config=config)
+        search_mock.assert_called_once()
+        self.assertEqual(result["similarEmbeddingStatus"], "ready")
+        self.assertEqual(result["similarEmbeddingMessage"], "当前工单向量已刷新后完成相似工单查询。")
+        self.assertEqual(result["similarTickets"], [{"ticketId": 2, "score": 0.9}])
+
+    def test_qdrant_cache_vector_search_uses_given_vector(self):
+        """Qdrant 详情查询应直接使用缓存向量，不先生成查询向量。"""
+        response = self._response(200, {"result": []})
+        config = TicketEmbeddingService._normalize_config_for_save(
+            {
+                "provider": "qdrant",
+                "threshold": 0,
+                "embedding": {
+                    "provider": "openai_compatible",
+                    "endpoint": "http://embedding.local/v1/embeddings",
+                    "model": "mock-embedding",
+                    "version": "v1",
+                    "dimension": 3,
+                },
+                "qdrant": {"url": "http://qdrant.local", "collection": "ticket_similarity"},
+            }
+        )
+
+        with (
+            patch.object(TicketEmbeddingService, "_embed_text_openai_compatible") as embed_mock,
+            patch.object(TicketEmbeddingService, "_ensure_qdrant_collection"),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.requests.post",
+                return_value=response,
+            ) as post_mock,
+        ):
+            TicketEmbeddingService.search_qdrant_by_vector([1.0, 0.0, 0.0], 5, config)
+
+        embed_mock.assert_not_called()
+        self.assertEqual(post_mock.call_args.kwargs["json"]["vector"], [1.0, 0.0, 0.0])
 
 
 if __name__ == "__main__":

@@ -8,6 +8,15 @@ updated: 2026-07-07
 
 # 操作日志
 
+## [2026-07-11] INGEST-CODE | 工单业务周周期快照与精确统计
+
+- 触发：用户要求实现业务周快照新表和快照业务周精确统计。
+- 架构层：工单域 / 统计服务 / 数据模型 / 定时任务 / Web 统计页。
+- 创建的页面：`server/modules/ticket/dao/ticket_statistics_period_snapshot_dao.py`、`server/sql/20260711_ticket_statistics_period_snapshot.sql`、`web/public/docs/2026-07-11-ticket-business-week-period-snapshot.md`
+- 更新的页面：`server/modules/ticket/entity/do/ticket_do.py`、`server/modules/ticket/service/stats/ticket_statistics_snapshot_service.py`、`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/modules/ticket/controller/ticket_config_controller.py`、`server/modules/ticket/util/ticket_statistics_time_util.py`、`server/module_task/scheduler_maintenance.py`、`server/tests/test_ticket_processing_metrics.py`、`web/src/views/ticket/statistics/index.vue`、`web/public/docs/2026-07-10-ticket-statistics-usage-guide.md`、`web/public/docs/2026-07-11-ticket-statistics-similarity-phase1-2.md`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：`ticket_statistics_period_snapshot` -> `TicketStatisticsPeriodSnapshotDao` -> `TicketStatisticsSnapshotService.build_business_week_snapshot` -> `ticket_business_week_statistics_snapshot` -> `TicketProcessingStatsService.get_business_week_snapshot_statistics/get_business_week_snapshot_trend` -> 统计页快照业务周读取精确周期快照。
+- 关键结论：自然日、自然周和自然月快照继续读取 `ticket_statistics_daily`；快照口径业务周读取周期表，不再返回 `snapshot_business_week_not_supported`。
+
 ## [2026-07-10] INGEST-CODE | 工单统计第三阶段维度快照补齐
 
 - 触发：用户要求继续实现方案第三阶段未实现部分，并按项目、模块、问题类型分维度冻结快照。
@@ -1301,3 +1310,11 @@ updated: 2026-07-07
 - 创建的双向链接：0 对
 - 变更传播链：`web/src/views/ticket/hooks/useLogViewer.js` / `useTicketList.js` / `useOptions.js` / `syncAutomation/hooks/useSyncConfig.js` -> 工单详情日志拉取、列表查询、AI 分析 Provider 联动、同步自动化保存校验。
 - 总共涉及页面：3
+## [2026-07-11] INGEST-CODE | 工单统计默认时间、业务周趋势与相似查询缓存化
+- 触发：用户要求按既定计划实现工单统计与相似工单第一、二阶段，并同步文档和 wiki。
+- 架构层：工单域 / 统计服务 / 相似度服务 / 独立详情页
+- 创建的页面：`web/public/docs/2026-07-11-ticket-statistics-similarity-phase1-2.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`entities/data-models/ticket-core-models.md`、`flows/ticket-automation-flow.md`、`web/public/docs/2026-07-10-ticket-statistics-usage-guide.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`ticket_statistics_time_util.py` -> `/ticket/statistics/time-config` -> 统计页默认范围；`TicketProcessingStatsService/TicketDao.get_statistics_trend` -> 业务周分桶；`TicketEmbeddingService.get_ticket_embedding_context/vectorize_ticket/search_tickets_by_vector` -> `TicketSimilarityQueryService.search_similar_tickets_by_ticket` -> `TicketService.get_messages_services` -> 详情相似推荐优先复用缓存向量，缺失或过期时刷新向量；`TicketDetailView.vue` -> `ticket/detail/index.vue` -> 独立详情路由不加载列表。
+- 总共涉及页面：5
