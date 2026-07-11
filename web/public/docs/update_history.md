@@ -3,6 +3,11 @@
 1. 工单统计新增业务周周期快照：新增 `ticket_statistics_period_snapshot`、业务周快照 DAO、SQL 迁移和定时任务 `ticket_business_week_statistics_snapshot`。
 2. 快照口径下 `granularity=week&weekBucketMode=business_week` 改为读取业务周周期快照，overview 和 trend 均按周四 18:00 等业务周边界精确统计，不再返回自然日快照限制提示。
 3. 新增说明文档：`web/public/docs/2026-07-11-ticket-business-week-period-snapshot.md`。
+4. 完成工单版本治理剩余计划：新增 `POST /ticket/release/batch` 批量维护接口和 `GET /ticket/release/statistics` 版本统计接口。
+5. 工单列表新增多选列、“版本批量维护”和“版本统计”入口；批量维护支持计划修复版本、实际修复版本、发版版本、发版时间、验证时间，以及快速标记发版/验证完成。
+6. 批量标记发版完成写入 `DEPLOYED` 工单事件，批量标记验证完成写入 `VERIFIED` 工单事件；版本统计按当前筛选条件实时聚合发生版本与修复/发版版本。
+7. 本轮不新增版本维度快照表；正式周报若需要冻结版本统计，后续再新增 `ticket_version_statistics_daily`。
+8. 新增说明文档：`web/public/docs/2026-07-11-ticket-version-governance.md`。
 
 ## 2026-07-11
 

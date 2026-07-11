@@ -223,6 +223,95 @@ class TicketStatusChangeModel(BaseModel):
     released_version: str | None = Field(default=None, description="实际发版版本")
 
 
+class TicketReleaseBatchUpdateModel(BaseModel):
+    """
+    工单版本治理批量维护模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_ids: list[int] = Field(default_factory=list, description="待维护工单ID列表")
+    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
+    fixed_version: str | None = Field(default=None, description="实际修复版本")
+    released_version: str | None = Field(default=None, description="实际发版版本")
+    released_at: datetime | None = Field(default=None, description="实际发版时间")
+    verified_at: datetime | None = Field(default=None, description="验证完成时间")
+    mark_released: bool = Field(default=False, description="是否标记发版完成，未传发版时间时使用当前时间")
+    mark_verified: bool = Field(default=False, description="是否标记验证完成，未传验证时间时使用当前时间")
+    comment: str | None = Field(default=None, description="批量维护说明")
+
+    @model_validator(mode="after")
+    def normalize_payload(self):
+        """
+        归一化批量维护参数，清理空字符串并校验至少存在一个更新字段。
+        :return: 当前模型
+        """
+        normalized_ids: list[int] = []
+        for ticket_id in self.ticket_ids or []:
+            try:
+                parsed_id = int(ticket_id)
+            except Exception:
+                continue
+            if parsed_id > 0 and parsed_id not in normalized_ids:
+                normalized_ids.append(parsed_id)
+        self.ticket_ids = normalized_ids
+        for field_name in ("planned_fix_version", "fixed_version", "released_version", "comment"):
+            value = getattr(self, field_name)
+            setattr(self, field_name, str(value).strip() if value is not None else None)
+        if not self.ticket_ids:
+            raise ValueError("请选择需要维护的工单")
+        has_update = any(
+            [
+                self.planned_fix_version is not None,
+                self.fixed_version is not None,
+                self.released_version is not None,
+                self.released_at is not None,
+                self.verified_at is not None,
+                self.mark_released,
+                self.mark_verified,
+            ]
+        )
+        if not has_update:
+            raise ValueError("请至少填写一个版本治理字段")
+        return self
+
+
+@as_query
+class TicketVersionStatisticsQueryModel(QueryModel):
+    """
+    工单版本统计查询模型。
+    """
+
+    begin_time: date | datetime | str | None = Field(default=None, description="创建时间开始")
+    end_time: date | datetime | str | None = Field(default=None, description="创建时间结束")
+    submit_begin_time: datetime | str | None = Field(default=None, description="提交时间开始")
+    submit_end_time: datetime | str | None = Field(default=None, description="提交时间结束")
+    processed_begin_time: datetime | str | None = Field(default=None, description="处理完成时间开始")
+    processed_end_time: datetime | str | None = Field(default=None, description="处理完成时间结束")
+    project_ids: str | None = Field(default=None, description="项目ID多选，逗号分隔字符串")
+    module_ids: str | None = Field(default=None, description="模块ID多选，逗号分隔字符串")
+    issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
+    root_cause_types: str | None = Field(default=None, description="根因分类多选，逗号分隔字符串")
+    solution_types: str | None = Field(default=None, description="解决方式多选，逗号分隔字符串")
+    resolution_codes: str | None = Field(default=None, description="关闭结果编码多选，逗号分隔字符串")
+    problem_pattern_codes: str | None = Field(default=None, description="细分问题编码多选，逗号分隔字符串")
+    version_keyword: str | None = Field(default=None, description="版本关键字，匹配发生/计划/修复/发版版本")
+    top_limit: int = Field(default=5, description="Top 维度返回数量")
+    version_limit: int = Field(default=50, description="每组版本最大返回数量")
+
+    @model_validator(mode="after")
+    def normalize_query(self):
+        """
+        限制版本统计返回规模，避免一次返回过多维度数据。
+        :return: 当前模型
+        """
+        self.top_limit = min(max(int(self.top_limit or 5), 1), 20)
+        self.version_limit = min(max(int(self.version_limit or 50), 1), 200)
+        self.version_keyword = str(self.version_keyword or "").strip() or None
+        self.is_page = False
+        return self
+
+
 class TicketCommentCreateModel(BaseModel):
     """
     新增工单评论模型。

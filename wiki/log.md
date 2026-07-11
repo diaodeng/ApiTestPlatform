@@ -1318,3 +1318,12 @@ updated: 2026-07-07
 - 创建的双向链接：0 对
 - 变更传播链：`ticket_statistics_time_util.py` -> `/ticket/statistics/time-config` -> 统计页默认范围；`TicketProcessingStatsService/TicketDao.get_statistics_trend` -> 业务周分桶；`TicketEmbeddingService.get_ticket_embedding_context/vectorize_ticket/search_tickets_by_vector` -> `TicketSimilarityQueryService.search_similar_tickets_by_ticket` -> `TicketService.get_messages_services` -> 详情相似推荐优先复用缓存向量，缺失或过期时刷新向量；`TicketDetailView.vue` -> `ticket/detail/index.vue` -> 独立详情路由不加载列表。
 - 总共涉及页面：5
+
+## [2026-07-11] INGEST-CODE | 工单版本治理批量维护与版本统计
+- 触发：用户要求按计划继续处理剩余项，当前剩余为版本批量维护和版本统计。
+- 架构层：工单域 / 版本治理 / 实时统计聚合
+- 创建的页面：`web/public/docs/2026-07-11-ticket-version-governance.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`entities/data-models/ticket-core-models.md`、`web/public/docs/2026-07-10-ticket-statistics-usage-guide.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketReleaseBatchUpdateModel/TicketVersionStatisticsQueryModel` -> `TicketReleaseService` -> `ticket_release_controller.py` -> `/ticket/release/batch` 与 `/ticket/release/statistics` -> 工单列表页版本批量维护和版本统计弹窗。
+- 总共涉及页面：5

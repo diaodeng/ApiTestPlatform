@@ -95,6 +95,7 @@ erDiagram
 - 2026-07-08 第一阶段已新增 `Ticket.processed_at` 作为“首次形成有效排查结论时间”，用它统计已处理数、处理率、首次处理耗时和未处理存量；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。
 - 2026-07-08 待实施方案确认 `Ticket.resolved_at` 保留当前终态写入逻辑，语义为“工单处置完成时间”；真实 Bug 修复统计应结合 `is_problem/solution_type/resolution_code/fixed_version/released_at/verified_at`。
 - 2026-07-08 第一阶段已新增 `affected_version/planned_fix_version/fixed_version/released_version/released_at/verified_at`；其中 `affected_version` 可兼容 `extra_data.version_key`，`planned_fix_version` 是治理排期字段，不应继续塞进 `extra_data.version_key`。
+- 2026-07-11 版本治理批量维护已启用这些字段：批量发版会写入 `released_version/released_at`，批量验证会写入 `verified_at`，并分别生成 `TicketEventType.DEPLOYED/VERIFIED` 事件。版本统计暂不新增数据表，直接按 `ticket` 当前态实时聚合；需要冻结历史版本周报时再新增版本统计快照表。
 - `Ticket` 新增索引 `idx_ticket_del_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version`，支撑提交时间、处理时间、处置/关闭时间和计划版本筛选。
 - 2026-07-10 第三阶段维度快照已补齐：`TicketStatisticsDaily.snapshot_scope='all'` 保存全局自然日快照，`snapshot_scope='leaf'` 保存 `project_id + module_id + issue_type_id` 叶子维度快照；唯一键为 `statistics_date/snapshot_scope/project_id/module_id/issue_type_id`。快照口径支持项目、模块、模块 Code 和工单类型筛选，细分问题 `problem_pattern_code` 暂不冻结。
 - 2026-07-08 第二阶段已新增 `TicketIssue`、`Ticket.issue_id/issue_relation_type/issue_confirmed` 和 `TicketRelation`：`Ticket.issue_id` 是主归因字段，`TicketRelation` 只保存补充关系，不替代主归因。

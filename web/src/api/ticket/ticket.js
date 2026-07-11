@@ -342,6 +342,24 @@ export function changeTicketStatus(ticketId, data) {
   });
 }
 
+// 批量维护工单版本治理字段
+export function batchUpdateTicketRelease(data) {
+  return request({
+    url: '/ticket/release/batch',
+    method: 'post',
+    data,
+  });
+}
+
+// 查询工单版本统计
+export function getTicketVersionStatistics(query) {
+  return request({
+    url: '/ticket/release/statistics',
+    method: 'get',
+    params: sanitizeQueryParams(query),
+  });
+}
+
 // 手动翻译工单描述
 export function translateTicketDescription(ticketId) {
   return request({

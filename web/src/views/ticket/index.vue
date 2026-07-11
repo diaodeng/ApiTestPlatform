@@ -356,6 +356,22 @@
             问题实例管理
           </el-button>
         </el-col>
+        <el-col :span="1.5">
+          <el-button
+            plain
+            icon="EditPen"
+            :disabled="selectedTicketRows.length === 0"
+            @click="openReleaseBatchDialog"
+            v-hasPermi="['ticket:ticket:edit']"
+          >
+            版本批量维护
+          </el-button>
+        </el-col>
+        <el-col :span="1.5">
+          <el-button plain icon="TrendCharts" @click="openVersionStatisticsDialog" v-hasPermi="['ticket:statistics:list']">
+            版本统计
+          </el-button>
+        </el-col>
         <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
       </el-row>
 
@@ -368,7 +384,9 @@
           order: toElementSortOrder(queryParams.sortOrder),
         }"
         @sort-change="handleTicketSortChange"
+        @selection-change="handleTicketSelectionChange"
       >
+        <el-table-column type="selection" width="48" align="center" fixed="left" />
         <el-table-column
           v-if="isTicketColumnVisible('index')"
           label="序号"
@@ -779,6 +797,147 @@
           <el-button @click="resetTicketColumnConfig">恢复默认</el-button>
           <el-button type="primary" @click="saveTicketColumnConfig">保存</el-button>
         </template>
+      </el-dialog>
+
+      <el-dialog title="版本批量维护" v-model="releaseBatchOpen" width="720px" append-to-body @closed="resetReleaseBatchForm">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          :title="`已选择 ${selectedTicketRows.length} 张工单，空字段不会覆盖原值`"
+          class="mb12"
+        />
+        <el-form ref="releaseBatchRef" :model="releaseBatchForm" label-width="120px">
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="计划修复版本">
+                <el-input v-model="releaseBatchForm.plannedFixVersion" maxlength="100" clearable />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="实际修复版本">
+                <el-input v-model="releaseBatchForm.fixedVersion" maxlength="100" clearable />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="实际发版版本">
+                <el-input v-model="releaseBatchForm.releasedVersion" maxlength="100" clearable />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="发版完成">
+                <el-checkbox v-model="releaseBatchForm.markReleased">标记为已发版</el-checkbox>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="发版时间">
+                <el-date-picker
+                  v-model="releaseBatchForm.releasedAt"
+                  type="datetime"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  format="YYYY-MM-DD HH:mm:ss"
+                  placeholder="留空则使用当前时间"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="验证完成">
+                <el-checkbox v-model="releaseBatchForm.markVerified">标记为已验证</el-checkbox>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="验证时间">
+                <el-date-picker
+                  v-model="releaseBatchForm.verifiedAt"
+                  type="datetime"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  format="YYYY-MM-DD HH:mm:ss"
+                  placeholder="留空则使用当前时间"
+                  style="width: 100%"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="维护说明">
+                <el-input
+                  v-model="releaseBatchForm.comment"
+                  type="textarea"
+                  :rows="3"
+                  maxlength="500"
+                  show-word-limit
+                  placeholder="可选，写入发版/验证事件"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+        <template #footer>
+          <el-button :disabled="releaseBatchSubmitting" @click="releaseBatchOpen = false">取 消</el-button>
+          <el-button
+            type="primary"
+            :loading="releaseBatchSubmitting"
+            :disabled="releaseBatchSubmitting"
+            @click="submitReleaseBatch"
+          >
+            确 定
+          </el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog title="版本统计" v-model="versionStatisticsOpen" width="1180px" append-to-body>
+        <div class="version-statistics-toolbar">
+          <el-input
+            v-model="versionStatisticsQuery.versionKeyword"
+            placeholder="版本关键字"
+            clearable
+            style="width: 220px"
+            @keyup.enter="loadVersionStatistics"
+          />
+          <el-button type="primary" icon="Search" :loading="versionStatisticsLoading" @click="loadVersionStatistics">
+            查询
+          </el-button>
+        </div>
+        <el-tabs v-model="versionStatisticsTab">
+          <el-tab-pane label="发生版本" name="affected">
+            <el-table v-loading="versionStatisticsLoading" :data="versionStatistics.affectedVersionRows || []" max-height="520">
+              <el-table-column label="版本" prop="version" min-width="140" show-overflow-tooltip />
+              <el-table-column label="工单数" prop="ticketCount" width="90" align="right" />
+              <el-table-column label="真实问题" prop="problemCount" width="90" align="right" />
+              <el-table-column label="Issue数" prop="issueCount" width="90" align="right" />
+              <el-table-column label="未处理" prop="unprocessedCount" width="90" align="right" />
+              <el-table-column label="未关闭" prop="openBacklog" width="90" align="right" />
+              <el-table-column label="Top模块" min-width="180" show-overflow-tooltip>
+                <template #default="scope">{{ formatTopRows(scope.row.topModules) }}</template>
+              </el-table-column>
+              <el-table-column label="Top类型" min-width="180" show-overflow-tooltip>
+                <template #default="scope">{{ formatTopRows(scope.row.topIssueTypes) }}</template>
+              </el-table-column>
+              <el-table-column label="Top根因" min-width="180" show-overflow-tooltip>
+                <template #default="scope">{{ formatTopRows(scope.row.topRootCauses) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="修复/发版版本" name="fix">
+            <el-table v-loading="versionStatisticsLoading" :data="versionStatistics.fixVersionRows || []" max-height="520">
+              <el-table-column label="版本" prop="version" min-width="140" show-overflow-tooltip />
+              <el-table-column label="工单数" prop="ticketCount" width="90" align="right" />
+              <el-table-column label="Issue数" prop="issueCount" width="90" align="right" />
+              <el-table-column label="已发版" prop="releasedCount" width="90" align="right" />
+              <el-table-column label="已验证" prop="verifiedCount" width="90" align="right" />
+              <el-table-column label="未验证" prop="unverifiedCount" width="90" align="right" />
+              <el-table-column label="关闭结果" min-width="190" show-overflow-tooltip>
+                <template #default="scope">{{ formatTopRows(scope.row.resolutionCounts) }}</template>
+              </el-table-column>
+              <el-table-column label="解决方式" min-width="190" show-overflow-tooltip>
+                <template #default="scope">{{ formatTopRows(scope.row.solutionTypeCounts) }}</template>
+              </el-table-column>
+              <el-table-column label="细分问题" min-width="190" show-overflow-tooltip>
+                <template #default="scope">{{ formatTopRows(scope.row.topProblemPatterns) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
       </el-dialog>
 
       <pagination
@@ -3434,6 +3593,7 @@
     addTicketEvent,
     addTicketAiAnalysis,
     assignTicket,
+    batchUpdateTicketRelease,
     bindTicketIssueFromSimilar,
     changeTicketStatus,
     createAndBindTicketIssue,
@@ -3443,6 +3603,7 @@
     getTicket,
     getTicketComments,
     getTicketTimeline,
+    getTicketVersionStatistics,
     importTicketExcel,
     listTicketAiAnalysisTasks,
     retryTicketAiAnalysis,
@@ -3519,6 +3680,7 @@
     handleSearch,
     resetQuery,
     handleNaturalSearch,
+    buildTicketListQueryParams,
     handleQueryCurrentAssigneeChange,
     handleQueryFirstLineAssigneeChange,
     handleQueryInternalOwnerChange,
@@ -3595,6 +3757,23 @@
   const firstLineAssigneeOption = ref(null);
   const internalOwnerOption = ref(null);
   const formModuleValue = ref('');
+  const selectedTicketRows = ref([]);
+  const releaseBatchOpen = ref(false);
+  const releaseBatchSubmitting = ref(false);
+  const releaseBatchForm = ref(createDefaultReleaseBatchForm());
+  const versionStatisticsOpen = ref(false);
+  const versionStatisticsLoading = ref(false);
+  const versionStatisticsTab = ref('affected');
+  const versionStatistics = ref({
+    total: 0,
+    affectedVersionRows: [],
+    fixVersionRows: [],
+  });
+  const versionStatisticsQuery = ref({
+    versionKeyword: '',
+    topLimit: 5,
+    versionLimit: 50,
+  });
   const detail = ref({});
   const timeline = ref({});
   const commentList = ref([]);
@@ -3887,6 +4066,141 @@
       autoTranslate: false,
       logPullConfig: createDefaultLogPullForm(),
     };
+  }
+
+  function createDefaultReleaseBatchForm() {
+    return {
+      plannedFixVersion: '',
+      fixedVersion: '',
+      releasedVersion: '',
+      releasedAt: '',
+      verifiedAt: '',
+      markReleased: false,
+      markVerified: false,
+      comment: '',
+    };
+  }
+
+  function handleTicketSelectionChange(rows) {
+    selectedTicketRows.value = Array.isArray(rows) ? rows : [];
+  }
+
+  function openReleaseBatchDialog() {
+    if (!selectedTicketRows.value.length) {
+      proxy.$modal.msgWarning('请先选择需要维护的工单');
+      return;
+    }
+    releaseBatchForm.value = createDefaultReleaseBatchForm();
+    releaseBatchOpen.value = true;
+  }
+
+  function resetReleaseBatchForm() {
+    releaseBatchForm.value = createDefaultReleaseBatchForm();
+    releaseBatchSubmitting.value = false;
+  }
+
+  function buildReleaseBatchPayload() {
+    const formData = releaseBatchForm.value || {};
+    const ticketIds = selectedTicketRows.value
+      .map((item) => Number(item.ticketId || item.ticket_id))
+      .filter((item) => Number.isFinite(item) && item > 0);
+    const payload = {
+      ticketIds,
+      plannedFixVersion: String(formData.plannedFixVersion || '').trim() || undefined,
+      fixedVersion: String(formData.fixedVersion || '').trim() || undefined,
+      releasedVersion: String(formData.releasedVersion || '').trim() || undefined,
+      releasedAt: formData.releasedAt || undefined,
+      verifiedAt: formData.verifiedAt || undefined,
+      markReleased: Boolean(formData.markReleased),
+      markVerified: Boolean(formData.markVerified),
+      comment: String(formData.comment || '').trim() || undefined,
+    };
+    return Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== '')
+    );
+  }
+
+  function submitReleaseBatch() {
+    const payload = buildReleaseBatchPayload();
+    if (!payload.ticketIds?.length) {
+      proxy.$modal.msgWarning('请先选择需要维护的工单');
+      return;
+    }
+    const hasUpdate = [
+      payload.plannedFixVersion,
+      payload.fixedVersion,
+      payload.releasedVersion,
+      payload.releasedAt,
+      payload.verifiedAt,
+      payload.markReleased,
+      payload.markVerified,
+    ].some(Boolean);
+    if (!hasUpdate) {
+      proxy.$modal.msgWarning('请至少填写一个版本治理字段');
+      return;
+    }
+    releaseBatchSubmitting.value = true;
+    batchUpdateTicketRelease(payload)
+      .then((response) => {
+        const updatedCount = response.data?.updatedCount ?? payload.ticketIds.length;
+        proxy.$modal.msgSuccess(`已维护 ${updatedCount} 张工单`);
+        releaseBatchOpen.value = false;
+        getList();
+      })
+      .finally(() => {
+        releaseBatchSubmitting.value = false;
+      });
+  }
+
+  function openVersionStatisticsDialog() {
+    versionStatisticsOpen.value = true;
+    loadVersionStatistics();
+  }
+
+  function buildVersionStatisticsQuery() {
+    const params = buildTicketListQueryParams();
+    return {
+      beginTime: params.beginTime,
+      endTime: params.endTime,
+      submitBeginTime: params.submitBeginTime,
+      submitEndTime: params.submitEndTime,
+      processedBeginTime: params.processedBeginTime,
+      processedEndTime: params.processedEndTime,
+      projectIds: params.projectIds,
+      moduleIds: params.moduleIds,
+      issueTypeIds: params.issueTypeIds,
+      rootCauseTypes: params.rootCauseTypes,
+      solutionTypes: params.solutionTypes,
+      resolutionCodes: params.resolutionCodes,
+      problemPatternCodes: params.problemPatternCodes,
+      versionKeyword: String(versionStatisticsQuery.value.versionKeyword || '').trim() || undefined,
+      topLimit: versionStatisticsQuery.value.topLimit,
+      versionLimit: versionStatisticsQuery.value.versionLimit,
+    };
+  }
+
+  function loadVersionStatistics() {
+    versionStatisticsLoading.value = true;
+    getTicketVersionStatistics(buildVersionStatisticsQuery())
+      .then((response) => {
+        versionStatistics.value = response.data || {
+          total: 0,
+          affectedVersionRows: [],
+          fixVersionRows: [],
+        };
+      })
+      .finally(() => {
+        versionStatisticsLoading.value = false;
+      });
+  }
+
+  function formatTopRows(rows) {
+    if (!Array.isArray(rows) || !rows.length) {
+      return '-';
+    }
+    return rows
+      .map((item) => `${item.name || '未填写'}(${item.count || 0})`)
+      .join('、');
   }
 
   const data = reactive({
@@ -5635,6 +5949,10 @@
     margin-bottom: 16px;
   }
 
+  .mb12 {
+    margin-bottom: 12px;
+  }
+
   .mb8 {
     margin-bottom: 8px;
   }
@@ -5653,6 +5971,13 @@
 
   .import-result {
     margin-top: 16px;
+  }
+
+  .version-statistics-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
   }
 
   .result-title {
