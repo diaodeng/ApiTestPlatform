@@ -1327,3 +1327,12 @@ updated: 2026-07-07
 - 创建的双向链接：0 对
 - 变更传播链：`TicketReleaseBatchUpdateModel/TicketVersionStatisticsQueryModel` -> `TicketReleaseService` -> `ticket_release_controller.py` -> `/ticket/release/batch` 与 `/ticket/release/statistics` -> 工单列表页版本批量维护和版本统计弹窗。
 - 总共涉及页面：5
+
+## [2026-07-12] INGEST-CODE | 相似工单系统详情纯净页面
+- 触发：用户要求相似工单跳转本地服务详情页后不显示左侧菜单和顶部多余内容，并保留工单描述收起能力。
+- 架构层：Web 壳层 / 工单独立详情页
+- 创建的页面：无
+- 更新的页面：`entities/components/web-shell.md`、`entities/services/ticket-domain.md`、`web/public/docs/2026-07-11-ticket-statistics-similarity-phase1-2.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`web/src/router/index.js` 顶层 `TicketDetail` 路由 -> `web/src/views/ticket/detail/index.vue` 纯页面容器 -> `TicketDetailView.vue` 描述/翻译展开状态。
+- 总共涉及页面：4

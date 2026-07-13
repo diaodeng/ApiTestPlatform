@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-11
+freshness: 2026-07-12
 created: 2026-05-20
-updated: 2026-07-11
+updated: 2026-07-12
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -109,7 +109,7 @@ graph TD
 - `GET /ticket/statistics/trend` 新增 `weekBucketMode=calendar_week/business_week`。实时口径周粒度可按业务周起点分桶，旧整体趋势、问题性质趋势、Top 模块、Top 细分问题和新增处理趋势共享同一分桶。快照口径在 `granularity=week&weekBucketMode=business_week` 时读取 `ticket_statistics_period_snapshot`，按周四 18:00 等业务周边界精确统计，不再返回自然日快照限制提示。
 - 工单统计页新增用户配置 `ticket/ticket_statistics_detail_columns` 控制趋势明细列，`bucket` 为必选列；统计块和趋势块继续使用 `ticket_statistics_blocks`。
 - 工单详情相似推荐优先复用当前工单已保存向量：`TicketSimilarityQueryService.search_similar_tickets_by_ticket` 读取 `embedding_record` 并校验 `content_hash/model/version/dimension`，`provider=embedding` 用缓存向量与库内向量计算，`provider=qdrant` 用缓存向量查询 Qdrant；`TicketService.get_messages_services` 只调用该子服务并组装详情响应。向量缺失或过期时，详情链路会按当前 Provider 配置同步调用 `vectorize_ticket` 刷新向量，刷新成功后返回 `similarEmbeddingStatus=ready` 和相似工单，刷新失败才返回 `similarEmbeddingStatus=error`。
-- `#/ticket/detail/:ticketId` 已切到独立详情页 `web/src/views/ticket/detail/index.vue`，页面复用 `TicketDetailView` 并只请求详情、评论和时间线等详情接口，不加载 `useTicketList`，不请求 `/ticket/list`。
+- `#/ticket/detail/:ticketId` 已切到独立详情页 `web/src/views/ticket/detail/index.vue`，页面复用 `TicketDetailView` 并只请求详情、评论和时间线等详情接口，不加载 `useTicketList`，不请求 `/ticket/list`。2026-07-12 起该路由直接挂在顶层，不再进入 `Layout`，因此相似工单“系统详情”打开后不会显示左侧菜单、顶部导航或标签栏。
 - 2026-07-08 第一阶段已落地：`Ticket.submit_time` 作为统计主时间，`Ticket.processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，前端 `processStatus` 文案已改为“日志/AI进度”，业务处理结论通过 `processingConclusionStatus/processedAt` 展示。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)，实现记录见 [工单提交时间、处理结论和版本治理第一阶段实现记录](../../../../web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md)。
 - 同一方案确认保留当前 `resolved_at` 终态写入逻辑，但语义明确为“工单处置完成时间”，不是只代表真实 Bug 修复完成；真实 Bug 修复统计应结合 `is_problem`、`solution_type`、`resolution_code`、`fixed_version`、`released_at` 和 `verified_at`。
 - 版本治理字段已从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`extra_data.version_key` 暂保留供 AI 仓库映射兼容。
@@ -200,7 +200,7 @@ graph TD
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
 - 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
 - 工单描述翻译继续复用轻量 AI 翻译配置 `ticket.ai.translate.provider.code` 和 `ticket.ai.translate.prompt.code`：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。
-- 工单详情页描述与翻译支持独立展开/收起，默认展开描述、收起翻译，收起时保留一行内容预览；评论已从历史页二级 tab 提升为详情页一级 tab，并通过 `GET /ticket/{ticket_id}/comments` 在点击评论时按需加载。
+- 工单详情页描述与翻译支持独立展开/收起，默认展开，收起时保留一行内容预览；评论已从历史页二级 tab 提升为详情页一级 tab，并通过 `GET /ticket/{ticket_id}/comments` 在点击评论时按需加载。
 - 前端时间线接口调用 `TicketDao.get_timeline(..., include_comments=False)`，不再为历史页捎带评论；DAO 默认仍保留评论，供 AI 分析和知识提炼内部上下文复用。
 - 工单详情页新增“刷新AI数据”按钮，方便在 AI 任务完成后手动刷新当前详情与任务历史，不再依赖退出重进页面。
 - 工单详情页的相似工单现在提供两个跳转入口：“系统详情”打开隐藏路由 `#/ticket/detail/:ticketId`，进入后复用现有全屏详情弹窗独立展示指定工单；“飞书详情”在相似工单携带外部详情链接时打开原飞书/外部记录 URL。

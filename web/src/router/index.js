@@ -48,16 +48,17 @@ export const constantRoutes = [
     hidden: true,
   },
   {
+    path: '/ticket/detail/:ticketId(\\d+)',
+    component: () => import('@/views/ticket/detail/index.vue'),
+    name: 'TicketDetail',
+    hidden: true,
+    meta: { title: '工单详情' },
+  },
+  {
     path: '/ticket',
     component: Layout,
     hidden: true,
     children: [
-      {
-        path: 'detail/:ticketId(\\d+)',
-        component: () => import('@/views/ticket/detail/index.vue'),
-        name: 'TicketDetail',
-        meta: { title: '工单详情', activeMenu: '/ticket/ticket' },
-      },
       {
         path: 'issue',
         component: () => import('@/views/ticket/issue/index.vue'),

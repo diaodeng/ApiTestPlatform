@@ -25,11 +25,37 @@
     </el-descriptions>
 
     <section class="detail-section">
-      <div class="section-title">描述</div>
-      <div class="section-content pre-line">{{ detailOriginalDescription || '-' }}</div>
+      <div class="section-title section-title--with-actions">
+        <span>描述</span>
+        <el-button link type="primary" @click="descriptionExpanded = !descriptionExpanded">
+          {{ descriptionExpanded ? '收起' : '展开' }}
+        </el-button>
+      </div>
+      <div
+        :class="[
+          'section-content',
+          'pre-line',
+          { 'section-content--collapsed': !descriptionExpanded },
+        ]"
+      >
+        {{ detailOriginalDescription || '-' }}
+      </div>
       <div v-if="detailAiTranslation" class="translation-block">
-        <div class="section-title">AI翻译</div>
-        <div class="section-content pre-line">{{ detailAiTranslation }}</div>
+        <div class="section-title section-title--with-actions">
+          <span>AI翻译</span>
+          <el-button link type="primary" @click="translationExpanded = !translationExpanded">
+            {{ translationExpanded ? '收起' : '展开' }}
+          </el-button>
+        </div>
+        <div
+          :class="[
+            'section-content',
+            'pre-line',
+            { 'section-content--collapsed': !translationExpanded },
+          ]"
+        >
+          {{ detailAiTranslation }}
+        </div>
       </div>
     </section>
 
@@ -123,6 +149,8 @@
   const router = useRouter();
   const loading = ref(false);
   const activeTab = ref('overview');
+  const descriptionExpanded = ref(true);
+  const translationExpanded = ref(true);
   const detail = ref({});
   const commentList = ref([]);
   const commentLoaded = ref(false);
@@ -169,6 +197,9 @@
     );
   });
 
+  /**
+   * 加载纯净详情页所需的工单主详情。
+   */
   function loadDetail() {
     const currentTicketId = Number(props.ticketId || 0);
     if (!currentTicketId) {
@@ -184,6 +215,9 @@
       });
   }
 
+  /**
+   * 按需加载评论，避免首次打开详情页时请求无关数据。
+   */
   function loadComments() {
     if (commentLoaded.value || !props.ticketId) {
       return;
@@ -194,6 +228,9 @@
     });
   }
 
+  /**
+   * 按需加载历史时间线，保持纯净详情页首屏轻量。
+   */
   function loadTimeline() {
     if (timelineLoaded.value || !props.ticketId) {
       return;
@@ -204,6 +241,9 @@
     });
   }
 
+  /**
+   * 切换详情页标签时补充加载当前标签需要的数据。
+   */
   function handleTabChange(tabName) {
     if (tabName === 'comments') {
       loadComments();
@@ -263,6 +303,8 @@
     () => props.ticketId,
     () => {
       activeTab.value = 'overview';
+      descriptionExpanded.value = true;
+      translationExpanded.value = true;
       commentList.value = [];
       commentLoaded.value = false;
       timeline.value = {};
@@ -311,11 +353,24 @@
     color: #303133;
   }
 
+  .section-title--with-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
   .section-content {
     padding: 12px;
     border: 1px solid #ebeef5;
     border-radius: 6px;
     background: #fafafa;
+  }
+
+  .section-content--collapsed {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .translation-block {

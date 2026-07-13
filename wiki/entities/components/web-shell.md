@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-05-20
+freshness: 2026-07-12
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-07-12
 related_files:
   - web/src/main.js
   - web/src/App.vue
@@ -37,6 +37,7 @@ graph TD
 - 挂载路由、Store、国际化、指令和 UI 库。
 - 控制登录态、权限和页面布局。
 - 作为所有业务视图的统一宿主。
+- 顶层业务详情路由可绕过 `Layout` 直接由 `App.vue` 的根 `router-view` 承载；当前 `TicketDetail` 使用该模式，避免相似工单跳转后出现侧边栏、顶部导航或标签栏。
 
 ## 参见
 

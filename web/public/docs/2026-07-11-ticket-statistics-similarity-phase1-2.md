@@ -12,6 +12,7 @@
 4. 趋势明细列配置：新增用户配置 `ticket/ticket_statistics_detail_columns`，`bucket` 为必选列。
 5. 详情页相似工单优先复用当前工单已保存向量：向量缺失或过期时同步刷新向量后再查询。
 6. 独立详情页：`#/ticket/detail/:ticketId` 改为加载独立页面，不再复用工单列表页组件。
+7. 2026-07-12 修正：`TicketDetail` 路由从 `Layout` 子路由提升为顶层纯页面，打开相似工单“系统详情”时不再显示左侧菜单、顶部导航或标签栏；纯详情页继续保留工单描述和 AI 翻译的收起/展开能力。
 
 ## 后端变更
 
@@ -80,8 +81,9 @@
 
 - 新增 `web/src/views/ticket/components/TicketDetailView.vue`。
 - 新增 `web/src/views/ticket/detail/index.vue`。
-- 路由 `TicketDetail` 改为指向独立详情页。
+- 路由 `TicketDetail` 指向独立详情页；2026-07-12 起该路由直接挂在顶层 `/ticket/detail/:ticketId`，不再作为 `/ticket` 的 `Layout` 子路由。
 - 独立详情页只调用详情、评论、时间线等详情相关接口，不调用 `useTicketList`，不会请求 `/ticket/list`。
+- `TicketDetailView` 内置描述和 AI 翻译的展开状态，默认展开；用户收起后保留一行预览，切换到其他工单时恢复展开。
 
 ## 未实施范围
 
