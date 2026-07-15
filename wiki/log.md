@@ -1336,3 +1336,12 @@ updated: 2026-07-07
 - 创建的双向链接：0 对
 - 变更传播链：`web/src/router/index.js` 顶层 `TicketDetail` 路由 -> `web/src/views/ticket/detail/index.vue` 纯页面容器 -> `TicketDetailView.vue` 描述/翻译展开状态。
 - 总共涉及页面：4
+
+## [2026-07-15] INGEST-CODE | 工单日志查看与搜索资源保护
+- 触发：用户要求优先解决日志拉取解压和搜索可能导致卡顿甚至重启的问题，并且不在页面额外展示文件数量。
+- 架构层：工单域 / 日志拉取 / 日志搜索配置
+- 创建的页面：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`entities/data-models/ticket-core-models.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`ticket.logPull.storage` 运行保护阈值 -> `TicketLogPullService.get_storage_config_dict` -> `LogService.prepare/search/errors` -> `/ticket/logs/prepare`、`/ticket/logs/search`、`/ticket/logs/errors`。
+- 总共涉及页面：4

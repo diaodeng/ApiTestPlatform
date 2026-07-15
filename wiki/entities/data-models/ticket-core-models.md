@@ -109,6 +109,7 @@ erDiagram
 - `Ticket.merchant_name` 继续作为兼容字段保存项目名称，保证旧前端字段 `merchantName` 和历史数据可平滑读取。
 - `WorkflowTransition.allowed_roles` 现承载扩展 JSON，内部包含 `roles`、`assignee`、`notification` 三类配置。
 - `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。
+- `ticket.logPull.storage` 除保存归档目录、FTP、轮询和下载配置外，还保存日志查看运行保护阈值：`maxContentChars` 控制入库文本字符数，`maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes` 控制日志查看准备解压，`maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes` 控制日志搜索和 Python 降级扫描。
 - `TicketLogPullRecord.command_content` 会携带内部 `_automation` 扩展字段，用于记录日志拉取成功后是否自动触发 AI 以及目标 Agent 编码，外部提交前会自动剥离。
 - `TicketLogPullRecord.command_content` 还可携带 `notifyConfig`，用于在日志拉取成功、版本号提取失败或 AI 分析结束时继续沿用同一套通知配置。
 - `TicketAiRepoMapping` 记录项目、版本、仓库地址、分支、本地仓库路径和工作区根目录的兼容映射，用于历史任务审计和兜底；当前 AI Worker 执行时优先读取 Agent 本地配置中的仓库路径和工作区根目录。

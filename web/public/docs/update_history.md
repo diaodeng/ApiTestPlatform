@@ -1,3 +1,10 @@
+## 2026-07-15
+
+1. 工单日志查看准备、关键字搜索和原始归档实时截取补齐资源保护，降低大日志包导致应用卡顿、线程占满或进程被重启的风险。
+2. `ticket.logPull.storage` 新增 `maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes/maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes`，作为后台保护阈值，不在搜索页面额外展示文件数量。
+3. 日志搜索改为按文件执行 `rg` 并按剩余命中上限截断，Python 降级搜索限制总扫描字节数；日志内容入库重新启用 `maxContentChars` 上限。
+4. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`。
+
 ## 2026-07-11
 
 1. 工单统计新增业务周周期快照：新增 `ticket_statistics_period_snapshot`、业务周快照 DAO、SQL 迁移和定时任务 `ticket_business_week_statistics_snapshot`。

@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+import time
 import zipfile
 from collections import Counter
 from datetime import datetime
@@ -55,14 +56,17 @@ class LogService:
         准备指定工单的日志目录：复用最新日志拉取归档，下载或复制到 source 后递归解压到 extract。
         :param db: 数据库会话
         :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID，为空时使用当前工单最新日志记录
         :return: 准备结果
         """
         logger.info(f"开始准备工单日志查看目录，ticket_id={ticket_id}")
+        runtime_config = cls._get_runtime_config(db)
         ticket_dir = cls._ticket_dir(ticket_id, record_id)
         source_dir = ticket_dir / "source"
         extract_dir = ticket_dir / "extract"
         meta_path = ticket_dir / cls.META_FILE_NAME
         if extract_dir.exists() and any(extract_dir.iterdir()):
+            cls._validate_extracted_resource_usage(extract_dir, runtime_config)
             files = cls.files(ticket_id, record_id)
             logger.info(f"工单日志已存在解压目录，跳过重复准备，ticket_id={ticket_id}，file_count={len(files)}")
             return TicketLogPrepareModel(
@@ -117,7 +121,7 @@ class LogService:
             shutil.copy2(archive_path, source_path)
             if should_cleanup:
                 archive_path.unlink(missing_ok=True)
-            cls._extract_recursive(source_path, extract_dir)
+            cls._extract_recursive(source_path, extract_dir, runtime_config, time.monotonic())
             files = cls.files(ticket_id, record.id if record_id else None)
             cls._write_meta(
                 meta_path,
@@ -192,6 +196,7 @@ class LogService:
         with_context: bool = True,
         record_id: int | None = None,
         file_path: str | None = None,
+        db: Session | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         使用 ripgrep 搜索工单日志，并按需返回每个命中的上下文。
@@ -203,6 +208,7 @@ class LogService:
         :param with_context: 是否直接返回上下文
         :param record_id: 日志拉取记录ID
         :param file_path: 指定相对日志文件路径，空值表示全局搜索
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
         :return: 搜索命中列表
         """
         keyword = str(keyword or "").strip()
@@ -211,22 +217,42 @@ class LogService:
         extract_dir = cls._extract_dir(ticket_id, record_id)
         if not extract_dir.exists():
             return []
+        runtime_config = cls._get_runtime_config(db)
         normalized_file = cls._normalize_relative_path(file_path) if str(file_path or "").strip() else None
         if normalized_file:
             # 先解析一次相对路径，确保指定文件仍位于当前工单日志目录内。
             cls._resolve_log_file(ticket_id, normalized_file, record_id)
+        target_files = cls._resolve_search_files(ticket_id, record_id, normalized_file, runtime_config)
         if not keyword.isascii():
             logger.info(
                 f"日志搜索包含非 ASCII 关键字，使用 Python 编码兼容模式，ticket_id={ticket_id}，keyword={keyword}"
             )
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
+                ticket_id,
+                keyword,
+                context_before,
+                context_after,
+                limit,
+                with_context,
+                record_id,
+                normalized_file,
+                runtime_config,
+                target_files,
             )
         search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
         if search_mode == "python":
             logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
+                ticket_id,
+                keyword,
+                context_before,
+                context_after,
+                limit,
+                with_context,
+                record_id,
+                normalized_file,
+                runtime_config,
+                target_files,
             )
 
         executable = (
@@ -238,54 +264,95 @@ class LogService:
         if not executable:
             logger.warning(f"未找到 rg/ripgrep，日志搜索降级为 Python，ticket_id={ticket_id}，keyword={keyword}")
             return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
-            )
-
-        search_target = normalized_file or "."
-        command = [
-            executable,
-            "-n",
-            "--no-heading",
-            "--with-filename",
-            "--color",
-            "never",
-            "--fixed-strings",
-            keyword,
-            search_target,
-        ]
-        try:
-            process = subprocess.run(
-                command,
-                cwd=str(extract_dir),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-        except FileNotFoundError as exc:
-            logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
-            return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
-            )
-        if process.returncode not in (0, 1):
-            logger.warning(
-                f"rg 搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
-                f"reason={process.stderr.strip() or process.stdout.strip()}"
-            )
-            return cls._search_by_python(
-                ticket_id, keyword, context_before, context_after, limit, with_context, record_id, normalized_file
+                ticket_id,
+                keyword,
+                context_before,
+                context_after,
+                limit,
+                with_context,
+                record_id,
+                normalized_file,
+                runtime_config,
+                target_files,
             )
 
         hits: list[TicketLogSearchHitModel] = []
-        for raw_line in process.stdout.splitlines():
+        deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        for target_file in target_files:
             if len(hits) >= limit:
                 break
-            hit = cls._parse_rg_line(raw_line)
-            if not hit:
-                continue
-            if with_context:
-                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
-            hits.append(hit)
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                logger.warning(f"日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+                break
+            remaining_limit = max(limit - len(hits), 1)
+            command = [
+                executable,
+                "-n",
+                "--no-heading",
+                "--with-filename",
+                "--color",
+                "never",
+                "--fixed-strings",
+                "-m",
+                str(remaining_limit),
+                keyword,
+                "--",
+                target_file,
+            ]
+            try:
+                process = subprocess.run(
+                    command,
+                    cwd=str(extract_dir),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=remaining_seconds,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning(f"日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+                break
+            except FileNotFoundError as exc:
+                logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
+                return cls._search_by_python(
+                    ticket_id,
+                    keyword,
+                    context_before,
+                    context_after,
+                    limit,
+                    with_context,
+                    record_id,
+                    normalized_file,
+                    runtime_config,
+                    target_files,
+                )
+            if process.returncode not in (0, 1):
+                logger.warning(
+                    f"rg 搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
+                    f"reason={process.stderr.strip() or process.stdout.strip()}"
+                )
+                return cls._search_by_python(
+                    ticket_id,
+                    keyword,
+                    context_before,
+                    context_after,
+                    limit,
+                    with_context,
+                    record_id,
+                    normalized_file,
+                    runtime_config,
+                    target_files,
+                )
+            for raw_line in process.stdout.splitlines():
+                if len(hits) >= limit:
+                    break
+                hit = cls._parse_rg_line(raw_line)
+                if not hit:
+                    continue
+                if with_context:
+                    hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
+                hits.append(hit)
         return hits
 
     @classmethod
@@ -364,6 +431,7 @@ class LogService:
         limit: int = 100,
         with_context: bool = True,
         record_id: int | None = None,
+        db: Session | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         按时间文本搜索日志，典型输入为 14:32。
@@ -373,9 +441,20 @@ class LogService:
         :param context_after: 后置上下文行数
         :param limit: 最大返回命中数
         :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
         :return: 搜索命中列表
         """
-        return cls.search(ticket_id, time_keyword, context_before, context_after, limit, with_context, record_id)
+        return cls.search(
+            ticket_id=ticket_id,
+            keyword=time_keyword,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            db=db,
+        )
 
     @classmethod
     def _search_by_python(
@@ -388,6 +467,8 @@ class LogService:
         with_context: bool,
         record_id: int | None = None,
         file_path: str | None = None,
+        runtime_config: dict[str, Any] | None = None,
+        target_files: list[str] | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         Python 降级搜索实现，在没有 rg/ripgrep 时使用。
@@ -399,14 +480,24 @@ class LogService:
         :param with_context: 是否直接返回上下文
         :param record_id: 日志拉取记录ID
         :param file_path: 指定相对日志文件路径，空值表示全局搜索
+        :param runtime_config: 运行保护配置
+        :param target_files: 已归一化的搜索文件列表
         :return: 搜索命中列表
         """
         hits: list[TicketLogSearchHitModel] = []
-        target_files = [file_path] if file_path else [file_item.file for file_item in cls.files(ticket_id, record_id)]
-        for target_file in target_files:
+        resolved_config = runtime_config or cls._get_runtime_config()
+        resolved_target_files = target_files or cls._resolve_search_files(
+            ticket_id, record_id, file_path, resolved_config
+        )
+        max_scan_bytes = cls._config_int(resolved_config, "maxPythonSearchBytes", 268435456)
+        scanned_bytes = 0
+        for target_file in resolved_target_files:
             if len(hits) >= limit:
                 break
             path = cls._resolve_log_file(ticket_id, target_file, record_id)
+            scanned_bytes += path.stat().st_size
+            if scanned_bytes > max_scan_bytes:
+                raise RuntimeError("日志搜索扫描量超过当前保护阈值，请缩小文件范围或调整日志拉取存储配置")
             encoding = cls._detect_file_encoding(path)
             with path.open("r", encoding=encoding, errors="replace") as file_obj:
                 for line_no, content in enumerate(file_obj, start=1):
@@ -463,11 +554,15 @@ class LogService:
         )
 
     @classmethod
-    def errors(cls, ticket_id: int, limit: int = 100, record_id: int | None = None) -> TicketLogErrorSummaryModel:
+    def errors(
+        cls, ticket_id: int, limit: int = 100, record_id: int | None = None, db: Session | None = None
+    ) -> TicketLogErrorSummaryModel:
         """
         提取常见异常关键字并聚合计数。
         :param ticket_id: 工单ID
         :param limit: 最大样例数量
+        :param record_id: 日志拉取记录ID
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
         :return: 异常摘要
         """
         samples: list[TicketLogSearchHitModel] = []
@@ -476,7 +571,7 @@ class LogService:
             remain = max(limit - len(samples), 0)
             if remain <= 0:
                 break
-            for hit in cls.search(ticket_id, keyword, 0, 0, remain, with_context=False, record_id=record_id):
+            for hit in cls.search(ticket_id, keyword, 0, 0, remain, with_context=False, record_id=record_id, db=db):
                 summary = cls._normalize_error_summary(hit.content)
                 if not summary:
                     continue
@@ -503,6 +598,63 @@ class LogService:
         return rows.get(ticket_id)
 
     @classmethod
+    def _get_runtime_config(cls, db: Session | None = None) -> dict[str, Any]:
+        """
+        读取日志查看运行保护配置，数据库不可用时使用默认存储配置兜底。
+        :param db: 数据库会话
+        :return: 标准化后的运行配置
+        """
+        if db is None:
+            return {
+                "maxExtractSeconds": 300,
+                "maxExtractFileCount": 2000,
+                "maxExtractTotalBytes": 2147483648,
+                "maxSearchSeconds": 30,
+                "maxSearchFileCount": 1000,
+                "maxPythonSearchBytes": 268435456,
+            }
+        return TicketLogPullService.get_storage_config_dict(db)
+
+    @staticmethod
+    def _config_int(config: dict[str, Any], key: str, default: int) -> int:
+        """
+        从运行配置中安全读取正整数。
+        :param config: 运行配置字典
+        :param key: 配置键名
+        :param default: 默认值
+        :return: 正整数配置值
+        """
+        try:
+            value = int(float(str(config.get(key, default)).strip()))
+            return value if value > 0 else default
+        except Exception:
+            return default
+
+    @classmethod
+    def _resolve_search_files(
+        cls,
+        ticket_id: int,
+        record_id: int | None,
+        file_path: str | None,
+        runtime_config: dict[str, Any],
+    ) -> list[str]:
+        """
+        解析本次日志搜索允许扫描的文件列表，并按配置做数量保护。
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定相对日志文件路径
+        :param runtime_config: 运行保护配置
+        :return: 相对日志文件列表
+        """
+        if file_path:
+            return [cls._normalize_relative_path(file_path)]
+        max_file_count = cls._config_int(runtime_config, "maxSearchFileCount", 1000)
+        files = [file_item.file for file_item in cls.files(ticket_id, record_id)]
+        if len(files) > max_file_count:
+            raise RuntimeError("日志文件数量超过当前搜索保护阈值，请指定文件范围或调整日志拉取存储配置")
+        return files
+
+    @classmethod
     def _resolve_record(cls, db: Session, ticket_id: int, record_id: int | None = None) -> TicketLogPullRecord | None:
         """
         解析本次日志查看使用的拉取记录。
@@ -516,29 +668,72 @@ class LogService:
         return cls._latest_record(db, ticket_id)
 
     @classmethod
-    def _extract_recursive(cls, archive_path: Path, target_dir: Path) -> None:
+    def _extract_recursive(
+        cls, archive_path: Path, target_dir: Path, runtime_config: dict[str, Any], started_at: float
+    ) -> None:
         """
         递归解压压缩包，直到目录内不再存在受支持的压缩文件或达到最大轮次。
         :param archive_path: 初始压缩包路径
         :param target_dir: 解压目标目录
+        :param runtime_config: 运行保护配置
+        :param started_at: 准备阶段开始时间戳
         :return: 无
         """
+        cls._ensure_prepare_budget(started_at, runtime_config)
         cls._extract_one(archive_path, target_dir)
+        cls._validate_extracted_resource_usage(target_dir, runtime_config)
         for round_index in range(cls.MAX_RECURSIVE_EXTRACT_ROUNDS):
+            cls._ensure_prepare_budget(started_at, runtime_config)
             archives = [path for path in target_dir.rglob("*") if path.is_file() and cls._is_archive(path)]
             if not archives:
                 logger.info(f"递归解压完成，target_dir={target_dir}，round={round_index}")
                 return
             for archive in archives:
+                cls._ensure_prepare_budget(started_at, runtime_config)
                 extract_to = archive.parent / archive.stem
                 extract_to.mkdir(parents=True, exist_ok=True)
                 try:
                     cls._extract_one(archive, extract_to)
                     archive.unlink(missing_ok=True)
+                    cls._validate_extracted_resource_usage(target_dir, runtime_config)
                     logger.info(f"完成一层日志压缩包解压，archive={archive}，extract_to={extract_to}")
                 except Exception as exc:
                     logger.warning(f"日志压缩包解压失败，archive={archive}，reason={exc}")
         logger.warning(f"递归解压达到最大轮次后停止，target_dir={target_dir}，max_rounds={cls.MAX_RECURSIVE_EXTRACT_ROUNDS}")
+
+    @classmethod
+    def _ensure_prepare_budget(cls, started_at: float, runtime_config: dict[str, Any]) -> None:
+        """
+        检查日志准备阶段是否超过配置的最大耗时。
+        :param started_at: 准备阶段开始时间戳
+        :param runtime_config: 运行保护配置
+        :return: 无
+        """
+        max_seconds = cls._config_int(runtime_config, "maxExtractSeconds", 300)
+        if time.monotonic() - started_at > max_seconds:
+            raise RuntimeError("日志解压准备超过当前保护超时，请缩小日志包或调整日志拉取存储配置")
+
+    @classmethod
+    def _validate_extracted_resource_usage(cls, target_dir: Path, runtime_config: dict[str, Any]) -> None:
+        """
+        检查解压目录资源占用，避免异常日志包拖垮服务。
+        :param target_dir: 解压目标目录
+        :param runtime_config: 运行保护配置
+        :return: 无
+        """
+        max_file_count = cls._config_int(runtime_config, "maxExtractFileCount", 2000)
+        max_total_bytes = cls._config_int(runtime_config, "maxExtractTotalBytes", 2147483648)
+        file_count = 0
+        total_bytes = 0
+        for path in target_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            file_count += 1
+            total_bytes += path.stat().st_size
+            if file_count > max_file_count:
+                raise RuntimeError("日志解压文件数量超过当前保护阈值，请缩小日志包或调整日志拉取存储配置")
+            if total_bytes > max_total_bytes:
+                raise RuntimeError("日志解压总大小超过当前保护阈值，请缩小日志包或调整日志拉取存储配置")
 
     @classmethod
     def _extract_one(cls, archive_path: Path, target_dir: Path) -> None:
@@ -687,7 +882,8 @@ class LogService:
         """
         if path.suffix.lower() in cls.TEXT_EXTENSIONS:
             return True
-        sample = path.read_bytes()[:8192]
+        with path.open("rb") as file_obj:
+            sample = file_obj.read(8192)
         if b"\x00" in sample:
             return False
         result = from_bytes(sample).best()

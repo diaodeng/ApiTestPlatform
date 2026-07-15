@@ -48,6 +48,12 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
     poll_timeout_sec: int = Field(default=1800, description="日志拉取轮询超时时间，单位秒")
     download_timeout_sec: int = Field(default=300, description="压缩包下载超时时间，单位秒")
     max_content_chars: int = Field(default=500000, description="压缩入库允许的最大文本字符数，超出则失败")
+    max_extract_seconds: int = Field(default=300, description="日志查看准备阶段最大解压秒数")
+    max_extract_file_count: int = Field(default=2000, description="日志查看准备阶段最大解压文件数")
+    max_extract_total_bytes: int = Field(default=2147483648, description="日志查看准备阶段最大解压总字节数")
+    max_search_seconds: int = Field(default=30, description="日志关键字搜索最大执行秒数")
+    max_search_file_count: int = Field(default=1000, description="日志关键字搜索最大扫描文件数")
+    max_python_search_bytes: int = Field(default=268435456, description="Python降级搜索最大扫描字节数")
 
 
 class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):

@@ -345,6 +345,12 @@ class TicketLogPullService:
             "pollTimeoutSec": 1800,
             "downloadTimeoutSec": 300,
             "maxContentChars": 500000,
+            "maxExtractSeconds": 300,
+            "maxExtractFileCount": 2000,
+            "maxExtractTotalBytes": 2147483648,
+            "maxSearchSeconds": 30,
+            "maxSearchFileCount": 1000,
+            "maxPythonSearchBytes": 268435456,
         }
 
     @classmethod
@@ -408,10 +414,22 @@ class TicketLogPullService:
             "mode": mode,
             "ftp": {**defaults["ftp"], **ftp_config},
         }
-        normalized["pollIntervalSec"] = max(int(normalized.get("pollIntervalSec") or 20), 3)
-        normalized["pollTimeoutSec"] = max(int(normalized.get("pollTimeoutSec") or 1800), 60)
-        normalized["downloadTimeoutSec"] = max(int(normalized.get("downloadTimeoutSec") or 300), 30)
-        normalized["maxContentChars"] = max(int(normalized.get("maxContentChars") or 500000), 10000)
+        normalized["pollIntervalSec"] = max(cls._parse_positive_int(normalized.get("pollIntervalSec"), 20), 3)
+        normalized["pollTimeoutSec"] = max(cls._parse_positive_int(normalized.get("pollTimeoutSec"), 1800), 60)
+        normalized["downloadTimeoutSec"] = max(cls._parse_positive_int(normalized.get("downloadTimeoutSec"), 300), 30)
+        normalized["maxContentChars"] = max(cls._parse_positive_int(normalized.get("maxContentChars"), 500000), 10000)
+        normalized["maxExtractSeconds"] = max(cls._parse_positive_int(normalized.get("maxExtractSeconds"), 300), 30)
+        normalized["maxExtractFileCount"] = max(
+            cls._parse_positive_int(normalized.get("maxExtractFileCount"), 2000), 100
+        )
+        normalized["maxExtractTotalBytes"] = max(
+            cls._parse_positive_int(normalized.get("maxExtractTotalBytes"), 2147483648), 10485760
+        )
+        normalized["maxSearchSeconds"] = max(cls._parse_positive_int(normalized.get("maxSearchSeconds"), 30), 3)
+        normalized["maxSearchFileCount"] = max(cls._parse_positive_int(normalized.get("maxSearchFileCount"), 1000), 10)
+        normalized["maxPythonSearchBytes"] = max(
+            cls._parse_positive_int(normalized.get("maxPythonSearchBytes"), 268435456), 10485760
+        )
         normalized["effectiveLocalDirectory"] = str(cls._resolve_local_dir(normalized.get("localDirectory")))
         return normalized
 
@@ -1397,7 +1415,7 @@ class TicketLogPullService:
                 try:
                     temp_file_path.unlink()
                 except Exception:
-                    logger.warning("删除重新下载产生的临时文件失败: %s", temp_file_path)
+                    logger.warning(f"删除重新下载产生的临时文件失败: {temp_file_path}")
 
     @classmethod
     def delete_log_pull_services(
@@ -1608,7 +1626,7 @@ class TicketLogPullService:
                 try:
                     archive_path.unlink(missing_ok=True)
                 except Exception:
-                    logger.warning("删除重新截取产生的临时文件失败: %s", archive_path)
+                    logger.warning(f"删除重新截取产生的临时文件失败: {archive_path}")
 
     @classmethod
     def create_log_pull_services(
@@ -1859,7 +1877,7 @@ class TicketLogPullService:
                         begin_time=requested_begin_time,
                         end_time=requested_end_time,
                     )
-                    text = content_result["compressed_content"]
+                    text = cls._decompress_text(content_result["compressed_content"])
                     content_summary = content_result["content_summary"]
                     content_char_count = content_result["content_char_count"]
                     content_truncated = content_result["content_truncated"]
@@ -1867,7 +1885,7 @@ class TicketLogPullService:
                     archive_entry_count = content_result["archive_entry_count"]
                     view_source = "realtime"
                 except Exception as exc:
-                    logger.warning("实时截取日志失败，回退到已入库内容: %s", exc)
+                    logger.warning(f"实时截取日志失败，回退到已入库内容: {exc}")
                     content_summary = cls._build_view_fallback_summary(
                         record.content_summary, "实时截取失败，已回退到入库内容"
                     )
@@ -2287,7 +2305,7 @@ class TicketLogPullService:
             return
         ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
         if not ticket:
-            logger.warning("日志拉取记录[%s] 自动AI触发失败，工单不存在", record_id)
+            logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单不存在")
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
@@ -2319,7 +2337,7 @@ class TicketLogPullService:
             )
             return
         if not agent_code and not provider_code:
-            logger.warning("日志拉取记录[%s] 已配置自动AI但未填写Provider或Agent", record_id)
+            logger.warning(f"日志拉取记录[{record_id}] 已配置自动AI但未填写Provider或Agent")
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
@@ -2338,7 +2356,7 @@ class TicketLogPullService:
             )
             return
         if not version_key:
-            logger.warning("日志拉取记录[%s] 自动AI触发失败，工单缺少版本号", record_id)
+            logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单缺少版本号")
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
@@ -2406,7 +2424,7 @@ class TicketLogPullService:
                     },
                 )
         except Exception as exc:
-            logger.exception("日志拉取记录[%s] 触发自动AI分析失败: %s", record_id, exc)
+            logger.exception(f"日志拉取记录[{record_id}] 触发自动AI分析失败: {exc}")
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
@@ -3008,13 +3026,13 @@ class TicketLogPullService:
             try:
                 return cls._download_file_from_ftp_to_temp(db, storage_path), True
             except Exception as exc:
-                logger.warning("从 FTP 下载日志压缩包失败: %s", exc)
+                logger.warning(f"从 FTP 下载日志压缩包失败: {exc}")
         if str(record.command_result_url or "").strip():
             try:
                 temp_file, _ = cls._download_archive(record, db)
                 return temp_file, True
             except Exception as exc:
-                logger.warning("从外部地址重新下载日志压缩包失败: %s", exc)
+                logger.warning(f"从外部地址重新下载日志压缩包失败: {exc}")
         return None, False
 
     @classmethod
@@ -3039,7 +3057,7 @@ class TicketLogPullService:
                 try:
                     return cls._download_file_from_ftp_to_temp(db, storage_path), True
                 except Exception as exc:
-                    logger.warning("从 FTP 下载日志压缩包失败: %s", exc)
+                    logger.warning(f"从 FTP 下载日志压缩包失败: {exc}")
             if normalized_source == "service":
                 return None, False
         if normalized_source in {"auto", "original"} and str(record.command_result_url or "").strip():
@@ -3047,7 +3065,7 @@ class TicketLogPullService:
                 temp_file, _ = cls._download_archive(record, db)
                 return temp_file, True
             except Exception as exc:
-                logger.warning("从外部地址重新下载日志压缩包失败: %s", exc)
+                logger.warning(f"从外部地址重新下载日志压缩包失败: {exc}")
         return None, False
 
     @classmethod
@@ -3200,7 +3218,7 @@ class TicketLogPullService:
             return matched_count, char_count
         separator_length = 2 if content_parts else 0
         projected_length = char_count + len(entry_text) + separator_length
-        if False and projected_length > max_content_chars:  # 这里暂时取消长度判断
+        if projected_length > max_content_chars:
             raise TicketLogContentTooLargeError(
                 f"日志内容超过入库上限 {max_content_chars} 字符，请缩小时间范围后重新提交"
             )
@@ -3453,7 +3471,7 @@ class TicketLogPullService:
         try:
             return TicketLogPullCreateModel.model_validate(payload_data)
         except Exception as exc:
-            logger.warning("恢复日志拉取参数失败: %s", exc)
+            logger.warning(f"恢复日志拉取参数失败: {exc}")
             return None
 
     @classmethod
@@ -3627,6 +3645,15 @@ class TicketLogPullService:
         config_row = TicketLogPullDao.get_storage_config_row(db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
         return cls._normalize_storage_config(payload)
+
+    @classmethod
+    def get_storage_config_dict(cls, db: Session) -> dict[str, Any]:
+        """
+        读取日志拉取存储配置字典，供日志查看、搜索等子服务复用运行保护阈值。
+        :param db: 数据库会话
+        :return: 标准化后的日志拉取存储配置
+        """
+        return cls._get_storage_config_dict(db)
 
     @classmethod
     def _get_external_config_dict(cls, db: Session) -> dict[str, Any]:

@@ -171,11 +171,16 @@ async def get_ticket_log_files(request: Request, ticket_id: int, record_id: int 
     "/logs/search",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
-async def search_ticket_logs(request: Request, search_object: TicketLogSearchRequestModel):
+async def search_ticket_logs(
+    request: Request,
+    search_object: TicketLogSearchRequestModel,
+    query_db: Session = Depends(get_db),
+):
     """
     搜索工单日志接口。
     :param request: 请求对象
     :param search_object: 日志搜索请求
+    :param query_db: 数据库会话，用于读取日志搜索资源保护配置
     :return: 搜索命中列表
     """
     try:
@@ -189,6 +194,7 @@ async def search_ticket_logs(request: Request, search_object: TicketLogSearchReq
             search_object.with_context,
             search_object.record_id,
             search_object.file,
+            query_db,
         )
         return ResponseUtil.success(data=result)
     except Exception as e:
@@ -231,11 +237,16 @@ async def get_ticket_log_context(
     "/logs/search_time",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
-async def search_ticket_logs_by_time(request: Request, search_object: TicketLogSearchTimeRequestModel):
+async def search_ticket_logs_by_time(
+    request: Request,
+    search_object: TicketLogSearchTimeRequestModel,
+    query_db: Session = Depends(get_db),
+):
     """
     按时间关键字搜索工单日志接口。
     :param request: 请求对象
     :param search_object: 日志时间搜索请求
+    :param query_db: 数据库会话，用于读取日志搜索资源保护配置
     :return: 搜索命中列表
     """
     try:
@@ -248,6 +259,7 @@ async def search_ticket_logs_by_time(request: Request, search_object: TicketLogS
             search_object.limit,
             search_object.with_context,
             search_object.record_id,
+            query_db,
         )
         return ResponseUtil.success(data=result)
     except Exception as e:
@@ -259,16 +271,21 @@ async def search_ticket_logs_by_time(request: Request, search_object: TicketLogS
     "/logs/errors",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
-async def get_ticket_log_errors(request: Request, errors_object: TicketLogErrorsRequestModel):
+async def get_ticket_log_errors(
+    request: Request,
+    errors_object: TicketLogErrorsRequestModel,
+    query_db: Session = Depends(get_db),
+):
     """
     提取工单日志异常摘要接口。
     :param request: 请求对象
     :param errors_object: 异常摘要请求
+    :param query_db: 数据库会话，用于读取日志搜索资源保护配置
     :return: 异常摘要
     """
     try:
         result = await run_in_threadpool(
-            LogService.errors, errors_object.ticket_id, errors_object.limit, errors_object.record_id
+            LogService.errors, errors_object.ticket_id, errors_object.limit, errors_object.record_id, query_db
         )
         return ResponseUtil.success(data=result)
     except Exception as e:
