@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-12
 created: 2026-05-20
-updated: 2026-07-12
+updated: 2026-07-15
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -212,6 +212,8 @@ graph TD
 - 日志内容传输采用压缩串，前端通过 `decompressText` 解压后展示，减少大日志查看时的传输成本。
 - 2026-07-15 起，日志查看准备、关键字搜索和异常提取会读取 `ticket.logPull.storage` 中的资源保护阈值：`maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes/maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes`。这些阈值只作为后端保护，不在搜索页面额外展示文件数量；超过阈值时提示缩小日志包、指定文件范围或调整参数配置。
 - 日志搜索不再一次性对整个目录执行 `rg` 并收集全部输出，而是按文件执行、按剩余命中上限截断，并由 `maxSearchSeconds` 控制总耗时；非 ASCII 关键字或无 `rg` 环境下的 Python 降级搜索会受 `maxPythonSearchBytes` 限制。
+- 日志搜索接口支持 `keywords/searchMode` 多关键字契约，`searchMode=any` 表示同一行任一关键字命中，`searchMode=all` 表示同一行必须包含全部关键字；响应命中项返回 `matchedKeywords`，旧 `keyword` 入参仍兼容。
+- 工单日志查看器前端支持多关键字输入、多字符串高亮和搜索/上下文面板剩余空间自适应；工单详情和日志拉取记录页的日志拉取表格常显横向滚动条，并移除固定操作列，减少横向拖动时的布局干扰。
 - 日志内容查看默认不换行，可通过开关切换换行显示。
 - 新增工单时可勾选自动拉日志和日志后自动 AI 分析，日志拉取配置与 Agent 编码会跟随工单/日志记录一起保存。
 - 工单详情页的顶层入口已收敛为 `概览`、`日志拉取`、`协同/AI`、`历史` 四块；概览区的“最新AI结论”优先展示最新快照，日志拉取前置到 AI 分析前面，详情页从右侧抽屉改为全屏弹窗，任务历史和任务原文改为弹窗查看，仓库映射不再占用详情页主视图。

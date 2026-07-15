@@ -448,6 +448,7 @@ class TicketLogSearchHitModel(TicketLogPullBaseModel):
     file: str = Field(description="相对日志文件路径")
     line: int = Field(description="命中行号")
     content: str = Field(default="", description="命中行内容")
+    matched_keywords: list[str] = Field(default_factory=list, description="当前命中行匹配到的关键字")
     context: TicketLogContextModel | None = Field(default=None, description="命中上下文")
 
 
@@ -458,12 +459,38 @@ class TicketLogSearchRequestModel(TicketLogPullBaseModel):
 
     ticket_id: int = Field(description="工单ID")
     record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
-    keyword: str = Field(description="搜索关键字")
+    keyword: str | None = Field(default=None, description="搜索关键字，兼容旧单关键字入参")
+    keywords: list[str] = Field(default_factory=list, description="搜索关键字列表，支持多个固定字符串")
+    search_mode: str = Field(default="any", description="多关键字匹配模式：any 任一命中，all 同行全部命中")
     file: str | None = Field(default=None, description="指定相对日志文件路径，空值表示全局搜索")
     context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
     context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
     limit: int = Field(default=500, ge=1, le=5000, description="最大返回命中数量")
     with_context: bool = Field(default=True, description="是否直接返回上下文")
+
+    @model_validator(mode="after")
+    def normalize_search_keywords(self):
+        """
+        归一化日志搜索关键字，兼容旧 keyword 字段并限制无效输入。
+        :return: 当前模型
+        """
+        raw_keywords: list[str] = []
+        raw_keywords.extend(self.keywords or [])
+        if self.keyword:
+            raw_keywords.append(self.keyword)
+        normalized_keywords: list[str] = []
+        for item in raw_keywords:
+            keyword = str(item or "").strip()
+            if keyword and keyword not in normalized_keywords:
+                normalized_keywords.append(keyword[:200])
+        self.keywords = normalized_keywords[:10]
+        self.keyword = self.keywords[0] if self.keywords else None
+        self.search_mode = str(self.search_mode or "any").strip().lower()
+        if self.search_mode not in {"any", "all"}:
+            self.search_mode = "any"
+        if not self.keywords:
+            raise ValueError("搜索关键字不能为空")
+        return self
 
 
 class TicketLogSearchTimeRequestModel(TicketLogPullBaseModel):

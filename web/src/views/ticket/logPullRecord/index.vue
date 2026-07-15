@@ -102,7 +102,13 @@
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
     </el-row>
 
-    <el-table v-loading="loading" :data="recordList" row-key="id">
+    <el-table
+      v-loading="loading"
+      :data="recordList"
+      row-key="id"
+      class="log-pull-record-table"
+      scrollbar-always-on
+    >
       <el-table-column label="记录ID" prop="id" width="180" show-overflow-tooltip />
       <el-table-column label="关联工单" min-width="220" show-overflow-tooltip>
         <template #default="scope">
@@ -170,7 +176,7 @@
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="300">
         <template #default="scope">
           <el-button link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
@@ -1498,5 +1504,13 @@ onBeforeUnmount(() => {
 
 .log-content-wrap {
   white-space: pre-wrap;
+}
+
+.log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal) {
+  height: 12px;
+}
+
+.log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal .el-scrollbar__thumb) {
+  min-width: 48px;
 }
 </style>

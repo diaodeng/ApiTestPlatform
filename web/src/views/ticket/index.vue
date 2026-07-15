@@ -1849,7 +1849,13 @@
                   <el-button link type="primary" @click="loadLogPullList">刷新</el-button>
                 </div>
               </div>
-              <el-table v-loading="logPullLoading" :data="logPullList" row-key="id" class="mb16">
+              <el-table
+                v-loading="logPullLoading"
+                :data="logPullList"
+                row-key="id"
+                class="mb16 log-pull-record-table"
+                scrollbar-always-on
+              >
                 <el-table-column label="创建时间" prop="createTime" width="170">
                   <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
                 </el-table-column>
@@ -1924,7 +1930,7 @@
                     <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="340" fixed="right">
+                <el-table-column label="操作" width="340">
                   <template #default="scope">
                     <el-button-group>
                       <el-button
@@ -2430,7 +2436,8 @@
                     v-loading="logPullLoading"
                     :data="logPullList"
                     row-key="id"
-                    class="mb16"
+                    class="mb16 log-pull-record-table"
+                    scrollbar-always-on
                   >
                     <el-table-column label="创建时间" prop="createTime" width="170">
                       <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
@@ -2502,7 +2509,7 @@
                         <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
                       </template>
                     </el-table-column>
-                    <el-table-column label="操作" width="280" fixed="right">
+                    <el-table-column label="操作" width="280">
                       <template #default="scope">
                         <el-button-group>
                           <el-button
@@ -3330,14 +3337,24 @@
       class="ticket-log-viewer-dialog"
       @closed="handleLogPullDialogClosed"
     >
-      <div v-loading="logViewerSearching">
+      <div v-loading="logViewerSearching" class="log-viewer-content">
         <div class="panel-header mb16 log-view-controls">
-          <el-input
-            v-model="logViewerForm.keyword"
-            placeholder="关键词搜索"
-            clearable
-            @keyup.enter="searchLogViewerKeyword"
+          <el-select
+            v-model="logViewerForm.keywords"
+            class="log-keyword-select"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            collapse-tags
+            collapse-tags-tooltip
+            reserve-keyword
+            placeholder="输入关键字，回车添加"
           />
+          <el-radio-group v-model="logViewerForm.searchMode" size="small">
+            <el-radio-button value="any">任一</el-radio-button>
+            <el-radio-button value="all">全部</el-radio-button>
+          </el-radio-group>
           <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword"
             >搜索</el-button
           >
@@ -3399,6 +3416,19 @@
           <el-button type="warning" :loading="logViewerSearching" @click="loadLogViewerErrors"
             >异常提取</el-button
           >
+          <el-select
+            v-model="logViewerHighlightKeywords"
+            class="log-keyword-select log-highlight-select"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            collapse-tags
+            collapse-tags-tooltip
+            reserve-keyword
+            placeholder="输入高亮文本，回车添加"
+            @change="updateLogViewerHighlightKeywords"
+          />
         </div>
         <el-alert
           v-if="logViewerErrorSummary"
@@ -3416,6 +3446,9 @@
             {
               'log-view-panel-fullscreen': logViewerResultViewMode === 'fullscreen',
               'log-view-panel-minimized': logViewerResultViewMode === 'minimized',
+              'log-view-panel-fill':
+                logViewerResultViewMode !== 'minimized' &&
+                (!logViewerContext || logViewerContextViewMode === 'minimized'),
             },
           ]"
         >
@@ -3485,6 +3518,8 @@
             {
               'log-view-panel-fullscreen': logViewerContextViewMode === 'fullscreen',
               'log-view-panel-minimized': logViewerContextViewMode === 'minimized',
+              'log-view-panel-fill':
+                logViewerContextViewMode !== 'minimized' && logViewerResultViewMode === 'minimized',
             },
           ]"
         >
@@ -3560,7 +3595,6 @@
               'log-context-block',
               { 'log-content-wrap': logPullWrapEnabled },
             ]"
-            @mouseup="captureLogViewerHighlight"
             ><span
               v-for="item in logViewerContextDisplayLines"
               :key="`${item.file}:${item.line}`"
@@ -3568,9 +3602,10 @@
               ><span class="log-context-line-no">{{ item.paddedLine }}</span
               ><span class="log-context-line-content"
                 ><template v-for="(part, partIndex) in item.parts" :key="partIndex"
-                  ><mark v-if="part.highlight" class="log-context-highlight">{{
-                    part.text
-                  }}</mark
+                  ><mark
+                    v-if="part.highlight"
+                    :class="['log-context-highlight', part.highlightClass]"
+                    >{{ part.text }}</mark
                   ><span v-else>{{ part.text }}</span></template
                 ></span
               ></span
@@ -3809,6 +3844,7 @@
     logViewerResultViewMode,
     logViewerContextViewMode,
     logViewerHighlightText,
+    logViewerHighlightKeywords,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
@@ -3836,6 +3872,7 @@
     searchLogViewerInFile,
     clearLogViewerFileScope,
     captureLogViewerHighlight,
+    updateLogViewerHighlightKeywords,
     clearLogViewerHighlight,
     setLogViewerPanelMode,
     searchLogViewerKeyword,
@@ -4314,21 +4351,39 @@
   /** 将一行日志按当前选中文案拆成普通片段和高亮片段。 */
   function splitLogViewerHighlightParts(content) {
     const text = String(content || '');
-    const keyword = String(logViewerHighlightText.value || '');
-    if (!keyword) return [{ text, highlight: false }];
+    const keywords = Array.from(new Set(logViewerHighlightKeywords.value || []))
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .sort((left, right) => right.length - left.length);
+    if (!keywords.length) return [{ text, highlight: false }];
     const parts = [];
     let cursor = 0;
     while (cursor < text.length) {
-      const index = text.indexOf(keyword, cursor);
-      if (index < 0) {
+      let nextMatch = null;
+      keywords.forEach((keyword, keywordIndex) => {
+        const index = text.indexOf(keyword, cursor);
+        if (index < 0) return;
+        if (
+          !nextMatch ||
+          index < nextMatch.index ||
+          (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
+        ) {
+          nextMatch = { index, keyword, keywordIndex };
+        }
+      });
+      if (!nextMatch) {
         parts.push({ text: text.slice(cursor), highlight: false });
         break;
       }
-      if (index > cursor) {
-        parts.push({ text: text.slice(cursor, index), highlight: false });
+      if (nextMatch.index > cursor) {
+        parts.push({ text: text.slice(cursor, nextMatch.index), highlight: false });
       }
-      parts.push({ text: text.slice(index, index + keyword.length), highlight: true });
-      cursor = index + keyword.length;
+      parts.push({
+        text: text.slice(nextMatch.index, nextMatch.index + nextMatch.keyword.length),
+        highlight: true,
+        highlightClass: `log-context-highlight-${nextMatch.keywordIndex % 6}`,
+      });
+      cursor = nextMatch.index + nextMatch.keyword.length;
     }
     return parts.length ? parts : [{ text, highlight: false }];
   }
@@ -4343,7 +4398,11 @@
     }));
   });
   const logViewerResultTableHeight = computed(() =>
-    logViewerResultViewMode.value === 'fullscreen' ? 'calc(100vh - 170px)' : 320
+    logViewerResultViewMode.value === 'fullscreen'
+      ? 'calc(100vh - 170px)'
+      : !logViewerContext.value || logViewerContextViewMode.value === 'minimized'
+        ? 'calc(100vh - 250px)'
+        : 320
   );
   const logViewerDialogTitle = computed(() => {
     const ticketNo = String(logViewerTicketMeta.value?.ticketNo || '').trim();
@@ -6067,6 +6126,26 @@
     align-items: center;
   }
 
+  .ticket-page :deep(.ticket-log-viewer-dialog .el-dialog__body) {
+    height: calc(100vh - 56px);
+    overflow: hidden;
+  }
+
+  .log-viewer-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .log-keyword-select {
+    width: min(420px, 100%);
+  }
+
+  .log-highlight-select {
+    width: min(360px, 100%);
+  }
+
   .log-view-time-picker {
     width: 220px;
   }
@@ -6100,6 +6179,10 @@
   }
 
   .log-view-panel {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    min-height: 0;
     padding: 10px;
     border: 1px solid #dcdfe6;
     border-radius: 6px;
@@ -6132,7 +6215,23 @@
   }
 
   .log-view-panel-minimized {
+    flex: 0 0 auto;
     padding-bottom: 6px;
+  }
+
+  .log-view-panel-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .log-view-panel-fill :deep(.el-table) {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .log-view-panel-fill .log-content-block {
+    flex: 1 1 auto;
+    max-height: none;
   }
 
   .detail-main-tabs :deep(.el-tabs__header) {
@@ -6201,7 +6300,35 @@
     border-radius: 2px;
   }
 
+  .log-context-highlight-1 {
+    background: #bfdbfe;
+  }
+
+  .log-context-highlight-2 {
+    background: #bbf7d0;
+  }
+
+  .log-context-highlight-3 {
+    background: #fecaca;
+  }
+
+  .log-context-highlight-4 {
+    background: #ddd6fe;
+  }
+
+  .log-context-highlight-5 {
+    background: #fed7aa;
+  }
+
   .log-content-dialog {
     max-height: 60vh;
+  }
+
+  .log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal) {
+    height: 12px;
+  }
+
+  .log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal .el-scrollbar__thumb) {
+    min-width: 48px;
   }
 </style>

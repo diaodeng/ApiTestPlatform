@@ -185,9 +185,10 @@ async def search_ticket_logs(
     """
     try:
         result = await run_in_threadpool(
-            LogService.search,
+            LogService.search_keywords,
             search_object.ticket_id,
-            search_object.keyword,
+            search_object.keywords,
+            search_object.search_mode,
             search_object.context_before,
             search_object.context_after,
             search_object.limit,

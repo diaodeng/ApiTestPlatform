@@ -350,10 +350,120 @@ class LogService:
                 hit = cls._parse_rg_line(raw_line)
                 if not hit:
                     continue
+                hit.matched_keywords = cls._match_keywords(hit.content, [keyword], "any")
                 if with_context:
                     hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
                 hits.append(hit)
         return hits
+
+    @classmethod
+    def search_keywords(
+        cls,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str = "any",
+        context_before: int = 20,
+        context_after: int = 20,
+        limit: int = 100,
+        with_context: bool = True,
+        record_id: int | None = None,
+        file_path: str | None = None,
+        db: Session | None = None,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        使用多个固定字符串搜索工单日志，支持任一命中或同一行全部命中。
+        :param ticket_id: 工单ID
+        :param keywords: 搜索关键字列表
+        :param search_mode: 匹配模式，any 表示任一命中，all 表示同一行全部命中
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定相对日志文件路径，空值表示全局搜索
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
+        :return: 搜索命中列表
+        """
+        normalized_keywords = cls._normalize_keywords(keywords)
+        if not normalized_keywords:
+            return []
+        normalized_mode = str(search_mode or "any").strip().lower()
+        if normalized_mode not in {"any", "all"}:
+            normalized_mode = "any"
+        if len(normalized_keywords) == 1:
+            return cls.search(
+                ticket_id=ticket_id,
+                keyword=normalized_keywords[0],
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                file_path=file_path,
+                db=db,
+            )
+
+        extract_dir = cls._extract_dir(ticket_id, record_id)
+        if not extract_dir.exists():
+            return []
+        runtime_config = cls._get_runtime_config(db)
+        normalized_file = cls._normalize_relative_path(file_path) if str(file_path or "").strip() else None
+        if normalized_file:
+            cls._resolve_log_file(ticket_id, normalized_file, record_id)
+        target_files = cls._resolve_search_files(ticket_id, record_id, normalized_file, runtime_config)
+        search_mode_config = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
+        should_use_python = (
+            normalized_mode == "all"
+            or search_mode_config == "python"
+            or any(not keyword.isascii() for keyword in normalized_keywords)
+        )
+        if should_use_python:
+            return cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+            )
+
+        executable = (
+            shutil.which("rg")
+            or shutil.which("rg.exe")
+            or shutil.which("ripgrep")
+            or shutil.which("ripgrep.exe")
+        )
+        if not executable:
+            logger.warning(f"未找到 rg/ripgrep，多关键字日志搜索降级为 Python，ticket_id={ticket_id}")
+            return cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+            )
+        return cls._search_by_rg_keywords(
+            ticket_id=ticket_id,
+            keywords=normalized_keywords,
+            executable=executable,
+            extract_dir=extract_dir,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            runtime_config=runtime_config,
+            target_files=target_files,
+        )
 
     @classmethod
     def context(
@@ -507,6 +617,184 @@ class LogService:
                         file=target_file,
                         line=line_no,
                         content=content.rstrip("\r\n"),
+                        matched_keywords=cls._match_keywords(content, [keyword], "any"),
+                    )
+                    if with_context:
+                        hit.context = cls.context(
+                            ticket_id, target_file, line_no, context_before, context_after, record_id
+                        )
+                    hits.append(hit)
+                    if len(hits) >= limit:
+                        break
+        return hits
+
+    @classmethod
+    def _search_by_rg_keywords(
+        cls,
+        *,
+        ticket_id: int,
+        keywords: list[str],
+        executable: str,
+        extract_dir: Path,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        runtime_config: dict[str, Any],
+        target_files: list[str],
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        使用 rg 一次匹配多个 ASCII 固定字符串。
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param executable: rg 可执行文件路径
+        :param extract_dir: 日志解压目录
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param runtime_config: 运行保护配置
+        :param target_files: 搜索文件列表
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        seen_keys: set[tuple[str, int]] = set()
+        deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        pattern_args: list[str] = []
+        for keyword in keywords:
+            pattern_args.extend(["-e", keyword])
+        for target_file in target_files:
+            if len(hits) >= limit:
+                break
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                logger.warning(f"多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+                break
+            remaining_limit = max(limit - len(hits), 1)
+            command = [
+                executable,
+                "-n",
+                "--no-heading",
+                "--with-filename",
+                "--color",
+                "never",
+                "--fixed-strings",
+                "-m",
+                str(remaining_limit),
+                *pattern_args,
+                "--",
+                target_file,
+            ]
+            try:
+                process = subprocess.run(
+                    command,
+                    cwd=str(extract_dir),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=remaining_seconds,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning(f"多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+                break
+            if process.returncode not in (0, 1):
+                logger.warning(
+                    f"rg 多关键字搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
+                    f"reason={process.stderr.strip() or process.stdout.strip()}"
+                )
+                return cls._search_by_python_keywords(
+                    ticket_id=ticket_id,
+                    keywords=keywords,
+                    search_mode="any",
+                    context_before=context_before,
+                    context_after=context_after,
+                    limit=limit,
+                    with_context=with_context,
+                    record_id=record_id,
+                    runtime_config=runtime_config,
+                    target_files=target_files,
+                )
+            for raw_line in process.stdout.splitlines():
+                if len(hits) >= limit:
+                    break
+                hit = cls._parse_rg_line(raw_line)
+                if not hit:
+                    continue
+                unique_key = (hit.file, hit.line)
+                if unique_key in seen_keys:
+                    continue
+                matched_keywords = cls._match_keywords(hit.content, keywords, "any")
+                if not matched_keywords:
+                    continue
+                hit.matched_keywords = matched_keywords
+                if with_context:
+                    hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
+                hits.append(hit)
+                seen_keys.add(unique_key)
+        return hits
+
+    @classmethod
+    def _search_by_python_keywords(
+        cls,
+        *,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        runtime_config: dict[str, Any],
+        target_files: list[str],
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        Python 多关键字搜索实现，支持任一命中和同一行全部命中。
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param search_mode: 匹配模式
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param runtime_config: 运行保护配置
+        :param target_files: 搜索文件列表
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        max_scan_bytes = cls._config_int(runtime_config, "maxPythonSearchBytes", 268435456)
+        deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        scanned_bytes = 0
+        for target_file in target_files:
+            if len(hits) >= limit:
+                break
+            if time.monotonic() > deadline:
+                logger.warning(f"Python 多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+                break
+            path = cls._resolve_log_file(ticket_id, target_file, record_id)
+            scanned_bytes += path.stat().st_size
+            if scanned_bytes > max_scan_bytes:
+                raise RuntimeError("日志搜索扫描量超过当前保护阈值，请缩小文件范围或调整日志拉取存储配置")
+            encoding = cls._detect_file_encoding(path)
+            with path.open("r", encoding=encoding, errors="replace") as file_obj:
+                for line_no, content in enumerate(file_obj, start=1):
+                    if time.monotonic() > deadline:
+                        logger.warning(
+                            f"Python 多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}"
+                        )
+                        return hits
+                    matched_keywords = cls._match_keywords(content, keywords, search_mode)
+                    if not matched_keywords:
+                        continue
+                    hit = TicketLogSearchHitModel(
+                        file=target_file,
+                        line=line_no,
+                        content=content.rstrip("\r\n"),
+                        matched_keywords=matched_keywords,
                     )
                     if with_context:
                         hit.context = cls.context(
@@ -629,6 +917,35 @@ class LogService:
             return value if value > 0 else default
         except Exception:
             return default
+
+    @staticmethod
+    def _normalize_keywords(keywords: list[str] | tuple[str, ...] | None) -> list[str]:
+        """
+        归一化日志搜索关键字列表，保持输入顺序并去重。
+        :param keywords: 原始关键字列表
+        :return: 去重后的非空关键字列表
+        """
+        result: list[str] = []
+        for item in keywords or []:
+            keyword = str(item or "").strip()
+            if keyword and keyword not in result:
+                result.append(keyword[:200])
+        return result[:10]
+
+    @staticmethod
+    def _match_keywords(content: str, keywords: list[str], search_mode: str) -> list[str]:
+        """
+        计算单行日志命中的关键字列表。
+        :param content: 日志行内容
+        :param keywords: 关键字列表
+        :param search_mode: any/all 匹配模式
+        :return: 命中的关键字；all 模式未全部命中时返回空列表
+        """
+        text = str(content or "")
+        matched = [keyword for keyword in keywords if keyword and keyword in text]
+        if search_mode == "all" and len(matched) != len(keywords):
+            return []
+        return matched
 
     @classmethod
     def _resolve_search_files(

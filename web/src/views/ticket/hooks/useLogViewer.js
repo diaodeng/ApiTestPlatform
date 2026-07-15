@@ -87,7 +87,16 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   const logViewerResultViewMode = ref('normal')
   const logViewerContextViewMode = ref('normal')
   const logViewerHighlightText = ref('')
-  const logViewerForm = ref({ ticketId: undefined, keyword: '', file: '', contextLines: 20, limit: 500 })
+  const logViewerHighlightKeywords = ref([])
+  const logViewerForm = ref({
+    ticketId: undefined,
+    keyword: '',
+    keywords: [],
+    searchMode: 'any',
+    file: '',
+    contextLines: 20,
+    limit: 500
+  })
 
   function buildCleanLogPullConfig(source) {
     const config = { ...(source || {}) }
@@ -544,8 +553,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerContext.value = null
     logViewerErrorSummary.value = null
     logViewerForm.value.keyword = ''
+    logViewerForm.value.keywords = []
     logViewerForm.value.file = ''
-    logViewerHighlightText.value = ''
+    clearLogViewerHighlight()
     logViewerForm.value.ticketId = ticketId
   }
 
@@ -604,7 +614,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerHits.value = []
     logViewerContext.value = null
     logViewerErrorSummary.value = null
-    logViewerHighlightText.value = ''
+    clearLogViewerHighlight()
   }
 
   function buildLogViewerPayload(keywordField = 'keyword') {
@@ -619,7 +629,10 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       limit,
       withContext: false
     }
-    payload[keywordField] = logViewerForm.value[keywordField]
+    const keywords = normalizeLogViewerKeywords(logViewerForm.value.keywords)
+    payload.keywords = keywords
+    payload.keyword = keywords[0] || String(logViewerForm.value[keywordField] || '').trim()
+    payload.searchMode = String(logViewerForm.value.searchMode || 'any').trim().toLowerCase() === 'all' ? 'all' : 'any'
     const file = String(logViewerForm.value.file || '').trim()
     if (file) payload.file = file
     return payload
@@ -641,6 +654,35 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerForm.value.file = ''
   }
 
+  /** 归一化日志搜索或高亮关键字，支持数组、逗号、分号和换行分隔。 */
+  function normalizeLogViewerKeywords(value) {
+    const rawItems = Array.isArray(value)
+      ? value
+      : String(value || '').split(/[\n,，;；]+/)
+    const keywords = []
+    rawItems.forEach(item => {
+      const keyword = String(item || '').trim()
+      if (keyword && !keywords.includes(keyword)) {
+        keywords.push(keyword.slice(0, 200))
+      }
+    })
+    return keywords.slice(0, 10)
+  }
+
+  /** 同步多高亮关键字，并维护旧展示字段。 */
+  function updateLogViewerHighlightKeywords(value) {
+    const keywords = normalizeLogViewerKeywords(value)
+    logViewerHighlightKeywords.value = keywords
+    logViewerHighlightText.value = keywords.join('、')
+  }
+
+  /** 增加一个日志高亮关键字。 */
+  function addLogViewerHighlightKeyword(text) {
+    const keyword = normalizeLogViewerSelectedText(text)
+    if (!keyword) return
+    updateLogViewerHighlightKeywords([...logViewerHighlightKeywords.value, keyword])
+  }
+
   /** 归一化用户在日志详细信息中选中的文本，避免跨行选择导致高亮范围过大。 */
   function normalizeLogViewerSelectedText(text) {
     const selected = String(text || '').replace(/\r/g, '').trim()
@@ -656,12 +698,13 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       proxy.$modal.msgWarning('请选择至少 2 个字符用于高亮')
       return
     }
-    logViewerHighlightText.value = selected
+    addLogViewerHighlightKeyword(selected)
   }
 
   /** 清空当前上下文高亮关键字。 */
   function clearLogViewerHighlight() {
     logViewerHighlightText.value = ''
+    logViewerHighlightKeywords.value = []
   }
 
   function setLogViewerPanelMode(panel, mode) {
@@ -673,11 +716,14 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   }
 
   function searchLogViewerKeyword() {
-    const keyword = String(logViewerForm.value.keyword || '').trim()
-    if (!keyword) {
+    const keywords = normalizeLogViewerKeywords(logViewerForm.value.keywords)
+    if (!keywords.length) {
       proxy.$modal.msgWarning('请输入搜索关键字')
       return
     }
+    logViewerForm.value.keywords = keywords
+    logViewerForm.value.keyword = keywords[0]
+    updateLogViewerHighlightKeywords(keywords)
     logViewerSearching.value = true
     searchTicketLogs(buildLogViewerPayload('keyword')).then(response => {
       setLogViewerHits(response?.data || [])
@@ -769,6 +815,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerResultViewMode,
     logViewerContextViewMode,
     logViewerHighlightText,
+    logViewerHighlightKeywords,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
@@ -810,7 +857,10 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     searchLogViewerInFile,
     clearLogViewerFileScope,
     normalizeLogViewerSelectedText,
+    normalizeLogViewerKeywords,
     captureLogViewerHighlight,
+    updateLogViewerHighlightKeywords,
+    addLogViewerHighlightKeyword,
     clearLogViewerHighlight,
     setLogViewerPanelMode,
     searchLogViewerKeyword,

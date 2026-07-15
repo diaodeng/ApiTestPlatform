@@ -3,7 +3,9 @@
 1. 工单日志查看准备、关键字搜索和原始归档实时截取补齐资源保护，降低大日志包导致应用卡顿、线程占满或进程被重启的风险。
 2. `ticket.logPull.storage` 新增 `maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes/maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes`，作为后台保护阈值，不在搜索页面额外展示文件数量。
 3. 日志搜索改为按文件执行 `rg` 并按剩余命中上限截断，Python 降级搜索限制总扫描字节数；日志内容入库重新启用 `maxContentChars` 上限。
-4. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`。
+4. 日志搜索支持多个关键字和“任一/全部”匹配模式，命中结果返回 `matchedKeywords`；前端高亮支持多个字符串，并与文本选中复制解耦。
+5. 日志搜索结果区和上下文区在另一侧最小化或无上下文时自动填满剩余空间；工单详情和日志拉取记录页表格常显横向滚动条并取消固定操作列，改善拖动横向滚动条体验。
+6. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`、`web/public/docs/2026-07-15-ticket-log-search-ui-multikeyword.md`。
 
 ## 2026-07-11
 

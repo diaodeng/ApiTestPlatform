@@ -1345,3 +1345,12 @@ updated: 2026-07-07
 - 创建的双向链接：0 对
 - 变更传播链：`ticket.logPull.storage` 运行保护阈值 -> `TicketLogPullService.get_storage_config_dict` -> `LogService.prepare/search/errors` -> `/ticket/logs/prepare`、`/ticket/logs/search`、`/ticket/logs/errors`。
 - 总共涉及页面：4
+
+## [2026-07-15] INGEST-CODE | 工单日志搜索面板与多关键字高亮
+- 触发：用户要求继续处理日志搜索面板布局、多关键字搜索、多高亮和日志拉取记录表格横向滚动问题。
+- 架构层：工单域 / 日志搜索契约 / Web 控制台
+- 创建的页面：`web/public/docs/2026-07-15-ticket-log-search-ui-multikeyword.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`entities/services/web-feature-domains.md`、`entities/data-models/ticket-core-models.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketLogSearchRequestModel.keywords/searchMode` -> `LogService.search_keywords` -> `/ticket/logs/search` -> `useLogViewer` 多关键字表单和多高亮状态 -> `web/src/views/ticket/index.vue` 日志查看器布局与表格滚动；`web/src/views/ticket/logPullRecord/index.vue` 日志拉取记录横向滚动。
+- 总共涉及页面：5
