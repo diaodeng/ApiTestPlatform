@@ -1,3 +1,4 @@
+import gc
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -155,7 +156,10 @@ class TicketProcessingStatsService:
             issue_type_ids=issue_type_id_values,
         )
         metrics = cls.build_overview_metrics(rows, start, finish)
-        return {**base_statistics, **_camelize(metrics)}
+        result = {**base_statistics, **_camelize(metrics)}
+        del rows, metrics
+        gc.collect()
+        return result
 
     @classmethod
     def normalize_overview_count_rows(cls, statistics: dict, stat_options: dict[str, Any] | None = None) -> dict:
@@ -486,6 +490,8 @@ class TicketProcessingStatsService:
                 week_bucket_config=time_config,
             )
         )
+        rows.clear()
+        gc.collect()
         return cls.merge_trend_series(base_trend, processing_trend, normalized_granularity)
 
     @staticmethod

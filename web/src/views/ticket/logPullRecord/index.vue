@@ -539,7 +539,8 @@ import {
   listTicketLogPullRecords,
   importTicketLogPullStoreConfigs,
   redownloadTicketLogPull,
-  retryTicketLogPull
+  retryTicketLogPull,
+  streamTicketLogPullContent
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
@@ -1184,10 +1185,22 @@ function loadContent() {
     return
   }
   contentLoading.value = true
-  getTicketLogPullContent(selectedRecord.value.id, buildContentQuery()).then(response => {
+  contentDetail.value = {}
+  contentText.value = ''
+  streamTicketLogPullContent(selectedRecord.value.id, buildContentQuery(), {
+    onMeta: data => {
+      contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
+    },
+    onChunk: text => {
+      contentText.value += text || ''
+    },
+    onDone: data => {
+      contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
+    }
+  }).catch(() => getTicketLogPullContent(selectedRecord.value.id, buildContentQuery()).then(response => {
     contentDetail.value = response.data || {}
     contentText.value = response.data?.text || ''
-  }).finally(() => {
+  })).finally(() => {
     contentLoading.value = false
   })
 }

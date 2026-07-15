@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import base64
+import gc
 import gzip
 import io
 import json
@@ -1917,6 +1918,100 @@ class TicketLogPullService:
         )
 
     @classmethod
+    def iter_log_pull_content_stream(
+        cls, query_db: Session, record_id: int, query: TicketLogPullContentQueryModel | None = None
+    ):
+        """
+        以 NDJSON 形式流式输出日志内容，避免后端一次性构造完整 JSON 响应。
+        :param query_db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :param query: 查看日志时的时间范围参数
+        :return: NDJSON 字节迭代器
+        """
+        try:
+            record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+            if not record:
+                yield cls._content_stream_event("error", {"message": "日志拉取记录不存在"})
+                return
+
+            command_result_url = record.command_result_url
+            view_begin_time = record.log_begin_time
+            view_end_time = record.log_end_time
+            view_source = "stored"
+            view_mode = str(getattr(query, "view_mode", "stored") or "stored").strip().lower()
+            meta = {
+                "recordId": record.id,
+                "viewBeginTime": view_begin_time,
+                "viewEndTime": view_end_time,
+                "viewSource": view_source,
+                "contentSummary": record.content_summary,
+                "contentCharCount": record.content_char_count or 0,
+                "contentTruncated": bool(record.content_truncated),
+                "matchedEntryCount": record.matched_entry_count or 0,
+                "archiveEntryCount": record.archive_entry_count or 0,
+                "storagePath": record.storage_path,
+                "commandResultUrl": command_result_url,
+            }
+
+            if view_mode != "archive":
+                yield cls._content_stream_event("meta", meta)
+                streamed_chars = 0
+                for chunk in cls._iter_decompressed_text_chunks(record.compressed_content):
+                    streamed_chars += len(chunk)
+                    yield cls._content_stream_event("chunk", {"text": chunk})
+                meta["contentCharCount"] = record.content_char_count or streamed_chars
+                yield cls._content_stream_event("done", meta)
+                return
+
+            requested_begin_time, requested_end_time = (
+                cls._resolve_view_log_time_range(query) if query else (None, None)
+            )
+            archive_path, should_cleanup = cls._resolve_archive_source_for_view(record, query_db)
+            meta["viewBeginTime"] = requested_begin_time or view_begin_time
+            meta["viewEndTime"] = requested_end_time or view_end_time
+            if not archive_path:
+                meta["viewSource"] = "fallback"
+                meta["contentSummary"] = cls._build_view_fallback_summary(
+                    record.content_summary, "归档文件不可用，已返回入库内容"
+                )
+                yield cls._content_stream_event("meta", meta)
+                streamed_chars = 0
+                for chunk in cls._iter_decompressed_text_chunks(record.compressed_content):
+                    streamed_chars += len(chunk)
+                    yield cls._content_stream_event("chunk", {"text": chunk})
+                meta["contentCharCount"] = record.content_char_count or streamed_chars
+                yield cls._content_stream_event("done", meta)
+                return
+
+            try:
+                yield cls._content_stream_event("meta", {**meta, "viewSource": "realtime"})
+                stream_result = yield from cls._iter_archive_content_stream(
+                    record,
+                    archive_path,
+                    query_db,
+                    begin_time=requested_begin_time,
+                    end_time=requested_end_time,
+                )
+                final_meta = {
+                    **meta,
+                    "viewSource": "realtime",
+                    "contentSummary": stream_result["content_summary"],
+                    "contentCharCount": stream_result["content_char_count"],
+                    "contentTruncated": stream_result["content_truncated"],
+                    "matchedEntryCount": stream_result["matched_entry_count"],
+                    "archiveEntryCount": stream_result["archive_entry_count"],
+                }
+                yield cls._content_stream_event("done", final_meta)
+            finally:
+                if should_cleanup and archive_path:
+                    archive_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning(f"流式读取日志内容失败: record_id={record_id}, error={exc}")
+            yield cls._content_stream_event("error", {"message": str(exc)})
+        finally:
+            gc.collect()
+
+    @classmethod
     def get_latest_summary_map(cls, query_db: Session, ticket_ids: list[int]) -> dict[int, dict[str, Any]]:
         """
         查询多个工单的最新日志拉取摘要。
@@ -1999,6 +2094,7 @@ class TicketLogPullService:
         finally:
             with cls._executor_lock:
                 cls._active_record_ids.discard(record_id)
+            gc.collect()
 
     @classmethod
     def _process_record(cls, db: Session, record_id: int) -> None:
@@ -2835,8 +2931,9 @@ class TicketLogPullService:
         timestamp_end = end_time if end_time is not None else cls._parse_datetime(record.log_end_time)
         archive_entry_count = 0
         matched_entry_count = 0
-        content_buffer = io.StringIO()
         current_char_count = 0
+        content_buffer = io.StringIO() if return_text else None
+        compressed_buffer = io.BytesIO() if not return_text else None
 
         with zipfile.ZipFile(archive_path) as archive:
             entry_names = [name for name in archive.namelist() if not name.endswith("/")]
@@ -2852,33 +2949,161 @@ class TicketLogPullService:
                     "text": "" if return_text else None,
                     "content_summary": f"压缩包共 {archive_entry_count} 个文件，未发现 *_pos.log* 日志文件。",
                 }
-            for entry_name in cls._sort_archive_entry_names(target_entry_names):
-                matched_entry_count, current_char_count = cls._extract_entry_logs(
-                    archive=archive,
-                    entry_name=entry_name,
-                    record=record,
-                    timestamp_start=timestamp_start,
-                    timestamp_end=timestamp_end,
-                    content_buffer=content_buffer,
-                    current_char_count=current_char_count,
-                    current_matched_count=matched_entry_count,
-                    max_content_chars=max_content_chars,
-                )
+            if return_text:
+                for entry_name in cls._sort_archive_entry_names(target_entry_names):
+                    matched_entry_count, current_char_count = cls._extract_entry_logs(
+                        archive=archive,
+                        entry_name=entry_name,
+                        record=record,
+                        timestamp_start=timestamp_start,
+                        timestamp_end=timestamp_end,
+                        content_buffer=content_buffer,
+                        current_char_count=current_char_count,
+                        current_matched_count=matched_entry_count,
+                        max_content_chars=max_content_chars,
+                    )
+            else:
+                with gzip.GzipFile(fileobj=compressed_buffer, mode="wb") as gzip_file:
+                    for entry_name in cls._sort_archive_entry_names(target_entry_names):
+                        for entry_text in cls._iter_entry_log_texts(
+                            archive=archive,
+                            entry_name=entry_name,
+                            timestamp_start=timestamp_start,
+                            timestamp_end=timestamp_end,
+                        ):
+                            separator_length = 2 if current_char_count > 0 else 0
+                            projected_length = current_char_count + len(entry_text) + separator_length
+                            if projected_length > max_content_chars:
+                                raise TicketLogContentTooLargeError(
+                                    f"日志内容超过入库上限 {max_content_chars} 字符，请缩小时间范围后重新提交"
+                                )
+                            if separator_length:
+                                gzip_file.write(b"\n\n")
+                            gzip_file.write(entry_text.encode("utf-8"))
+                            current_char_count = projected_length
+                            matched_entry_count += 1
 
-        full_text = content_buffer.getvalue()
+        full_text = content_buffer.getvalue() if content_buffer is not None else ""
+        compressed_text = (
+            base64.b64encode(compressed_buffer.getvalue()).decode("ascii")
+            if compressed_buffer is not None and current_char_count > 0
+            else None
+        )
         return {
             "archive_entry_count": archive_entry_count,
             "matched_entry_count": matched_entry_count,
-            "content_char_count": len(full_text),
+            "content_char_count": len(full_text) if return_text else current_char_count,
             "content_truncated": False,
-            "compressed_content": None if return_text else cls._compress_text(full_text) if full_text else None,
+            "compressed_content": None if return_text else compressed_text,
             "text": full_text if return_text else None,
             "content_summary": cls._build_content_summary(
                 archive_entry_count=archive_entry_count,
                 matched_entry_count=matched_entry_count,
-                content_char_count=len(full_text),
+                content_char_count=len(full_text) if return_text else current_char_count,
                 content_truncated=False,
             ),
+        }
+
+    @staticmethod
+    def _content_stream_event(event_type: str, data: dict[str, Any]) -> bytes:
+        """
+        构造日志内容流式输出的 NDJSON 事件。
+        :param event_type: 事件类型，meta/chunk/done/error
+        :param data: 事件数据
+        :return: UTF-8 编码后的单行 JSON
+        """
+        return (json.dumps({"type": event_type, "data": data}, ensure_ascii=False, default=str) + "\n").encode("utf-8")
+
+    @classmethod
+    def _iter_decompressed_text_chunks(cls, encoded_text: str | None, chunk_size: int = 65536):
+        """
+        分块解压 gzip+base64 文本，降低响应阶段的大字符串峰值。
+        :param encoded_text: 压缩后的文本
+        :param chunk_size: 每次读取的字符数
+        :return: 文本块迭代器
+        """
+        if not encoded_text:
+            return
+        compressed_bytes = base64.b64decode(encoded_text.encode("ascii"))
+        with gzip.GzipFile(fileobj=io.BytesIO(compressed_bytes), mode="rb") as gzip_file:
+            text_file = io.TextIOWrapper(gzip_file, encoding="utf-8", errors="replace")
+            while True:
+                chunk = text_file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    @classmethod
+    def _iter_archive_content_stream(
+        cls,
+        record: TicketLogPullRecord,
+        archive_path: Path,
+        db: Session,
+        begin_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ):
+        """
+        从压缩包中流式提取日志文本并输出 NDJSON chunk 事件。
+        :param record: 日志拉取记录
+        :param archive_path: 压缩包路径
+        :param db: 数据库会话
+        :param begin_time: 可选的查看开始时间
+        :param end_time: 可选的查看结束时间
+        :return: 文本事件迭代器，并在结束时返回统计结果
+        """
+        if int(record.command_data_type or TicketLogDataType.LOG.value) == TicketLogDataType.DB.value:
+            return {
+                "archive_entry_count": cls._count_archive_entries(archive_path),
+                "matched_entry_count": 0,
+                "content_char_count": 0,
+                "content_truncated": False,
+                "content_summary": "DB 拉取完成，当前版本不解析数据库文件文本内容。",
+            }
+
+        config = cls._get_storage_config_dict(db)
+        max_content_chars = int(config.get("maxContentChars") or 500000)
+        timestamp_start = begin_time if begin_time is not None else cls._parse_datetime(record.log_begin_time)
+        timestamp_end = end_time if end_time is not None else cls._parse_datetime(record.log_end_time)
+        archive_entry_count = 0
+        matched_entry_count = 0
+        current_char_count = 0
+
+        with zipfile.ZipFile(archive_path) as archive:
+            entry_names = [name for name in archive.namelist() if not name.endswith("/")]
+            archive_entry_count = len(entry_names)
+            target_entry_names = [name for name in entry_names if cls._is_target_log_entry(name)]
+            for entry_name in cls._sort_archive_entry_names(target_entry_names):
+                for entry_text in cls._iter_entry_log_texts(
+                    archive=archive,
+                    entry_name=entry_name,
+                    timestamp_start=timestamp_start,
+                    timestamp_end=timestamp_end,
+                ):
+                    separator_length = 2 if current_char_count > 0 else 0
+                    projected_length = current_char_count + len(entry_text) + separator_length
+                    if projected_length > max_content_chars:
+                        raise TicketLogContentTooLargeError(
+                            f"日志内容超过入库上限 {max_content_chars} 字符，请缩小时间范围后重新提交"
+                        )
+                    if separator_length:
+                        yield cls._content_stream_event("chunk", {"text": "\n\n"})
+                    yield cls._content_stream_event("chunk", {"text": entry_text})
+                    current_char_count = projected_length
+                    matched_entry_count += 1
+
+        return {
+            "archive_entry_count": archive_entry_count,
+            "matched_entry_count": matched_entry_count,
+            "content_char_count": current_char_count,
+            "content_truncated": False,
+            "content_summary": cls._build_content_summary(
+                archive_entry_count=archive_entry_count,
+                matched_entry_count=matched_entry_count,
+                content_char_count=current_char_count,
+                content_truncated=False,
+            )
+            if matched_entry_count
+            else f"压缩包共 {archive_entry_count} 个文件，未发现时间范围内日志。",
         }
 
     @classmethod
@@ -3232,6 +3457,80 @@ class TicketLogPullService:
             content_buffer.write("\n\n")
         content_buffer.write(entry_text)
         return matched_count + 1, projected_length
+
+    @classmethod
+    def _iter_entry_log_texts(
+        cls,
+        *,
+        archive: zipfile.ZipFile,
+        entry_name: str,
+        timestamp_start: datetime | None,
+        timestamp_end: datetime | None,
+    ):
+        """
+        流式解析压缩包中的单个日志文件，逐条产出命中的日志文本。
+        :param archive: 压缩包对象
+        :param entry_name: 文件名
+        :param timestamp_start: 开始时间
+        :param timestamp_end: 结束时间
+        :return: 命中日志条目文本迭代器
+        """
+        encoding = cls._detect_archive_entry_encoding(archive, entry_name)
+        with archive.open(entry_name, "r") as binary_file:
+            text_file = io.TextIOWrapper(binary_file, encoding=encoding, errors="replace")
+            current_lines: list[str] = []
+            current_timestamp: datetime | None = None
+            for raw_line in text_file:
+                line = raw_line.rstrip("\r\n")
+                match = cls.TIMESTAMP_PATTERN.match(line)
+                if match:
+                    entry_text = cls._build_matched_entry_text(
+                        current_lines=current_lines,
+                        current_timestamp=current_timestamp,
+                        begin_time=timestamp_start,
+                        end_time=timestamp_end,
+                    )
+                    if entry_text:
+                        yield entry_text
+                    current_timestamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S,%f")
+                    file_name = os.path.basename(entry_name)
+                    current_lines = [f"[{file_name}]{line}"]
+                    continue
+                if current_lines:
+                    current_lines.append(line)
+            entry_text = cls._build_matched_entry_text(
+                current_lines=current_lines,
+                current_timestamp=current_timestamp,
+                begin_time=timestamp_start,
+                end_time=timestamp_end,
+            )
+            if entry_text:
+                yield entry_text
+
+    @staticmethod
+    def _build_matched_entry_text(
+        *,
+        current_lines: list[str],
+        current_timestamp: datetime | None,
+        begin_time: datetime | None,
+        end_time: datetime | None,
+    ) -> str:
+        """
+        将当前日志条目按时间范围转换为可输出文本。
+        :param current_lines: 当前条目文本行
+        :param current_timestamp: 当前条目时间
+        :param begin_time: 开始时间
+        :param end_time: 结束时间
+        :return: 命中的条目文本，未命中返回空字符串
+        """
+        if not current_lines or current_timestamp is None:
+            return ""
+        if begin_time and current_timestamp < begin_time:
+            return ""
+        if end_time and current_timestamp > end_time:
+            return ""
+        entry_text = "\n".join(current_lines)
+        return entry_text if entry_text.strip() else ""
 
     @classmethod
     def _detect_archive_entry_encoding(cls, archive: zipfile.ZipFile, entry_name: str) -> str:

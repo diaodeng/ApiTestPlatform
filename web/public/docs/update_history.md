@@ -2,13 +2,15 @@
 
 1. 优化工单统计、飞书多维表格主动拉取和日志实时查看的大数据量内存水位：统计改查轻量字段并减少中间列表，主动拉取改分页迭代处理，日志实时查看避免压缩后再解压。
 2. 新增说明文档：`web/public/docs/2026-07-15-ticket-memory-watermark-optimization.md`。
-3. 工单日志查看准备、关键字搜索和原始归档实时截取补齐资源保护，降低大日志包导致应用卡顿、线程占满或进程被重启的风险。
-4. `ticket.logPull.storage` 新增 `maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes/maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes`，作为后台保护阈值，不在搜索页面额外展示文件数量。
-5. 日志搜索改为按文件执行 `rg` 并按剩余命中上限截断，Python 降级搜索限制总扫描字节数；日志内容入库重新启用 `maxContentChars` 上限。
-6. 日志搜索支持多个关键字和“任一/全部”匹配模式，命中结果返回 `matchedKeywords`；前端高亮支持多个字符串，并与文本选中复制解耦。
-7. 日志搜索结果区和上下文区在另一侧最小化或无上下文时自动填满剩余空间；工单详情和日志拉取记录页表格常显横向滚动条并取消固定操作列，改善拖动横向滚动条体验。
-8. 工单详情页日志搜索关键字和高亮词改为文本框输入，多个文本使用英文逗号或换行分隔；高亮词输入和上下文行数移动到日志详情显示区域顶部，高亮摘要过长时单行省略。
-9. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`、`web/public/docs/2026-07-15-ticket-log-search-ui-multikeyword.md`、`web/public/docs/2026-07-15-ticket-log-search-text-input-layout.md`。
+3. 日志拉取记录新增 `/ticket/log-pulls/{record_id}/content/stream` NDJSON 流式读取接口，前端优先边接收边显示，异常时回退旧 JSON 接口；日志任务和统计计算结束后主动触发可释放对象回收。
+4. 明确日志压缩包外部下载和浏览器下载链路已经是流式写文件/`FileResponse`，本次主要优化解压、归档截取和内容响应阶段的大对象峰值。
+5. 工单日志查看准备、关键字搜索和原始归档实时截取补齐资源保护，降低大日志包导致应用卡顿、线程占满或进程被重启的风险。
+6. `ticket.logPull.storage` 新增 `maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes/maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes`，作为后台保护阈值，不在搜索页面额外展示文件数量。
+7. 日志搜索改为按文件执行 `rg` 并按剩余命中上限截断，Python 降级搜索限制总扫描字节数；日志内容入库重新启用 `maxContentChars` 上限。
+8. 日志搜索支持多个关键字和“任一/全部”匹配模式，命中结果返回 `matchedKeywords`；前端高亮支持多个字符串，并与文本选中复制解耦。
+9. 日志搜索结果区和上下文区在另一侧最小化或无上下文时自动填满剩余空间；工单详情和日志拉取记录页表格常显横向滚动条并取消固定操作列，改善拖动横向滚动条体验。
+10. 工单详情页日志搜索关键字和高亮词改为文本框输入，多个文本使用英文逗号或换行分隔；高亮词输入和上下文行数移动到日志详情显示区域顶部，高亮摘要过长时单行省略。
+11. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`、`web/public/docs/2026-07-15-ticket-log-search-ui-multikeyword.md`、`web/public/docs/2026-07-15-ticket-log-search-text-input-layout.md`。
 
 ## 2026-07-11
 

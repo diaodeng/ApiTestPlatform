@@ -1,4 +1,6 @@
 import request from '@/utils/request';
+import { getToken } from '@/utils/auth';
+import { tansParams } from '@/utils/ruoyi';
 
 function sanitizeQueryParams(query) {
   return Object.fromEntries(
@@ -177,6 +179,51 @@ export function getTicketLogPullContent(recordId, query) {
     method: 'get',
     params: query,
   });
+}
+
+// 流式查询日志拉取文本内容，按 NDJSON 事件逐块回调
+export async function streamTicketLogPullContent(recordId, query, handlers = {}) {
+  const baseURL = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || '';
+  const queryText = tansParams(sanitizeQueryParams(query || {})).replace(/&$/, '');
+  const url = `${baseURL}/ticket/log-pulls/${recordId}/content/stream${queryText ? `?${queryText}` : ''}`;
+  const headers = {};
+  if (getToken()) {
+    headers.Authorization = `Bearer ${getToken()}`;
+  }
+  const response = await fetch(url, { method: 'GET', headers });
+  if (!response.ok || !response.body) {
+    throw new Error(`日志内容流式读取失败: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  const handleLine = rawLine => {
+    const line = String(rawLine || '').trim();
+    if (!line) return;
+    const event = JSON.parse(line);
+    const data = event.data || {};
+    if (event.type === 'meta') {
+      handlers.onMeta?.(data);
+    } else if (event.type === 'chunk') {
+      handlers.onChunk?.(data.text || '');
+    } else if (event.type === 'done') {
+      handlers.onDone?.(data);
+    } else if (event.type === 'error') {
+      throw new Error(data.message || '日志内容流式读取失败');
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    lines.forEach(handleLine);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    handleLine(buffer);
+  }
 }
 
 // 准备工单日志查看目录

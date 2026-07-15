@@ -2,7 +2,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
@@ -120,6 +120,31 @@ async def get_ticket_log_pull_content(
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
+    "/log-pulls/{record_id}/content/stream",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def stream_ticket_log_pull_content(
+    request: Request,
+    record_id: int,
+    query: TicketLogPullContentQueryModel = Depends(TicketLogPullContentQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    流式获取日志拉取记录文本内容接口。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query: 查看日志范围参数，支持开始/结束时间或时间点前后范围
+    :param query_db: 数据库会话
+    :return: NDJSON 事件流，包含 meta/chunk/done/error
+    """
+    del request
+    return StreamingResponse(
+        TicketLogPullService.iter_log_pull_content_stream(query_db, record_id, query),
+        media_type="application/x-ndjson; charset=utf-8",
+    )
 
 
 @ticketLogPullController.post(

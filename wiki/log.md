@@ -1372,3 +1372,12 @@ updated: 2026-07-15
 - 创建的双向链接：0 对
 - 变更传播链：日志搜索文本框输入 -> `normalizeLogViewerKeywords` 归一化 -> `/ticket/logs/search` 多关键字契约；详情区高亮文本框 -> `logViewerHighlightKeywords` -> 上下文行高亮渲染。
 - 总共涉及页面：5
+
+## [2026-07-15] INGEST-CODE | 工单日志内容流式读取与统计回收
+- 触发：用户反馈飞书主动拉取、日志拉取/查看和工单统计后进程内存水位持续升高，要求按有限改动把大数据量链路改为分批、yield 和流式处理，并尽量主动释放内存。
+- 架构层：工单域 / 日志拉取 / 统计服务 / Web 控制台
+- 创建的页面：无
+- 更新的页面：`web/public/docs/2026-07-15-ticket-memory-watermark-optimization.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketLogPullService.iter_log_pull_content_stream` -> `/ticket/log-pulls/{record_id}/content/stream` -> `streamTicketLogPullContent` -> `web/src/views/ticket/logPullRecord/index.vue` 边接收边显示；`TicketProcessingStatsService` overview/trend 计算结束后删除临时对象并触发 GC。
+- 总共涉及页面：2
