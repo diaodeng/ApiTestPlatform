@@ -352,7 +352,12 @@
           <el-button plain icon="Setting" @click="columnConfigOpen = true">列设置</el-button>
         </el-col>
         <el-col :span="1.5">
-          <el-button plain icon="Tickets" @click="openIssueManagement" v-hasPermi="['ticket:issue:list']">
+          <el-button
+            plain
+            icon="Tickets"
+            @click="openIssueManagement"
+            v-hasPermi="['ticket:issue:list']"
+          >
             问题实例管理
           </el-button>
         </el-col>
@@ -368,7 +373,12 @@
           </el-button>
         </el-col>
         <el-col :span="1.5">
-          <el-button plain icon="TrendCharts" @click="openVersionStatisticsDialog" v-hasPermi="['ticket:statistics:list']">
+          <el-button
+            plain
+            icon="TrendCharts"
+            @click="openVersionStatisticsDialog"
+            v-hasPermi="['ticket:statistics:list']"
+          >
             版本统计
           </el-button>
         </el-col>
@@ -443,7 +453,9 @@
           sortable="custom"
         >
           <template #default="scope">
-            <el-tag v-if="scope.row.issueId && scope.row.issueConfirmed" type="success">已确认</el-tag>
+            <el-tag v-if="scope.row.issueId && scope.row.issueConfirmed" type="success"
+              >已确认</el-tag
+            >
             <el-tag v-else-if="scope.row.issueId" type="warning">待确认</el-tag>
             <span v-else>-</span>
           </template>
@@ -465,7 +477,9 @@
           sortable="custom"
           show-overflow-tooltip
         >
-          <template #default="scope">{{ formatIssueRelationType(scope.row.issueRelationType) }}</template>
+          <template #default="scope">{{
+            formatIssueRelationType(scope.row.issueRelationType)
+          }}</template>
         </el-table-column>
         <el-table-column
           v-if="isTicketColumnVisible('status')"
@@ -799,7 +813,13 @@
         </template>
       </el-dialog>
 
-      <el-dialog title="版本批量维护" v-model="releaseBatchOpen" width="720px" append-to-body @closed="resetReleaseBatchForm">
+      <el-dialog
+        title="版本批量维护"
+        v-model="releaseBatchOpen"
+        width="720px"
+        append-to-body
+        @closed="resetReleaseBatchForm"
+      >
         <el-alert
           type="info"
           :closable="false"
@@ -873,7 +893,9 @@
           </el-row>
         </el-form>
         <template #footer>
-          <el-button :disabled="releaseBatchSubmitting" @click="releaseBatchOpen = false">取 消</el-button>
+          <el-button :disabled="releaseBatchSubmitting" @click="releaseBatchOpen = false"
+            >取 消</el-button
+          >
           <el-button
             type="primary"
             :loading="releaseBatchSubmitting"
@@ -894,13 +916,22 @@
             style="width: 220px"
             @keyup.enter="loadVersionStatistics"
           />
-          <el-button type="primary" icon="Search" :loading="versionStatisticsLoading" @click="loadVersionStatistics">
+          <el-button
+            type="primary"
+            icon="Search"
+            :loading="versionStatisticsLoading"
+            @click="loadVersionStatistics"
+          >
             查询
           </el-button>
         </div>
         <el-tabs v-model="versionStatisticsTab">
           <el-tab-pane label="发生版本" name="affected">
-            <el-table v-loading="versionStatisticsLoading" :data="versionStatistics.affectedVersionRows || []" max-height="520">
+            <el-table
+              v-loading="versionStatisticsLoading"
+              :data="versionStatistics.affectedVersionRows || []"
+              max-height="520"
+            >
               <el-table-column label="版本" prop="version" min-width="140" show-overflow-tooltip />
               <el-table-column label="工单数" prop="ticketCount" width="90" align="right" />
               <el-table-column label="真实问题" prop="problemCount" width="90" align="right" />
@@ -919,7 +950,11 @@
             </el-table>
           </el-tab-pane>
           <el-tab-pane label="修复/发版版本" name="fix">
-            <el-table v-loading="versionStatisticsLoading" :data="versionStatistics.fixVersionRows || []" max-height="520">
+            <el-table
+              v-loading="versionStatisticsLoading"
+              :data="versionStatistics.fixVersionRows || []"
+              max-height="520"
+            >
               <el-table-column label="版本" prop="version" min-width="140" show-overflow-tooltip />
               <el-table-column label="工单数" prop="ticketCount" width="90" align="right" />
               <el-table-column label="Issue数" prop="issueCount" width="90" align="right" />
@@ -927,13 +962,19 @@
               <el-table-column label="已验证" prop="verifiedCount" width="90" align="right" />
               <el-table-column label="未验证" prop="unverifiedCount" width="90" align="right" />
               <el-table-column label="关闭结果" min-width="190" show-overflow-tooltip>
-                <template #default="scope">{{ formatTopRows(scope.row.resolutionCounts) }}</template>
+                <template #default="scope">{{
+                  formatTopRows(scope.row.resolutionCounts)
+                }}</template>
               </el-table-column>
               <el-table-column label="解决方式" min-width="190" show-overflow-tooltip>
-                <template #default="scope">{{ formatTopRows(scope.row.solutionTypeCounts) }}</template>
+                <template #default="scope">{{
+                  formatTopRows(scope.row.solutionTypeCounts)
+                }}</template>
               </el-table-column>
               <el-table-column label="细分问题" min-width="190" show-overflow-tooltip>
-                <template #default="scope">{{ formatTopRows(scope.row.topProblemPatterns) }}</template>
+                <template #default="scope">{{
+                  formatTopRows(scope.row.topProblemPatterns)
+                }}</template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
@@ -1018,17 +1059,29 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="计划修复版本" prop="plannedFixVersion">
-              <el-input v-model="form.plannedFixVersion" placeholder="请输入计划修复版本" maxlength="100" />
+              <el-input
+                v-model="form.plannedFixVersion"
+                placeholder="请输入计划修复版本"
+                maxlength="100"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="实际修复版本" prop="fixedVersion">
-              <el-input v-model="form.fixedVersion" placeholder="请输入实际修复版本" maxlength="100" />
+              <el-input
+                v-model="form.fixedVersion"
+                placeholder="请输入实际修复版本"
+                maxlength="100"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="实际发版版本" prop="releasedVersion">
-              <el-input v-model="form.releasedVersion" placeholder="请输入实际发版版本" maxlength="100" />
+              <el-input
+                v-model="form.releasedVersion"
+                placeholder="请输入实际发版版本"
+                maxlength="100"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -3339,17 +3392,13 @@
     >
       <div v-loading="logViewerSearching" class="log-viewer-content">
         <div class="panel-header mb16 log-view-controls">
-          <el-select
+          <el-input
             v-model="logViewerForm.keywords"
-            class="log-keyword-select"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            collapse-tags
-            collapse-tags-tooltip
-            reserve-keyword
-            placeholder="输入关键字，回车添加"
+            class="log-keyword-input"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 2 }"
+            clearable
+            placeholder="输入搜索关键字，多个用英文逗号或换行分隔"
           />
           <el-radio-group v-model="logViewerForm.searchMode" size="small">
             <el-radio-button value="any">任一</el-radio-button>
@@ -3372,20 +3421,9 @@
               :value="file"
             />
           </el-select>
-          <el-button
-            v-if="logViewerForm.file"
-            link
-            type="primary"
-            @click="clearLogViewerFileScope"
+          <el-button v-if="logViewerForm.file" link type="primary" @click="clearLogViewerFileScope"
             >清除文件范围</el-button
           >
-          <el-text>上下文</el-text>
-          <el-input-number
-            v-model="logViewerForm.contextLines"
-            :min="0"
-            :max="500"
-            controls-position="right"
-          />
           <el-text>结果上限</el-text>
           <el-input-number
             v-model="logViewerForm.limit"
@@ -3416,19 +3454,6 @@
           <el-button type="warning" :loading="logViewerSearching" @click="loadLogViewerErrors"
             >异常提取</el-button
           >
-          <el-select
-            v-model="logViewerHighlightKeywords"
-            class="log-keyword-select log-highlight-select"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            collapse-tags
-            collapse-tags-tooltip
-            reserve-keyword
-            placeholder="输入高亮文本，回车添加"
-            @change="updateLogViewerHighlightKeywords"
-          />
         </div>
         <el-alert
           v-if="logViewerErrorSummary"
@@ -3499,10 +3524,7 @@
             <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
             <el-table-column label="操作" width="130" fixed="right">
               <template #default="scope">
-                <el-button
-                  link
-                  type="primary"
-                  @click.stop="searchLogViewerInFile(scope.row.file)"
+                <el-button link type="primary" @click.stop="searchLogViewerInFile(scope.row.file)"
                   >在此文件搜索</el-button
                 >
               </template>
@@ -3530,62 +3552,87 @@
               }}-{{ logViewerContext.end }}/{{ logViewerContext.totalLines }}）</span
             >
             <div class="panel-inline">
+              <el-text style="flex: none">上下文</el-text>
+              <el-input-number
+                v-model="logViewerForm.contextLines"
+                class="log-context-lines-input"
+                :min="0"
+                :max="500"
+                controls-position="right"
+              />
+              <el-input
+                v-model="logViewerHighlightText"
+                class="log-highlight-input"
+                type="textarea"
+                :autosize="{ minRows: 1, maxRows: 2 }"
+                clearable
+                placeholder="输入高亮文本，多个用英文逗号或换行分隔"
+                @input="updateLogViewerHighlightKeywords(logViewerHighlightText)"
+              />
               <el-switch
                 v-model="logPullWrapEnabled"
                 inline-prompt
                 active-text="换行"
                 inactive-text="不换行"
               />
-              <el-tag v-if="logViewerHighlightText" type="warning" effect="plain" round>
-                高亮：{{ logViewerHighlightText }}
+              <el-tag
+                v-if="logViewerHighlightSummary"
+                class="log-highlight-summary-tag"
+                type="warning"
+                effect="plain"
+                round
+                :title="`高亮：${logViewerHighlightSummary}`"
+              >
+                <span class="log-highlight-summary">高亮：{{ logViewerHighlightSummary }}</span>
               </el-tag>
               <el-button
-                v-if="logViewerHighlightText"
+                icon="Delete"
+                v-if="logViewerHighlightSummary"
                 link
                 type="primary"
                 @click="clearLogViewerHighlight"
-                >清除高亮</el-button
-              >
+                title="清除高亮"
+              ></el-button>
               <el-button
                 link
                 type="primary"
+                icon="ArrowLeftBold"
+                title="上一段"
                 :disabled="!logViewerContext.hasPrev || logViewerSearching"
                 @click="pageLogViewerContext(-1)"
-                >上一段</el-button
-              >
+              ></el-button>
               <el-button
                 link
                 type="primary"
+                icon="ArrowRightBold"
+                title="下一段"
                 :disabled="!logViewerContext.hasNext || logViewerSearching"
                 @click="pageLogViewerContext(1)"
-                >下一段</el-button
-              >
+              ></el-button>
               <el-button
                 link
                 type="primary"
                 :icon="logViewerContextViewMode === 'minimized' ? 'Plus' : 'Minus'"
+                :title="logViewerContextViewMode === 'minimized' ? '展开' : '最小化'"
                 @click="
                   setLogViewerPanelMode(
                     'context',
                     logViewerContextViewMode === 'minimized' ? 'normal' : 'minimized'
                   )
                 "
-              >
-                {{ logViewerContextViewMode === 'minimized' ? '展开' : '最小化' }}
-              </el-button>
+              ></el-button>
               <el-button
                 link
                 type="primary"
                 :icon="logViewerContextViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'"
+                :title="logViewerContextViewMode === 'fullscreen' ? '还原' : '放大全屏'"
                 @click="
                   setLogViewerPanelMode(
                     'context',
                     logViewerContextViewMode === 'fullscreen' ? 'normal' : 'fullscreen'
                   )
                 "
-              >
-                {{ logViewerContextViewMode === 'fullscreen' ? '还原' : '放大全屏' }}
-              </el-button>
+              ></el-button>
             </div>
           </div>
           <pre
@@ -3595,7 +3642,7 @@
               'log-context-block',
               { 'log-content-wrap': logPullWrapEnabled },
             ]"
-            ><span
+          ><span
               v-for="item in logViewerContextDisplayLines"
               :key="`${item.file}:${item.line}`"
               class="log-context-line"
@@ -3609,8 +3656,7 @@
                   ><span v-else>{{ part.text }}</span></template
                 ></span
               ></span
-            ></pre
-          >
+            ></pre>
         </div>
       </div>
     </el-dialog>
@@ -3845,6 +3891,7 @@
     logViewerContextViewMode,
     logViewerHighlightText,
     logViewerHighlightKeywords,
+    logViewerHighlightSummary,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
@@ -3893,13 +3940,13 @@
    * 拆分后日志拉取表单归 useLogViewer 管理，因此保留在页面层完成跨 hook 状态回写。
    */
   function applyProjectVendorMapping(projectId) {
-    const vendorNo = getProjectVendorNo(projectId)
+    const vendorNo = getProjectVendorNo(projectId);
     if (!vendorNo) {
-      return
+      return;
     }
-    const resolvedVendorId = Number(vendorNo)
-    logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId
-    resetStoreSelection(logPullForm.value, logPullForm.value.vendorId)
+    const resolvedVendorId = Number(vendorNo);
+    logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId;
+    resetStoreSelection(logPullForm.value, logPullForm.value.vendorId);
   }
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
@@ -3950,9 +3997,9 @@
    * useOptions 只负责解析选项，页面层负责写入当前分析表单。
    */
   function applyAiAnalysisProviderAgent(providerCode) {
-    const providerAgentCode = resolveAiAnalysisProviderAgent(providerCode)
+    const providerAgentCode = resolveAiAnalysisProviderAgent(providerCode);
     if (providerAgentCode) {
-      aiAnalysisTaskForm.value.agentCode = providerAgentCode
+      aiAnalysisTaskForm.value.agentCode = providerAgentCode;
     }
   }
 
@@ -3977,11 +4024,11 @@
    * 处理 AI 分析 Provider 变更，保持与备份分支一致的 Agent 自动带入行为。
    */
   function handleAiAnalysisProviderChange(providerCode) {
-    applyAiAnalysisProviderAgent(providerCode)
+    applyAiAnalysisProviderAgent(providerCode);
     saveTicketAiPreferencePatch({
       aiProviderCode: providerCode,
       agentCode: aiAnalysisTaskForm.value.agentCode,
-    })
+    });
   }
 
   /**
@@ -4013,7 +4060,7 @@
    * 从当前工单详情解析默认追加提示词编码。
    */
   function resolveDefaultAiPromptTemplateCodes() {
-    return resolveDefaultAiPromptTemplateCodesFromDetail(detail.value)
+    return resolveDefaultAiPromptTemplateCodesFromDetail(detail.value);
   }
   const projectVendorMapForm = ref({
     projectId: undefined,
@@ -4153,7 +4200,9 @@
       comment: String(formData.comment || '').trim() || undefined,
     };
     return Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== '')
+      Object.entries(payload).filter(
+        ([, value]) => value !== undefined && value !== null && value !== ''
+      )
     );
   }
 
@@ -4235,9 +4284,7 @@
     if (!Array.isArray(rows) || !rows.length) {
       return '-';
     }
-    return rows
-      .map((item) => `${item.name || '未填写'}(${item.count || 0})`)
-      .join('、');
+    return rows.map((item) => `${item.name || '未填写'}(${item.count || 0})`).join('、');
   }
 
   const data = reactive({
@@ -4749,9 +4796,11 @@
           ticketData.extraData?.version_key ||
           '';
         form.value.affectedVersion = ticketData.affectedVersion || form.value.versionKey || '';
-        form.value.plannedFixVersion = ticketData.plannedFixVersion || ticketData.planned_fix_version || '';
+        form.value.plannedFixVersion =
+          ticketData.plannedFixVersion || ticketData.planned_fix_version || '';
         form.value.fixedVersion = ticketData.fixedVersion || ticketData.fixed_version || '';
-        form.value.releasedVersion = ticketData.releasedVersion || ticketData.released_version || '';
+        form.value.releasedVersion =
+          ticketData.releasedVersion || ticketData.released_version || '';
         form.value.isProblem = ticketData.isProblem ?? ticketData.is_problem ?? undefined;
         form.value.rootCauseType = ticketData.rootCauseType || ticketData.root_cause_type || '';
         form.value.solutionType = ticketData.solutionType || ticketData.solution_type || '';
@@ -5010,7 +5059,8 @@
   function buildIssueCreateBindForm() {
     return {
       title: detail.value.issueTitle || detail.value.title || '',
-      summary: detail.value.rootCause || latestSnapshotSummary.value || detail.value.description || '',
+      summary:
+        detail.value.rootCause || latestSnapshotSummary.value || detail.value.description || '',
       status: 'open',
       severity: detail.value.severity || detail.value.internalPriority || '',
       projectId: detail.value.projectId || undefined,
@@ -5062,7 +5112,9 @@
       return;
     }
     proxy.$modal
-      .confirm(`是否确认解除当前工单与问题实例 ${detail.value.issueNo || detail.value.issueId} 的归因？`)
+      .confirm(
+        `是否确认解除当前工单与问题实例 ${detail.value.issueNo || detail.value.issueId} 的归因？`
+      )
       .then(() => {
         issueActionLoading.value = true;
         return unbindTicketIssue(detail.value.ticketId);
@@ -6138,12 +6190,30 @@
     min-height: 0;
   }
 
-  .log-keyword-select {
-    width: min(420px, 100%);
+  .log-keyword-input {
+    width: min(460px, 100%);
   }
 
-  .log-highlight-select {
+  .log-highlight-input {
     width: min(360px, 100%);
+  }
+
+  .log-context-lines-input {
+    width: 120px;
+  }
+
+  .log-highlight-summary-tag {
+    max-width: min(280px, 32vw);
+    min-width: 0;
+  }
+
+  .log-highlight-summary {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    white-space: nowrap;
   }
 
   .log-view-time-picker {
@@ -6158,7 +6228,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .inline-inputs {
@@ -6191,7 +6261,15 @@
 
   .log-view-panel-header {
     align-items: center;
+    flex-wrap: wrap;
     justify-content: space-between;
+  }
+
+  .log-view-panel-header > span {
+    min-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .log-view-panel-fullscreen {

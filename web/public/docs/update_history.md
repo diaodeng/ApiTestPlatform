@@ -5,7 +5,8 @@
 3. 日志搜索改为按文件执行 `rg` 并按剩余命中上限截断，Python 降级搜索限制总扫描字节数；日志内容入库重新启用 `maxContentChars` 上限。
 4. 日志搜索支持多个关键字和“任一/全部”匹配模式，命中结果返回 `matchedKeywords`；前端高亮支持多个字符串，并与文本选中复制解耦。
 5. 日志搜索结果区和上下文区在另一侧最小化或无上下文时自动填满剩余空间；工单详情和日志拉取记录页表格常显横向滚动条并取消固定操作列，改善拖动横向滚动条体验。
-6. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`、`web/public/docs/2026-07-15-ticket-log-search-ui-multikeyword.md`。
+6. 工单详情页日志搜索关键字和高亮词改为文本框输入，多个文本使用英文逗号或换行分隔；高亮词输入和上下文行数移动到日志详情显示区域顶部，高亮摘要过长时单行省略。
+7. 新增说明文档：`web/public/docs/2026-07-15-ticket-log-resource-guard.md`、`web/public/docs/2026-07-15-ticket-log-search-ui-multikeyword.md`、`web/public/docs/2026-07-15-ticket-log-search-text-input-layout.md`。
 
 ## 2026-07-11
 

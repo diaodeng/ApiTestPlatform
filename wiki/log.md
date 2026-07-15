@@ -1354,3 +1354,12 @@ updated: 2026-07-07
 - 创建的双向链接：0 对
 - 变更传播链：`TicketLogSearchRequestModel.keywords/searchMode` -> `LogService.search_keywords` -> `/ticket/logs/search` -> `useLogViewer` 多关键字表单和多高亮状态 -> `web/src/views/ticket/index.vue` 日志查看器布局与表格滚动；`web/src/views/ticket/logPullRecord/index.vue` 日志拉取记录横向滚动。
 - 总共涉及页面：5
+
+## [2026-07-15] INGEST-CODE | 工单日志搜索文本框化与详情区配置
+- 触发：用户要求工单详情页日志搜索关键字和高亮文本输入不要使用下拉列表，改为文本框；多个文本用英文逗号或换行分隔；高亮词输入和上下文数量配置移动到日志详情显示区域顶部；顶部高亮摘要过长时省略。
+- 架构层：Web 控制台 / 工单日志查看器
+- 创建的页面：`web/public/docs/2026-07-15-ticket-log-search-text-input-layout.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/public/docs/update_history.md`、`entities/services/ticket-domain.md`、`entities/services/web-feature-domains.md`
+- 创建的双向链接：0 对
+- 变更传播链：日志搜索文本框输入 -> `normalizeLogViewerKeywords` 归一化 -> `/ticket/logs/search` 多关键字契约；详情区高亮文本框 -> `logViewerHighlightKeywords` -> 上下文行高亮渲染。
+- 总共涉及页面：5

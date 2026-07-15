@@ -4,7 +4,7 @@
  * 该 hook 从工单管理页拆出日志拉取表单、记录刷新、下载和日志查看器能力；
  * 业务行为保持与备份分支 master_params_ticket_new 中 index.vue 的实现一致。
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { saveAs } from 'file-saver'
 import { blobValidate } from '@/utils/ruoyi'
 import {
@@ -88,10 +88,11 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   const logViewerContextViewMode = ref('normal')
   const logViewerHighlightText = ref('')
   const logViewerHighlightKeywords = ref([])
+  const logViewerHighlightSummary = computed(() => logViewerHighlightKeywords.value.join('、'))
   const logViewerForm = ref({
     ticketId: undefined,
     keyword: '',
-    keywords: [],
+    keywords: '',
     searchMode: 'any',
     file: '',
     contextLines: 20,
@@ -553,7 +554,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerContext.value = null
     logViewerErrorSummary.value = null
     logViewerForm.value.keyword = ''
-    logViewerForm.value.keywords = []
+    logViewerForm.value.keywords = ''
     logViewerForm.value.file = ''
     clearLogViewerHighlight()
     logViewerForm.value.ticketId = ticketId
@@ -673,7 +674,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   function updateLogViewerHighlightKeywords(value) {
     const keywords = normalizeLogViewerKeywords(value)
     logViewerHighlightKeywords.value = keywords
-    logViewerHighlightText.value = keywords.join('、')
+    logViewerHighlightText.value = Array.isArray(value) ? keywords.join('\n') : String(value || '')
   }
 
   /** 增加一个日志高亮关键字。 */
@@ -721,7 +722,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       proxy.$modal.msgWarning('请输入搜索关键字')
       return
     }
-    logViewerForm.value.keywords = keywords
+    logViewerForm.value.keywords = keywords.join('\n')
     logViewerForm.value.keyword = keywords[0]
     updateLogViewerHighlightKeywords(keywords)
     logViewerSearching.value = true
@@ -816,6 +817,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerContextViewMode,
     logViewerHighlightText,
     logViewerHighlightKeywords,
+    logViewerHighlightSummary,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
