@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -1004,7 +1005,7 @@ class TicketProcessingStatsService:
     @classmethod
     def build_overview_metrics(
         cls,
-        rows: list[Any],
+        rows: Iterable[Any],
         begin_time: datetime | None,
         end_time: datetime | None,
     ) -> dict:
@@ -1015,35 +1016,81 @@ class TicketProcessingStatsService:
         :param end_time: 结束时间。
         :return: snake_case 指标。
         """
-        submitted_rows = [
-            ticket for ticket in rows if cls.time_in_range(cls.submit_time(ticket), begin_time, end_time)
-        ]
-        first_responded_rows = [
-            ticket for ticket in rows if cls.time_in_range(ticket.first_response_at, begin_time, end_time)
-        ]
-        processed_rows = [ticket for ticket in rows if cls.time_in_range(ticket.processed_at, begin_time, end_time)]
-        resolved_rows = [ticket for ticket in rows if cls.time_in_range(ticket.resolved_at, begin_time, end_time)]
-        closed_rows = [ticket for ticket in rows if cls.time_in_range(ticket.closed_at, begin_time, end_time)]
-        processed_in_new_rows = [ticket for ticket in submitted_rows if ticket.processed_at is not None]
-        unprocessed_count = sum(1 for ticket in submitted_rows if ticket.processed_at is None)
-        new_count = len(submitted_rows)
+        new_count = 0
+        first_responded_count = 0
+        processed_count = 0
+        processed_in_new_count = 0
+        resolved_count = 0
+        closed_count = 0
+        unprocessed_count = 0
+        first_response_seconds_sum = 0
+        first_response_seconds_count = 0
+        first_process_seconds_sum = 0
+        first_process_seconds_count = 0
+        resolve_seconds_sum = 0
+        resolve_seconds_count = 0
+        close_seconds_sum = 0
+        close_seconds_count = 0
+
+        for ticket in rows:
+            submit_time = cls.submit_time(ticket)
+            first_response_at = getattr(ticket, "first_response_at", None)
+            processed_at = getattr(ticket, "processed_at", None)
+            resolved_at = getattr(ticket, "resolved_at", None)
+            closed_at = getattr(ticket, "closed_at", None)
+            is_submitted_in_range = cls.time_in_range(submit_time, begin_time, end_time)
+            if is_submitted_in_range:
+                new_count += 1
+                if processed_at is not None:
+                    processed_in_new_count += 1
+                else:
+                    unprocessed_count += 1
+            if cls.time_in_range(first_response_at, begin_time, end_time):
+                first_responded_count += 1
+            if cls.time_in_range(processed_at, begin_time, end_time):
+                processed_count += 1
+            if cls.time_in_range(resolved_at, begin_time, end_time):
+                resolved_count += 1
+            if cls.time_in_range(closed_at, begin_time, end_time):
+                closed_count += 1
+            response_seconds = cls.elapsed_seconds_from_submit(ticket, "first_response_at")
+            if response_seconds is not None:
+                first_response_seconds_sum += response_seconds
+                first_response_seconds_count += 1
+            process_seconds = cls.elapsed_seconds_from_submit(ticket, "processed_at")
+            if process_seconds is not None:
+                first_process_seconds_sum += process_seconds
+                first_process_seconds_count += 1
+            resolve_seconds = cls.elapsed_seconds_from_submit(ticket, "resolved_at")
+            if resolve_seconds is not None:
+                resolve_seconds_sum += resolve_seconds
+                resolve_seconds_count += 1
+            close_seconds = cls.elapsed_seconds_from_submit(ticket, "closed_at")
+            if close_seconds is not None:
+                close_seconds_sum += close_seconds
+                close_seconds_count += 1
+
         return {
             "new_count": new_count,
-            "first_responded_count": len(first_responded_rows),
-            "processed_count": len(processed_rows),
-            "processed_in_new_count": len(processed_in_new_rows),
-            "process_rate": round(len(processed_in_new_rows) / new_count, 4) if new_count else 0,
-            "resolved_count": len(resolved_rows),
-            "closed_count": len(closed_rows),
+            "first_responded_count": first_responded_count,
+            "processed_count": processed_count,
+            "processed_in_new_count": processed_in_new_count,
+            "process_rate": round(processed_in_new_count / new_count, 4) if new_count else 0,
+            "resolved_count": resolved_count,
+            "closed_count": closed_count,
             "unprocessed_count": unprocessed_count,
             "processed_status_counts": [
-                {"status": "processed", "label": "已处理", "count": len(processed_in_new_rows)},
+                {"status": "processed", "label": "已处理", "count": processed_in_new_count},
                 {"status": "unprocessed", "label": "未处理", "count": unprocessed_count},
             ],
-            "avg_first_response_seconds": cls.average_seconds(rows, "first_response_at"),
-            "avg_first_process_seconds": cls.average_seconds(rows, "processed_at"),
-            "avg_resolve_seconds": cls.average_seconds(rows, "resolved_at"),
-            "avg_close_seconds": cls.average_seconds(rows, "closed_at"),
+            "avg_first_response_seconds": cls.average_from_sum(
+                first_response_seconds_sum, first_response_seconds_count
+            ),
+            "avg_first_process_seconds": cls.average_from_sum(
+                first_process_seconds_sum, first_process_seconds_count
+            ),
+            "avg_resolve_seconds": cls.average_from_sum(resolve_seconds_sum, resolve_seconds_count),
+            "avg_close_seconds": cls.average_from_sum(close_seconds_sum, close_seconds_count),
         }
 
     @classmethod
@@ -1066,18 +1113,22 @@ class TicketProcessingStatsService:
         :param week_bucket_config: 业务周配置。
         :return: snake_case 趋势结果。
         """
-        event_times = [
-            value
-            for ticket in rows
-            for value in (
-                cls.submit_time(ticket),
-                ticket.first_response_at,
-                ticket.processed_at,
-                ticket.resolved_at,
-                ticket.closed_at,
+        submit_times: list[datetime | None] = []
+        event_times = []
+        for ticket in rows:
+            submit_time = cls.submit_time(ticket)
+            submit_times.append(submit_time)
+            event_times.extend(
+                value
+                for value in (
+                    submit_time,
+                    getattr(ticket, "first_response_at", None),
+                    getattr(ticket, "processed_at", None),
+                    getattr(ticket, "resolved_at", None),
+                    getattr(ticket, "closed_at", None),
+                )
+                if isinstance(value, datetime)
             )
-            if isinstance(value, datetime)
-        ]
         if not event_times:
             return {"granularity": granularity, "series": []}
         start_time = begin_time or min(event_times)
@@ -1102,7 +1153,7 @@ class TicketProcessingStatsService:
             )
             if submit_bucket:
                 submit_bucket["new_count"] += 1
-                if ticket.processed_at is not None:
+                if getattr(ticket, "processed_at", None) is not None:
                     submit_bucket["processed_in_new_count"] += 1
             for field_name, count_name in (
                 ("first_response_at", "first_responded_count"),
@@ -1121,6 +1172,13 @@ class TicketProcessingStatsService:
                 )
                 if bucket:
                     bucket[count_name] += 1
+                    elapsed_seconds = cls.elapsed_seconds_from_submit(ticket, field_name)
+                    if field_name == "first_response_at" and elapsed_seconds is not None:
+                        bucket["_first_response_seconds_sum"] += elapsed_seconds
+                        bucket["_first_response_seconds_count"] += 1
+                    if field_name == "processed_at" and elapsed_seconds is not None:
+                        bucket["_first_process_seconds_sum"] += elapsed_seconds
+                        bucket["_first_process_seconds_count"] += 1
         series = []
         for bucket_date in sorted(bucket_map):
             bucket = bucket_map[bucket_date]
@@ -1135,51 +1193,59 @@ class TicketProcessingStatsService:
             )
             bucket["unprocessed_backlog"] = sum(
                 1
-                for ticket in rows
-                if isinstance(cls.submit_time(ticket), datetime)
-                and cls.submit_time(ticket) < next_bucket_time
-                and (not isinstance(ticket.processed_at, datetime) or ticket.processed_at >= next_bucket_time)
+                for row_index, ticket in enumerate(rows)
+                if isinstance(submit_times[row_index], datetime)
+                and submit_times[row_index] < next_bucket_time
+                and (
+                    not isinstance(getattr(ticket, "processed_at", None), datetime)
+                    or getattr(ticket, "processed_at", None) >= next_bucket_time
+                )
             )
             bucket["open_backlog"] = sum(
                 1
-                for ticket in rows
-                if isinstance(cls.submit_time(ticket), datetime)
-                and cls.submit_time(ticket) < next_bucket_time
-                and (not isinstance(ticket.closed_at, datetime) or ticket.closed_at >= next_bucket_time)
+                for row_index, ticket in enumerate(rows)
+                if isinstance(submit_times[row_index], datetime)
+                and submit_times[row_index] < next_bucket_time
+                and (
+                    not isinstance(getattr(ticket, "closed_at", None), datetime)
+                    or getattr(ticket, "closed_at", None) >= next_bucket_time
+                )
             )
             bucket["net_increase"] = bucket["new_count"] - bucket["closed_count"]
-            response_rows = [
-                ticket
-                for ticket in rows
-                if cls.bucket_for_time(
-                    bucket_map,
-                    ticket.first_response_at,
-                    granularity,
-                    begin_time,
-                    end_time,
-                    week_bucket_mode=week_bucket_mode,
-                    week_bucket_config=week_bucket_config,
-                )
-                is bucket
-            ]
-            process_rows = [
-                ticket
-                for ticket in rows
-                if cls.bucket_for_time(
-                    bucket_map,
-                    ticket.processed_at,
-                    granularity,
-                    begin_time,
-                    end_time,
-                    week_bucket_mode=week_bucket_mode,
-                    week_bucket_config=week_bucket_config,
-                )
-                is bucket
-            ]
-            bucket["avg_first_response_seconds"] = cls.average_seconds(response_rows, "first_response_at")
-            bucket["avg_first_process_seconds"] = cls.average_seconds(process_rows, "processed_at")
+            bucket["avg_first_response_seconds"] = cls.average_from_sum(
+                bucket.pop("_first_response_seconds_sum", 0),
+                bucket.pop("_first_response_seconds_count", 0),
+            )
+            bucket["avg_first_process_seconds"] = cls.average_from_sum(
+                bucket.pop("_first_process_seconds_sum", 0),
+                bucket.pop("_first_process_seconds_count", 0),
+            )
             series.append(bucket)
         return {"granularity": granularity, "series": series}
+
+    @staticmethod
+    def average_from_sum(total_seconds: int, count: int) -> int:
+        """
+        根据已累计的秒数和数量计算平均值，避免为求平均构造临时列表。
+        :param total_seconds: 秒数总和。
+        :param count: 参与平均的数量。
+        :return: 平均秒数。
+        """
+        return int(total_seconds / count) if count else 0
+
+    @classmethod
+    def elapsed_seconds_from_submit(cls, ticket: Any, target_field: str) -> int | None:
+        """
+        计算指定时间字段相对提交时间的耗时秒数。
+        :param ticket: 工单轻量行或工单实体。
+        :param target_field: 目标时间字段名。
+        :return: 耗时秒数，时间缺失或倒挂时返回 None。
+        """
+        submit_time = cls.submit_time(ticket)
+        target_time = getattr(ticket, target_field, None)
+        if isinstance(submit_time, datetime) and isinstance(target_time, datetime) and target_time >= submit_time:
+            return int((target_time - submit_time).total_seconds())
+        return None
 
     @staticmethod
     def time_in_range(value: datetime | None, begin_time: datetime | None, end_time: datetime | None) -> bool:
@@ -1260,6 +1326,10 @@ class TicketProcessingStatsService:
                 "unprocessed_backlog": 0,
                 "avg_first_response_seconds": 0,
                 "avg_first_process_seconds": 0,
+                "_first_response_seconds_sum": 0,
+                "_first_response_seconds_count": 0,
+                "_first_process_seconds_sum": 0,
+                "_first_process_seconds_count": 0,
             }
             current_bucket = cls.next_bucket_start(current_bucket, granularity)
         return bucket_map

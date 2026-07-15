@@ -3,10 +3,19 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-07
+updated: 2026-07-15
 ---
 
 # 操作日志
+
+## [2026-07-15] INGEST-CODE | 工单大数据量内存水位优化
+
+- 触发：用户反馈部署后执行飞书主动拉取、日志拉取/查看和工单统计后内存水位持续升高，要求按有限改动改成分批、yield 和流式处理。
+- 架构层：工单域 / 统计服务 / 日志拉取服务 / 飞书多维表格主动拉取。
+- 创建的页面：`web/public/docs/2026-07-15-ticket-memory-watermark-optimization.md`
+- 更新的页面：`server/modules/ticket/dao/ticket_processing_stats_dao.py`、`server/modules/ticket/service/stats/ticket_processing_stats_service.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/service/sync/ticket_sync_notify_service.py`、`server/modules/ticket/service/sync/ticket_sync_config_service.py`、`server/modules/ticket/service/sync/ticket_bitable_pull_service.py`、`web/public/docs/update_history.md`
+- 变更传播链：统计接口 -> 轻量字段行和单次遍历计算；飞书主动拉取 -> records/search 分页迭代 -> 主动拉取循环逐条处理；日志实时查看 -> 归档截取 `StringIO` 顺序写入 -> 直接返回文本。
+- 关键结论：本次不改变接口响应契约；RSS 不立即回落仍可能来自 Python 内存池高水位，但大对象峰值和全量 ORM/飞书记录列表已收敛。
 
 ## [2026-07-11] INGEST-CODE | 工单业务周周期快照与精确统计
 

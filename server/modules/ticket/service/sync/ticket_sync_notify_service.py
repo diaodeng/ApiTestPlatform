@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -1271,6 +1272,16 @@ class TicketSyncNotifyService:
         :param config: 人员催办配置。
         :return: 记录列表。
         """
+        return list(cls.iter_bitable_records(config))
+
+    @classmethod
+    def iter_bitable_records(cls, config: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        """
+        分页迭代拉取飞书多维表格记录，供主动同步等大数据量链路逐页处理。
+
+        :param config: 多维表格配置。
+        :return: 飞书记录迭代器。
+        """
         app_id, app_secret = cls._resolve_feishu_auth(config)
         app_token = str(config.get("appToken") or "").strip()
         table_id = str(config.get("tableId") or "").strip()
@@ -1288,7 +1299,7 @@ class TicketSyncNotifyService:
         url = f"{cls.FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records/search"
         page_token = ""
         seen_page_tokens: set[str] = set()
-        all_records: list[dict[str, Any]] = []
+        total_count = 0
         max_pages = 200
 
         for page_index in range(max_pages):
@@ -1321,7 +1332,13 @@ class TicketSyncNotifyService:
             # )
             if not isinstance(page_records, list):
                 page_records = []
-            all_records.extend([item for item in page_records if isinstance(item, dict)])
+            hydrated_records = cls._hydrate_bitable_record_shared_urls(
+                [item for item in page_records if isinstance(item, dict)],
+                config=config,
+                tenant_access_token=token,
+            )
+            total_count += len(hydrated_records)
+            yield from hydrated_records
             has_more = bool(response_data.get("has_more"))
             next_page_token = str(response_data.get("page_token") or "").strip()
             if not has_more or not next_page_token:
@@ -1329,21 +1346,15 @@ class TicketSyncNotifyService:
             if next_page_token in seen_page_tokens:
                 logger.warning(
                     f"飞书多维表格分页令牌重复，停止继续拉取避免死循环: "
-                    f"page={page_index + 1}, page_token={next_page_token}, accumulated={len(all_records)}"
+                    f"page={page_index + 1}, page_token={next_page_token}, accumulated={total_count}"
                 )
                 break
             page_token = next_page_token
             logger.info(
                 f"飞书多维表格分页拉取中: page={page_index + 1}, "
-                f"page_size={page_size}, page_records={len(page_records)}, accumulated={len(all_records)}"
+                f"page_size={page_size}, page_records={len(page_records)}, accumulated={total_count}"
             )
-        all_records = cls._hydrate_bitable_record_shared_urls(
-            all_records,
-            config=config,
-            tenant_access_token=token,
-        )
-        logger.info(f"飞书多维表格拉取完成: records={len(all_records)}, table_id={table_id}, view_id={view_id or '-'}")
-        return all_records
+        logger.info(f"飞书多维表格拉取完成: records={total_count}, table_id={table_id}, view_id={view_id or '-'}")
 
     @classmethod
     def query_bitable_fields(cls, config: dict[str, Any]) -> list[dict[str, Any]]:

@@ -2,6 +2,7 @@
 工单同步配置管理服务：默认配置工厂、配置规范化和持久化。
 """
 import json
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
@@ -1152,15 +1153,29 @@ class TicketSyncConfigService:
         :param filters: 过滤条件列表。
         :return: 去重后的飞书记录。
         """
+        return list(cls.iter_bitable_pull_records(pull_config, filters))
+
+    @classmethod
+    def iter_bitable_pull_records(
+        cls,
+        pull_config: dict[str, Any],
+        filters: list[dict[str, Any]],
+    ) -> Iterator[dict[str, Any]]:
+        """
+        按一个或多个飞书 filter 分页迭代主动拉取记录，并按 record_id 去重。
+
+        :param pull_config: 主动拉取配置。
+        :param filters: 过滤条件列表。
+        :return: 去重后的飞书记录迭代器。
+        """
         if not filters:
-            return TicketSyncNotifyService.query_bitable_records(pull_config)
-        merged_records: list[dict[str, Any]] = []
+            yield from TicketSyncNotifyService.iter_bitable_records(pull_config)
+            return
         seen_record_ids: set[str] = set()
         for filter_item in filters:
             query_config = dict(pull_config)
             query_config["filterFormula"] = filter_item
-            page_records = TicketSyncNotifyService.query_bitable_records(query_config)
-            for record in page_records:
+            for record in TicketSyncNotifyService.iter_bitable_records(query_config):
                 if not isinstance(record, dict):
                     continue
                 record_id = str(record.get("record_id") or record.get("recordId") or "").strip()
@@ -1168,8 +1183,7 @@ class TicketSyncConfigService:
                 if unique_key in seen_record_ids:
                     continue
                 seen_record_ids.add(unique_key)
-                merged_records.append(record)
-        return merged_records
+                yield record
 
     # --- migrated from TicketSyncService._normalize_group_push_auto_statuses ---
 

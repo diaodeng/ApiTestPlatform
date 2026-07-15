@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
@@ -66,7 +67,7 @@ class TicketProcessingStatsDao:
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
-    ) -> list[Ticket]:
+    ) -> Iterable[Any]:
         """
         查询处理统计需要扫描的工单集合。
         :param db: 数据库会话。
@@ -77,7 +78,7 @@ class TicketProcessingStatsDao:
         :param module_codes: 模块业务码列表。
         :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
-        :return: 工单列表。
+        :return: 轻量字段行迭代器。
         """
         submit_time_expr = _ticket_submit_time_expr()
         filters = cls.build_scope_filters(
@@ -104,7 +105,20 @@ class TicketProcessingStatsDao:
                     column_filters.append(column <= end_time)
                 time_filters.append(and_(*column_filters))
             filters.append(or_(*time_filters))
-        return db.query(Ticket).filter(and_(*filters)).order_by(submit_time_expr.asc(), Ticket.ticket_id.asc()).all()
+        query = (
+            db.query(
+                Ticket.ticket_id.label("ticket_id"),
+                submit_time_expr.label("submit_time"),
+                Ticket.create_time.label("create_time"),
+                Ticket.first_response_at.label("first_response_at"),
+                Ticket.processed_at.label("processed_at"),
+                Ticket.resolved_at.label("resolved_at"),
+                Ticket.closed_at.label("closed_at"),
+            )
+            .filter(and_(*filters))
+            .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())
+        )
+        return query.yield_per(1000)
 
     @classmethod
     def list_trend_tickets(
@@ -117,7 +131,7 @@ class TicketProcessingStatsDao:
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
-    ) -> list[Ticket]:
+    ) -> list[Any]:
         """
         查询趋势统计所需的工单集合，保留周期前已提交的工单用于存量计算。
         :param db: 数据库会话。
@@ -127,7 +141,7 @@ class TicketProcessingStatsDao:
         :param module_codes: 模块业务码列表。
         :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
-        :return: 工单列表。
+        :return: 轻量字段行列表。
         """
         submit_time_expr = _ticket_submit_time_expr()
         filters = cls.build_scope_filters(
@@ -140,7 +154,20 @@ class TicketProcessingStatsDao:
         )
         if end_time:
             filters.append(submit_time_expr <= end_time)
-        return db.query(Ticket).filter(and_(*filters)).order_by(submit_time_expr.asc(), Ticket.ticket_id.asc()).all()
+        query = (
+            db.query(
+                Ticket.ticket_id.label("ticket_id"),
+                submit_time_expr.label("submit_time"),
+                Ticket.create_time.label("create_time"),
+                Ticket.first_response_at.label("first_response_at"),
+                Ticket.processed_at.label("processed_at"),
+                Ticket.resolved_at.label("resolved_at"),
+                Ticket.closed_at.label("closed_at"),
+            )
+            .filter(and_(*filters))
+            .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())
+        )
+        return list(query.yield_per(1000))
 
     @classmethod
     def resolve_submit_time(cls, ticket: Ticket) -> datetime | None:

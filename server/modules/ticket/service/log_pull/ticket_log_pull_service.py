@@ -1876,8 +1876,9 @@ class TicketLogPullService:
                         query_db,
                         begin_time=requested_begin_time,
                         end_time=requested_end_time,
+                        return_text=True,
                     )
-                    text = cls._decompress_text(content_result["compressed_content"])
+                    text = str(content_result.get("text") or "")
                     content_summary = content_result["content_summary"]
                     content_char_count = content_result["content_char_count"]
                     content_truncated = content_result["content_truncated"]
@@ -2805,6 +2806,7 @@ class TicketLogPullService:
         db: Session,
         begin_time: datetime | None = None,
         end_time: datetime | None = None,
+        return_text: bool = False,
     ) -> dict[str, Any]:
         """
         从压缩包中提取日志文本并压缩入库。
@@ -2813,6 +2815,7 @@ class TicketLogPullService:
         :param db: 数据库会话
         :param begin_time: 可选的查看开始时间
         :param end_time: 可选的查看结束时间
+        :param return_text: 是否直接返回文本，日志查看场景用于避免压缩后再解压。
         :return: 提取结果
         """
         if int(record.command_data_type or TicketLogDataType.LOG.value) == TicketLogDataType.DB.value:
@@ -2822,6 +2825,7 @@ class TicketLogPullService:
                 "content_char_count": 0,
                 "content_truncated": False,
                 "compressed_content": None,
+                "text": "" if return_text else None,
                 "content_summary": "DB 拉取完成，当前版本不解析数据库文件文本内容。",
             }
 
@@ -2831,7 +2835,7 @@ class TicketLogPullService:
         timestamp_end = end_time if end_time is not None else cls._parse_datetime(record.log_end_time)
         archive_entry_count = 0
         matched_entry_count = 0
-        content_parts: list[str] = []
+        content_buffer = io.StringIO()
         current_char_count = 0
 
         with zipfile.ZipFile(archive_path) as archive:
@@ -2845,6 +2849,7 @@ class TicketLogPullService:
                     "content_char_count": 0,
                     "content_truncated": False,
                     "compressed_content": None,
+                    "text": "" if return_text else None,
                     "content_summary": f"压缩包共 {archive_entry_count} 个文件，未发现 *_pos.log* 日志文件。",
                 }
             for entry_name in cls._sort_archive_entry_names(target_entry_names):
@@ -2854,19 +2859,20 @@ class TicketLogPullService:
                     record=record,
                     timestamp_start=timestamp_start,
                     timestamp_end=timestamp_end,
-                    content_parts=content_parts,
+                    content_buffer=content_buffer,
                     current_char_count=current_char_count,
                     current_matched_count=matched_entry_count,
                     max_content_chars=max_content_chars,
                 )
 
-        full_text = "\n\n".join(part for part in content_parts if part)
+        full_text = content_buffer.getvalue()
         return {
             "archive_entry_count": archive_entry_count,
             "matched_entry_count": matched_entry_count,
             "content_char_count": len(full_text),
             "content_truncated": False,
-            "compressed_content": cls._compress_text(full_text) if full_text else None,
+            "compressed_content": None if return_text else cls._compress_text(full_text) if full_text else None,
+            "text": full_text if return_text else None,
             "content_summary": cls._build_content_summary(
                 archive_entry_count=archive_entry_count,
                 matched_entry_count=matched_entry_count,
@@ -2925,7 +2931,7 @@ class TicketLogPullService:
         record: TicketLogPullRecord,
         timestamp_start: datetime | None,
         timestamp_end: datetime | None,
-        content_parts: list[str],
+        content_buffer: io.StringIO,
         current_char_count: int,
         current_matched_count: int,
         max_content_chars: int,
@@ -2937,7 +2943,7 @@ class TicketLogPullService:
         :param record: 日志拉取记录
         :param timestamp_start: 开始时间
         :param timestamp_end: 结束时间
-        :param content_parts: 已匹配的文本片段列表
+        :param content_buffer: 已匹配文本片段的顺序写入缓冲区
         :param current_char_count: 当前已累积的字符数
         :param current_matched_count: 当前已命中的日志条目数
         :param max_content_chars: 最大保留字符数
@@ -2960,7 +2966,7 @@ class TicketLogPullService:
                         begin_time=timestamp_start,
                         end_time=timestamp_end,
                         matched_count=matched_count,
-                        content_parts=content_parts,
+                        content_buffer=content_buffer,
                         char_count=char_count,
                         max_content_chars=max_content_chars,
                     )
@@ -2976,7 +2982,7 @@ class TicketLogPullService:
                 begin_time=timestamp_start,
                 end_time=timestamp_end,
                 matched_count=matched_count,
-                content_parts=content_parts,
+                content_buffer=content_buffer,
                 char_count=char_count,
                 max_content_chars=max_content_chars,
             )
@@ -3191,7 +3197,7 @@ class TicketLogPullService:
         begin_time: datetime | None,
         end_time: datetime | None,
         matched_count: int,
-        content_parts: list[str],
+        content_buffer: io.StringIO,
         char_count: int,
         max_content_chars: int,
     ) -> tuple[int, int]:
@@ -3202,7 +3208,7 @@ class TicketLogPullService:
         :param begin_time: 开始时间
         :param end_time: 结束时间
         :param matched_count: 当前命中数
-        :param content_parts: 结果集
+        :param content_buffer: 结果缓冲区
         :param char_count: 当前字符数
         :param max_content_chars: 最大字符数
         :return: 更新后的命中数和字符数
@@ -3216,13 +3222,15 @@ class TicketLogPullService:
         entry_text = "\n".join(current_lines)
         if not entry_text.strip():
             return matched_count, char_count
-        separator_length = 2 if content_parts else 0
+        separator_length = 2 if char_count > 0 else 0
         projected_length = char_count + len(entry_text) + separator_length
         if projected_length > max_content_chars:
             raise TicketLogContentTooLargeError(
                 f"日志内容超过入库上限 {max_content_chars} 字符，请缩小时间范围后重新提交"
             )
-        content_parts.append(entry_text)
+        if separator_length:
+            content_buffer.write("\n\n")
+        content_buffer.write(entry_text)
         return matched_count + 1, projected_length
 
     @classmethod

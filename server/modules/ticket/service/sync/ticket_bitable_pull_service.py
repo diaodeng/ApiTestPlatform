@@ -305,8 +305,7 @@ class TicketBitablePullService:
             logger.info(
                 f"飞书多维表格主动拉取无时间过滤: trigger={trigger_source}, auto_append={auto_append}"
             )
-        records = TicketSyncConfigService.query_bitable_pull_records(pull_config, pull_filters)
-        queried_count = len(records)
+        records = TicketSyncConfigService.iter_bitable_pull_records(pull_config, pull_filters)
         force_sync = SyncUtil.to_bool(pull_config.get("forceSync"), False)
         required_fields = TicketSyncConfigService.derive_required_fields_from_external_field_model(
             config.get("externalFieldModel")
@@ -314,8 +313,8 @@ class TicketBitablePullService:
         summary = {
             "triggerSource": trigger_source,
             "skipped": False,
-            "recordCount": len(records),
-            "queriedRecordCount": queried_count,
+            "recordCount": 0,
+            "queriedRecordCount": 0,
             "createdAfter": created_after.strftime("%Y-%m-%d %H:%M:%S") if created_after else "",
             "forceSync": force_sync,
             "syncedCount": 0,
@@ -333,6 +332,8 @@ class TicketBitablePullService:
         automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
 
         for record in records:
+            summary["recordCount"] += 1
+            summary["queriedRecordCount"] += 1
             sync_object = cls.build_bitable_pull_sync_object(
                 record=record,
                 config=pull_config,
