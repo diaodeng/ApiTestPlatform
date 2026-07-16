@@ -385,6 +385,60 @@ class TicketService:
     工单模块服务层，负责工单生命周期、状态机、事件和知识库业务逻辑。
     """
 
+    @staticmethod
+    def _expand_stat_filter_values(raw_value: Any, options: list[dict[str, Any]]) -> str | None:
+        """
+        将统计枚举筛选值扩展为编码和显示名，兼容历史数据把 label 写入主表的情况。
+        :param raw_value: 前端传入的逗号分隔筛选值
+        :param options: 当前统计枚举选项
+        :return: 逗号分隔的编码和显示名；无有效值时返回 None
+        """
+        values = _normalize_text_list(raw_value)
+        if not values:
+            return None
+        expanded: list[str] = []
+        for value in values:
+            if value not in expanded:
+                expanded.append(value)
+            lowered = value.lower()
+            for option in options:
+                option_value = str(option.get("value") or option.get("code") or "").strip()
+                option_label = str(option.get("label") or option.get("name") or "").strip()
+                if lowered not in {option_value.lower(), option_label.lower()}:
+                    continue
+                for candidate in (option_value, option_label):
+                    if candidate and candidate not in expanded:
+                        expanded.append(candidate)
+        return ",".join(expanded) if expanded else None
+
+    @classmethod
+    def _build_ticket_list_filter_query(cls, query_db: Session, query: TicketQueryModel) -> TicketQueryModel:
+        """
+        构建工单列表实际查询参数，补齐统计枚举筛选的编码和显示名兼容值。
+        :param query_db: 数据库会话
+        :param query: 原始查询参数
+        :return: 可传入 DAO 的查询参数
+        """
+        if not any(
+            _normalize_text_list(value)
+            for value in (query.root_cause_types, query.root_cause_type, query.solution_types, query.solution_type)
+        ):
+            return query
+        stat_config = TicketSyncConfigService.get_ticket_stat_classification_options(query_db)
+        root_cause_options = (
+            stat_config.get("rootCauseTypes") if isinstance(stat_config.get("rootCauseTypes"), list) else []
+        )
+        solution_options = (
+            stat_config.get("solutionTypes") if isinstance(stat_config.get("solutionTypes"), list) else []
+        )
+        update_data = {
+            "root_cause_types": cls._expand_stat_filter_values(query.root_cause_types, root_cause_options),
+            "root_cause_type": cls._expand_stat_filter_values(query.root_cause_type, root_cause_options),
+            "solution_types": cls._expand_stat_filter_values(query.solution_types, solution_options),
+            "solution_type": cls._expand_stat_filter_values(query.solution_type, solution_options),
+        }
+        return query.model_copy(update={key: value for key, value in update_data.items() if value is not None})
+
     @classmethod
     def init_default_workflow(cls, query_db: Session) -> None:
         """
@@ -1161,6 +1215,7 @@ class TicketService:
         :param query: 查询参数
         :return: 分页结果或列表
         """
+        query = cls._build_ticket_list_filter_query(query_db, query)
         result = TicketDao.get_ticket_list(query_db, query)
         if query.is_page:
             rows = result.rows or []

@@ -98,6 +98,7 @@ graph TD
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
 - 工单列表页支持服务端表头排序，默认 `submitTime desc`；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。
 - 2026-07-02 起，工单列表页主要下拉筛选项支持多选：状态、处理状态、项目、模块、模块Code、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、内部优先级和三类负责人；前端按逗号分隔提交多值参数（通过 `joinQueryList` 将数组拼成逗号分隔字符串，由 `tansParams` 序列化为 `key=val1%2Cval2` 格式），后端兼容旧单值参数并使用 `IN` 过滤。`Ticket` 模型同步声明常用筛选组合索引，数据库侧已手动创建对应索引。
+- 2026-07-16 起，工单列表根因分类和解决方式筛选在 `TicketService` 层会将枚举编码扩展为“编码 + 中文标签”，兼容历史 AI 分类把中文标签写入 `ticket.root_cause_type/solution_type` 的数据；后续 `TicketLightAiService` 自动分类归一化统一回填枚举 `value`，避免继续写 label。
 - **注意**：多选查询字段在 `TicketQueryModel` 和 `TicketStatisticsQueryModel` 中的类型必须为 `str | None`（不能是 `str | list[X] | None`）。因为 FastAPI 的 `Query()` 检测到类型含 `list[...]` 时会自动将标量查询值包装成列表（如 `"3,2"` → `["3,2"]`），导致 DAO 的 `_normalize_*_list` 收到已包装的列表后不再拆分，文本字段用 `.in_(["open,closed"])` 查不到数据，整数人员字段则直接触发 Pydantic 验证错误。
 - 工单编辑弹窗回填时会抑制项目监听器误清空 `module_id`，模块下拉变更和提交前会按 `module_id` 补齐 `module_name`，保证列表模块列在编辑保存后不丢失。
 - 若工单的 `module_name` 来自外部同步或历史数据且无法匹配当前项目 HRM 模块，编辑弹窗会以可创建下拉项形式原样展示并保存文本；只有用户手动选择现有模块时才切换为标准 `module_id/module_name`。

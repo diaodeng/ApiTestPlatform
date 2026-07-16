@@ -443,8 +443,8 @@ class TicketLightAiService:
             "issueTypeName": str((issue_option or {}).get("label") or payload.get("issueTypeName") or "").strip(),
             "moduleName": str(payload.get("moduleName") or payload.get("module") or "").strip(),
             "severity": str(payload.get("severity") or "").strip(),
-            "rootCauseType": str((root_option or {}).get("label") or payload.get("rootCauseType") or "").strip(),
-            "solutionType": str((solution_option or {}).get("label") or payload.get("solutionType") or "").strip(),
+            "rootCauseType": str((root_option or {}).get("value") or payload.get("rootCauseType") or "").strip(),
+            "solutionType": str((solution_option or {}).get("value") or payload.get("solutionType") or "").strip(),
             "resolutionCode": str(
                 (resolution_option or {}).get("value") or payload.get("resolutionCode") or ""
             ).strip(),

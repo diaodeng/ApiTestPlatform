@@ -1390,3 +1390,12 @@ updated: 2026-07-16
 - 创建的双向链接：0 对
 - 变更传播链：`TicketLogPullService.iter_log_pull_content_stream` -> `/ticket/log-pulls/{record_id}/content/stream` -> `streamTicketLogPullContent` -> `web/src/views/ticket/logPullRecord/index.vue` 边接收边显示；`TicketProcessingStatsService` overview/trend 计算结束后删除临时对象并触发 GC。
 - 总共涉及页面：2
+
+## [2026-07-16] INGEST-CODE | 工单列表统计枚举筛选编码标签兼容
+- 触发：用户反馈工单列表中能看到对应根因分类和解决方式，但按条件搜索查不到数据。
+- 架构层：工单域 / 列表筛选 / AI 自动分类归一化
+- 创建的页面：`web/public/docs/2026-07-16-ticket-list-stat-filter-code-label-fix.md`
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketLightAiService._normalize_structured_classification_result` -> `ticket.root_cause_type/solution_type` 新数据写编码；`TicketService._build_ticket_list_filter_query` -> `TicketDao.get_ticket_list` 根因分类和解决方式筛选同时匹配编码与历史中文标签。
+- 总共涉及页面：3
