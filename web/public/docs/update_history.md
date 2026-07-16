@@ -3,7 +3,8 @@
 1. 工单日志准备接口补充运行日志，记录原始归档位置、服务端缓存压缩包位置、解压目录、文件数和准备耗时。
 2. 工单日志搜索接口补充运行日志，记录实际使用 `rg` 还是 Python、搜索目录、扫描文件数、关键字/模式、核心参数、命中数和耗时。
 3. 日志搜索策略调整为 `maxSearchFileCount` 限制内一次性交给 `rg` 搜索；多关键字 `all` 使用 `rg` 管道流式过滤，中文关键字同样优先走 `rg`，Python 仅作为缺少 `rg`、强制 Python 或 `rg` 异常时的降级。
-4. 新增说明文档：`web/public/docs/2026-07-16-ticket-log-search-observability.md`。
+4. 日志拉取下载完成后新增可配置后处理：自动解压、解压后提取版本号、解压后生成行索引；配置入口放到工单同步自动化公共配置，并通过专用接口只覆盖三个后处理开关。
+5. 新增说明文档：`web/public/docs/2026-07-16-ticket-log-search-observability.md`、`web/public/docs/2026-07-16-ticket-log-post-download-processing.md`。
 
 ## 2026-07-15
 

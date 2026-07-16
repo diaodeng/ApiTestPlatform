@@ -11,11 +11,11 @@ updated: 2026-07-16
 ## [2026-07-16] INGEST-CODE | 工单日志搜索耗时观测补充
 
 - 触发：用户反馈工单详情日志搜索感觉较慢，要求准备接口记录压缩包位置和解压目录，搜索接口记录工具、参数、目录和耗时。
-- 架构层：工单域 / 日志查看服务 / 日志搜索观测。
-- 创建的页面：`web/public/docs/2026-07-16-ticket-log-search-observability.md`
-- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_service.py`、`web/public/docs/update_history.md`
-- 变更传播链：`/ticket/logs/prepare` -> `LogService.prepare` 记录 `archive_path/source_path/extract_path/elapsed_ms`；`/ticket/logs/search` -> `LogService.search_keywords/search` 记录 `tool/extract_dir/file/target_file_count/args/hit_count/elapsed_ms`；`all` 多关键字 -> `rg` 管道链流式过滤。
-- 关键结论：2026-07-15 的按文件 `rg` 会在文件数多时放大进程启动成本；当前改为 `maxSearchFileCount` 限制内一次性交给 `rg`，中文和 `all` 不再默认走 Python，Python 仅用于缺少 `rg`、强制 Python 或 `rg` 异常降级。
+- 架构层：工单域 / 日志查看服务 / 日志搜索观测 / 日志拉取后处理。
+- 创建的页面：`web/public/docs/2026-07-16-ticket-log-search-observability.md`、`web/public/docs/2026-07-16-ticket-log-post-download-processing.md`
+- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_service.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/service/log_pull/ticket_log_post_process_service.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`server/modules/ticket/controller/ticket_log_pull_controller.py`、`web/src/views/ticket/syncAutomation/index.vue`、`web/src/views/ticket/syncAutomation/hooks/useSyncConfig.js`、`web/public/docs/update_history.md`
+- 变更传播链：`/ticket/logs/prepare` -> `LogService.prepare` 记录 `archive_path/source_path/extract_path/elapsed_ms`；`/ticket/logs/search` -> `LogService.search_keywords/search` 记录 `tool/extract_dir/file/target_file_count/args/hit_count/elapsed_ms`；`all` 多关键字 -> `rg` 管道链流式过滤；`/ticket/log-pull/post-process-config` -> `ticket.logPull.storage.postDownload*` -> `TicketLogPostProcessService` -> 下载完成后按配置解压、版本提取、行索引。
+- 关键结论：2026-07-15 的按文件 `rg` 会在文件数多时放大进程启动成本；当前改为 `maxSearchFileCount` 限制内一次性交给 `rg`，中文和 `all` 不再默认走 Python。日志下载完成后的版本提取和索引生成均建立在自动解压开关之上，关闭解压时不会执行。
 
 ## [2026-07-15] INGEST-CODE | 工单大数据量内存水位优化
 

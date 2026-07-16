@@ -10,6 +10,10 @@ import {
   saveTicketSyncAutomationConfig,
   getTicketWorkflow
 } from '@/api/ticket/ticket'
+import {
+  getTicketLogPullPostProcessConfig,
+  saveTicketLogPullPostProcessConfig,
+} from '@/api/ticket/logPull'
 
 export function useSyncConfig(proxy) {
   const loading = ref(false)
@@ -303,6 +307,11 @@ export function useSyncConfig(proxy) {
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
       },
+      logPullPostProcess: {
+        postDownloadExtractEnabled: false,
+        postDownloadVersionExtractEnabled: false,
+        postDownloadIndexEnabled: false,
+      },
       promptTemplates: { classificationHint: '' },
       aiClassification: {
         enabled: false,
@@ -361,6 +370,32 @@ export function useSyncConfig(proxy) {
       return `${minuteMatch[0]}:00`
     }
     return text
+  }
+
+  /**
+   * 应用日志拉取后处理配置，只把后处理开关映射到当前公共配置表单。
+   * @param {object} payload 后端返回的日志下载完成后处理配置。
+   * @returns {void}
+   */
+  function applyLogPullPostProcessConfig(payload = {}) {
+    const config = payload || {}
+    form.logPullPostProcess = {
+      postDownloadExtractEnabled: Boolean(config.postDownloadExtractEnabled),
+      postDownloadVersionExtractEnabled: Boolean(config.postDownloadVersionExtractEnabled),
+      postDownloadIndexEnabled: Boolean(config.postDownloadIndexEnabled),
+    }
+  }
+
+  /**
+   * 构建日志拉取后处理配置保存载荷，只提交公共配置页维护的三个开关。
+   * @returns {object} 日志下载完成后处理配置。
+   */
+  function buildLogPullPostProcessPayload() {
+    return {
+      postDownloadExtractEnabled: Boolean(form.logPullPostProcess?.postDownloadExtractEnabled),
+      postDownloadVersionExtractEnabled: Boolean(form.logPullPostProcess?.postDownloadVersionExtractEnabled),
+      postDownloadIndexEnabled: Boolean(form.logPullPostProcess?.postDownloadIndexEnabled),
+    }
   }
 
   function normalizeWorkflowStatusOptions(statuses = []) {
@@ -724,8 +759,12 @@ export function useSyncConfig(proxy) {
 
   function loadConfig() {
     loading.value = true
-    return getTicketSyncAutomationConfig().then(res => {
-      applyConfig((res.data && res.data.configValue) || res.data || {})
+    return Promise.all([
+      getTicketSyncAutomationConfig(),
+      getTicketLogPullPostProcessConfig().catch(() => ({ data: {} })),
+    ]).then(([syncRes, postProcessRes]) => {
+      applyConfig((syncRes.data && syncRes.data.configValue) || syncRes.data || {})
+      applyLogPullPostProcessConfig(postProcessRes.data || {})
     }).finally(() => { loading.value = false })
   }
 
@@ -939,6 +978,7 @@ export function useSyncConfig(proxy) {
       payload.statClassification = normalizeStatClassificationConfig(payload.statClassification)
 
       await saveTicketSyncAutomationConfig(payload)
+      await saveTicketLogPullPostProcessConfig(buildLogPullPostProcessPayload())
       proxy.$modal.msgSuccess('保存成功')
       loadConfig()
     } catch (error) {

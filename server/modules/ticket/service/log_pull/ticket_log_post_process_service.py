@@ -1,0 +1,544 @@
+from __future__ import annotations
+
+import bz2
+import gzip
+import json
+import lzma
+import re
+import shutil
+import subprocess
+import tarfile
+import time
+import zipfile
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from charset_normalizer import from_bytes
+from sqlalchemy.orm import Session
+
+from modules.ticket.dao.ticket_dao import TicketDao
+from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
+from utils.log_util import logger
+
+
+class TicketLogPostProcessService:
+    """
+    工单日志拉取完成后的本地后处理服务。
+
+    负责在日志压缩包下载完成后，按配置把归档准备到日志查看目录，并可选执行版本号提取和行索引生成。
+    """
+
+    BASE_DIR = Path(__file__).resolve().parents[4] / "data" / "logs"
+    META_FILE_NAME = "meta.json"
+    LINE_INDEX_SUFFIX = ".lineidx"
+    LINE_INDEX_ENCODING_VERSION = 2
+    TEXT_EXTENSIONS = {".log", ".txt", ".out"}
+    COMPRESSED_SUFFIXES = (".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz", ".gz", ".bz2", ".xz")
+    MAX_RECURSIVE_EXTRACT_ROUNDS = 20
+    VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
+
+    @classmethod
+    def run_after_download(
+        cls,
+        db: Session,
+        record: TicketLogPullRecord,
+        archive_path: Path,
+        runtime_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        根据日志存储配置执行下载完成后的后处理。
+        :param db: 数据库会话
+        :param record: 日志拉取记录
+        :param archive_path: 已下载到本地临时文件的压缩包路径
+        :param runtime_config: 日志拉取存储配置
+        :return: 后处理摘要
+        """
+        if not cls._config_bool(runtime_config, "postDownloadExtractEnabled", False):
+            return {"enabled": False, "message": "下载完成后自动解压未启用"}
+        if not record.ticket_id:
+            return {"enabled": True, "prepared": False, "message": "记录未关联工单，跳过解压"}
+        if not archive_path.exists():
+            return {"enabled": True, "prepared": False, "message": "压缩包文件不存在，跳过解压"}
+
+        started_at = time.monotonic()
+        ticket_dir = cls._ticket_dir(record.ticket_id, record.id)
+        source_dir = ticket_dir / "source"
+        extract_dir = ticket_dir / "extract"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        source_path = source_dir / cls._build_source_file_name(archive_path)
+        shutil.copy2(archive_path, source_path)
+        cls._extract_recursive(source_path, extract_dir, runtime_config, started_at)
+        log_files = cls._list_log_files(extract_dir)
+        version_key = ""
+        if cls._config_bool(runtime_config, "postDownloadVersionExtractEnabled", False):
+            version_key = cls.extract_and_update_version_key(db, record.ticket_id, record.id, log_files)
+        indexed_count = 0
+        if cls._config_bool(runtime_config, "postDownloadIndexEnabled", False):
+            indexed_count = cls.build_line_indexes(log_files)
+        cls._write_meta(
+            ticket_dir / cls.META_FILE_NAME,
+            {
+                "ticket_id": record.ticket_id,
+                "record_id": record.id,
+                "source_path": str(source_path),
+                "extract_path": str(extract_dir),
+                "prepared_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+                "file_count": len(log_files),
+                "post_download": True,
+                "version_key": version_key,
+                "indexed_count": indexed_count,
+            },
+        )
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        logger.info(
+            f"日志下载完成后处理完成，ticket_id={record.ticket_id}，record_id={record.id}，"
+            f"source_path={source_path}，extract_path={extract_dir}，file_count={len(log_files)}，"
+            f"version_key={version_key}，indexed_count={indexed_count}，elapsed_ms={elapsed_ms}"
+        )
+        return {
+            "enabled": True,
+            "prepared": True,
+            "sourcePath": str(source_path),
+            "extractPath": str(extract_dir),
+            "fileCount": len(log_files),
+            "versionKey": version_key,
+            "indexedCount": indexed_count,
+            "elapsedMs": elapsed_ms,
+        }
+
+    @classmethod
+    def extract_and_update_version_key(
+        cls,
+        db: Session,
+        ticket_id: int,
+        record_id: int,
+        log_files: list[Path],
+    ) -> str:
+        """
+        从已解压日志文件中流式提取版本号，并在工单缺失版本时写入扩展字段。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param log_files: 已解压日志文件列表
+        :return: 提取到的版本号，未命中返回空字符串
+        """
+        ticket = TicketDao.get_ticket_by_id(db, ticket_id)
+        if not ticket:
+            return ""
+        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
+            value = str(extra_data.get(key) or "").strip()
+            if value:
+                return value
+
+        version_key = cls.extract_version_key_from_files(log_files)
+        if not version_key:
+            logger.info(f"日志下载完成后版本提取未命中，ticket_id={ticket_id}，record_id={record_id}")
+            return ""
+        extra_data["version_key"] = version_key
+        TicketDao.update_ticket(
+            db,
+            ticket_id,
+            {
+                "extra_data": extra_data,
+                "update_by": "system",
+                "update_time": datetime.now(),
+            },
+        )
+        logger.info(f"日志下载完成后版本提取成功，ticket_id={ticket_id}，record_id={record_id}，version_key={version_key}")
+        return version_key
+
+    @classmethod
+    def extract_version_key_from_files(cls, log_files: list[Path]) -> str:
+        """
+        从日志文件中按行流式提取版本号，命中后立即返回。
+        :param log_files: 日志文件列表
+        :return: 提取到的版本号
+        """
+        for path in log_files:
+            encoding = cls._detect_file_encoding(path)
+            try:
+                with path.open("r", encoding=encoding, errors="replace") as file_obj:
+                    for line in file_obj:
+                        match = cls.VERSION_PATTERN.search(line)
+                        if match:
+                            return str(match.group(1) or "").strip()
+            except Exception as exc:
+                logger.warning(f"日志版本提取读取文件失败，path={path}，reason={exc}")
+        return ""
+
+    @classmethod
+    def build_line_indexes(cls, log_files: list[Path]) -> int:
+        """
+        为已解压日志文件生成行索引。
+        :param log_files: 日志文件列表
+        :return: 成功生成或复用的索引数量
+        """
+        indexed_count = 0
+        for path in log_files:
+            try:
+                cls._ensure_line_index(path)
+                indexed_count += 1
+            except Exception as exc:
+                logger.warning(f"日志下载完成后生成行索引失败，path={path}，reason={exc}")
+        return indexed_count
+
+    @classmethod
+    def _extract_recursive(
+        cls,
+        archive_path: Path,
+        target_dir: Path,
+        runtime_config: dict[str, Any],
+        started_at: float,
+    ) -> None:
+        """
+        递归解压日志压缩包。
+        :param archive_path: 源压缩包路径
+        :param target_dir: 解压目录
+        :param runtime_config: 运行保护配置
+        :param started_at: 开始时间戳
+        :return: 无
+        """
+        cls._ensure_prepare_budget(started_at, runtime_config)
+        cls._extract_one(archive_path, target_dir)
+        cls._validate_extracted_resource_usage(target_dir, runtime_config)
+        for round_index in range(cls.MAX_RECURSIVE_EXTRACT_ROUNDS):
+            cls._ensure_prepare_budget(started_at, runtime_config)
+            archives = [path for path in target_dir.rglob("*") if path.is_file() and cls._is_archive(path)]
+            if not archives:
+                logger.info(f"日志下载完成后递归解压完成，target_dir={target_dir}，round={round_index}")
+                return
+            for archive in archives:
+                cls._ensure_prepare_budget(started_at, runtime_config)
+                extract_to = archive.parent / archive.stem
+                extract_to.mkdir(parents=True, exist_ok=True)
+                try:
+                    cls._extract_one(archive, extract_to)
+                    archive.unlink(missing_ok=True)
+                    cls._validate_extracted_resource_usage(target_dir, runtime_config)
+                except Exception as exc:
+                    logger.warning(f"日志下载完成后递归解压失败，archive={archive}，reason={exc}")
+        logger.warning(f"日志下载完成后递归解压达到最大轮次，target_dir={target_dir}")
+
+    @classmethod
+    def _ensure_prepare_budget(cls, started_at: float, runtime_config: dict[str, Any]) -> None:
+        """
+        检查自动解压耗时保护。
+        :param started_at: 开始时间戳
+        :param runtime_config: 运行保护配置
+        :return: 无
+        """
+        max_seconds = cls._config_int(runtime_config, "maxExtractSeconds", 300)
+        if time.monotonic() - started_at > max_seconds:
+            raise RuntimeError("日志下载完成后自动解压超过当前保护超时")
+
+    @classmethod
+    def _validate_extracted_resource_usage(cls, target_dir: Path, runtime_config: dict[str, Any]) -> None:
+        """
+        检查解压目录文件数量和总字节数。
+        :param target_dir: 解压目录
+        :param runtime_config: 运行保护配置
+        :return: 无
+        """
+        max_file_count = cls._config_int(runtime_config, "maxExtractFileCount", 2000)
+        max_total_bytes = cls._config_int(runtime_config, "maxExtractTotalBytes", 2147483648)
+        file_count = 0
+        total_bytes = 0
+        for path in target_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            file_count += 1
+            total_bytes += path.stat().st_size
+            if file_count > max_file_count:
+                raise RuntimeError("日志下载完成后自动解压文件数量超过当前保护阈值")
+            if total_bytes > max_total_bytes:
+                raise RuntimeError("日志下载完成后自动解压总大小超过当前保护阈值")
+
+    @classmethod
+    def _extract_one(cls, archive_path: Path, target_dir: Path) -> None:
+        """
+        解压单个压缩文件。
+        :param archive_path: 压缩文件路径
+        :param target_dir: 解压目录
+        :return: 无
+        """
+        name = archive_path.name.lower()
+        if name.endswith(".zip"):
+            cls._extract_zip_safely(archive_path, target_dir)
+            return
+        if name.endswith((".tar", ".tar.gz", ".tgz", ".bz2", ".xz")) and tarfile.is_tarfile(archive_path):
+            cls._extract_tar_safely(archive_path, target_dir)
+            return
+        if name.endswith(".gz") and not name.endswith(".tar.gz"):
+            output_path = target_dir / archive_path.with_suffix("").name
+            with gzip.open(archive_path, "rb") as source, output_path.open("wb") as target:
+                shutil.copyfileobj(source, target)
+            return
+        if name.endswith(".bz2"):
+            output_path = target_dir / archive_path.with_suffix("").name
+            with bz2.open(archive_path, "rb") as source, output_path.open("wb") as target:
+                shutil.copyfileobj(source, target)
+            return
+        if name.endswith(".xz"):
+            output_path = target_dir / archive_path.with_suffix("").name
+            with lzma.open(archive_path, "rb") as source, output_path.open("wb") as target:
+                shutil.copyfileobj(source, target)
+            return
+        cls._extract_by_7z(archive_path, target_dir)
+
+    @classmethod
+    def _extract_zip_safely(cls, archive_path: Path, target_dir: Path) -> None:
+        """
+        安全解压 ZIP 文件。
+        :param archive_path: ZIP 文件路径
+        :param target_dir: 解压目录
+        :return: 无
+        """
+        root = target_dir.resolve()
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.infolist():
+                target_path = (target_dir / member.filename).resolve()
+                if not cls._is_relative_to(target_path, root):
+                    logger.warning(f"跳过非法 ZIP 条目，archive={archive_path}，member={member.filename}")
+                    continue
+                archive.extract(member, target_dir)
+
+    @classmethod
+    def _extract_tar_safely(cls, archive_path: Path, target_dir: Path) -> None:
+        """
+        安全解压 TAR 文件。
+        :param archive_path: TAR 文件路径
+        :param target_dir: 解压目录
+        :return: 无
+        """
+        root = target_dir.resolve()
+        with tarfile.open(archive_path) as archive:
+            for member in archive.getmembers():
+                target_path = (target_dir / member.name).resolve()
+                if not cls._is_relative_to(target_path, root):
+                    logger.warning(f"跳过非法 TAR 条目，archive={archive_path}，member={member.name}")
+                    continue
+                archive.extract(member, target_dir)
+
+    @classmethod
+    def _extract_by_7z(cls, archive_path: Path, target_dir: Path) -> None:
+        """
+        使用 7z 解压标准库不支持的压缩格式。
+        :param archive_path: 压缩文件路径
+        :param target_dir: 解压目录
+        :return: 无
+        """
+        executable = shutil.which("7z") or shutil.which("7z.exe")
+        if not executable:
+            raise RuntimeError("当前环境未找到 7z，无法自动解压 rar/7z 等格式")
+        process = subprocess.run(
+            [executable, "x", "-y", f"-o{target_dir}", str(archive_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "7z 解压失败")
+
+    @classmethod
+    def _list_log_files(cls, extract_dir: Path) -> list[Path]:
+        """
+        列出已解压目录中的可搜索日志文本文件。
+        :param extract_dir: 解压目录
+        :return: 日志文件列表
+        """
+        result: list[Path] = []
+        for path in extract_dir.rglob("*"):
+            if not path.is_file() or path.stat().st_size <= 0:
+                continue
+            if path.name.endswith(cls.LINE_INDEX_SUFFIX):
+                continue
+            if cls._is_archive(path):
+                continue
+            if cls._is_text_file(path):
+                result.append(path)
+        return sorted(result, key=lambda item: str(item))
+
+    @classmethod
+    def _ensure_line_index(cls, path: Path) -> dict[str, Any]:
+        """
+        确保指定日志文件存在行号索引。
+        :param path: 日志文件路径
+        :return: 索引元数据
+        """
+        index_path = path.with_name(f"{path.name}{cls.LINE_INDEX_SUFFIX}")
+        stat = path.stat()
+        if index_path.exists():
+            try:
+                with index_path.open("r", encoding="utf-8") as file_obj:
+                    meta = json.loads(file_obj.readline() or "{}")
+                if (
+                    meta.get("size") == stat.st_size
+                    and meta.get("mtime_ns") == stat.st_mtime_ns
+                    and meta.get("encoding_version") == cls.LINE_INDEX_ENCODING_VERSION
+                ):
+                    return meta
+            except Exception as exc:
+                logger.warning(f"读取日志行索引失败，将重建索引，path={path}，reason={exc}")
+
+        encoding = cls._detect_file_encoding(path)
+        line_count = 0
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_index_path = index_path.with_name(f"{index_path.name}.tmp")
+        with path.open("rb") as source, temp_index_path.open("w", encoding="utf-8", newline="\n") as temp_index_file:
+            while True:
+                offset = source.tell()
+                line = source.readline()
+                if not line:
+                    break
+                line_count += 1
+                temp_index_file.write(f"{offset}\n")
+        meta = {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "line_count": line_count,
+            "encoding": encoding,
+            "encoding_version": cls.LINE_INDEX_ENCODING_VERSION,
+            "created_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+        }
+        with index_path.open("w", encoding="utf-8", newline="\n") as index_file:
+            index_file.write(json.dumps(meta, ensure_ascii=False) + "\n")
+            with temp_index_path.open("r", encoding="utf-8") as temp_index_file:
+                shutil.copyfileobj(temp_index_file, index_file)
+        temp_index_path.unlink(missing_ok=True)
+        return meta
+
+    @classmethod
+    def _detect_file_encoding(cls, path: Path) -> str:
+        """
+        探测日志文件编码。
+        :param path: 文件路径
+        :return: 编码名称
+        """
+        with path.open("rb") as file_obj:
+            sample = file_obj.read(65536)
+        if not sample:
+            return "utf-8"
+        if sample.startswith(b"\xef\xbb\xbf"):
+            return "utf-8-sig"
+        try:
+            sample.decode("utf-8")
+            return "utf-8"
+        except UnicodeDecodeError:
+            pass
+        for fallback_encoding in ("gb18030", "gbk", "big5"):
+            try:
+                sample.decode(fallback_encoding)
+                return fallback_encoding
+            except UnicodeDecodeError:
+                continue
+        detected = from_bytes(sample).best()
+        detected_encoding = str(detected.encoding or "").strip() if detected else ""
+        return detected_encoding or "utf-8"
+
+    @classmethod
+    def _is_text_file(cls, path: Path) -> bool:
+        """
+        判断文件是否可按文本日志处理。
+        :param path: 文件路径
+        :return: 是否文本文件
+        """
+        if path.suffix.lower() in cls.TEXT_EXTENSIONS:
+            return True
+        with path.open("rb") as file_obj:
+            sample = file_obj.read(8192)
+        if b"\x00" in sample:
+            return False
+        result = from_bytes(sample).best()
+        return bool(result and result.encoding)
+
+    @classmethod
+    def _write_meta(cls, path: Path, payload: dict[str, Any]) -> None:
+        """
+        写入日志查看目录元数据。
+        :param path: 元数据文件路径
+        :param payload: 元数据内容
+        :return: 无
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @classmethod
+    def _build_source_file_name(cls, archive_path: Path) -> str:
+        """
+        根据压缩包后缀生成 source 目录文件名。
+        :param archive_path: 压缩包路径
+        :return: 文件名
+        """
+        name = archive_path.name.lower()
+        for suffix in (".tar.gz", ".tgz", ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"):
+            if name.endswith(suffix):
+                return f"log{suffix}"
+        return "log.zip"
+
+    @classmethod
+    def _ticket_dir(cls, ticket_id: int, record_id: int | None = None) -> Path:
+        """
+        获取日志查看根目录。
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :return: 根目录
+        """
+        ticket_dir = cls.BASE_DIR / f"ticket_{ticket_id}"
+        return ticket_dir / f"record_{record_id}" if record_id else ticket_dir
+
+    @classmethod
+    def _is_archive(cls, path: Path) -> bool:
+        """
+        判断文件是否为支持递归解压的压缩包。
+        :param path: 文件路径
+        :return: 是否压缩包
+        """
+        name = path.name.lower()
+        return any(name.endswith(suffix) for suffix in cls.COMPRESSED_SUFFIXES)
+
+    @staticmethod
+    def _is_relative_to(path: Path, root: Path) -> bool:
+        """
+        判断路径是否位于根目录内。
+        :param path: 待判断路径
+        :param root: 根目录
+        :return: 是否位于根目录内
+        """
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _config_int(config: dict[str, Any], key: str, default: int) -> int:
+        """
+        从配置中读取正整数。
+        :param config: 配置字典
+        :param key: 字段名
+        :param default: 默认值
+        :return: 正整数
+        """
+        try:
+            value = int(float(str(config.get(key, default)).strip()))
+            return value if value > 0 else default
+        except Exception:
+            return default
+
+    @staticmethod
+    def _config_bool(config: dict[str, Any], key: str, default: bool) -> bool:
+        """
+        从配置中读取布尔值。
+        :param config: 配置字典
+        :param key: 字段名
+        :param default: 默认值
+        :return: 布尔值
+        """
+        value = config.get(key, default)
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}

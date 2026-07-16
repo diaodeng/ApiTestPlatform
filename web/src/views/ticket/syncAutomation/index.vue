@@ -42,6 +42,51 @@
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
+                <span>日志拉取后处理</span>
+                <el-tag type="warning" effect="plain">下载完成后</el-tag>
+              </div>
+            </template>
+            <el-form :model="form.logPullPostProcess" label-width="170px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后解压">
+                    <el-switch
+                      v-model="form.logPullPostProcess.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后提取版本">
+                    <el-switch
+                      v-model="form.logPullPostProcess.postDownloadVersionExtractEnabled"
+                      :disabled="!form.logPullPostProcess.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后生成索引">
+                    <el-switch
+                      v-model="form.logPullPostProcess.postDownloadIndexEnabled"
+                      :disabled="!form.logPullPostProcess.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
                 <span>多维表格公共配置</span>
                 <el-tag type="info" effect="plain">公共覆盖基座</el-tag>
               </div>

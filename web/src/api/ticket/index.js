@@ -46,6 +46,8 @@ export {
   // logPull
   getTicketLogPullStorageConfig,
   saveTicketLogPullStorageConfig,
+  getTicketLogPullPostProcessConfig,
+  saveTicketLogPullPostProcessConfig,
   getTicketLogPullVendorStoreOptions,
   downloadTicketLogPullStoreConfigTemplate,
   listTicketLogPullStoreConfigs,

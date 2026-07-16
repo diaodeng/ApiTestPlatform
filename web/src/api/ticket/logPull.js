@@ -27,6 +27,23 @@ export function saveTicketLogPullStorageConfig(data) {
   });
 }
 
+// 查询日志拉取下载完成后处理配置
+export function getTicketLogPullPostProcessConfig() {
+  return request({
+    url: '/ticket/log-pull/post-process-config',
+    method: 'get',
+  });
+}
+
+// 保存日志拉取下载完成后处理配置
+export function saveTicketLogPullPostProcessConfig(data) {
+  return request({
+    url: '/ticket/log-pull/post-process-config',
+    method: 'put',
+    data,
+  });
+}
+
 // 查询工单日志拉取记录
 export function listTicketLogPulls(ticketId, query) {
   query['ticketId'] = ticketId;

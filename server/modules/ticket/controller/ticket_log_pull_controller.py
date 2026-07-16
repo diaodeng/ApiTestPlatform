@@ -16,6 +16,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPrepareRequestModel,
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
+    TicketLogPullPostProcessConfigModel,
     TicketLogPullProjectVendorMapQueryModel,
     TicketLogPullProjectVendorMapUpsertModel,
     TicketLogPullQueryModel,
@@ -89,13 +90,75 @@ async def save_ticket_log_pull_storage_config(
     :param config_object: 本地目录、FTP 连接、轮询和压缩入库配置
     :param query_db: 数据库会话
     :param current_user: 当前登录用户，用于写入配置审计信息
-    :return: 保存结果；当前版本统一改为通过系统参数配置维护
+    :return: 保存结果
     """
     try:
-        return ResponseUtil.failure(msg="请前往参数配置维护 ticket.logPull.external / ticket.logPull.storage")
+        result = await run_in_threadpool(
+            TicketLogPullService.save_storage_config_services,
+            query_db,
+            config_object,
+            current_user,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
+    "/log-pull/post-process-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def get_ticket_log_pull_post_process_config(request: Request, query_db: Session = Depends(get_db)):
+    """
+    获取工单同步公共配置中的日志拉取后处理开关接口。
+    :param request: 请求对象
+    :param query_db: 数据库会话
+    :return: 日志下载完成后的解压、版本提取和索引配置
+    """
+    try:
+        result = await run_in_threadpool(TicketLogPullService.get_post_process_config_services, query_db)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.put(
+    "/log-pull/post-process-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def save_ticket_log_pull_post_process_config(
+    request: Request,
+    config_object: TicketLogPullPostProcessConfigModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    保存工单同步公共配置中的日志拉取后处理开关接口。
+    :param request: 请求对象
+    :param config_object: 下载完成后的解压、版本提取和索引开关
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入配置审计信息
+    :return: 保存结果
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketLogPullService.save_post_process_config_services,
+            query_db,
+            config_object,
+            current_user,
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
 @ticketLogPullController.get(
     "/log-pulls/{record_id}/content",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],

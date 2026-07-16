@@ -54,6 +54,23 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
     max_search_seconds: int = Field(default=30, description="日志关键字搜索最大执行秒数")
     max_search_file_count: int = Field(default=1000, description="日志关键字搜索最大扫描文件数")
     max_python_search_bytes: int = Field(default=268435456, description="Python降级搜索最大扫描字节数")
+    post_download_extract_enabled: bool = Field(default=False, description="日志下载完成后是否自动解压到查看目录")
+    post_download_version_extract_enabled: bool = Field(
+        default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
+    )
+    post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
+
+
+class TicketLogPullPostProcessConfigModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取下载完成后处理配置模型。
+    """
+
+    post_download_extract_enabled: bool = Field(default=False, description="日志下载完成后是否自动解压到查看目录")
+    post_download_version_extract_enabled: bool = Field(
+        default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
+    )
+    post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
 
 
 class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):

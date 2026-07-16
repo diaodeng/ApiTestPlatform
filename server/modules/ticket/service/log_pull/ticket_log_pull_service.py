@@ -41,6 +41,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
     TicketLogPullListItemModel,
+    TicketLogPullPostProcessConfigModel,
     TicketLogPullProjectVendorMapModel,
     TicketLogPullProjectVendorMapQueryModel,
     TicketLogPullProjectVendorMapUpsertModel,
@@ -53,6 +54,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullVendorStoreOptionsModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
+from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -352,6 +354,9 @@ class TicketLogPullService:
             "maxSearchSeconds": 30,
             "maxSearchFileCount": 1000,
             "maxPythonSearchBytes": 268435456,
+            "postDownloadExtractEnabled": False,
+            "postDownloadVersionExtractEnabled": False,
+            "postDownloadIndexEnabled": False,
         }
 
     @classmethod
@@ -431,6 +436,9 @@ class TicketLogPullService:
         normalized["maxPythonSearchBytes"] = max(
             cls._parse_positive_int(normalized.get("maxPythonSearchBytes"), 268435456), 10485760
         )
+        normalized["postDownloadExtractEnabled"] = bool(normalized.get("postDownloadExtractEnabled"))
+        normalized["postDownloadVersionExtractEnabled"] = bool(normalized.get("postDownloadVersionExtractEnabled"))
+        normalized["postDownloadIndexEnabled"] = bool(normalized.get("postDownloadIndexEnabled"))
         normalized["effectiveLocalDirectory"] = str(cls._resolve_local_dir(normalized.get("localDirectory")))
         return normalized
 
@@ -1074,6 +1082,49 @@ class TicketLogPullService:
             raise
 
     @classmethod
+    def get_post_process_config_services(cls, query_db: Session) -> TicketLogPullPostProcessConfigModel:
+        """
+        获取日志下载完成后处理配置。
+        :param query_db: 数据库会话
+        :return: 日志后处理配置模型
+        """
+        storage_config = cls._get_storage_config_dict(query_db)
+        return TicketLogPullPostProcessConfigModel.model_validate(
+            {
+                "postDownloadExtractEnabled": storage_config.get("postDownloadExtractEnabled"),
+                "postDownloadVersionExtractEnabled": storage_config.get("postDownloadVersionExtractEnabled"),
+                "postDownloadIndexEnabled": storage_config.get("postDownloadIndexEnabled"),
+            }
+        )
+
+    @classmethod
+    def save_post_process_config_services(
+        cls, query_db: Session, config_model: TicketLogPullPostProcessConfigModel, current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """
+        保存日志下载完成后处理配置，只覆盖后处理开关并保留存储目录、FTP 和资源保护参数。
+        :param query_db: 数据库会话
+        :param config_model: 日志后处理配置模型
+        :param current_user: 当前登录用户
+        :return: 保存结果
+        """
+        current_config = cls._get_storage_config_dict(query_db)
+        post_process_payload = config_model.model_dump(by_alias=True)
+        payload = cls._normalize_storage_config({**current_config, **post_process_payload})
+        payload.pop("effectiveLocalDirectory", None)
+        try:
+            TicketLogPullDao.save_storage_config_row(
+                query_db,
+                config_value=cls._json_dumps(payload),
+                user_name=cls._user_name(current_user),
+            )
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="日志拉取后处理配置已保存")
+        except Exception:
+            query_db.rollback()
+            raise
+
+    @classmethod
     def retry_log_pull_services(
         cls, query_db: Session, record_id: int, current_user: CurrentUserModel
     ) -> CrudResponseModel:
@@ -1140,6 +1191,20 @@ class TicketLogPullService:
         if not match:
             return ""
         return str(match.group(1) or "").strip()
+
+    @staticmethod
+    def _resolve_ticket_version_key(ticket) -> str:
+        """
+        从工单扩展字段中读取已保存版本号。
+        :param ticket: 工单对象
+        :return: 版本号，未配置返回空字符串
+        """
+        extra_data = ticket.extra_data if ticket and isinstance(ticket.extra_data, dict) else {}
+        for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
+            value = str(extra_data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
 
     @classmethod
     def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> bool:
@@ -2330,6 +2395,33 @@ class TicketLogPullService:
                         "whole_archive": not has_log_time_range,
                     },
                 )
+                try:
+                    post_process_result = TicketLogPostProcessService.run_after_download(
+                        db,
+                        record,
+                        temp_file_path,
+                        cls._get_storage_config_dict(db),
+                    )
+                    if post_process_result.get("enabled"):
+                        cls._log_chain_step(
+                            db,
+                            ticket_id=record.ticket_id,
+                            record_id=record.id,
+                            step="post-download-prepare",
+                            status="success" if post_process_result.get("prepared") else "skipped",
+                            reason=str(post_process_result.get("message") or "日志下载完成后处理完成"),
+                            detail=post_process_result,
+                        )
+                except Exception as exc:
+                    logger.warning(f"日志下载完成后处理失败，record_id={record.id}，reason={exc}")
+                    cls._log_chain_step(
+                        db,
+                        ticket_id=record.ticket_id,
+                        record_id=record.id,
+                        step="post-download-prepare",
+                        status="failed",
+                        reason=str(exc),
+                    )
                 cls._notify_log_pull_record(
                     db,
                     record,
@@ -2412,7 +2504,7 @@ class TicketLogPullService:
                 reason="工单不存在",
             )
             return
-        version_key = cls._ensure_ticket_version_key_from_log(db, ticket.ticket_id, record_id)
+        version_key = cls._resolve_ticket_version_key(ticket)
         record_notify_config = cls._extract_record_notify_config(record)
         automation = record.command_content.get("_automation")
         if isinstance(automation, dict):
