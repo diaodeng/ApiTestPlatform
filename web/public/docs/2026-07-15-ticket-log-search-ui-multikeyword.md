@@ -22,7 +22,8 @@
 ## 实现要点
 
 1. 后端 `LogService.search_keywords(...)` 作为多关键字入口，单关键字继续复用原 `search(...)`。
-2. ASCII 多关键字 `any` 模式优先使用 `rg --fixed-strings -e` 按文件搜索；`all` 模式、中文关键字或无 `rg` 环境时使用 Python 行扫描。
+2. 多关键字 `any` 模式优先使用一次 `rg --fixed-strings -e` 搜索全部受控文件；`all` 模式使用多个 `rg` 进程管道串联过滤，中文关键字同样优先走 `rg`。
+3. Python 行扫描仅作为无 `rg`、环境变量强制 Python 或 `rg` 执行异常时的降级路径。
 3. 多关键字搜索继续受 `maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes` 保护，返回结果仍由 `limit` 截断。
 4. 前端搜索输入改为可创建的多选框；高亮输入独立维护，支持多个字符串同时高亮并使用不同背景色区分。
 5. 日志上下文 `<pre>` 不再绑定鼠标选中事件，复制文本时不会触发高亮状态更新。

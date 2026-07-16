@@ -59,7 +59,8 @@ class LogService:
         :param record_id: 日志拉取记录ID，为空时使用当前工单最新日志记录
         :return: 准备结果
         """
-        logger.info(f"开始准备工单日志查看目录，ticket_id={ticket_id}")
+        prepare_started_at = time.monotonic()
+        logger.info(f"开始准备工单日志查看目录，ticket_id={ticket_id}，record_id={record_id}")
         runtime_config = cls._get_runtime_config(db)
         ticket_dir = cls._ticket_dir(ticket_id, record_id)
         source_dir = ticket_dir / "source"
@@ -68,7 +69,12 @@ class LogService:
         if extract_dir.exists() and any(extract_dir.iterdir()):
             cls._validate_extracted_resource_usage(extract_dir, runtime_config)
             files = cls.files(ticket_id, record_id)
-            logger.info(f"工单日志已存在解压目录，跳过重复准备，ticket_id={ticket_id}，file_count={len(files)}")
+            logger.info(
+                f"工单日志已存在解压目录，跳过重复准备，ticket_id={ticket_id}，record_id={record_id}，"
+                f"source_path={cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME}，"
+                f"extract_path={extract_dir}，file_count={len(files)}，"
+                f"elapsed_ms={int((time.monotonic() - prepare_started_at) * 1000)}"
+            )
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
                 record_id=record_id,
@@ -118,6 +124,11 @@ class LogService:
             source_dir.mkdir(parents=True, exist_ok=True)
             extract_dir.mkdir(parents=True, exist_ok=True)
             source_path = source_dir / cls._build_source_file_name(archive_path)
+            logger.info(
+                f"工单日志准备解析到归档，ticket_id={ticket_id}，record_id={record.id}，"
+                f"archive_path={archive_path}，source_path={source_path}，extract_path={extract_dir}，"
+                f"should_cleanup={should_cleanup}"
+            )
             shutil.copy2(archive_path, source_path)
             if should_cleanup:
                 archive_path.unlink(missing_ok=True)
@@ -134,7 +145,11 @@ class LogService:
                     "file_count": len(files),
                 },
             )
-            logger.info(f"工单日志准备完成，ticket_id={ticket_id}，record_id={record.id}，file_count={len(files)}")
+            logger.info(
+                f"工单日志准备完成，ticket_id={ticket_id}，record_id={record.id}，"
+                f"archive_path={archive_path}，source_path={source_path}，extract_path={extract_dir}，"
+                f"file_count={len(files)}，elapsed_ms={int((time.monotonic() - prepare_started_at) * 1000)}"
+            )
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
                 record_id=record.id,
@@ -146,6 +161,12 @@ class LogService:
             )
         except Exception as exc:
             logger.exception(exc)
+            failed_source_path = cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME
+            logger.warning(
+                f"工单日志准备失败，ticket_id={ticket_id}，record_id={record.id}，"
+                f"archive_path={archive_path}，source_path={failed_source_path}，extract_path={extract_dir}，"
+                f"elapsed_ms={int((time.monotonic() - prepare_started_at) * 1000)}"
+            )
             return TicketLogPrepareModel(
                 ticket_id=ticket_id,
                 record_id=record.id,
@@ -211,6 +232,7 @@ class LogService:
         :param db: 数据库会话，用于读取日志搜索资源保护配置
         :return: 搜索命中列表
         """
+        search_started_at = time.monotonic()
         keyword = str(keyword or "").strip()
         if not keyword:
             return []
@@ -223,26 +245,25 @@ class LogService:
             # 先解析一次相对路径，确保指定文件仍位于当前工单日志目录内。
             cls._resolve_log_file(ticket_id, normalized_file, record_id)
         target_files = cls._resolve_search_files(ticket_id, record_id, normalized_file, runtime_config)
-        if not keyword.isascii():
-            logger.info(
-                f"日志搜索包含非 ASCII 关键字，使用 Python 编码兼容模式，ticket_id={ticket_id}，keyword={keyword}"
-            )
-            return cls._search_by_python(
-                ticket_id,
-                keyword,
-                context_before,
-                context_after,
-                limit,
-                with_context,
-                record_id,
-                normalized_file,
-                runtime_config,
-                target_files,
-            )
         search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
         if search_mode == "python":
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=[keyword],
+                search_mode="any",
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=normalized_file,
+                target_file_count=len(target_files),
+                args={"reason": "env_python", "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes")},
+            )
             logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
-            return cls._search_by_python(
+            hits = cls._search_by_python(
                 ticket_id,
                 keyword,
                 context_before,
@@ -254,6 +275,8 @@ class LogService:
                 runtime_config,
                 target_files,
             )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
 
         executable = (
             shutil.which("rg")
@@ -262,8 +285,23 @@ class LogService:
             or shutil.which("ripgrep.exe")
         )
         if not executable:
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=[keyword],
+                search_mode="any",
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=normalized_file,
+                target_file_count=len(target_files),
+                args={"reason": "rg_not_found", "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes")},
+            )
             logger.warning(f"未找到 rg/ripgrep，日志搜索降级为 Python，ticket_id={ticket_id}，keyword={keyword}")
-            return cls._search_by_python(
+            hits = cls._search_by_python(
                 ticket_id,
                 keyword,
                 context_before,
@@ -275,86 +313,57 @@ class LogService:
                 runtime_config,
                 target_files,
             )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
 
-        hits: list[TicketLogSearchHitModel] = []
-        deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
-        for target_file in target_files:
-            if len(hits) >= limit:
-                break
-            remaining_seconds = deadline - time.monotonic()
-            if remaining_seconds <= 0:
-                logger.warning(f"日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
-                break
-            remaining_limit = max(limit - len(hits), 1)
-            command = [
-                executable,
-                "-n",
-                "--no-heading",
-                "--with-filename",
-                "--color",
-                "never",
-                "--fixed-strings",
-                "-m",
-                str(remaining_limit),
-                keyword,
-                "--",
-                target_file,
-            ]
-            try:
-                process = subprocess.run(
-                    command,
-                    cwd=str(extract_dir),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=remaining_seconds,
-                )
-            except subprocess.TimeoutExpired:
-                logger.warning(f"日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
-                break
-            except FileNotFoundError as exc:
-                logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
-                return cls._search_by_python(
-                    ticket_id,
-                    keyword,
-                    context_before,
-                    context_after,
-                    limit,
-                    with_context,
-                    record_id,
-                    normalized_file,
-                    runtime_config,
-                    target_files,
-                )
-            if process.returncode not in (0, 1):
-                logger.warning(
-                    f"rg 搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
-                    f"reason={process.stderr.strip() or process.stdout.strip()}"
-                )
-                return cls._search_by_python(
-                    ticket_id,
-                    keyword,
-                    context_before,
-                    context_after,
-                    limit,
-                    with_context,
-                    record_id,
-                    normalized_file,
-                    runtime_config,
-                    target_files,
-                )
-            for raw_line in process.stdout.splitlines():
-                if len(hits) >= limit:
-                    break
-                hit = cls._parse_rg_line(raw_line)
-                if not hit:
-                    continue
-                hit.matched_keywords = cls._match_keywords(hit.content, [keyword], "any")
-                if with_context:
-                    hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
-                hits.append(hit)
-        return hits
+        cls._log_search_execution(
+            tool="rg",
+            ticket_id=ticket_id,
+            record_id=record_id,
+            extract_dir=extract_dir,
+            keywords=[keyword],
+            search_mode="any",
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            file_path=normalized_file,
+            target_file_count=len(target_files),
+            args={
+                "executable": executable,
+                "rgArgs": [
+                    "-n",
+                    "--no-heading",
+                    "--with-filename",
+                    "--color",
+                    "never",
+                    "--fixed-strings",
+                    "-m",
+                    "<remaining_limit>",
+                    "-e",
+                    "<keyword...>",
+                    "--",
+                    "<target_file...>",
+                ],
+                "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+            },
+        )
+        return cls._search_by_rg_keywords(
+            ticket_id=ticket_id,
+            keywords=[keyword],
+            search_mode="any",
+            executable=executable,
+            extract_dir=extract_dir,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            runtime_config=runtime_config,
+            target_files=target_files,
+            file_path=normalized_file,
+            search_started_at=search_started_at,
+        )
 
     @classmethod
     def search_keywords(
@@ -384,6 +393,7 @@ class LogService:
         :param db: 数据库会话，用于读取日志搜索资源保护配置
         :return: 搜索命中列表
         """
+        search_started_at = time.monotonic()
         normalized_keywords = cls._normalize_keywords(keywords)
         if not normalized_keywords:
             return []
@@ -412,13 +422,27 @@ class LogService:
             cls._resolve_log_file(ticket_id, normalized_file, record_id)
         target_files = cls._resolve_search_files(ticket_id, record_id, normalized_file, runtime_config)
         search_mode_config = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
-        should_use_python = (
-            normalized_mode == "all"
-            or search_mode_config == "python"
-            or any(not keyword.isascii() for keyword in normalized_keywords)
-        )
-        if should_use_python:
-            return cls._search_by_python_keywords(
+        if search_mode_config == "python":
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=normalized_file,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "env_python",
+                    "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                },
+            )
+            hits = cls._search_by_python_keywords(
                 ticket_id=ticket_id,
                 keywords=normalized_keywords,
                 search_mode=normalized_mode,
@@ -430,6 +454,8 @@ class LogService:
                 runtime_config=runtime_config,
                 target_files=target_files,
             )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
 
         executable = (
             shutil.which("rg")
@@ -439,7 +465,22 @@ class LogService:
         )
         if not executable:
             logger.warning(f"未找到 rg/ripgrep，多关键字日志搜索降级为 Python，ticket_id={ticket_id}")
-            return cls._search_by_python_keywords(
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=normalized_file,
+                target_file_count=len(target_files),
+                args={"reason": "rg_not_found", "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes")},
+            )
+            hits = cls._search_by_python_keywords(
                 ticket_id=ticket_id,
                 keywords=normalized_keywords,
                 search_mode=normalized_mode,
@@ -451,9 +492,44 @@ class LogService:
                 runtime_config=runtime_config,
                 target_files=target_files,
             )
-        return cls._search_by_rg_keywords(
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
+        cls._log_search_execution(
+            tool="rg",
+            ticket_id=ticket_id,
+            record_id=record_id,
+            extract_dir=extract_dir,
+            keywords=normalized_keywords,
+            search_mode=normalized_mode,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            file_path=normalized_file,
+            target_file_count=len(target_files),
+            args={
+                "executable": executable,
+                "rgArgs": [
+                    "-n",
+                    "--no-heading",
+                    "--with-filename",
+                    "--color",
+                    "never",
+                    "--fixed-strings",
+                    "-m",
+                    "<remaining_limit>",
+                    "-e",
+                    "<keyword...>",
+                    "--",
+                    "<target_file...>",
+                ],
+                "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+            },
+        )
+        hits = cls._search_by_rg_keywords(
             ticket_id=ticket_id,
             keywords=normalized_keywords,
+            search_mode=normalized_mode,
             executable=executable,
             extract_dir=extract_dir,
             context_before=context_before,
@@ -463,7 +539,10 @@ class LogService:
             record_id=record_id,
             runtime_config=runtime_config,
             target_files=target_files,
+            file_path=normalized_file,
+            search_started_at=search_started_at,
         )
+        return hits
 
     @classmethod
     def context(
@@ -634,6 +713,7 @@ class LogService:
         *,
         ticket_id: int,
         keywords: list[str],
+        search_mode: str,
         executable: str,
         extract_dir: Path,
         context_before: int,
@@ -643,6 +723,8 @@ class LogService:
         record_id: int | None,
         runtime_config: dict[str, Any],
         target_files: list[str],
+        file_path: str | None = None,
+        search_started_at: float | None = None,
     ) -> list[TicketLogSearchHitModel]:
         """
         使用 rg 一次匹配多个 ASCII 固定字符串。
@@ -657,84 +739,187 @@ class LogService:
         :param record_id: 日志拉取记录ID
         :param runtime_config: 运行保护配置
         :param target_files: 搜索文件列表
+        :param file_path: 指定文件范围
+        :param search_started_at: 搜索开始时间戳
         :return: 搜索命中列表
         """
         hits: list[TicketLogSearchHitModel] = []
         seen_keys: set[tuple[str, int]] = set()
-        deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
-        pattern_args: list[str] = []
-        for keyword in keywords:
-            pattern_args.extend(["-e", keyword])
-        for target_file in target_files:
+        max_seconds = cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        first_keyword = keywords[0]
+        first_command = [
+            executable,
+            "-n",
+            "--no-heading",
+            "--with-filename",
+            "--color",
+            "never",
+            "--fixed-strings",
+            "-e",
+            first_keyword,
+        ]
+        if search_mode == "any":
+            for keyword in keywords[1:]:
+                first_command.extend(["-e", keyword])
+        first_command.extend(["--", *target_files])
+
+        commands = [first_command]
+        if search_mode == "all":
+            for index, keyword in enumerate(keywords[1:], start=1):
+                command = [executable, "--color", "never"]
+                if index == len(keywords) - 1:
+                    command.extend(["-m", str(limit)])
+                command.append(cls._build_rg_output_content_pattern(keyword))
+                commands.append(command)
+        else:
+            commands.append([executable, "--color", "never", "-m", str(limit), "."])
+
+        try:
+            stdout_text = cls._run_rg_pipeline(commands, extract_dir, max_seconds)
+        except subprocess.TimeoutExpired:
+            logger.warning(f"rg 日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+            if search_started_at is not None:
+                cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+            return hits
+        except FileNotFoundError as exc:
+            logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_file_not_found",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+            )
+            if search_started_at is not None:
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
+        except RuntimeError as exc:
+            logger.warning(f"rg 日志搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_returncode",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+            )
+            if search_started_at is not None:
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
+
+        for raw_line in stdout_text.splitlines():
             if len(hits) >= limit:
                 break
-            remaining_seconds = deadline - time.monotonic()
-            if remaining_seconds <= 0:
-                logger.warning(f"多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
-                break
-            remaining_limit = max(limit - len(hits), 1)
-            command = [
-                executable,
-                "-n",
-                "--no-heading",
-                "--with-filename",
-                "--color",
-                "never",
-                "--fixed-strings",
-                "-m",
-                str(remaining_limit),
-                *pattern_args,
-                "--",
-                target_file,
-            ]
-            try:
-                process = subprocess.run(
+            hit = cls._parse_rg_line(raw_line)
+            if not hit:
+                continue
+            unique_key = (hit.file, hit.line)
+            if unique_key in seen_keys:
+                continue
+            matched_keywords = cls._match_keywords(hit.content, keywords, search_mode)
+            if not matched_keywords:
+                continue
+            hit.matched_keywords = matched_keywords
+            if with_context:
+                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
+            hits.append(hit)
+            seen_keys.add(unique_key)
+        if search_started_at is not None:
+            cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+        return hits
+
+    @classmethod
+    def _run_rg_pipeline(cls, commands: list[list[str]], extract_dir: Path, timeout_seconds: int) -> str:
+        """
+        使用管道串联多个 rg 进程，避免把中间匹配结果收集到 Python 内存。
+        :param commands: rg 命令链，第一段读取日志文件，后续段从 stdin 过滤
+        :param extract_dir: 日志解压目录
+        :param timeout_seconds: 管道最大执行秒数
+        :return: 最后一段 rg 的标准输出
+        """
+        processes: list[subprocess.Popen] = []
+        previous_stdout = None
+        try:
+            for index, command in enumerate(commands):
+                process = subprocess.Popen(
                     command,
                     cwd=str(extract_dir),
-                    capture_output=True,
+                    stdin=previous_stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE if index == len(commands) - 1 else subprocess.DEVNULL,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=remaining_seconds,
                 )
-            except subprocess.TimeoutExpired:
-                logger.warning(f"多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
-                break
-            if process.returncode not in (0, 1):
-                logger.warning(
-                    f"rg 多关键字搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，"
-                    f"reason={process.stderr.strip() or process.stdout.strip()}"
-                )
-                return cls._search_by_python_keywords(
-                    ticket_id=ticket_id,
-                    keywords=keywords,
-                    search_mode="any",
-                    context_before=context_before,
-                    context_after=context_after,
-                    limit=limit,
-                    with_context=with_context,
-                    record_id=record_id,
-                    runtime_config=runtime_config,
-                    target_files=target_files,
-                )
-            for raw_line in process.stdout.splitlines():
-                if len(hits) >= limit:
-                    break
-                hit = cls._parse_rg_line(raw_line)
-                if not hit:
-                    continue
-                unique_key = (hit.file, hit.line)
-                if unique_key in seen_keys:
-                    continue
-                matched_keywords = cls._match_keywords(hit.content, keywords, "any")
-                if not matched_keywords:
-                    continue
-                hit.matched_keywords = matched_keywords
-                if with_context:
-                    hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
-                hits.append(hit)
-                seen_keys.add(unique_key)
-        return hits
+                if previous_stdout is not None:
+                    previous_stdout.close()
+                previous_stdout = process.stdout
+                processes.append(process)
+            stdout_text, stderr_text = processes[-1].communicate(timeout=timeout_seconds)
+            for process in processes[:-1]:
+                process.wait(timeout=1)
+            final_returncode = processes[-1].returncode
+            if final_returncode not in (0, 1):
+                raise RuntimeError(str(stderr_text or stdout_text or "rg 搜索失败").strip())
+            return stdout_text
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+
+    @staticmethod
+    def _build_rg_output_content_pattern(keyword: str) -> str:
+        """
+        构造用于过滤 rg 输出内容区的正则，避免后续管道误匹配文件名或行号。
+        :param keyword: 固定字符串关键字
+        :return: rg 可用的正则表达式
+        """
+        return rf"^[^:\r\n]+:\d+:.*{re.escape(keyword)}"
 
     @classmethod
     def _search_by_python_keywords(
@@ -902,6 +1087,71 @@ class LogService:
                 "maxPythonSearchBytes": 268435456,
             }
         return TicketLogPullService.get_storage_config_dict(db)
+
+    @classmethod
+    def _log_search_execution(
+        cls,
+        *,
+        tool: str,
+        ticket_id: int,
+        record_id: int | None,
+        extract_dir: Path,
+        keywords: list[str],
+        search_mode: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        file_path: str | None,
+        target_file_count: int,
+        args: dict[str, Any],
+    ) -> None:
+        """
+        记录日志搜索执行计划，便于定位实际使用的工具、参数和搜索目录。
+        :param tool: 搜索工具名称，如 rg/python
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param extract_dir: 本次搜索的日志解压目录
+        :param keywords: 搜索关键字列表
+        :param search_mode: 搜索模式
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回数量
+        :param with_context: 是否返回上下文
+        :param file_path: 指定文件范围
+        :param target_file_count: 本次扫描的文件数量
+        :param args: 工具相关参数
+        :return: 无
+        """
+        logger.info(
+            f"工单日志搜索开始，ticket_id={ticket_id}，record_id={record_id}，tool={tool}，"
+            f"extract_dir={extract_dir}，file={file_path or '<all>'}，target_file_count={target_file_count}，"
+            f"keywords={keywords}，search_mode={search_mode}，context_before={context_before}，"
+            f"context_after={context_after}，limit={limit}，with_context={with_context}，args={args}"
+        )
+
+    @staticmethod
+    def _log_search_completed(
+        tool: str,
+        ticket_id: int,
+        record_id: int | None,
+        hit_count: int,
+        started_at: float,
+    ) -> None:
+        """
+        记录日志搜索完成耗时和命中数量。
+        :param tool: 搜索工具名称
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param hit_count: 返回命中数量
+        :param started_at: 搜索开始时间戳
+        :return: 无
+        """
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        logger.info(
+            f"工单日志搜索完成，ticket_id={ticket_id}，record_id={record_id}，tool={tool}，"
+            f"hit_count={hit_count}，elapsed_ms={elapsed_ms}"
+        )
 
     @staticmethod
     def _config_int(config: dict[str, Any], key: str, default: int) -> int:
