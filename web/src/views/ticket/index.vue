@@ -387,6 +387,7 @@
 
       <el-table
         v-loading="loading"
+        border
         :data="ticketList"
         row-key="ticketId"
         :default-sort="{
@@ -3519,7 +3520,7 @@
             :max-height="logViewerResultTableHeight"
             @row-click="selectLogViewerHit"
           >
-            <el-table-column label="文件" prop="file" min-width="220" show-overflow-tooltip />
+            <el-table-column label="文件" prop="file" min-width="100" show-overflow-tooltip />
             <el-table-column label="行号" prop="line" width="90" />
             <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
             <el-table-column label="操作" width="130" fixed="right">
@@ -3576,7 +3577,7 @@
                 inactive-text="不换行"
               />
               <el-tag
-                v-if="logViewerHighlightSummary"
+                v-if="false && logViewerHighlightSummary"
                 class="log-highlight-summary-tag"
                 type="warning"
                 effect="plain"
@@ -4408,8 +4409,8 @@
   function supportsNativeLogViewerHighlight() {
     return Boolean(
       window.CSS?.highlights &&
-        typeof window.Highlight === 'function' &&
-        typeof window.Range === 'function'
+      typeof window.Highlight === 'function' &&
+      typeof window.Range === 'function'
     );
   }
 
