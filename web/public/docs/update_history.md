@@ -1,3 +1,11 @@
+## 2026-07-17
+
+1. 工单发生版本统一以 `affected_version` 为权威字段，`versionKey/extra_data.version_key` 仅保留为历史接口和 AI 仓库映射兜底兼容。
+2. 日志下载完成后自动提取版本号前，会先检查工单已有发生版本或兼容版本字段；已有有效版本时不再扫描日志，提取成功后同步写入 `affected_version`。
+3. 版本号提取新增归一化过滤，避免把 `version`、`版本号`、`appVersion` 等字段名误写成版本号。
+4. 工单编辑页保存发生版本时，以当前表单版本覆盖旧 `affectedVersion`，避免旧脏值再次抢占展示。
+5. 新增说明文档：`web/public/docs/2026-07-17-ticket-version-authority-and-log-extract-fix.md`。
+
 ## 2026-07-16
 
 1. 工单日志准备接口补充运行日志，记录原始归档位置、服务端缓存压缩包位置、解压目录、文件数和准备耗时。

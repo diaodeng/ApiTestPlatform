@@ -27,6 +27,7 @@ from modules.ticket.service.sync.ticket_sync_field_mapping_service import Ticket
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import extract_ticket_version_key as _extract_ticket_version_key
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 from utils.log_util import logger
 
@@ -348,15 +349,15 @@ class TicketSyncAutomationService:
             else {}
         )
         ai_version_key = (
-            str(ai_extract_payload.get("versionKey") or "").strip()
+            normalize_ticket_version_key(ai_extract_payload.get("versionKey"))
             if isinstance(ai_extract_payload, dict)
             else ""
         )
         version_key = (
-            str(sync_object.version_key or "").strip()
+            normalize_ticket_version_key(sync_object.version_key)
             or _extract_ticket_version_key(sync_object.extra_data)
             or ai_version_key
-            or str(cls.extract_pattern(text, config.get("versionPatterns")) or "").strip()
+            or normalize_ticket_version_key(cls.extract_pattern(text, config.get("versionPatterns")))
         )
         return {
             "projectId": getattr(project, "project_id", None)

@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 
 if TYPE_CHECKING:
     from modules.ticket.entity.do.ticket_do import Ticket
@@ -125,7 +126,7 @@ class TicketProcessingMetricService:
         """
         extra = extra_data if isinstance(extra_data, dict) else {}
         for candidate in (affected_version, version_key, extra.get("version_key"), extra.get("versionKey"), fallback):
-            text = str(candidate or "").strip()
+            text = normalize_ticket_version_key(candidate)
             if text:
                 return text
         return ""

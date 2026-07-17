@@ -90,11 +90,11 @@ erDiagram
 ## 关键字段约束
 
 - `Ticket.project_id` 与 `Ticket.module_id` 直接引用 HRM 项目/模块主键，工单归属不再维护独立“商户/模块”字典。
-- `Ticket.ticket_no` 作为外部系统工单号，手动录入且全局唯一；`Ticket.extra_data.version_key` 用作版本号，供 AI 分析匹配仓库映射。
+- `Ticket.ticket_no` 作为外部系统工单号，手动录入且全局唯一；`Ticket.affected_version` 是问题发生/分析版本权威字段，`Ticket.extra_data.version_key` 仅作为历史版本号兼容字段，供旧数据和 AI 分析仓库映射兜底。
 - 2026-07-08 第一阶段已新增 `Ticket.submit_time` 作为统计主时间，外部同步工单取外部 `createTime`，手工创建工单取本地 `create_time`；查询过渡期优先 `submit_time`，为空再回退 `extra_data.external_sync.externalCreateTime` 和 `create_time`。
 - 2026-07-08 第一阶段已新增 `Ticket.processed_at` 作为“首次形成有效排查结论时间”，用它统计已处理数、处理率、首次处理耗时和未处理存量；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。
 - 2026-07-08 待实施方案确认 `Ticket.resolved_at` 保留当前终态写入逻辑，语义为“工单处置完成时间”；真实 Bug 修复统计应结合 `is_problem/solution_type/resolution_code/fixed_version/released_at/verified_at`。
-- 2026-07-08 第一阶段已新增 `affected_version/planned_fix_version/fixed_version/released_version/released_at/verified_at`；其中 `affected_version` 可兼容 `extra_data.version_key`，`planned_fix_version` 是治理排期字段，不应继续塞进 `extra_data.version_key`。
+- 2026-07-08 第一阶段已新增 `affected_version/planned_fix_version/fixed_version/released_version/released_at/verified_at`；其中 `affected_version` 兼容 `extra_data.version_key`，且 2026-07-17 起被明确为 bug 首发版本/提单版本的唯一权威字段。版本号提取会过滤 `version`、`版本号` 等字段名误识别结果，`planned_fix_version` 是治理排期字段，不应继续塞进 `extra_data.version_key`。
 - 2026-07-11 版本治理批量维护已启用这些字段：批量发版会写入 `released_version/released_at`，批量验证会写入 `verified_at`，并分别生成 `TicketEventType.DEPLOYED/VERIFIED` 事件。版本统计暂不新增数据表，直接按 `ticket` 当前态实时聚合；需要冻结历史版本周报时再新增版本统计快照表。
 - `Ticket` 新增索引 `idx_ticket_del_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version`，支撑提交时间、处理时间、处置/关闭时间和计划版本筛选。
 - 2026-07-10 第三阶段维度快照已补齐：`TicketStatisticsDaily.snapshot_scope='all'` 保存全局自然日快照，`snapshot_scope='leaf'` 保存 `project_id + module_id + issue_type_id` 叶子维度快照；唯一键为 `statistics_date/snapshot_scope/project_id/module_id/issue_type_id`。快照口径支持项目、模块、模块 Code 和工单类型筛选，细分问题 `problem_pattern_code` 暂不冻结。

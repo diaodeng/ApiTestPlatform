@@ -56,6 +56,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key, resolve_ticket_current_version_key
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -86,7 +87,10 @@ class TicketLogPullService:
     _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ticket-log-pull")
     _executor_lock = threading.Lock()
     _active_record_ids: set[int] = set()
-    VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
+    VERSION_PATTERN = re.compile(
+        r"(?:版本号|版本|version|app[_\s-]*version)\s*[:：=]\s*([A-Za-z0-9._/-]+)",
+        re.IGNORECASE,
+    )
     STORE_IMPORT_HEADERS = [
         "集团编号",
         "商户编号",
@@ -1190,7 +1194,7 @@ class TicketLogPullService:
         match = cls.VERSION_PATTERN.search(text)
         if not match:
             return ""
-        return str(match.group(1) or "").strip()
+        return normalize_ticket_version_key(match.group(1))
 
     @staticmethod
     def _resolve_ticket_version_key(ticket) -> str:
@@ -1199,12 +1203,7 @@ class TicketLogPullService:
         :param ticket: 工单对象
         :return: 版本号，未配置返回空字符串
         """
-        extra_data = ticket.extra_data if ticket and isinstance(ticket.extra_data, dict) else {}
-        for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
-            value = str(extra_data.get(key) or "").strip()
-            if value:
-                return value
-        return ""
+        return resolve_ticket_current_version_key(ticket)
 
     @classmethod
     def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> bool:
@@ -1219,18 +1218,20 @@ class TicketLogPullService:
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
             return False
-        normalized_version_key = str(version_key or "").strip()
+        normalized_version_key = normalize_ticket_version_key(version_key)
         if not normalized_version_key:
             return False
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        current_extra_version = str(extra_data.get("version_key") or "").strip()
-        if current_extra_version == normalized_version_key:
+        current_version_key = resolve_ticket_current_version_key(ticket)
+        if current_version_key == normalized_version_key:
             return False
+        # extra_data.version_key 暂保留给历史 AI 仓库映射等链路兜底；权威字段写入 affected_version。
         extra_data["version_key"] = normalized_version_key
         TicketDao.update_ticket(
             query_db,
             ticket_id,
             {
+                "affected_version": normalized_version_key,
                 "extra_data": extra_data,
                 "update_by": "system",
                 "update_time": datetime.now(),
@@ -1251,8 +1252,7 @@ class TicketLogPullService:
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
             return ""
-        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        version_key = str(extra_data.get("version_key") or "").strip()
+        version_key = resolve_ticket_current_version_key(ticket)
         if version_key:
             return version_key
 

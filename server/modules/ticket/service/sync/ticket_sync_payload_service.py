@@ -20,6 +20,7 @@ from modules.ticket.enums.ticket_enums import TicketStatus
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
 from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.util.sync_util import SyncUtil
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import user_id as _user_id
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 
@@ -386,8 +387,11 @@ class TicketSyncPayloadService:
         payload = cls.merge_external_text_fields(payload, detected or {}, sync_object)
         if is_remote_pull and resolved_assignee_name and not resolved_assignee_id:
             payload["current_assignee_id"] = None
-        version_key = str((detected or {}).get("versionKey") or sync_object.version_key or "").strip()
+        version_key = normalize_ticket_version_key((detected or {}).get("versionKey")) or normalize_ticket_version_key(
+            sync_object.version_key
+        )
         if version_key:
+            # extra_data.version_key 暂保留给历史 AI 仓库映射等链路兜底；权威字段写入 affected_version。
             extra_data["version_key"] = version_key
         payload["submit_time"] = TicketProcessingMetricService.resolve_submit_time(
             explicit_submit_time=sync_object.submit_time or (ticket.submit_time if ticket else None),

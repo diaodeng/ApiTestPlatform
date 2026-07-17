@@ -58,6 +58,7 @@ from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncCon
 from modules.ticket.util.ticket_common_util import (
     extract_ticket_version_key as _extract_ticket_version_key,
 )
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import (
     user_id as _user_id,
 )
@@ -581,10 +582,11 @@ class TicketService:
         extra_data = item.get("extraData")
         sync_summary = _extract_ticket_sync_summary(extra_data)
         item["versionKey"] = (
-            item.get("versionKey")
-            or item.get("affectedVersion")
+            normalize_ticket_version_key(item.get("versionKey"))
+            or normalize_ticket_version_key(item.get("affectedVersion"))
             or _extract_ticket_version_key(extra_data)
         )
+        item["affectedVersion"] = item["versionKey"]
         if not str(item.get("ticketUrl") or "").strip() and isinstance(sync_summary, dict):
             item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
         if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):

@@ -5018,7 +5018,7 @@
       handleModuleChange(formModuleValue.value);
       payload.moduleId = form.value.moduleId;
       payload.moduleName = form.value.moduleName || '';
-      payload.affectedVersion = payload.affectedVersion || payload.versionKey || '';
+      payload.affectedVersion = payload.versionKey || payload.affectedVersion || '';
       if (payload.issueTypeId) {
         payload.issueTypeName =
           payload.issueTypeName || getStatOptionLabel(issueTypeOptions.value, payload.issueTypeId);

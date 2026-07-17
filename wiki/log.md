@@ -3,10 +3,19 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-16
+updated: 2026-07-17
 ---
 
 # 操作日志
+
+## [2026-07-17] INGEST-CODE | 工单发生版本权威字段与日志提取修复
+
+- 触发：用户反馈编辑页保存发生版本后再次打开显示 `version`，要求统一版本字段语义，并避免日志下载后重复或错误提取版本号。
+- 架构层：工单域 / 版本治理 / 日志拉取后处理 / 外部同步入库 / AI 仓库映射。
+- 创建的页面：`web/public/docs/2026-07-17-ticket-version-authority-and-log-extract-fix.md`
+- 更新的页面：`server/modules/ticket/util/ticket_common_util.py`、`server/modules/ticket/service/log_pull/ticket_log_post_process_service.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/service/sync/ticket_sync_payload_service.py`、`server/modules/ticket/service/sync/ticket_sync_automation_service.py`、`server/modules/ticket/service/ai/ticket_ai_analysis_service.py`、`server/modules/ticket/service/ai/ticket_light_ai_service.py`、`server/modules/ticket/service/core/ticket_processing_metric_service.py`、`server/modules/ticket/service/core/ticket_service.py`、`web/src/views/ticket/index.vue`、`server/tests/test_ticket_version_key_normalization.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`
+- 变更传播链：版本号归一化工具 -> 详情返回与统计字段解析过滤无效版本 -> 编辑页保存以当前发生版本覆盖旧值 -> 同步入库/自动化/轻量 AI 统一过滤 -> 日志下载后处理先检查 `affected_version` 再提取 -> 提取成功写入 `affected_version` 并保留 `extra_data.version_key` 兼容。
+- 关键结论：`affected_version` 是 bug 首发/提单版本的权威字段；`versionKey` 和 `extra_data.version_key` 不删除，但只作为历史接口、旧数据和 AI 仓库映射兜底。日志中出现的字段名 `version` 不再被当作有效版本号。
 
 ## [2026-07-16] INGEST-CODE | 工单日志选区候选词与非侵入高亮
 

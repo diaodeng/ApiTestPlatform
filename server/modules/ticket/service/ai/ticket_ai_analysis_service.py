@@ -52,6 +52,7 @@ from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingSe
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
+from modules.ticket.util.ticket_common_util import resolve_ticket_current_version_key
 from utils.api_key_util import ApiKeyUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -525,12 +526,7 @@ class TicketAiAnalysisService:
         """
         if request and str(request.version_key or "").strip():
             return str(request.version_key).strip()
-        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
-            value = extra_data.get(key)
-            if str(value or "").strip():
-                return str(value).strip()
-        return ""
+        return resolve_ticket_current_version_key(ticket)
 
     @classmethod
     def _resolve_mapping(

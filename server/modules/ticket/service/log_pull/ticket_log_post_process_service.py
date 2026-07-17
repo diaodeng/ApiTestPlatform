@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key, resolve_ticket_current_version_key
 from utils.log_util import logger
 
 
@@ -36,7 +37,10 @@ class TicketLogPostProcessService:
     TEXT_EXTENSIONS = {".log", ".txt", ".out"}
     COMPRESSED_SUFFIXES = (".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz", ".gz", ".bz2", ".xz")
     MAX_RECURSIVE_EXTRACT_ROUNDS = 20
-    VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
+    VERSION_PATTERN = re.compile(
+        r"(?:版本号|版本|version|app[_\s-]*version)\s*[:：=]\s*([A-Za-z0-9._/-]+)",
+        re.IGNORECASE,
+    )
 
     @classmethod
     def run_after_download(
@@ -117,7 +121,7 @@ class TicketLogPostProcessService:
         log_files: list[Path],
     ) -> str:
         """
-        从已解压日志文件中流式提取版本号，并在工单缺失版本时写入扩展字段。
+        从已解压日志文件中流式提取版本号，并在工单缺失版本时写入发生版本。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param record_id: 日志拉取记录ID
@@ -128,20 +132,25 @@ class TicketLogPostProcessService:
         if not ticket:
             return ""
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        for key in ("versionKey", "version_key", "version", "deployVersion", "deploy_version", "appVersion"):
-            value = str(extra_data.get(key) or "").strip()
-            if value:
-                return value
+        current_version_key = resolve_ticket_current_version_key(ticket)
+        if current_version_key:
+            logger.info(
+                f"日志下载完成后版本提取跳过，ticket_id={ticket_id}，record_id={record_id}，"
+                f"reason=工单已有发生版本，version_key={current_version_key}"
+            )
+            return current_version_key
 
         version_key = cls.extract_version_key_from_files(log_files)
         if not version_key:
             logger.info(f"日志下载完成后版本提取未命中，ticket_id={ticket_id}，record_id={record_id}")
             return ""
+        # extra_data.version_key 暂保留给 AI 仓库映射等历史链路兜底；权威字段写入 affected_version。
         extra_data["version_key"] = version_key
         TicketDao.update_ticket(
             db,
             ticket_id,
             {
+                "affected_version": version_key,
                 "extra_data": extra_data,
                 "update_by": "system",
                 "update_time": datetime.now(),
@@ -164,7 +173,9 @@ class TicketLogPostProcessService:
                     for line in file_obj:
                         match = cls.VERSION_PATTERN.search(line)
                         if match:
-                            return str(match.group(1) or "").strip()
+                            version_key = normalize_ticket_version_key(match.group(1))
+                            if version_key:
+                                return version_key
             except Exception as exc:
                 logger.warning(f"日志版本提取读取文件失败，path={path}，reason={exc}")
         return ""

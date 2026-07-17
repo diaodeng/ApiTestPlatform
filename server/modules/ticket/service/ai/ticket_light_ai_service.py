@@ -13,6 +13,7 @@ from module_admin.dao.ai_provider_dao import AiProviderDao
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.service.ai_task_execution_service import AiTaskExecutionService
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from utils.api_key_util import ApiKeyUtil
 from utils.log_util import logger
 
@@ -23,7 +24,10 @@ class TicketLightAiService:
     """
 
     DEFAULT_TIMEOUT_SEC = 60
-    VERSION_PATTERN = re.compile(r"(?:版本号|版本|version|app[_\s-]*version)[:：\s-]*([A-Za-z0-9._/-]+)", re.IGNORECASE)
+    VERSION_PATTERN = re.compile(
+        r"(?:版本号|版本|version|app[_\s-]*version)\s*[:：=]\s*([A-Za-z0-9._/-]+)",
+        re.IGNORECASE,
+    )
     JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
     CONFIG_TRANSLATE_ENABLED = "ticket.ai.translate.enabled"
     CONFIG_TRANSLATE_PROVIDER = "ticket.ai.translate.provider.code"
@@ -214,7 +218,7 @@ class TicketLightAiService:
         match = cls.VERSION_PATTERN.search(text)
         if not match:
             return ""
-        return str(match.group(1) or "").strip()
+        return normalize_ticket_version_key(match.group(1))
 
     @staticmethod
     def _build_translation_prompt(title: str, content: str) -> str:
