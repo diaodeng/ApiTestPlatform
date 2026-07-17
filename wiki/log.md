@@ -34,7 +34,7 @@ updated: 2026-07-17
 - 架构层：Web 控制台 / 工单详情 tab 组件
 - 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/components/TicketDetailWithList.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailOverviewTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCollabTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCommentsTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailHistoryTab.vue`、`web/public/docs/2026-07-17-ticket-detail-dialog-component.md`、`web/public/docs/update_history.md`、`wiki/entities/services/web-feature-domains.md`、`wiki/entities/services/ticket-domain.md`
 - 变更传播链：详情父组件传参收敛为 tab `ticketId/active` -> 概览/日志拉取/协同/评论/历史 tab 内部自行拉取数据和维护表单/弹窗/样式 -> tab 变更后通过 `changed` 通知详情父组件刷新顶部详情和列表 -> 列表页删除旧详情同步函数和详情 tab 样式残留。
-- 关键结论：tab 组件不是临时模板拆分，而是各自围绕工单 ID 闭环；详情父组件只保留顶部详情、描述翻译、AI 分析/任务历史、仓库映射、商家映射和新建问题绑定等跨 tab 弹窗。
+- 关键结论：tab 组件不是临时模板拆分，而是不接收父级上下文对象；为减少重复 `getTicket`，概览、日志拉取、协同支持 `ticketId/detail` 双入口，父详情已有详情时复用，未传详情时仍可围绕工单 ID 自行闭环。
 
 ## [2026-07-16] INGEST-CODE | 工单日志选区候选词与非侵入高亮
 

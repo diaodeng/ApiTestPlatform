@@ -6,11 +6,15 @@
   const props = defineProps({
     ticketId: {
       type: [Number, String],
-      required: true,
+      default: undefined,
     },
     active: {
       type: Boolean,
       default: false,
+    },
+    detail: {
+      type: Object,
+      default: null,
     },
   });
 
@@ -28,6 +32,13 @@
   const loading = ref(false);
   const detail = ref({});
   const issueActionLoading = ref(false);
+  const hasExternalDetail = computed(() =>
+    Boolean(props.detail?.ticketId || props.detail?.ticket_id)
+  );
+  const resolvedTicketId = computed(() => {
+    const ticketId = Number(props.ticketId || props.detail?.ticketId || props.detail?.ticket_id);
+    return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined;
+  });
   const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null);
   const latestSnapshot = computed(
     () => detail.value.latestSnapshot || detail.value.snapshots?.[0] || null
@@ -39,9 +50,13 @@
    * @returns {Promise<void>} 数据加载完成 Promise。
    */
   function loadOverview() {
-    if (!props.ticketId) return Promise.resolve();
+    if (hasExternalDetail.value) {
+      detail.value = props.detail || {};
+      return Promise.resolve();
+    }
+    if (!resolvedTicketId.value) return Promise.resolve();
     loading.value = true;
-    return getTicket(props.ticketId)
+    return getTicket(resolvedTicketId.value)
       .then((response) => {
         detail.value = response.data || {};
       })
@@ -57,6 +72,20 @@
   function refreshAiData() {
     emit('refresh-ai');
     loadOverview();
+  }
+
+  /**
+   * 数据变更后刷新当前 tab，外部已提供详情时交给详情父组件刷新。
+   * @returns {Promise<void>} 刷新完成 Promise。
+   */
+  function refreshOverviewAfterChanged() {
+    if (hasExternalDetail.value) {
+      emit('changed');
+      return Promise.resolve();
+    }
+    return loadOverview().then(() => {
+      emit('changed');
+    });
   }
 
   /**
@@ -147,7 +176,7 @@
    */
   function bindSimilarIssue(item) {
     const similarTicketId = Number(item?.ticketId || item?.ticket_id);
-    if (!props.ticketId || !similarTicketId) {
+    if (!resolvedTicketId.value || !similarTicketId) {
       proxy.$modal.msgWarning('相似工单ID无效，无法归因');
       return;
     }
@@ -155,7 +184,7 @@
       .confirm(`是否确认将当前工单与 ${item.ticketNo || similarTicketId} 归入同一问题？`)
       .then(() => {
         issueActionLoading.value = true;
-        return bindTicketIssueFromSimilar(props.ticketId, {
+        return bindTicketIssueFromSimilar(resolvedTicketId.value, {
           similarTicketId,
           confidence: item.score,
           relationType: 'similar',
@@ -163,8 +192,7 @@
       })
       .then(() => {
         proxy.$modal.msgSuccess('相似工单归因已确认');
-        loadOverview();
-        emit('changed');
+        refreshOverviewAfterChanged();
       })
       .finally(() => {
         issueActionLoading.value = false;
@@ -172,11 +200,16 @@
   }
 
   watch(
-    () => props.ticketId,
+    () => [props.ticketId, props.detail],
     () => {
+      if (hasExternalDetail.value) {
+        detail.value = props.detail || {};
+        return;
+      }
       detail.value = {};
       if (props.active) loadOverview();
-    }
+    },
+    { immediate: true, deep: true }
   );
 
   watch(

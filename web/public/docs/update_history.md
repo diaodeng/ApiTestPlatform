@@ -8,7 +8,7 @@
 6. 工单详情全屏弹窗改为自闭环组件 `web/src/views/ticket/components/TicketDetailWithList.vue`，组件只接收 `ticketId/open`，内部自行加载详情数据并承接日志拉取、AI、协同、历史、归因和日志查看器弹窗。
 7. 工单列表页删除 `ticketDetailContext` 和详情相关状态/函数，只保留 `currentTicketId/detailOpen/openDetail` 与 `@changed="getList"`，新增/编辑工单仍复用下沉到 `logPull.shared.js` 的日志拉取表单默认值和清洗逻辑。
 8. 修复详情组件模板截断导致只显示顶部基础信息的问题，恢复描述/AI 翻译和下方 tabs。
-9. 工单详情下方 tabs 拆分为概览、日志拉取、协同、评论、历史 5 个子组件，并二次收口为只接收 `ticketId/active`：各 tab 自行拉取数据、维护表单/弹窗/样式和提交动作，通过 `changed` 通知详情组件刷新顶部信息与列表。
+9. 工单详情下方 tabs 拆分为概览、日志拉取、协同、评论、历史 5 个子组件，并二次收口为不接收父级上下文对象：评论和历史只接收 `ticketId/active`，概览、日志拉取、协同支持 `ticketId/detail/active` 双入口，父详情已持有详情时复用详情，未传详情时自行拉取。
 10. 修复日志拉取 tab 弹窗只显示按钮的问题：`TicketDetailLogPullTab.vue` 自行注册日志拉取表单字段组件，不再依赖父详情组件 import。
 11. 新增说明文档：`web/public/docs/2026-07-17-ticket-detail-dialog-component.md`。
 

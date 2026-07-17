@@ -18,11 +18,15 @@
   const props = defineProps({
     ticketId: {
       type: [Number, String],
-      required: true,
+      default: undefined,
     },
     active: {
       type: Boolean,
       default: false,
+    },
+    detail: {
+      type: Object,
+      default: null,
     },
   });
 
@@ -46,6 +50,13 @@
   const messageDataText = ref('');
   const issueActionLoading = ref(false);
   const messageForm = ref(createDefaultMessageForm());
+  const hasExternalDetail = computed(() =>
+    Boolean(props.detail?.ticketId || props.detail?.ticket_id)
+  );
+  const resolvedTicketId = computed(() => {
+    const ticketId = Number(props.ticketId || props.detail?.ticketId || props.detail?.ticket_id);
+    return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined;
+  });
 
   const ticketMessages = computed(() => detail.value.messages || []);
   const ticketSnapshots = computed(() => detail.value.snapshots || []);
@@ -140,9 +151,15 @@
    * @returns {Promise<void>} 刷新完成 Promise。
    */
   function refreshDetail() {
-    if (!props.ticketId) return Promise.resolve();
+    if (hasExternalDetail.value) {
+      detail.value = props.detail || {};
+      loadDetailVersionOptions(detail.value.projectId);
+      resetMessageForm();
+      return Promise.resolve();
+    }
+    if (!resolvedTicketId.value) return Promise.resolve();
     loading.value = true;
-    return getTicket(props.ticketId)
+    return getTicket(resolvedTicketId.value)
       .then((response) => {
         detail.value = response.data || {};
         loadDetailVersionOptions(detail.value.projectId);
@@ -151,6 +168,20 @@
       .finally(() => {
         loading.value = false;
       });
+  }
+
+  /**
+   * 数据变更后刷新协同 tab，外部已提供详情时交给详情父组件刷新。
+   * @returns {Promise<void>} 刷新完成 Promise。
+   */
+  function refreshAfterChanged() {
+    if (hasExternalDetail.value) {
+      emit('changed');
+      return Promise.resolve();
+    }
+    return refreshDetail().then(() => {
+      emit('changed');
+    });
   }
 
   /**
@@ -181,6 +212,10 @@
    * @returns {void}
    */
   function submitMessage() {
+    if (!resolvedTicketId.value) {
+      proxy.$modal.msgWarning('工单ID无效，无法提交消息');
+      return;
+    }
     const content = String(messageForm.value.content || '').trim();
     if (!content) {
       proxy.$modal.msgWarning('请填写消息内容');
@@ -193,7 +228,7 @@
       '';
     const attachments = parseMessageAttachments();
     if (attachments === null) return;
-    addTicketMessage(props.ticketId, {
+    addTicketMessage(resolvedTicketId.value, {
       ...messageForm.value,
       content,
       attachments,
@@ -210,8 +245,7 @@
         );
       }
       resetMessageForm();
-      refreshDetail();
-      emit('changed');
+      refreshAfterChanged();
     });
   }
 
@@ -220,7 +254,11 @@
    * @returns {Promise<void>} 保存完成 Promise。
    */
   function saveSnapshotFromCurrentState() {
-    return addTicketSnapshot(props.ticketId, {
+    if (!resolvedTicketId.value) {
+      proxy.$modal.msgWarning('工单ID无效，无法保存快照');
+      return Promise.resolve();
+    }
+    return addTicketSnapshot(resolvedTicketId.value, {
       summary: latestSnapshotSummary.value || detail.value.description || '',
       rootCause: detail.value.rootCause || '',
       solution: detail.value.solution || '',
@@ -235,8 +273,7 @@
       },
     }).then(() => {
       proxy.$modal.msgSuccess('快照已保存');
-      refreshDetail();
-      emit('changed');
+      refreshAfterChanged();
     });
   }
 
@@ -245,10 +282,13 @@
    * @returns {void}
    */
   function generateKnowledgeFromTicket() {
-    extractTicketKnowledge(props.ticketId).then(() => {
+    if (!resolvedTicketId.value) {
+      proxy.$modal.msgWarning('工单ID无效，无法生成知识库案例');
+      return;
+    }
+    extractTicketKnowledge(resolvedTicketId.value).then(() => {
       proxy.$modal.msgSuccess('知识库案例已生成');
-      refreshDetail();
-      emit('changed');
+      refreshAfterChanged();
     });
   }
 
@@ -312,7 +352,7 @@
    */
   function handleBindIssueFromSimilar(item) {
     const similarTicketId = Number(item?.ticketId || item?.ticket_id);
-    if (!props.ticketId || !similarTicketId) {
+    if (!resolvedTicketId.value || !similarTicketId) {
       proxy.$modal.msgWarning('相似工单ID无效，无法归因');
       return;
     }
@@ -320,7 +360,7 @@
       .confirm(`是否确认将当前工单与 ${item.ticketNo || similarTicketId} 归入同一问题？`)
       .then(() => {
         issueActionLoading.value = true;
-        return bindTicketIssueFromSimilar(props.ticketId, {
+        return bindTicketIssueFromSimilar(resolvedTicketId.value, {
           similarTicketId,
           confidence: item.score,
           relationType: 'similar',
@@ -328,8 +368,7 @@
       })
       .then(() => {
         proxy.$modal.msgSuccess('相似工单归因已确认');
-        refreshDetail();
-        emit('changed');
+        refreshAfterChanged();
       })
       .finally(() => {
         issueActionLoading.value = false;
@@ -337,9 +376,20 @@
   }
 
   watch(
-    () => props.ticketId,
+    () => props.detail,
     () => {
-      detail.value = {};
+      if (hasExternalDetail.value) {
+        detail.value = props.detail || {};
+        loadDetailVersionOptions(detail.value.projectId);
+      }
+    },
+    { immediate: true, deep: true }
+  );
+
+  watch(
+    resolvedTicketId,
+    () => {
+      detail.value = hasExternalDetail.value ? props.detail || {} : {};
       resetMessageForm();
       if (props.active) refreshDetail();
     },

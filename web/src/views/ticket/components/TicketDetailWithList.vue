@@ -1104,6 +1104,7 @@
             <TicketDetailOverviewTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'overview'"
+              :detail="detail"
               @run-ai="openAiAnalysisDialog"
               @refresh-ai="refreshAiAnalysisData"
               @open-ai-history="openAiTaskHistory"
@@ -1117,6 +1118,7 @@
             <TicketDetailLogPullTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'logPull'"
+              :detail="detail"
               @changed="refreshDetailAndNotify"
             />
           </el-tab-pane>
@@ -1125,6 +1127,7 @@
             <TicketDetailCollabTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'collab'"
+              :detail="detail"
               @changed="refreshDetailAndNotify"
               @run-ai="openAiAnalysisDialog"
               @open-ai-history="openAiTaskHistory"

@@ -16,11 +16,15 @@
   const props = defineProps({
     ticketId: {
       type: [Number, String],
-      required: true,
+      default: undefined,
     },
     active: {
       type: Boolean,
       default: false,
+    },
+    detail: {
+      type: Object,
+      default: null,
     },
   });
 
@@ -30,6 +34,13 @@
   const detail = ref({});
   const detailRef = computed(() => detail.value || {});
   const detailOpenRef = computed(() => Boolean(props.active));
+  const hasExternalDetail = computed(() =>
+    Boolean(props.detail?.ticketId || props.detail?.ticket_id)
+  );
+  const resolvedTicketId = computed(() => {
+    const ticketId = Number(props.ticketId || props.detail?.ticketId || props.detail?.ticket_id);
+    return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined;
+  });
 
   const {
     agentOptions,
@@ -60,6 +71,10 @@
    * @returns {Promise<void>} 详情加载完成 Promise。
    */
   function loadTicketDetail() {
+    if (hasExternalDetail.value) {
+      detail.value = props.detail || {};
+      return Promise.resolve();
+    }
     if (!currentTicketId.value) return Promise.resolve();
     return getTicket(currentTicketId.value).then((response) => {
       detail.value = response.data || {};
@@ -71,6 +86,10 @@
    * @returns {Promise<void>} 刷新完成 Promise。
    */
   function refreshTicketDetailAndNotify() {
+    if (hasExternalDetail.value) {
+      emitChanged();
+      return Promise.resolve();
+    }
     return Promise.all([loadTicketDetail(), emitChanged()]).then(() => undefined);
   }
 
@@ -282,15 +301,23 @@
   }
 
   watch(
-    () => props.ticketId,
+    () => props.detail,
+    () => {
+      if (hasExternalDetail.value) {
+        detail.value = props.detail || {};
+      }
+    },
+    { immediate: true, deep: true }
+  );
+
+  watch(
+    resolvedTicketId,
     (ticketId) => {
-      const resolvedTicketId = Number(ticketId);
-      currentTicketId.value =
-        Number.isFinite(resolvedTicketId) && resolvedTicketId > 0 ? resolvedTicketId : undefined;
+      currentTicketId.value = ticketId;
       logPullList.value = [];
       logPullTotal.value = 0;
       selectedLogPullRecord.value = null;
-      detail.value = {};
+      detail.value = hasExternalDetail.value ? props.detail || {} : {};
       logPullQuery.value.pageNum = 1;
       resetLogPullForm();
       if (props.active && currentTicketId.value) {
