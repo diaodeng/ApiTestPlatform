@@ -1,5 +1,21 @@
 ## 2026-07-17
 
+1. 修复工单编辑页缺失 `tagText` 响应式变量导致点击编辑按钮时报错的问题，打开编辑弹窗时不再触发 `Unhandled error during execution of native event handler`。
+2. 新增说明文档：`web/public/docs/2026-07-17-ticket-edit-tagtext-missing-fix.md`。
+3. 修复工单列表“更多”下拉里删除项的权限指令挂载方式，改为页面内权限布尔值控制，进入列表页时不再持续触发 `Runtime directive used on component with non-element root node` 告警。
+4. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-dropdown-directive-warning-fix.md`。
+5. 工单列表操作列默认仅显示详情、编辑、指派、流转和更多按钮；原有日志、外链跳转和删除动作收纳到更多下拉菜单中，默认按钮改为仅图标显示。
+6. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-more-actions-dropdown.md`。
+
+## 2026-07-17
+
+1. 修复工单列表“更多”下拉里删除项的权限指令挂载方式，改为页面内权限布尔值控制，进入列表页时不再持续触发 `Runtime directive used on component with non-element root node` 告警。
+2. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-dropdown-directive-warning-fix.md`。
+3. 工单列表操作列默认仅显示详情、编辑、指派、流转和更多按钮；原有日志、外链跳转和删除动作收纳到更多下拉菜单中，默认按钮改为仅图标显示。
+4. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-more-actions-dropdown.md`。
+
+## 2026-07-17
+
 1. 工单发生版本统一以 `affected_version` 为权威字段，`versionKey/extra_data.version_key` 仅保留为历史接口和 AI 仓库映射兜底兼容。
 2. 日志下载完成后自动提取版本号前，会先检查工单已有发生版本或兼容版本字段；已有有效版本时不再扫描日志，提取成功后同步写入 `affected_version`。
 3. 版本号提取新增归一化过滤，避免把 `version`、`版本号`、`appVersion` 等字段名误写成版本号。
@@ -14,6 +30,8 @@
 12. 工单列表搜索区默认只展示关键字、自然语言、状态、外部工单号和提交时间，其他筛选项默认折叠，并在重置按钮后增加“展开更多筛选/收起更多筛选”按钮。
 13. 工单详情页顶部信息默认只显示前九项，标题后增加“展开更多信息/收起更多信息”按钮；协同 tab 在版本选项加载完成后优先回填工单版本号，缺省时回填当前项目的首个可用版本。
 14. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-detail-collapse-and-collab-version-default.md`。
+15. 工单列表操作列默认仅显示详情、编辑、指派、流转和更多按钮；原有日志、外链跳转和删除动作收纳到更多下拉菜单中，默认按钮改为仅图标显示。
+16. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-more-actions-dropdown.md`。
 
 ## 2026-07-16
 

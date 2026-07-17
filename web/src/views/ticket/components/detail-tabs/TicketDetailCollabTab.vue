@@ -619,13 +619,13 @@
               <span>{{ item.rootCause || '-' }}</span>
             </div>
             <div class="similar-actions">
-              <el-link type="primary" :underline="false" @click="openSystemTicketDetail(item)"
+              <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)"
                 >系统详情</el-link
               >
               <el-link
                 v-if="resolveTicketDetailUrl(item)"
                 type="info"
-                :underline="false"
+                underline="never"
                 @click="openTicketLink(item)"
               >
                 飞书详情

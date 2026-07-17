@@ -767,71 +767,83 @@
         >
           <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" align="center" width="450" fixed="right">
+        <el-table-column label="操作" align="center" width="240" fixed="right">
           <template #default="scope">
-            <el-button
-              link
-              type="primary"
-              icon="View"
-              @click="openDetail(scope.row)"
-              v-hasPermi="['ticket:ticket:query']"
-            >
-              详情
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              icon="Search"
-              @click="openTicketLogViewer(scope.row)"
-              v-hasPermi="['ticket:logpull:query']"
-            >
-              日志
-            </el-button>
-            <el-button
-              v-if="resolveTicketDetailUrl(scope.row)"
-              link
-              type="info"
-              icon="Link"
-              @click="openTicketLink(scope.row)"
-            >
-              跳转
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              icon="Edit"
-              @click="handleUpdate(scope.row)"
-              v-hasPermi="['ticket:ticket:edit']"
-            >
-              编辑
-            </el-button>
-            <el-button
-              link
-              type="warning"
-              icon="User"
-              @click="openAssign(scope.row)"
-              v-hasPermi="['ticket:ticket:assign']"
-            >
-              指派
-            </el-button>
-            <el-button
-              link
-              type="success"
-              icon="Switch"
-              @click="openStatus(scope.row)"
-              v-hasPermi="['ticket:ticket:status']"
-            >
-              流转
-            </el-button>
-            <el-button
-              link
-              type="danger"
-              icon="Delete"
-              @click="handleDelete(scope.row)"
-              v-hasPermi="['ticket:ticket:remove']"
-            >
-              删除
-            </el-button>
+            <div class="ticket-row-actions">
+              <el-button
+                circle
+                size="small"
+                type="primary"
+                :icon="View"
+                title="详情"
+                aria-label="详情"
+                @click="openDetail(scope.row)"
+                v-hasPermi="['ticket:ticket:query']"
+              />
+              <el-button
+                circle
+                size="small"
+                type="primary"
+                :icon="Edit"
+                title="编辑"
+                aria-label="编辑"
+                @click="handleUpdate(scope.row)"
+                v-hasPermi="['ticket:ticket:edit']"
+              />
+              <el-button
+                circle
+                size="small"
+                type="warning"
+                :icon="User"
+                title="指派"
+                aria-label="指派"
+                @click="openAssign(scope.row)"
+                v-hasPermi="['ticket:ticket:assign']"
+              />
+              <el-button
+                circle
+                size="small"
+                type="success"
+                :icon="SwitchButton"
+                title="流转"
+                aria-label="流转"
+                @click="openStatus(scope.row)"
+                v-hasPermi="['ticket:ticket:status']"
+              />
+              <el-dropdown trigger="click" placement="bottom-end">
+                <el-button
+                  circle
+                  size="small"
+                  type="info"
+                  plain
+                  :icon="MoreFilled"
+                  title="更多"
+                  aria-label="更多"
+                />
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-if="openTicketLogViewer"
+                      @click="openTicketLogViewer(scope.row)"
+                    >
+                      <el-icon><Search /></el-icon>
+                      <span>日志</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="resolveTicketDetailUrl(scope.row)"
+                      @click="openTicketLink(scope.row)"
+                    >
+                      <el-icon><Link /></el-icon>
+                      <span>跳转</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item v-if="canDeleteTicket" @click="handleDelete(scope.row)">
+                      <el-icon><Delete /></el-icon>
+                      <span>删除</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -1626,9 +1638,11 @@
   } from './logPull.shared';
   import UserSelect from './components/UserSelect.vue';
   import TicketDetailWithList from './components/TicketDetailWithList.vue';
+  import { Delete, Edit, Link, MoreFilled, Search, SwitchButton, User, View } from '@element-plus/icons-vue';
   import { useRoute, useRouter } from 'vue-router';
   import { useWorkflow } from './hooks/useWorkflow';
   import { useOptions } from './hooks/useOptions';
+  import { useLogViewer } from './hooks/useLogViewer';
   import { useTicketList } from './hooks/useTicketList';
 
   const { proxy } = getCurrentInstance();
@@ -1710,6 +1724,7 @@
   // agentOptions / providerOptions / vendorOptions / pushOptions 已通过 useOptions() 提供
   // 已提取到 hooks/useWorkflow.js — workflowConfig / ticketStatusOptions / statusTransitionOptions / getStatusTagType / loadWorkflowConfig
   const currentTicketStatus = ref('');
+  const canDeleteTicket = computed(() => proxy.$auth.hasPermi('ticket:ticket:remove'));
   const { ticketStatusOptions, statusTransitionOptions, getStatusTagType, loadWorkflowConfig } =
     useWorkflow(currentTicketStatus);
 
@@ -1726,7 +1741,9 @@
   const firstLineAssigneeOption = ref(null);
   const internalOwnerOption = ref(null);
   const formModuleValue = ref('');
+  const tagText = ref('');
   const selectedTicketRows = ref([]);
+  const { openTicketLogViewer } = useLogViewer(proxy, currentTicketId);
   const releaseBatchOpen = ref(false);
   const releaseBatchSubmitting = ref(false);
   const releaseBatchForm = ref(createDefaultReleaseBatchForm());
@@ -2622,6 +2639,14 @@
     gap: 8px;
     align-items: center;
     margin-bottom: 12px;
+  }
+
+  .ticket-row-actions {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
   }
 
   .result-title {

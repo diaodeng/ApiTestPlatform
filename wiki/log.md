@@ -8,6 +8,33 @@ updated: 2026-07-17
 
 # 操作日志
 
+## [2026-07-17] INGEST-CODE | 工单编辑页 tagText 缺失修复
+
+- 触发：用户点击工单列表的编辑按钮时，编辑弹窗打开阶段报 `Unhandled error during execution of native event handler`，根因是 `reset()` 里访问了未定义的 `tagText`。
+- 架构层：Web 控制台 / 工单编辑弹窗 / 表单状态修复。
+- 创建的页面：`web/public/docs/2026-07-17-ticket-edit-tagtext-missing-fix.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`
+- 变更传播链：编辑弹窗 `reset()` -> `tagText.value = ''` -> 补回 `const tagText = ref('')` -> 编辑按钮恢复正常打开。
+- 关键结论：这是一个纯状态缺失问题，补回缺失响应式变量即可，不需要改编辑弹窗的提交或回填流程。
+
+## [2026-07-17] INGEST-CODE | 工单列表更多菜单权限指令告警修复
+
+- 触发：用户进入工单列表页时，控制台持续告警 `Runtime directive used on component with non-element root node`。
+- 架构层：Web 控制台 / 工单列表 / 更多菜单权限判断。
+- 创建的页面：`web/public/docs/2026-07-17-ticket-list-dropdown-directive-warning-fix.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`
+- 变更传播链：`el-dropdown-item` 上的 `v-hasPermi` -> 页面内 `canDeleteTicket` 布尔值 -> 删除项 `v-if` 控制显示 -> Vue 不再对非元素根组件执行运行时指令。
+- 关键结论：这次修复只改权限判断挂载位置，不改删除权限语义和删除行为。
+
+## [2026-07-17] INGEST-CODE | 工单列表操作列更多菜单收口
+
+- 触发：用户要求工单列表操作列默认只显示详情、编辑、指派、流转和更多，前四个只显示图标，其他操作收进更多下拉菜单，且更多菜单需要图标和文案同时展示。
+- 架构层：Web 控制台 / 工单列表操作列 / 更多动作下拉。
+- 创建的页面：`web/public/docs/2026-07-17-ticket-list-more-actions-dropdown.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/public/docs/update_history.md`
+- 变更传播链：操作列从平铺文本按钮改为图标按钮 + 更多下拉 -> 日志、跳转和删除动作进入更多菜单 -> 更多菜单复用既有日志查看、外链跳转和删除逻辑。
+- 关键结论：这次调整只收口展示形态，不新增业务能力；详情、编辑、指派、流转仍保留原权限判断，更多菜单只是承载原本已有的补充动作。
+
 ## [2026-07-17] INGEST-CODE | 工单列表与详情默认折叠优化
 
 - 触发：用户要求工单列表默认隐藏大部分筛选项，详情页顶部默认只显示前九项并把更多信息折叠到标题后的按钮里，同时协同 tab 有版本号时自动回填默认版本。
