@@ -1,22 +1,90 @@
-<script>
-  export default {
-    name: 'TicketDetailCommentsTab',
-    props: {
-      ctx: {
-        type: Object,
-        required: true,
-      },
+<script setup name="TicketDetailCommentsTab">
+  import { ref, watch } from 'vue';
+  import { getCurrentInstance } from 'vue';
+  import { addTicketComment, getTicketComments } from '@/api/ticket/ticket';
+
+  const props = defineProps({
+    ticketId: {
+      type: [Number, String],
+      required: true,
     },
-    /**
-     * 暴露详情组件内部上下文，保持当前 tab 只负责自身模板展示和交互触发。
-     * @param {object} props 组件属性，包含详情内部上下文。
-     * @returns {object} 当前 tab 模板所需的响应式上下文。
-     */
-    setup(props) {
-      return props.ctx;
+    active: {
+      type: Boolean,
+      default: false,
     },
-  };
+  });
+
+  const emit = defineEmits(['changed']);
+  const { proxy } = getCurrentInstance();
+
+  const commentLoading = ref(false);
+  const commentLoaded = ref(false);
+  const commentList = ref([]);
+  const commentForm = ref({
+    content: '',
+    isInternal: false,
+  });
+
+  /**
+   * 获取当前工单评论列表，组件内部维护加载状态和缓存。
+   * @param {boolean} force 是否强制刷新已加载数据。
+   * @returns {Promise<void>} 评论加载完成 Promise。
+   */
+  function loadComments(force = false) {
+    if (!props.ticketId || commentLoading.value || (commentLoaded.value && !force)) {
+      return Promise.resolve();
+    }
+    commentLoading.value = true;
+    return getTicketComments(props.ticketId)
+      .then((response) => {
+        commentList.value = response.data || [];
+        commentLoaded.value = true;
+      })
+      .finally(() => {
+        commentLoading.value = false;
+      });
+  }
+
+  /**
+   * 提交评论并刷新评论列表。
+   * @returns {void}
+   */
+  function submitComment() {
+    if (!commentForm.value.content) {
+      proxy.$modal.msgWarning('请填写评论内容');
+      return;
+    }
+    addTicketComment(props.ticketId, commentForm.value).then(() => {
+      proxy.$modal.msgSuccess('评论成功');
+      commentForm.value = { content: '', isInternal: false };
+      loadComments(true);
+      emit('changed');
+    });
+  }
+
+  watch(
+    () => props.ticketId,
+    () => {
+      commentLoaded.value = false;
+      commentList.value = [];
+      commentForm.value = { content: '', isInternal: false };
+      if (props.active) {
+        loadComments(true);
+      }
+    }
+  );
+
+  watch(
+    () => props.active,
+    (active) => {
+      if (active) {
+        loadComments();
+      }
+    },
+    { immediate: true }
+  );
 </script>
+
 <template>
   <el-form :model="commentForm" label-width="80px" class="mb16">
     <el-form-item label="评论">
@@ -51,3 +119,14 @@
     </el-card>
   </div>
 </template>
+
+<style scoped>
+  .record-head {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 8px;
+    color: #606266;
+    font-size: 13px;
+  }
+</style>

@@ -1,16 +1,5 @@
 <script setup name="TicketDetailWithList">
-  import {
-    computed,
-    getCurrentInstance,
-    nextTick,
-    onBeforeUnmount,
-    onMounted,
-    reactive,
-    ref,
-    toRefs,
-    watch,
-  } from 'vue';
-  import { useRouter } from 'vue-router';
+  import { computed, getCurrentInstance, reactive, ref, toRefs, watch } from 'vue';
   import TicketDetailOverviewTab from './detail-tabs/TicketDetailOverviewTab.vue';
   import TicketDetailLogPullTab from './detail-tabs/TicketDetailLogPullTab.vue';
   import TicketDetailCollabTab from './detail-tabs/TicketDetailCollabTab.vue';
@@ -18,37 +7,23 @@
   import TicketDetailHistoryTab from './detail-tabs/TicketDetailHistoryTab.vue';
   import {
     addTicketAiAnalysis,
-    addTicketComment,
-    addTicketEvent,
-    addTicketMessage,
-    addTicketSnapshot,
-    bindTicketIssueFromSimilar,
     createAndBindTicketIssue,
-    extractTicketKnowledge,
     getTicket,
-    getTicketComments,
     getTicketLogPullProjectVendorMap,
-    getTicketTimeline,
     listTicketAiAnalysisTasks,
     retryTicketAiAnalysis,
     saveTicketLogPullProjectVendorMap,
-    saveTicketRca,
     translateTicketDescription,
     unbindTicketIssue,
   } from '@/api/ticket/ticket';
   import {
-    eventTypeOptions,
     getLogPullStatusTagType,
     getOptionLabel,
-    logPullDataTypeOptions,
     logPullStatusOptions,
-    logPullStorageModeOptions,
     severityOptions,
     sourceOptions,
-    ticketProcessStatusOptions,
   } from '../constants';
   import { useAiRepoMapping } from '../hooks/useAiRepoMapping';
-  import { useLogViewer } from '../hooks/useLogViewer';
   import { useOptions } from '../hooks/useOptions';
   import { useWorkflow } from '../hooks/useWorkflow';
   import {
@@ -70,7 +45,6 @@
   const emit = defineEmits(['update:open', 'changed', 'closed']);
 
   const { proxy } = getCurrentInstance();
-  const router = useRouter();
   const currentTicketId = ref();
   const detailOpen = computed({
     get: () => props.open,
@@ -88,48 +62,29 @@
 
   const {
     projectOptions,
-    formModuleOptions,
-    formVersionOptions,
-    queryModuleOptions,
-    queryModuleCodeOptions,
-    issueTypeOptions,
     rootCauseTypeOptions,
     solutionTypeOptions,
-    resolutionOptions,
-    problemPatternOptions,
     agentOptions,
     providerOptions,
     analysisPromptOptions,
-    vendorOptions,
-    parameterExamples,
-    pushOptions,
     detailVersionOptions,
-    loadVendorOptions,
     loadProjectVendorMapOptions,
-    getProjectVendorNo,
-    getVendorStoreOptions,
     loadProviderOptions,
     loadAnalysisPromptOptions,
     getTicketAutomationLogPullConfig,
     resolveAiAnalysisProviderAgent,
     resolveDefaultAiPromptTemplateCodesFromDetail,
     loadDetailVersionOptions,
-    loadPushOptions,
     loadProjectOptions,
     loadAgentOptions,
-    loadQueryModuleOptions,
-    loadFormModuleOptions,
-    loadFormVersionOptions,
-    getStatOptionLabel,
     formatStatOption,
     formatProblemFlag,
     formatIssueType,
     formatResolution,
     formatProblemPattern,
-    loadStatClassificationOptions,
   } = useOptions();
   const currentTicketStatus = ref('');
-  const { ticketStatusOptions, statusTransitionOptions, getStatusTagType, loadWorkflowConfig } =
+  const { ticketStatusOptions, getStatusTagType, loadWorkflowConfig } =
     useWorkflow(currentTicketStatus);
 
   const detailMainTab = ref('overview');
@@ -139,99 +94,7 @@
   const issueCreateBindOpen = ref(false);
   const issueActionLoading = ref(false);
   const issueCreateBindForm = ref({});
-  const historyActiveTab = ref('timeline');
   const detail = ref({});
-  const timeline = ref({});
-  const commentList = ref([]);
-  const commentLoading = ref(false);
-  const commentLoaded = ref(false);
-  const ticketMessages = ref([]);
-  const ticketSnapshots = ref([]);
-  const similarTickets = ref([]);
-  const eventDataText = ref('');
-  const messageDataText = ref('');
-  // 日志拉取 + 日志查看器 已提取到 hooks/useLogViewer.js
-  const {
-    logPullLoading,
-    logPullSubmitting,
-    logPullActionLoading,
-    logPullSubmitOpen,
-    logPullContentOpen,
-    logPullList,
-    logPullTotal,
-    logPullForm,
-    logPullQuery,
-    logPullWrapEnabled,
-    logPullAutoRefreshing,
-    selectedLogPullRecord,
-    activeLogPullStatuses,
-    logViewerTicketMeta,
-    logViewerSearching,
-    logViewerHits,
-    logViewerContext,
-    logViewerErrorSummary,
-    logViewerResultViewMode,
-    logViewerContextViewMode,
-    logViewerHighlightText,
-    logViewerHighlightKeywords,
-    logViewerHighlightSummary,
-    logViewerForm,
-    createDefaultLogPullForm,
-    buildCleanLogPullConfig,
-    resetStoreSelection,
-    resetLogPullForm,
-    openLogPullSubmitDialog,
-    stopLogPullAutoRefresh,
-    loadLogPullList,
-    handleLogPullVendorChange,
-    submitLogPull,
-    deleteLogPull,
-    retryLogPull,
-    redownloadLogPull,
-    getLogPullOriginalDownloadUrl,
-    getLogPullArchiveDownloadUrl,
-    getLogPullArchiveDisplayText,
-    formatLogPullParameter,
-    copyLogPullOriginalDownloadUrl,
-    copyLogPullArchiveDownloadUrl,
-    downloadLogPullArchive,
-    downloadLogPullOriginal,
-    openTicketLogViewer,
-    openLogViewerFromPullRecord,
-    handleLogPullDialogClosed,
-    searchLogViewerInFile,
-    clearLogViewerFileScope,
-    captureLogViewerHighlight,
-    clearLogViewerSelectionHighlight,
-    updateLogViewerHighlightKeywords,
-    clearLogViewerHighlight,
-    setLogViewerPanelMode,
-    searchLogViewerKeyword,
-    loadLogViewerErrors,
-    selectLogViewerHit,
-    pageLogViewerContext,
-  } = useLogViewer(proxy, currentTicketId, {
-    detail,
-    detailOpen,
-    getList: emitChanged,
-    refreshDetail,
-    applyProjectVendorMapping,
-    getVendorStoreOptions,
-  });
-
-  /**
-   * 根据工单项目映射预填日志拉取供应商。
-   * 拆分后日志拉取表单归 useLogViewer 管理，因此保留在页面层完成跨 hook 状态回写。
-   */
-  function applyProjectVendorMapping(projectId) {
-    const vendorNo = getProjectVendorNo(projectId);
-    if (!vendorNo) {
-      return;
-    }
-    const resolvedVendorId = Number(vendorNo);
-    logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId;
-    resetStoreSelection(logPullForm.value, logPullForm.value.vendorId);
-  }
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
@@ -288,16 +151,6 @@
   }
 
   /**
-   * 根据 Provider 绑定关系回填协同消息 Agent。
-   */
-  function applyMessageProviderAgent(providerCode) {
-    const providerAgentCode = resolveAiAnalysisProviderAgent(providerCode);
-    if (providerAgentCode) {
-      messageForm.value.agentCode = providerAgentCode;
-    }
-  }
-
-  /**
    * 记录发起 AI 分析弹窗中用户手动选择的 Agent。
    */
   function handleAiAnalysisAgentChange(agentCode) {
@@ -323,24 +176,6 @@
   }
 
   /**
-   * 记录协同/AI 表单中用户手动选择的 Agent。
-   */
-  function handleMessageAgentChange(agentCode) {
-    saveTicketAiPreferencePatch({ agentCode });
-  }
-
-  /**
-   * 处理协同/AI Provider 变更，并保存本次手动选择。
-   */
-  function handleMessageProviderChange(providerCode) {
-    applyMessageProviderAgent(providerCode);
-    saveTicketAiPreferencePatch({
-      aiProviderCode: providerCode,
-      agentCode: messageForm.value.agentCode,
-    });
-  }
-
-  /**
    * 从当前工单详情解析默认追加提示词编码。
    */
   function resolveDefaultAiPromptTemplateCodes() {
@@ -360,29 +195,6 @@
   const aiTerminalStatuses = ['success', 'failed', 'canceled'];
 
   const data = reactive({
-    commentForm: {
-      content: '',
-      isInternal: false,
-    },
-    messageForm: {
-      role: 'user',
-      messageType: 'question',
-      content: '',
-      runAi: true,
-      versionKey: '',
-      agentCode: '',
-      aiProviderCode: '',
-    },
-    eventForm: {
-      eventType: 'ANALYSIS',
-      content: '',
-    },
-    rcaForm: {},
-    logPullRules: {
-      vendorId: [{ required: true, message: 'vendorId不能为空', trigger: 'blur' }],
-      storeId: [{ required: true, message: 'storeId不能为空', trigger: 'blur' }],
-      posNo: [{ required: true, message: 'posNo不能为空', trigger: 'blur' }],
-    },
     aiAnalysisRules: {
       versionKey: [],
     },
@@ -391,15 +203,7 @@
     },
   });
 
-  const {
-    commentForm,
-    messageForm,
-    eventForm,
-    rcaForm,
-    logPullRules,
-    aiAnalysisRules,
-    projectVendorMapRules,
-  } = toRefs(data);
+  const { aiAnalysisRules, projectVendorMapRules } = toRefs(data);
 
   const detailTitle = computed(() => `工单详情：${detail.value.title || ''}`);
   const detailOriginalDescription = computed(() => {
@@ -426,246 +230,14 @@
     ).trim()
   );
   const latestSnapshotSummary = computed(
-    () => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || ''
+    () =>
+      detail.value.latestSnapshot?.summary ||
+      detail.value.snapshots?.[0]?.summary ||
+      detail.value.rootCause ||
+      detail.value.description ||
+      ''
   );
-  /** 根据当前搜索结果生成可选文件范围，支持先全局搜索再收敛到单文件。 */
-  const logViewerFileOptions = computed(() => {
-    const files = new Set();
-    logViewerHits.value.forEach((item) => {
-      const file = String(item?.file || '').trim();
-      if (file) files.add(file);
-    });
-    const scopedFile = String(logViewerForm.value.file || '').trim();
-    if (scopedFile) files.add(scopedFile);
-    return Array.from(files).sort();
-  });
-  const logViewerContextBlockRef = ref(null);
-  const logViewerHighlightName = 'ticket-log-context-highlight';
-  const logViewerNativeHighlightSupported = computed(() => supportsNativeLogViewerHighlight());
-
-  /** 判断当前浏览器是否支持 CSS Highlight API。 */
-  function supportsNativeLogViewerHighlight() {
-    return Boolean(
-      window.CSS?.highlights &&
-      typeof window.Highlight === 'function' &&
-      typeof window.Range === 'function'
-    );
-  }
-
-  /** 清空日志上下文区域注册到浏览器的非侵入高亮。 */
-  function clearNativeLogViewerHighlights() {
-    if (!supportsNativeLogViewerHighlight()) return;
-    window.CSS.highlights.delete(logViewerHighlightName);
-  }
-
-  /** 为单个文本节点创建不重叠的关键字高亮 Range。 */
-  function buildLogViewerHighlightRanges(textNode, keywords) {
-    const text = textNode.textContent || '';
-    const ranges = [];
-    let cursor = 0;
-    while (cursor < text.length) {
-      let nextMatch = null;
-      keywords.forEach((keyword) => {
-        const index = text.indexOf(keyword, cursor);
-        if (index < 0) return;
-        if (
-          !nextMatch ||
-          index < nextMatch.index ||
-          (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
-        ) {
-          nextMatch = { index, keyword };
-        }
-      });
-      if (!nextMatch) break;
-      const range = new window.Range();
-      range.setStart(textNode, nextMatch.index);
-      range.setEnd(textNode, nextMatch.index + nextMatch.keyword.length);
-      ranges.push(range);
-      cursor = nextMatch.index + nextMatch.keyword.length;
-    }
-    return ranges;
-  }
-
-  /** 使用 CSS Highlight API 给当前日志上下文做非侵入高亮，避免生成大量 mark 节点。 */
-  function refreshNativeLogViewerHighlights() {
-    if (!supportsNativeLogViewerHighlight()) return;
-    const block = logViewerContextBlockRef.value;
-    const keywords = Array.from(new Set(logViewerHighlightKeywords.value || []))
-      .map((item) => String(item || '').trim())
-      .filter(Boolean)
-      .sort((left, right) => right.length - left.length);
-    if (!block || !keywords.length || logViewerContextViewMode.value === 'minimized') {
-      clearNativeLogViewerHighlights();
-      return;
-    }
-    const ranges = [];
-    block.querySelectorAll('.log-context-line-content').forEach((contentNode) => {
-      contentNode.childNodes.forEach((node) => {
-        if (node.nodeType === window.Node.TEXT_NODE) {
-          ranges.push(...buildLogViewerHighlightRanges(node, keywords));
-        }
-      });
-    });
-    if (!ranges.length) {
-      clearNativeLogViewerHighlights();
-      return;
-    }
-    window.CSS.highlights.set(logViewerHighlightName, new window.Highlight(...ranges));
-  }
-
-  /** 读取日志上下文区域内的浏览器选区文本，区域外选区不参与日志高亮。 */
-  function getLogViewerContextSelectionText() {
-    const block = logViewerContextBlockRef.value;
-    const selection = window.getSelection?.();
-    if (!block || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      return '';
-    }
-    if (!block.contains(selection.anchorNode) || !block.contains(selection.focusNode)) {
-      return '';
-    }
-    return selection.toString();
-  }
-
-  /** 用户在日志详情中完成选中后，把选中文案写入候选词并立即高亮。 */
-  function handleLogViewerContextSelection() {
-    const selectedText = getLogViewerContextSelectionText();
-    if (!selectedText) return;
-    captureLogViewerHighlight(selectedText);
-  }
-
-  /** 浏览器选区取消或移出日志详情后，移除本次选区临时追加的高亮词。 */
-  function handleLogViewerDocumentSelectionChange() {
-    const block = logViewerContextBlockRef.value;
-    const selection = window.getSelection?.();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      clearLogViewerSelectionHighlight();
-      return;
-    }
-    if (block && block.contains(selection.anchorNode) && block.contains(selection.focusNode)) {
-      return;
-    }
-    clearLogViewerSelectionHighlight();
-  }
-
-  /** 将一行日志按当前选中文案拆成普通片段和高亮片段。 */
-  function splitLogViewerHighlightParts(content) {
-    const text = String(content || '');
-    const keywords = Array.from(new Set(logViewerHighlightKeywords.value || []))
-      .map((item) => String(item || '').trim())
-      .filter(Boolean)
-      .sort((left, right) => right.length - left.length);
-    if (!keywords.length) return [{ text, highlight: false }];
-    const parts = [];
-    let cursor = 0;
-    while (cursor < text.length) {
-      let nextMatch = null;
-      keywords.forEach((keyword, keywordIndex) => {
-        const index = text.indexOf(keyword, cursor);
-        if (index < 0) return;
-        if (
-          !nextMatch ||
-          index < nextMatch.index ||
-          (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
-        ) {
-          nextMatch = { index, keyword, keywordIndex };
-        }
-      });
-      if (!nextMatch) {
-        parts.push({ text: text.slice(cursor), highlight: false });
-        break;
-      }
-      if (nextMatch.index > cursor) {
-        parts.push({ text: text.slice(cursor, nextMatch.index), highlight: false });
-      }
-      parts.push({
-        text: text.slice(nextMatch.index, nextMatch.index + nextMatch.keyword.length),
-        highlight: true,
-        highlightClass: `log-context-highlight-${nextMatch.keywordIndex % 6}`,
-      });
-      cursor = nextMatch.index + nextMatch.keyword.length;
-    }
-    return parts.length ? parts : [{ text, highlight: false }];
-  }
-  /** 生成日志详细信息块的展示行，避免在模板中拼接行号和高亮结构。 */
-  const logViewerContextDisplayLines = computed(() => {
-    const lines = logViewerContext.value?.lines || [];
-    return lines.map((item) => ({
-      file: item.file || logViewerContext.value?.file || '',
-      line: item.line,
-      paddedLine: `${String(item.line).padStart(6, ' ')}  `,
-      content: item.content || '',
-      parts: logViewerNativeHighlightSupported.value
-        ? []
-        : splitLogViewerHighlightParts(item.content || ''),
-    }));
-  });
-  const logViewerResultTableHeight = computed(() =>
-    logViewerResultViewMode.value === 'fullscreen'
-      ? 'calc(100vh - 170px)'
-      : !logViewerContext.value || logViewerContextViewMode.value === 'minimized'
-        ? 'calc(100vh - 250px)'
-        : 320
-  );
-  const logViewerDialogTitle = computed(() => {
-    const ticketNo = String(logViewerTicketMeta.value?.ticketNo || '').trim();
-    const ticketTitle = String(logViewerTicketMeta.value?.title || '').trim();
-    if (ticketNo && ticketTitle) {
-      return `日志查看 - ${ticketNo} - ${ticketTitle}`;
-    }
-    if (ticketNo) {
-      return `日志查看 - ${ticketNo}`;
-    }
-    if (ticketTitle) {
-      return `日志查看 - ${ticketTitle}`;
-    }
-    return '日志查看';
-  });
-
-  function resolveTicketProcessStatus(row) {
-    const latestAi = row?.latestAiAnalysis || row?.latest_ai_analysis || null;
-    const latestLog = row?.latestLogPull || row?.latest_log_pull || null;
-    const aiStatus = String(latestAi?.status || '').trim();
-    if (aiStatus) {
-      if (['created', 'running'].includes(aiStatus)) {
-        return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_running'), type: 'warning' };
-      }
-      if (aiStatus === 'success') {
-        return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_success'), type: 'success' };
-      }
-      if (['failed', 'canceled'].includes(aiStatus)) {
-        return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_failed'), type: 'danger' };
-      }
-    }
-    const logStatus = String(latestLog?.status || '').trim();
-    if (!logStatus) {
-      return { label: getOptionLabel(ticketProcessStatusOptions, 'no_log_pull'), type: 'info' };
-    }
-    if (logStatus === 'success') {
-      return {
-        label: getOptionLabel(ticketProcessStatusOptions, 'ai_not_analyzed'),
-        type: 'primary',
-      };
-    }
-    if (['failed', 'exception'].includes(logStatus)) {
-      return {
-        label: getOptionLabel(ticketProcessStatusOptions, 'log_pull_failed'),
-        type: 'danger',
-      };
-    }
-    return {
-      label: latestLog?.statusDesc || getOptionLabel(logPullStatusOptions, logStatus),
-      type: getLogPullStatusTagType(logStatus),
-    };
-  }
-
   // normalizeWorkflowStatusOptions / getStatusTagType / loadWorkflowConfig 已提取到 hooks/useWorkflow.js
-
-  const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null);
-
-  const latestSnapshot = computed(
-    () => detail.value.latestSnapshot || ticketSnapshots.value[0] || null
-  );
-  const latestSimilarTickets = computed(() => (similarTickets.value || []).slice(0, 3));
 
   function formatIssueRelationType(value) {
     const relationType = String(value || '').trim();
@@ -680,7 +252,6 @@
   }
   const aiTaskDetailPayload = computed(() => selectedAiTask.value || {});
   const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {});
-  const logPullStoreOptions = computed(() => getVendorStoreOptions(logPullForm.value.vendorId));
   const aiPromptHintTitle = computed(() => {
     const projectName =
       aiPromptLayers.value?.project?.projectName || detail.value.projectName || '';
@@ -704,43 +275,6 @@
 
   // ticketStatusOptions / statusTransitionOptions 已提取到 hooks/useWorkflow.js
 
-  const timelineItems = computed(() => {
-    const items = [];
-    (timeline.value.statusHistory || []).forEach((item) => {
-      items.push({
-        key: `status-${item.id}`,
-        time: item.startedAt,
-        title: `状态流转：${getOptionLabel(ticketStatusOptions.value, item.fromStatus)} -> ${getOptionLabel(ticketStatusOptions.value, item.toStatus)}`,
-        content: item.comment,
-      });
-    });
-    (timeline.value.assignHistory || []).forEach((item) => {
-      items.push({
-        key: `assign-${item.id}`,
-        time: item.assignedAt,
-        title: `指派：${item.fromUserName || '未指派'} -> ${item.toUserName || '-'}`,
-        content: item.reason,
-      });
-    });
-    (timeline.value.events || []).forEach((item) => {
-      items.push({
-        key: `event-${item.id}`,
-        time: item.createTime,
-        title: `事件：${item.eventType}`,
-        content: item.content,
-      });
-    });
-    return items.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
-  });
-
-  const messageItems = computed(() => {
-    return (ticketMessages.value || []).map((item) => ({
-      ...item,
-      roleLabel: item.role || 'user',
-      typeLabel: item.messageType || 'question',
-    }));
-  });
-
   // 将查询栏中的单值或多选数组统一转成数组，便于后续拼接查询参数。
 
   // 将多选数组拼成后端约定的逗号分隔查询参数。
@@ -749,9 +283,6 @@
 
   function syncDetailBundle(payload) {
     detail.value = payload || {};
-    ticketMessages.value = detail.value.messages || [];
-    ticketSnapshots.value = detail.value.snapshots || [];
-    similarTickets.value = detail.value.similarTickets || [];
   }
 
   /**
@@ -782,43 +313,6 @@
     return value || '';
   }
 
-  /**
-   * 在新窗口打开外部工单链接。
-   * @param {object} ticketRow 工单行或详情数据
-   * @returns {void}
-   */
-  function openTicketLink(ticketRow) {
-    const url = resolveTicketDetailUrl(ticketRow);
-    if (!url) {
-      proxy.$modal.msgWarning('当前工单未配置详情链接');
-      return;
-    }
-    window.open(url, '_blank', 'noopener');
-  }
-
-  /**
-   * 构建系统内部工单详情路由链接。
-   * @param {object} ticketRow 工单行或详情数据
-   * @returns {string} 系统详情页链接
-   */
-  function buildSystemTicketDetailUrl(ticketRow) {
-    const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id);
-    if (!Number.isFinite(ticketId) || ticketId <= 0) {
-      return '';
-    }
-    const resolved = router.resolve({ name: 'TicketDetail', params: { ticketId } });
-    return resolved.href;
-  }
-
-  /**
-   * 在新窗口打开系统内部工单详情。
-   * @param {object} ticketRow 工单行或详情数据
-   * @returns {void}
-   */
-  function openSystemTicketDetail(ticketRow) {
-    const url = buildSystemTicketDetailUrl(ticketRow);
-    if (url) window.open(url, '_blank');
-  }
   function refreshDetail() {
     if (!currentTicketId.value) {
       return Promise.resolve();
@@ -827,6 +321,14 @@
       syncDetailBundle(response.data || {});
       loadDetailVersionOptions(detail.value.projectId);
     });
+  }
+
+  /**
+   * 子组件完成数据变更后，刷新详情基础信息并通知列表页。
+   * @returns {Promise<void>} 刷新与通知完成 Promise。
+   */
+  function refreshDetailAndNotify() {
+    return Promise.all([refreshDetail(), emitChanged()]).then(() => undefined);
   }
 
   function buildIssueCreateBindForm() {
@@ -894,31 +396,6 @@
       })
       .then(() => {
         proxy.$modal.msgSuccess('归因已解除');
-        return Promise.all([refreshDetail(), emitChanged()]);
-      })
-      .finally(() => {
-        issueActionLoading.value = false;
-      });
-  }
-
-  function handleBindIssueFromSimilar(item) {
-    const similarTicketId = Number(item?.ticketId || item?.ticket_id);
-    if (!detail.value.ticketId || !similarTicketId) {
-      proxy.$modal.msgWarning('相似工单ID无效，无法归因');
-      return;
-    }
-    proxy.$modal
-      .confirm(`是否确认将当前工单与 ${item.ticketNo || similarTicketId} 归入同一问题？`)
-      .then(() => {
-        issueActionLoading.value = true;
-        return bindTicketIssueFromSimilar(detail.value.ticketId, {
-          similarTicketId,
-          confidence: item.score,
-          relationType: 'similar',
-        });
-      })
-      .then(() => {
-        proxy.$modal.msgSuccess('相似工单归因已确认');
         return Promise.all([refreshDetail(), emitChanged()]);
       })
       .finally(() => {
@@ -1175,7 +652,7 @@
     );
     aiAnalysisTaskForm.value.versionKey =
       detail.value.versionKey || detail.value.extraData?.versionKey || '';
-    aiAnalysisTaskForm.value.logPullRecordId = selectedLogPullRecord.value?.id || undefined;
+    aiAnalysisTaskForm.value.logPullRecordId = detail.value.latestLogPull?.id || undefined;
     aiAnalysisTaskForm.value.agentCode = aiDefaults.agentCode;
     aiAnalysisTaskForm.value.aiProviderCode = aiDefaults.aiProviderCode;
     if (!aiDefaults.hasManualAgentCode) {
@@ -1324,30 +801,15 @@
     currentTicketId.value = ticketId;
     detailOpen.value = true;
     detailMainTab.value = 'overview';
-    historyActiveTab.value = 'timeline';
     descriptionExpanded.value = true;
     translationExpanded.value = false;
-    logPullContentOpen.value = false;
-    logPullSubmitOpen.value = false;
     aiTaskHistoryOpen.value = false;
     aiTaskDetailOpen.value = false;
-    timeline.value = {};
-    commentList.value = [];
-    commentLoaded.value = false;
-    ticketMessages.value = [];
-    ticketSnapshots.value = [];
-    similarTickets.value = [];
-    rcaForm.value = {};
-    logPullList.value = [];
     aiTaskList.value = [];
     aiTaskTotal.value = 0;
     selectedAiTask.value = null;
     aiRepoMappingList.value = [];
     aiRepoMappingTotal.value = 0;
-    selectedLogPullRecord.value = null;
-    logPullQuery.value.pageNum = 1;
-    resetLogPullForm();
-    resetMessageForm();
     return getTicket(ticketId).then((response) => {
       syncDetailBundle(response.data || {});
       loadDetailVersionOptions(detail.value.projectId);
@@ -1378,219 +840,16 @@
 
   function resetDetailDialog() {
     detailMainTab.value = 'overview';
-    historyActiveTab.value = 'timeline';
     descriptionExpanded.value = true;
     translationExpanded.value = false;
     detail.value = {};
     detailVersionOptions.value = [];
-    timeline.value = {};
-    commentList.value = [];
-    commentLoaded.value = false;
-    commentLoading.value = false;
-    logPullContentOpen.value = false;
-    logPullSubmitOpen.value = false;
     aiTaskHistoryOpen.value = false;
     aiTaskDetailOpen.value = false;
     selectedAiTask.value = null;
     aiAnalysisOpen.value = false;
     aiRepoMappingOpen.value = false;
     projectVendorMapOpen.value = false;
-    stopLogPullAutoRefresh();
-  }
-
-  function switchDetailSection(section) {
-    detailMainTab.value = section;
-    handleDetailTabClick({ props: { name: section } });
-  }
-
-  function handleDetailTabClick(tab) {
-    const tabName = tab?.props?.name || tab?.paneName || tab?.name;
-    if (tabName === 'history') {
-      if (!timeline.value?.statusHistory && !timeline.value?.events) {
-        refreshTimeline();
-      }
-      return;
-    }
-    if (tabName === 'comments') {
-      loadComments();
-      return;
-    }
-    if (tabName === 'logPull') {
-      loadLogPullList();
-      return;
-    }
-    if (tabName === 'collab') {
-      aiAnalysisTaskForm.value.mappingId =
-        detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId;
-    }
-  }
-
-  function handleHistoryTabClick(tab) {
-    const tabName = tab?.props?.name || tab?.paneName || tab?.name;
-    if (tabName === 'timeline' || tabName === 'events' || tabName === 'rca') {
-      if (!timeline.value?.statusHistory && !timeline.value?.events) {
-        refreshTimeline();
-      }
-      return;
-    }
-  }
-
-  function refreshTimeline() {
-    return getTicketTimeline(currentTicketId.value).then((response) => {
-      timeline.value = response.data || {};
-      rcaForm.value = timeline.value.rca || rcaForm.value;
-    });
-  }
-
-  function loadComments(force = false) {
-    if (!currentTicketId.value || commentLoading.value || (commentLoaded.value && !force)) {
-      return Promise.resolve();
-    }
-    commentLoading.value = true;
-    return getTicketComments(currentTicketId.value)
-      .then((response) => {
-        commentList.value = response.data || [];
-        commentLoaded.value = true;
-      })
-      .finally(() => {
-        commentLoading.value = false;
-      });
-  }
-
-  function submitComment() {
-    if (!commentForm.value.content) {
-      proxy.$modal.msgWarning('请填写评论内容');
-      return;
-    }
-    addTicketComment(currentTicketId.value, commentForm.value).then(() => {
-      proxy.$modal.msgSuccess('评论成功');
-      commentForm.value = { content: '', isInternal: false };
-      Promise.all([loadComments(true), refreshDetail()]);
-    });
-  }
-
-  function resetMessageForm() {
-    const aiDefaults = buildTicketAiPreferenceDefaults(
-      detail.value,
-      resolveDefaultAiPromptTemplateCodes()
-    );
-    messageForm.value = {
-      role: 'user',
-      messageType: 'question',
-      content: '',
-      runAi: true,
-      versionKey: detail.value.versionKey || detail.value.extraData?.versionKey || '',
-      agentCode: aiDefaults.agentCode,
-      aiProviderCode: aiDefaults.aiProviderCode,
-    };
-    if (!aiDefaults.hasManualAgentCode) {
-      applyMessageProviderAgent(messageForm.value.aiProviderCode);
-    }
-    messageDataText.value = '';
-  }
-
-  function parseMessageAttachments() {
-    if (!messageDataText.value) {
-      return undefined;
-    }
-    try {
-      return JSON.parse(messageDataText.value);
-    } catch (error) {
-      proxy.$modal.msgError('消息附件必须是合法 JSON');
-      return null;
-    }
-  }
-
-  function submitMessage() {
-    const content = String(messageForm.value.content || '').trim();
-    if (!content) {
-      proxy.$modal.msgWarning('请填写消息内容');
-      return;
-    }
-    messageForm.value.versionKey =
-      detail.value.versionKey ||
-      detail.value.extraData?.versionKey ||
-      messageForm.value.versionKey ||
-      '';
-    const attachments = parseMessageAttachments();
-    if (attachments === null) {
-      return;
-    }
-    addTicketMessage(currentTicketId.value, {
-      ...messageForm.value,
-      content,
-      attachments,
-    }).then((response) => {
-      const payload = response.data || response || {};
-      const aiResult = payload.result || {};
-      if (messageForm.value.runAi && !aiResult.aiSuccess) {
-        proxy.$modal.msgWarning(
-          aiResult.aiMessage || payload.message || '消息已保存，但AI追问未发起'
-        );
-      } else {
-        proxy.$modal.msgSuccess(
-          payload.message || (aiResult.aiSuccess ? 'AI追问任务已提交' : '消息提交成功')
-        );
-      }
-      resetMessageForm();
-      const refreshTasks = [refreshDetail(), emitChanged()];
-      if (aiResult.aiSuccess) {
-        refreshTasks.push(loadAiAnalysisTasks(true));
-      }
-      Promise.all(refreshTasks);
-    });
-  }
-
-  function saveSnapshotFromCurrentState() {
-    return addTicketSnapshot(currentTicketId.value, {
-      summary: latestSnapshotSummary.value || detail.value.description || '',
-      rootCause: detail.value.rootCause || '',
-      solution: detail.value.solution || '',
-      prevention: latestSnapshot.value?.prevention || '',
-      risk: latestSnapshot.value?.risk || '',
-      owner: detail.value.currentAssigneeName || '',
-      sourceType: 'manual',
-      structuredData: {
-        ticketId: detail.value.ticketId,
-        rootCause: detail.value.rootCause,
-        solution: detail.value.solution,
-      },
-    }).then(() => {
-      proxy.$modal.msgSuccess('快照已保存');
-      return Promise.all([refreshDetail()]);
-    });
-  }
-
-  function generateKnowledgeFromTicket() {
-    extractTicketKnowledge(currentTicketId.value).then(() => {
-      proxy.$modal.msgSuccess('知识库案例已生成');
-      Promise.all([refreshDetail(), emitChanged()]);
-    });
-  }
-
-  function submitEvent() {
-    let eventData;
-    if (eventDataText.value) {
-      try {
-        eventData = JSON.parse(eventDataText.value);
-      } catch (error) {
-        proxy.$modal.msgError('结构化数据必须是合法 JSON');
-        return;
-      }
-    }
-    addTicketEvent(currentTicketId.value, { ...eventForm.value, eventData }).then(() => {
-      proxy.$modal.msgSuccess('事件记录成功');
-      eventForm.value = { eventType: 'ANALYSIS', content: '' };
-      eventDataText.value = '';
-      Promise.all([refreshTimeline(), refreshDetail()]);
-    });
-  }
-
-  function submitRca() {
-    saveTicketRca(currentTicketId.value, rcaForm.value).then(() => {
-      proxy.$modal.msgSuccess('RCA保存成功');
-      Promise.all([refreshTimeline(), refreshDetail()]);
-    });
   }
 
   function formatJson(value) {
@@ -1615,20 +874,6 @@
     return status || '-';
   }
 
-  function formatAiConfidence(value) {
-    if (value === null || value === undefined || value === '') {
-      return '-';
-    }
-    const numeric = Number(value);
-    if (Number.isNaN(numeric)) {
-      return String(value);
-    }
-    if (numeric > 0 && numeric <= 1) {
-      return `${Math.round(numeric * 100)}%`;
-    }
-    return numeric.toFixed ? numeric.toFixed(2) : String(numeric);
-  }
-
   function formatSeconds(seconds) {
     if (!seconds) return '-';
     const hour = Math.floor(seconds / 3600);
@@ -1636,92 +881,6 @@
     const second = seconds % 60;
     return `${hour}小时${minute}分${second}秒`;
   }
-
-  const detailTabContext = {
-    activeLogPullStatuses,
-    agentOptions,
-    aiAnalysisRefreshLoading,
-    commentForm,
-    commentList,
-    commentLoading,
-    copyLogPullArchiveDownloadUrl,
-    copyLogPullOriginalDownloadUrl,
-    deleteLogPull,
-    detail,
-    detailVersionOptions,
-    downloadLogPullArchive,
-    downloadLogPullOriginal,
-    eventDataText,
-    eventForm,
-    eventTypeOptions,
-    formatJson,
-    formatLogPullParameter,
-    generateKnowledgeFromTicket,
-    getAiStatusLabel,
-    getAiStatusTagType,
-    getLogPullArchiveDisplayText,
-    getLogPullArchiveDownloadUrl,
-    getLogPullOriginalDownloadUrl,
-    getLogPullStatusTagType,
-    getOptionLabel,
-    handleBindIssueFromSimilar,
-    handleHistoryTabClick,
-    handleLogPullVendorChange,
-    handleMessageAgentChange,
-    handleMessageProviderChange,
-    historyActiveTab,
-    issueActionLoading,
-    latestAiAnalysisTask,
-    latestSimilarTickets,
-    latestSnapshot,
-    loadLogPullList,
-    logPullActionLoading,
-    logPullAutoRefreshing,
-    logPullDataTypeOptions,
-    logPullForm,
-    logPullList,
-    logPullLoading,
-    logPullQuery,
-    logPullRules,
-    logPullStatusOptions,
-    logPullStorageModeOptions,
-    logPullStoreOptions,
-    logPullSubmitOpen,
-    logPullSubmitting,
-    logPullTotal,
-    messageDataText,
-    messageForm,
-    messageItems,
-    openAiAnalysisDialog,
-    openAiRepoMappingDialog,
-    openAiTaskHistory,
-    openLogPullSubmitDialog,
-    openLogViewerFromPullRecord,
-    openProjectVendorMapDialog,
-    openSystemTicketDetail,
-    openTicketLink,
-    parameterExamples,
-    providerOptions,
-    pushOptions,
-    rcaForm,
-    redownloadLogPull,
-    refreshAiAnalysisData,
-    resetLogPullForm,
-    resetMessageForm,
-    resolveTicketDetailUrl,
-    retryLogPull,
-    rootCauseTypeOptions,
-    saveSnapshotFromCurrentState,
-    similarTickets,
-    submitComment,
-    submitEvent,
-    submitLogPull,
-    submitMessage,
-    submitRca,
-    timeline,
-    timelineItems,
-    vendorOptions,
-  };
 
   /**
    * 关闭详情弹窗后清理组件内部状态，并通知父组件执行独立路由收尾。
@@ -1747,32 +906,11 @@
     { immediate: true }
   );
 
-  watch(
-    [logViewerContext, logViewerHighlightKeywords, logViewerContextViewMode],
-    () => {
-      nextTick(() => refreshNativeLogViewerHighlights());
-    },
-    { deep: true }
-  );
-
-  onMounted(() => {
-    document.addEventListener('selectionchange', handleLogViewerDocumentSelectionChange);
-  });
-
-  onBeforeUnmount(() => {
-    document.removeEventListener('selectionchange', handleLogViewerDocumentSelectionChange);
-    clearNativeLogViewerHighlights();
-    stopLogPullAutoRefresh();
-  });
-
   loadProjectOptions();
-  loadStatClassificationOptions();
   loadProjectVendorMapOptions();
   loadAgentOptions();
   loadProviderOptions();
-  loadVendorOptions();
   loadAnalysisPromptOptions();
-  loadPushOptions();
   loadWorkflowConfig();
 </script>
 <template>
@@ -1961,25 +1099,52 @@
           </div>
         </div>
 
-        <el-tabs v-model="detailMainTab" class="detail-main-tabs" @tab-click="handleDetailTabClick">
+        <el-tabs v-model="detailMainTab" class="detail-main-tabs">
           <el-tab-pane label="概览" name="overview" lazy>
-            <TicketDetailOverviewTab :ctx="detailTabContext" />
+            <TicketDetailOverviewTab
+              :ticket-id="currentTicketId"
+              :active="detailMainTab === 'overview'"
+              @run-ai="openAiAnalysisDialog"
+              @refresh-ai="refreshAiAnalysisData"
+              @open-ai-history="openAiTaskHistory"
+              @open-ai-repo-mapping="openAiRepoMappingDialog"
+              @open-project-vendor-map="openProjectVendorMapDialog"
+              @changed="refreshDetailAndNotify"
+            />
           </el-tab-pane>
 
           <el-tab-pane label="日志拉取" name="logPull" lazy>
-            <TicketDetailLogPullTab :ctx="detailTabContext" />
+            <TicketDetailLogPullTab
+              :ticket-id="currentTicketId"
+              :active="detailMainTab === 'logPull'"
+              @changed="refreshDetailAndNotify"
+            />
           </el-tab-pane>
 
           <el-tab-pane label="协同/AI" name="collab" lazy>
-            <TicketDetailCollabTab :ctx="detailTabContext" />
+            <TicketDetailCollabTab
+              :ticket-id="currentTicketId"
+              :active="detailMainTab === 'collab'"
+              @changed="refreshDetailAndNotify"
+              @run-ai="openAiAnalysisDialog"
+              @open-ai-history="openAiTaskHistory"
+            />
           </el-tab-pane>
 
           <el-tab-pane label="评论" name="comments" lazy>
-            <TicketDetailCommentsTab :ctx="detailTabContext" />
+            <TicketDetailCommentsTab
+              :ticket-id="currentTicketId"
+              :active="detailMainTab === 'comments'"
+              @changed="refreshDetailAndNotify"
+            />
           </el-tab-pane>
 
           <el-tab-pane label="历史" name="history" lazy>
-            <TicketDetailHistoryTab :ctx="detailTabContext" />
+            <TicketDetailHistoryTab
+              :ticket-id="currentTicketId"
+              :active="detailMainTab === 'history'"
+              @changed="refreshDetailAndNotify"
+            />
           </el-tab-pane>
         </el-tabs>
       </div>
@@ -2526,285 +1691,6 @@
       </el-button>
     </template>
   </el-dialog>
-
-  <el-dialog
-    v-model="logPullContentOpen"
-    :title="logViewerDialogTitle"
-    fullscreen
-    append-to-body
-    destroy-on-close
-    :close-on-click-modal="false"
-    class="ticket-log-viewer-dialog"
-    @closed="handleLogPullDialogClosed"
-  >
-    <div v-loading="logViewerSearching" class="log-viewer-content">
-      <div class="panel-header mb16 log-view-controls">
-        <el-input
-          v-model="logViewerForm.keywords"
-          class="log-keyword-input"
-          type="textarea"
-          :autosize="{ minRows: 1, maxRows: 2 }"
-          clearable
-          placeholder="输入搜索关键字，多个用英文逗号或换行分隔"
-        />
-        <el-radio-group v-model="logViewerForm.searchMode" size="small">
-          <el-radio-button value="any">任一</el-radio-button>
-          <el-radio-button value="all">全部</el-radio-button>
-        </el-radio-group>
-        <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword"
-          >搜索</el-button
-        >
-        <el-select
-          v-model="logViewerForm.file"
-          class="log-file-scope-select"
-          clearable
-          filterable
-          placeholder="全局搜索"
-        >
-          <el-option v-for="file in logViewerFileOptions" :key="file" :label="file" :value="file" />
-        </el-select>
-        <el-button v-if="logViewerForm.file" link type="primary" @click="clearLogViewerFileScope"
-          >清除文件范围</el-button
-        >
-        <el-text>结果上限</el-text>
-        <el-input-number
-          v-model="logViewerForm.limit"
-          :min="1"
-          :max="5000"
-          :step="100"
-          controls-position="right"
-        />
-        <el-button
-          type="warning"
-          @click="retryLogPull(selectedLogPullRecord)"
-          :disabled="logPullActionLoading"
-          v-hasPermi="['ticket:logpull:add']"
-        >
-          重新拉取
-        </el-button>
-        <el-button
-          type="success"
-          @click="redownloadLogPull(selectedLogPullRecord)"
-          :disabled="
-            logPullActionLoading ||
-            (!selectedLogPullRecord?.commandResultUrl && !selectedLogPullRecord?.storagePath)
-          "
-          v-hasPermi="['ticket:logpull:add']"
-        >
-          重新下载
-        </el-button>
-        <el-button type="warning" :loading="logViewerSearching" @click="loadLogViewerErrors"
-          >异常提取</el-button
-        >
-      </div>
-      <el-alert
-        v-if="logViewerErrorSummary"
-        type="warning"
-        show-icon
-        :closable="false"
-        class="mb16"
-        :title="`异常命中 ${logViewerErrorSummary.total || 0} 条`"
-      />
-      <div
-        v-if="logViewerHits.length"
-        :class="[
-          'log-view-panel',
-          'mb16',
-          {
-            'log-view-panel-fullscreen': logViewerResultViewMode === 'fullscreen',
-            'log-view-panel-minimized': logViewerResultViewMode === 'minimized',
-            'log-view-panel-fill':
-              logViewerResultViewMode !== 'minimized' &&
-              (!logViewerContext || logViewerContextViewMode === 'minimized'),
-          },
-        ]"
-      >
-        <div class="panel-header mb8 log-view-panel-header">
-          <span
-            >搜索结果：{{ logViewerHits.length }} 条（当前上限 {{ logViewerForm.limit }} 条）</span
-          >
-          <div class="panel-inline">
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerResultViewMode === 'minimized' ? 'Plus' : 'Minus'"
-              @click="
-                setLogViewerPanelMode(
-                  'result',
-                  logViewerResultViewMode === 'minimized' ? 'normal' : 'minimized'
-                )
-              "
-            >
-              {{ logViewerResultViewMode === 'minimized' ? '展开' : '最小化' }}
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerResultViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'"
-              @click="
-                setLogViewerPanelMode(
-                  'result',
-                  logViewerResultViewMode === 'fullscreen' ? 'normal' : 'fullscreen'
-                )
-              "
-            >
-              {{ logViewerResultViewMode === 'fullscreen' ? '还原' : '放大全屏' }}
-            </el-button>
-          </div>
-        </div>
-        <el-table
-          v-show="logViewerResultViewMode !== 'minimized'"
-          :data="logViewerHits"
-          row-key="hitKey"
-          size="small"
-          :max-height="logViewerResultTableHeight"
-          @row-click="selectLogViewerHit"
-        >
-          <el-table-column label="文件" prop="file" min-width="100" show-overflow-tooltip />
-          <el-table-column label="行号" prop="line" width="90" />
-          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
-          <el-table-column label="操作" width="130" fixed="right">
-            <template #default="scope">
-              <el-button link type="primary" @click.stop="searchLogViewerInFile(scope.row.file)"
-                >在此文件搜索</el-button
-              >
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-      <div
-        v-if="logViewerContext"
-        :class="[
-          'log-context-panel',
-          'log-view-panel',
-          'mb16',
-          {
-            'log-view-panel-fullscreen': logViewerContextViewMode === 'fullscreen',
-            'log-view-panel-minimized': logViewerContextViewMode === 'minimized',
-            'log-view-panel-fill':
-              logViewerContextViewMode !== 'minimized' && logViewerResultViewMode === 'minimized',
-          },
-        ]"
-      >
-        <div class="panel-header mb8 log-view-panel-header">
-          <span
-            >{{ logViewerContext.file }}:{{ logViewerContext.line }}（{{
-              logViewerContext.start
-            }}-{{ logViewerContext.end }}/{{ logViewerContext.totalLines }}）</span
-          >
-          <div class="panel-inline">
-            <el-text style="flex: none">上下文</el-text>
-            <el-input-number
-              v-model="logViewerForm.contextLines"
-              class="log-context-lines-input"
-              :min="0"
-              :max="500"
-              controls-position="right"
-            />
-            <el-input
-              v-model="logViewerHighlightText"
-              class="log-highlight-input"
-              type="textarea"
-              :autosize="{ minRows: 1, maxRows: 2 }"
-              clearable
-              placeholder="输入高亮文本，多个用英文逗号或换行分隔"
-              @input="updateLogViewerHighlightKeywords(logViewerHighlightText)"
-            />
-            <el-switch
-              v-model="logPullWrapEnabled"
-              inline-prompt
-              active-text="换行"
-              inactive-text="不换行"
-            />
-            <el-tag
-              v-if="false && logViewerHighlightSummary"
-              class="log-highlight-summary-tag"
-              type="warning"
-              effect="plain"
-              round
-              :title="`高亮：${logViewerHighlightSummary}`"
-            >
-              <span class="log-highlight-summary">高亮：{{ logViewerHighlightSummary }}</span>
-            </el-tag>
-            <el-button
-              icon="Delete"
-              v-if="logViewerHighlightSummary"
-              link
-              type="primary"
-              @click="clearLogViewerHighlight"
-              title="清除高亮"
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              icon="ArrowLeftBold"
-              title="上一段"
-              :disabled="!logViewerContext.hasPrev || logViewerSearching"
-              @click="pageLogViewerContext(-1)"
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              icon="ArrowRightBold"
-              title="下一段"
-              :disabled="!logViewerContext.hasNext || logViewerSearching"
-              @click="pageLogViewerContext(1)"
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerContextViewMode === 'minimized' ? 'Plus' : 'Minus'"
-              :title="logViewerContextViewMode === 'minimized' ? '展开' : '最小化'"
-              @click="
-                setLogViewerPanelMode(
-                  'context',
-                  logViewerContextViewMode === 'minimized' ? 'normal' : 'minimized'
-                )
-              "
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerContextViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'"
-              :title="logViewerContextViewMode === 'fullscreen' ? '还原' : '放大全屏'"
-              @click="
-                setLogViewerPanelMode(
-                  'context',
-                  logViewerContextViewMode === 'fullscreen' ? 'normal' : 'fullscreen'
-                )
-              "
-            ></el-button>
-          </div>
-        </div>
-        <pre
-          ref="logViewerContextBlockRef"
-          v-show="logViewerContextViewMode !== 'minimized'"
-          :class="[
-            'log-content-block',
-            'log-context-block',
-            { 'log-content-wrap': logPullWrapEnabled },
-          ]"
-          @mouseup="handleLogViewerContextSelection"
-          @keyup="handleLogViewerContextSelection"
-        ><span
-              v-for="item in logViewerContextDisplayLines"
-              :key="`${item.file}:${item.line}`"
-              class="log-context-line"
-              ><span class="log-context-line-no">{{ item.paddedLine }}</span
-              ><span class="log-context-line-content"
-                ><template v-if="logViewerNativeHighlightSupported">{{ item.content }}</template
-                ><template v-else v-for="(part, partIndex) in item.parts" :key="partIndex"
-                  ><mark
-                    v-if="part.highlight"
-                    :class="['log-context-highlight', part.highlightClass]"
-                    >{{ part.text }}</mark
-                  ><span v-else>{{ part.text }}</span></template
-                ></span
-              ></span
-            ></pre>
-      </div>
-    </div>
-  </el-dialog>
 </template>
 
 <style scoped lang="scss">
@@ -2934,60 +1820,12 @@
     font-weight: 600;
   }
 
-  .record-head {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 8px;
-    color: #606266;
-    font-size: 13px;
-  }
-
-  .timeline-title {
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-
-  .timeline-content {
-    color: #606266;
-  }
-
   .json-block {
     padding: 10px;
     margin: 10px 0 0;
     overflow: auto;
     background: #f6f8fa;
     border-radius: 4px;
-  }
-
-  .similar-item {
-    padding: 10px 0;
-    border-bottom: 1px solid #ebeef5;
-  }
-
-  .similar-item:last-child {
-    border-bottom: 0;
-  }
-
-  .similar-title {
-    margin-bottom: 4px;
-    font-weight: 600;
-  }
-
-  .similar-meta {
-    display: flex;
-    gap: 10px;
-    color: #606266;
-    font-size: 12px;
-  }
-
-  .similar-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 6px;
-    font-size: 12px;
-    align-items: center;
-    flex-wrap: wrap;
   }
 
   .issue-summary-inline {

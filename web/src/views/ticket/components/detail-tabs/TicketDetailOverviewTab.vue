@@ -1,24 +1,195 @@
-<script>
-  export default {
-    name: 'TicketDetailOverviewTab',
-    props: {
-      ctx: {
-        type: Object,
-        required: true,
-      },
+<script setup name="TicketDetailOverviewTab">
+  import { computed, getCurrentInstance, ref, watch } from 'vue';
+  import { useRouter } from 'vue-router';
+  import { bindTicketIssueFromSimilar, getTicket } from '@/api/ticket/ticket';
+
+  const props = defineProps({
+    ticketId: {
+      type: [Number, String],
+      required: true,
     },
-    /**
-     * 暴露详情组件内部上下文，保持当前 tab 只负责自身模板展示和交互触发。
-     * @param {object} props 组件属性，包含详情内部上下文。
-     * @returns {object} 当前 tab 模板所需的响应式上下文。
-     */
-    setup(props) {
-      return props.ctx;
+    active: {
+      type: Boolean,
+      default: false,
     },
-  };
+  });
+
+  const emit = defineEmits([
+    'run-ai',
+    'refresh-ai',
+    'open-ai-history',
+    'open-ai-repo-mapping',
+    'open-project-vendor-map',
+    'changed',
+  ]);
+  const { proxy } = getCurrentInstance();
+  const router = useRouter();
+
+  const loading = ref(false);
+  const detail = ref({});
+  const issueActionLoading = ref(false);
+  const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null);
+  const latestSnapshot = computed(
+    () => detail.value.latestSnapshot || detail.value.snapshots?.[0] || null
+  );
+  const latestSimilarTickets = computed(() => (detail.value.similarTickets || []).slice(0, 3));
+
+  /**
+   * 加载概览 tab 需要的工单快照、AI 任务和相似工单数据。
+   * @returns {Promise<void>} 数据加载完成 Promise。
+   */
+  function loadOverview() {
+    if (!props.ticketId) return Promise.resolve();
+    loading.value = true;
+    return getTicket(props.ticketId)
+      .then((response) => {
+        detail.value = response.data || {};
+      })
+      .finally(() => {
+        loading.value = false;
+      });
+  }
+
+  /**
+   * 刷新父详情 AI 数据并重新加载概览数据。
+   * @returns {void}
+   */
+  function refreshAiData() {
+    emit('refresh-ai');
+    loadOverview();
+  }
+
+  /**
+   * 获取 AI 任务状态标签类型。
+   * @param {string} value AI 任务状态。
+   * @returns {string} Element Plus 标签类型。
+   */
+  function getAiStatusTagType(value) {
+    const status = String(value || '');
+    if (status === 'success') return 'success';
+    if (status === 'failed') return 'danger';
+    if (status === 'running') return 'warning';
+    if (status === 'created') return 'info';
+    return 'info';
+  }
+
+  /**
+   * 获取 AI 任务状态展示文案。
+   * @param {string} value AI 任务状态。
+   * @returns {string} 状态文案。
+   */
+  function getAiStatusLabel(value) {
+    const status = String(value || '');
+    if (status === 'success') return '成功';
+    if (status === 'failed') return '失败';
+    if (status === 'running') return '执行中';
+    if (status === 'created') return '待执行';
+    return status || '-';
+  }
+
+  /**
+   * 解析外部工单详情链接。
+   * @param {object} ticketRow 工单行。
+   * @returns {string} 外部链接。
+   */
+  function resolveTicketDetailUrl(ticketRow) {
+    const row = ticketRow || {};
+    const syncSummary = row.syncSummary || row.sync_summary || {};
+    const extraData = row.extraData || row.extra_data || {};
+    const externalSync = extraData.externalSync || extraData.external_sync || {};
+    const source = externalSync.source || {};
+    return String(
+      row.ticketUrl ||
+        row.ticket_url ||
+        row.url ||
+        syncSummary.ticketUrl ||
+        syncSummary.ticket_url ||
+        syncSummary.sourceRecordUrl ||
+        syncSummary.source_record_url ||
+        source.ticketUrl ||
+        source.ticket_url ||
+        source.recordUrl ||
+        source.record_url ||
+        ''
+    ).trim();
+  }
+
+  /**
+   * 打开外部工单详情链接。
+   * @param {object} ticketRow 工单行。
+   * @returns {void}
+   */
+  function openTicketLink(ticketRow) {
+    const url = resolveTicketDetailUrl(ticketRow);
+    if (!url) {
+      proxy.$modal.msgWarning('当前工单未配置详情链接');
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
+  }
+
+  /**
+   * 打开系统内工单详情页。
+   * @param {object} ticketRow 工单行。
+   * @returns {void}
+   */
+  function openSystemTicketDetail(ticketRow) {
+    const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id);
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return;
+    const resolved = router.resolve({ name: 'TicketDetail', params: { ticketId } });
+    window.open(resolved.href, '_blank');
+  }
+
+  /**
+   * 将当前工单与相似工单归入同一问题。
+   * @param {object} item 相似工单。
+   * @returns {void}
+   */
+  function bindSimilarIssue(item) {
+    const similarTicketId = Number(item?.ticketId || item?.ticket_id);
+    if (!props.ticketId || !similarTicketId) {
+      proxy.$modal.msgWarning('相似工单ID无效，无法归因');
+      return;
+    }
+    proxy.$modal
+      .confirm(`是否确认将当前工单与 ${item.ticketNo || similarTicketId} 归入同一问题？`)
+      .then(() => {
+        issueActionLoading.value = true;
+        return bindTicketIssueFromSimilar(props.ticketId, {
+          similarTicketId,
+          confidence: item.score,
+          relationType: 'similar',
+        });
+      })
+      .then(() => {
+        proxy.$modal.msgSuccess('相似工单归因已确认');
+        loadOverview();
+        emit('changed');
+      })
+      .finally(() => {
+        issueActionLoading.value = false;
+      });
+  }
+
+  watch(
+    () => props.ticketId,
+    () => {
+      detail.value = {};
+      if (props.active) loadOverview();
+    }
+  );
+
+  watch(
+    () => props.active,
+    (active) => {
+      if (active) loadOverview();
+    },
+    { immediate: true }
+  );
 </script>
+
 <template>
-  <el-row :gutter="16">
+  <el-row v-loading="loading" :gutter="16">
     <el-col :span="16">
       <el-card shadow="never" class="mb16">
         <template #header>
@@ -27,7 +198,7 @@
             <el-button-group>
               <el-button
                 type="primary"
-                @click="openAiAnalysisDialog"
+                @click="emit('run-ai')"
                 v-hasPermi="['ticket:ai:analysis:run']"
               >
                 发起AI分析
@@ -35,19 +206,18 @@
               <el-button
                 type="info"
                 plain
-                @click="refreshAiAnalysisData"
-                :loading="aiAnalysisRefreshLoading"
+                @click="refreshAiData"
                 v-hasPermi="['ticket:ai:analysis:list']"
               >
                 刷新AI数据
               </el-button>
-              <el-button @click="openAiTaskHistory" v-hasPermi="['ticket:ai:analysis:list']">
+              <el-button @click="emit('open-ai-history')" v-hasPermi="['ticket:ai:analysis:list']">
                 查看任务历史
               </el-button>
               <el-button
                 type="warning"
                 plain
-                @click="openAiRepoMappingDialog()"
+                @click="emit('open-ai-repo-mapping')"
                 v-hasPermi="['ticket:ai:mapping:add']"
               >
                 管理映射
@@ -55,7 +225,7 @@
               <el-button
                 type="success"
                 plain
-                @click="openProjectVendorMapDialog()"
+                @click="emit('open-project-vendor-map')"
                 v-hasPermi="['ticket:logpull:config']"
               >
                 商家映射
@@ -136,7 +306,7 @@
               link
               type="success"
               :loading="issueActionLoading"
-              @click="handleBindIssueFromSimilar(item)"
+              @click="bindSimilarIssue(item)"
               v-hasPermi="['ticket:issue:bind']"
             >
               归入同一问题
@@ -147,3 +317,35 @@
     </el-col>
   </el-row>
 </template>
+
+<style scoped>
+  .similar-item {
+    padding: 10px 0;
+    border-bottom: 1px solid #ebeef5;
+  }
+
+  .similar-item:last-child {
+    border-bottom: 0;
+  }
+
+  .similar-title {
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .similar-meta {
+    display: flex;
+    gap: 10px;
+    color: #606266;
+    font-size: 12px;
+  }
+
+  .similar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-top: 6px;
+    font-size: 12px;
+  }
+</style>

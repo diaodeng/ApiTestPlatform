@@ -28,6 +28,14 @@ updated: 2026-07-17
 - 关键结论：详情弹窗对工单列表页的契约收敛为 `ticketId/open`，详情页主体、描述和 tabs 都由详情组件内部闭环，不再依赖父页 `ticketDetailContext`。拆出的 tab 子组件若使用局部组件，必须在子组件内自行注册，例如日志拉取 tab 的 `LogPullConfigFields` 和 `LogPullNotifyConfigFields`。
 - 总共涉及页面：12
 
+## [2026-07-17] INGEST-CODE | 工单详情 tab 自闭环收口
+
+- 触发：用户要求已拆分的工单详情 tab 不再依赖详情页上下文，并删除列表页和详情页中无用数据。
+- 架构层：Web 控制台 / 工单详情 tab 组件
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/components/TicketDetailWithList.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailOverviewTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCollabTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCommentsTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailHistoryTab.vue`、`web/public/docs/2026-07-17-ticket-detail-dialog-component.md`、`web/public/docs/update_history.md`、`wiki/entities/services/web-feature-domains.md`、`wiki/entities/services/ticket-domain.md`
+- 变更传播链：详情父组件传参收敛为 tab `ticketId/active` -> 概览/日志拉取/协同/评论/历史 tab 内部自行拉取数据和维护表单/弹窗/样式 -> tab 变更后通过 `changed` 通知详情父组件刷新顶部详情和列表 -> 列表页删除旧详情同步函数和详情 tab 样式残留。
+- 关键结论：tab 组件不是临时模板拆分，而是各自围绕工单 ID 闭环；详情父组件只保留顶部详情、描述翻译、AI 分析/任务历史、仓库映射、商家映射和新建问题绑定等跨 tab 弹窗。
+
 ## [2026-07-16] INGEST-CODE | 工单日志选区候选词与非侵入高亮
 
 - 触发：用户要求工单详情页日志搜索结果详情中，选中文本同时作为高亮候选词并立即高亮，取消选中时对应高亮也取消，并评估 CSS Highlight API。

@@ -2110,13 +2110,6 @@
     };
   }
 
-  function syncDetailBundle(payload) {
-    detail.value = payload || {};
-    ticketMessages.value = detail.value.messages || [];
-    ticketSnapshots.value = detail.value.snapshots || [];
-    similarTickets.value = detail.value.similarTickets || [];
-  }
-
   function downloadTemplate() {
     downloadTicketImportTemplate().then((data) => {
       saveAs(new Blob([data]), '工单导入模板.xlsx');
@@ -2552,12 +2545,6 @@
     white-space: nowrap;
   }
 
-  .collab-toolbar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
   .mt16 {
     margin-top: 16px;
   }
@@ -2601,62 +2588,6 @@
     margin-bottom: 8px;
     color: #606266;
     font-weight: 600;
-  }
-
-  .record-head {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 8px;
-    color: #606266;
-    font-size: 13px;
-  }
-
-  .timeline-title {
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-
-  .timeline-content {
-    color: #606266;
-  }
-
-  .json-block {
-    padding: 10px;
-    margin: 10px 0 0;
-    overflow: auto;
-    background: #f6f8fa;
-    border-radius: 4px;
-  }
-
-  .similar-item {
-    padding: 10px 0;
-    border-bottom: 1px solid #ebeef5;
-  }
-
-  .similar-item:last-child {
-    border-bottom: 0;
-  }
-
-  .similar-title {
-    margin-bottom: 4px;
-    font-weight: 600;
-  }
-
-  .similar-meta {
-    display: flex;
-    gap: 10px;
-    color: #606266;
-    font-size: 12px;
-  }
-
-  .similar-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 6px;
-    font-size: 12px;
-    align-items: center;
-    flex-wrap: wrap;
   }
 
   .issue-summary-inline {

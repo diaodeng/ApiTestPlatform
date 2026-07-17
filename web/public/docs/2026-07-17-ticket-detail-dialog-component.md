@@ -31,14 +31,23 @@
 6. 父页删除 `ticketDetailContext`、详情数据、评论/消息/RCA/AI/日志查看器状态和对应处理函数，只负责设置当前工单 ID、打开详情和在详情变更后刷新列表。
 7. 日志拉取表单默认值和清洗逻辑下沉到 `web/src/views/ticket/logPull.shared.js`，供父页新增/编辑表单和详情组件共同复用；父页不再为了默认值初始化 `useLogViewer`。
 8. 日志拉取 tab 拆出后，`TicketDetailLogPullTab.vue` 需要自行注册 `LogPullConfigFields` 和 `LogPullNotifyConfigFields`；父组件 import 不会透传到子组件模板。
+9. 二次收口后，5 个 tab 子组件均只接收 `ticketId` 和 `active` 作为数据入口；评论、历史、日志拉取、协同和概览都在组件内部自行请求接口、维护局部表单/弹窗/样式，并通过 `changed` 通知详情组件刷新顶部数据和列表。
+10. `TicketDetailWithList.vue` 删除已迁移到 tab 内部的相似工单、日志拉取、评论、协同消息、时间线和 RCA 局部状态；`web/src/views/ticket/index.vue` 删除旧详情同步函数和详情 tab 样式残留。
 
 ## 组件边界
 
 1. 详情组件输入：`ticketId`、`open`。
 2. 详情组件输出：`update:open`、`changed`、`closed`。
 3. 详情组件内部闭环：详情接口请求、描述翻译、评论、协同消息、事件、RCA、快照、知识提炼、AI 分析任务、仓库映射、商家映射、问题绑定/解绑、日志拉取和日志查看。
-4. 详情 tabs 子组件只服务于详情组件内部展示和交互分组，不要求工单列表页传入详情上下文。
+4. 详情 tabs 子组件只服务于详情组件内部展示和交互分组，不要求工单列表页或详情父组件传入详情上下文。
 5. 父页保留能力：列表查询、导入、新增/编辑、指派、状态流转、版本批量维护和版本统计。
+6. tab 子组件边界：
+
+- `TicketDetailOverviewTab.vue`：通过 `ticketId` 拉取最新 AI 结论、快照和相似工单，并自行完成相似工单归因。
+- `TicketDetailLogPullTab.vue`：通过 `ticketId` 拉取工单元信息、日志拉取记录、日志提交表单和日志查看器数据。
+- `TicketDetailCollabTab.vue`：通过 `ticketId` 拉取协同消息、快照和相似工单，并自行完成消息、快照、知识提炼和相似归因。
+- `TicketDetailCommentsTab.vue`：通过 `ticketId` 拉取和提交评论。
+- `TicketDetailHistoryTab.vue`：通过 `ticketId` 拉取时间线、事件和 RCA，并自行加载状态/根因分类选项。
 
 ## 验证
 
