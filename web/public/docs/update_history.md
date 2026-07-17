@@ -5,7 +5,8 @@
 3. 日志搜索策略调整为 `maxSearchFileCount` 限制内一次性交给 `rg` 搜索；多关键字 `all` 使用 `rg` 管道流式过滤，中文关键字同样优先走 `rg`，Python 仅作为缺少 `rg`、强制 Python 或 `rg` 异常时的降级。
 4. 日志拉取下载完成后新增可配置后处理：自动解压、解压后提取版本号、解压后生成行索引；配置入口放到工单同步自动化公共配置，并通过专用接口只覆盖三个后处理开关。
 5. 修复工单列表“根因分类”和“解决方式”筛选查不到已展示数据的问题：后续 AI 分类统一写入枚举编码，列表服务会把筛选编码扩展为编码和中文标签，兼容历史中文入库数据。
-6. 新增说明文档：`web/public/docs/2026-07-16-ticket-log-search-observability.md`、`web/public/docs/2026-07-16-ticket-log-post-download-processing.md`、`web/public/docs/2026-07-16-ticket-list-stat-filter-code-label-fix.md`。
+6. 工单详情页日志搜索结果详情恢复选中即高亮：选中文案会作为高亮候选词并立即高亮，取消选中时自动移除本次选区临时高亮；支持 CSS Highlight API 的浏览器使用非侵入高亮，不支持时保留 `<mark>` 兜底。
+7. 新增说明文档：`web/public/docs/2026-07-16-ticket-log-search-observability.md`、`web/public/docs/2026-07-16-ticket-log-post-download-processing.md`、`web/public/docs/2026-07-16-ticket-list-stat-filter-code-label-fix.md`、`web/public/docs/2026-07-16-ticket-log-selection-native-highlight.md`。
 
 ## 2026-07-15
 

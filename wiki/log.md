@@ -8,6 +8,15 @@ updated: 2026-07-16
 
 # 操作日志
 
+## [2026-07-16] INGEST-CODE | 工单日志选区候选词与非侵入高亮
+
+- 触发：用户要求工单详情页日志搜索结果详情中，选中文本同时作为高亮候选词并立即高亮，取消选中时对应高亮也取消，并评估 CSS Highlight API。
+- 架构层：Web 前端 / 工单日志查看器 / 日志上下文高亮。
+- 创建的页面：`web/public/docs/2026-07-16-ticket-log-selection-native-highlight.md`
+- 更新的页面：`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/views/ticket/index.vue`、`web/public/docs/update_history.md`、`wiki/entities/services/web-feature-domains.md`、`wiki/flows/ticket-log-record-isolated-view.md`
+- 变更传播链：日志上下文浏览器选区 -> `captureLogViewerHighlight` 记录临时选区高亮词 -> `logViewerHighlightKeywords`/文本框候选词 -> 支持 CSS Highlight API 时注册 `Range` 到 `CSS.highlights`，否则回退 `<mark>` 片段渲染；`selectionchange` 折叠或移出上下文 -> `clearLogViewerSelectionHighlight` 移除本次临时高亮。
+- 关键结论：非侵入高亮不改写日志文本 DOM，正常路径减少 Vue 节点拆分和选区干扰；不支持该 API 的浏览器仍按原方案只高亮当前上下文块。
+
 ## [2026-07-16] INGEST-CODE | 工单日志搜索耗时观测补充
 
 - 触发：用户反馈工单详情日志搜索感觉较慢，要求准备接口记录压缩包位置和解压目录，搜索接口记录工具、参数、目录和耗时。

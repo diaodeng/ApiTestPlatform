@@ -89,6 +89,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   const logViewerHighlightText = ref('')
   const logViewerHighlightKeywords = ref([])
   const logViewerHighlightSummary = computed(() => logViewerHighlightKeywords.value.join('、'))
+  const logViewerSelectionHighlightKeyword = ref('')
+  const logViewerSelectionHighlightOwned = ref(false)
   const logViewerForm = ref({
     ticketId: undefined,
     keyword: '',
@@ -671,17 +673,47 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   }
 
   /** 同步多高亮关键字，并维护旧展示字段。 */
-  function updateLogViewerHighlightKeywords(value) {
+  function syncLogViewerHighlightKeywords(value, displayText) {
     const keywords = normalizeLogViewerKeywords(value)
     logViewerHighlightKeywords.value = keywords
-    logViewerHighlightText.value = Array.isArray(value) ? keywords.join('\n') : String(value || '')
+    logViewerHighlightText.value = displayText === undefined ? keywords.join('\n') : displayText
+  }
+
+  /** 从高亮词列表中移除当前选区临时追加的高亮词。 */
+  function removeLogViewerSelectionOwnedKeyword(keywords = logViewerHighlightKeywords.value) {
+    const selectedKeyword = logViewerSelectionHighlightKeyword.value
+    if (!selectedKeyword || !logViewerSelectionHighlightOwned.value) {
+      return normalizeLogViewerKeywords(keywords)
+    }
+    return normalizeLogViewerKeywords(keywords).filter(keyword => keyword !== selectedKeyword)
+  }
+
+  /** 同步用户输入的多高亮关键字；存在选区时保留选区对应的临时高亮词。 */
+  function updateLogViewerHighlightKeywords(value) {
+    const keywords = normalizeLogViewerKeywords(value)
+    const selectedKeyword = logViewerSelectionHighlightKeyword.value
+    if (selectedKeyword && !keywords.includes(selectedKeyword)) {
+      keywords.push(selectedKeyword)
+      syncLogViewerHighlightKeywords(keywords)
+      return
+    }
+    syncLogViewerHighlightKeywords(
+      keywords,
+      Array.isArray(value) ? keywords.join('\n') : String(value || '')
+    )
   }
 
   /** 增加一个日志高亮关键字。 */
   function addLogViewerHighlightKeyword(text) {
     const keyword = normalizeLogViewerSelectedText(text)
     if (!keyword) return
-    updateLogViewerHighlightKeywords([...logViewerHighlightKeywords.value, keyword])
+    const keywords = removeLogViewerSelectionOwnedKeyword()
+    if (!keywords.includes(keyword)) {
+      keywords.push(keyword)
+    }
+    logViewerSelectionHighlightKeyword.value = ''
+    logViewerSelectionHighlightOwned.value = false
+    syncLogViewerHighlightKeywords(keywords)
   }
 
   /** 归一化用户在日志详细信息中选中的文本，避免跨行选择导致高亮范围过大。 */
@@ -691,21 +723,41 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     return selected.length > 200 ? selected.slice(0, 200) : selected
   }
 
-  /** 捕获日志详细信息块的鼠标选中文本，并作为当前上下文高亮关键字。 */
-  function captureLogViewerHighlight() {
-    const selected = normalizeLogViewerSelectedText(window.getSelection?.().toString())
+  /** 捕获日志详细信息块的选中文本，并作为当前上下文临时高亮关键字。 */
+  function captureLogViewerHighlight(text) {
+    const selected = normalizeLogViewerSelectedText(
+      text === undefined ? window.getSelection?.().toString() : text
+    )
     if (!selected) return
     if (selected.length < 2) {
       proxy.$modal.msgWarning('请选择至少 2 个字符用于高亮')
       return
     }
-    addLogViewerHighlightKeyword(selected)
+    const keywords = removeLogViewerSelectionOwnedKeyword()
+    const existed = keywords.includes(selected)
+    if (!existed) {
+      keywords.push(selected)
+    }
+    logViewerSelectionHighlightKeyword.value = selected
+    logViewerSelectionHighlightOwned.value = !existed
+    syncLogViewerHighlightKeywords(keywords)
+  }
+
+  /** 清除由当前浏览器选区临时追加的高亮词，保留用户手工维护的高亮词。 */
+  function clearLogViewerSelectionHighlight() {
+    if (!logViewerSelectionHighlightKeyword.value) return
+    const keywords = removeLogViewerSelectionOwnedKeyword()
+    logViewerSelectionHighlightKeyword.value = ''
+    logViewerSelectionHighlightOwned.value = false
+    syncLogViewerHighlightKeywords(keywords)
   }
 
   /** 清空当前上下文高亮关键字。 */
   function clearLogViewerHighlight() {
     logViewerHighlightText.value = ''
     logViewerHighlightKeywords.value = []
+    logViewerSelectionHighlightKeyword.value = ''
+    logViewerSelectionHighlightOwned.value = false
   }
 
   function setLogViewerPanelMode(panel, mode) {
@@ -818,6 +870,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerHighlightText,
     logViewerHighlightKeywords,
     logViewerHighlightSummary,
+    logViewerSelectionHighlightKeyword,
     logViewerForm,
     createDefaultLogPullForm,
     buildCleanLogPullConfig,
@@ -861,6 +914,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     normalizeLogViewerSelectedText,
     normalizeLogViewerKeywords,
     captureLogViewerHighlight,
+    clearLogViewerSelectionHighlight,
     updateLogViewerHighlightKeywords,
     addLogViewerHighlightKeyword,
     clearLogViewerHighlight,

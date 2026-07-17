@@ -3636,19 +3636,23 @@
             </div>
           </div>
           <pre
+            ref="logViewerContextBlockRef"
             v-show="logViewerContextViewMode !== 'minimized'"
             :class="[
               'log-content-block',
               'log-context-block',
               { 'log-content-wrap': logPullWrapEnabled },
             ]"
+            @mouseup="handleLogViewerContextSelection"
+            @keyup="handleLogViewerContextSelection"
           ><span
               v-for="item in logViewerContextDisplayLines"
               :key="`${item.file}:${item.line}`"
               class="log-context-line"
               ><span class="log-context-line-no">{{ item.paddedLine }}</span
               ><span class="log-context-line-content"
-                ><template v-for="(part, partIndex) in item.parts" :key="partIndex"
+                ><template v-if="logViewerNativeHighlightSupported">{{ item.content }}</template
+                ><template v-else v-for="(part, partIndex) in item.parts" :key="partIndex"
                   ><mark
                     v-if="part.highlight"
                     :class="['log-context-highlight', part.highlightClass]"
@@ -3919,6 +3923,7 @@
     searchLogViewerInFile,
     clearLogViewerFileScope,
     captureLogViewerHighlight,
+    clearLogViewerSelectionHighlight,
     updateLogViewerHighlightKeywords,
     clearLogViewerHighlight,
     setLogViewerPanelMode,
@@ -4395,6 +4400,114 @@
     if (scopedFile) files.add(scopedFile);
     return Array.from(files).sort();
   });
+  const logViewerContextBlockRef = ref(null);
+  const logViewerHighlightName = 'ticket-log-context-highlight';
+  const logViewerNativeHighlightSupported = computed(() => supportsNativeLogViewerHighlight());
+
+  /** 判断当前浏览器是否支持 CSS Highlight API。 */
+  function supportsNativeLogViewerHighlight() {
+    return Boolean(
+      window.CSS?.highlights &&
+        typeof window.Highlight === 'function' &&
+        typeof window.Range === 'function'
+    );
+  }
+
+  /** 清空日志上下文区域注册到浏览器的非侵入高亮。 */
+  function clearNativeLogViewerHighlights() {
+    if (!supportsNativeLogViewerHighlight()) return;
+    window.CSS.highlights.delete(logViewerHighlightName);
+  }
+
+  /** 为单个文本节点创建不重叠的关键字高亮 Range。 */
+  function buildLogViewerHighlightRanges(textNode, keywords) {
+    const text = textNode.textContent || '';
+    const ranges = [];
+    let cursor = 0;
+    while (cursor < text.length) {
+      let nextMatch = null;
+      keywords.forEach((keyword) => {
+        const index = text.indexOf(keyword, cursor);
+        if (index < 0) return;
+        if (
+          !nextMatch ||
+          index < nextMatch.index ||
+          (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
+        ) {
+          nextMatch = { index, keyword };
+        }
+      });
+      if (!nextMatch) break;
+      const range = new window.Range();
+      range.setStart(textNode, nextMatch.index);
+      range.setEnd(textNode, nextMatch.index + nextMatch.keyword.length);
+      ranges.push(range);
+      cursor = nextMatch.index + nextMatch.keyword.length;
+    }
+    return ranges;
+  }
+
+  /** 使用 CSS Highlight API 给当前日志上下文做非侵入高亮，避免生成大量 mark 节点。 */
+  function refreshNativeLogViewerHighlights() {
+    if (!supportsNativeLogViewerHighlight()) return;
+    const block = logViewerContextBlockRef.value;
+    const keywords = Array.from(new Set(logViewerHighlightKeywords.value || []))
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .sort((left, right) => right.length - left.length);
+    if (!block || !keywords.length || logViewerContextViewMode.value === 'minimized') {
+      clearNativeLogViewerHighlights();
+      return;
+    }
+    const ranges = [];
+    block.querySelectorAll('.log-context-line-content').forEach((contentNode) => {
+      contentNode.childNodes.forEach((node) => {
+        if (node.nodeType === window.Node.TEXT_NODE) {
+          ranges.push(...buildLogViewerHighlightRanges(node, keywords));
+        }
+      });
+    });
+    if (!ranges.length) {
+      clearNativeLogViewerHighlights();
+      return;
+    }
+    window.CSS.highlights.set(logViewerHighlightName, new window.Highlight(...ranges));
+  }
+
+  /** 读取日志上下文区域内的浏览器选区文本，区域外选区不参与日志高亮。 */
+  function getLogViewerContextSelectionText() {
+    const block = logViewerContextBlockRef.value;
+    const selection = window.getSelection?.();
+    if (!block || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return '';
+    }
+    if (!block.contains(selection.anchorNode) || !block.contains(selection.focusNode)) {
+      return '';
+    }
+    return selection.toString();
+  }
+
+  /** 用户在日志详情中完成选中后，把选中文案写入候选词并立即高亮。 */
+  function handleLogViewerContextSelection() {
+    const selectedText = getLogViewerContextSelectionText();
+    if (!selectedText) return;
+    captureLogViewerHighlight(selectedText);
+  }
+
+  /** 浏览器选区取消或移出日志详情后，移除本次选区临时追加的高亮词。 */
+  function handleLogViewerDocumentSelectionChange() {
+    const block = logViewerContextBlockRef.value;
+    const selection = window.getSelection?.();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      clearLogViewerSelectionHighlight();
+      return;
+    }
+    if (block && block.contains(selection.anchorNode) && block.contains(selection.focusNode)) {
+      return;
+    }
+    clearLogViewerSelectionHighlight();
+  }
+
   /** 将一行日志按当前选中文案拆成普通片段和高亮片段。 */
   function splitLogViewerHighlightParts(content) {
     const text = String(content || '');
@@ -4441,7 +4554,10 @@
       file: item.file || logViewerContext.value?.file || '',
       line: item.line,
       paddedLine: `${String(item.line).padStart(6, ' ')}  `,
-      parts: splitLogViewerHighlightParts(item.content || ''),
+      content: item.content || '',
+      parts: logViewerNativeHighlightSupported.value
+        ? []
+        : splitLogViewerHighlightParts(item.content || ''),
     }));
   });
   const logViewerResultTableHeight = computed(() =>
@@ -5935,7 +6051,21 @@
     }
   );
 
+  watch(
+    [logViewerContext, logViewerHighlightKeywords, logViewerContextViewMode],
+    () => {
+      nextTick(() => refreshNativeLogViewerHighlights());
+    },
+    { deep: true }
+  );
+
+  onMounted(() => {
+    document.addEventListener('selectionchange', handleLogViewerDocumentSelectionChange);
+  });
+
   onBeforeUnmount(() => {
+    document.removeEventListener('selectionchange', handleLogViewerDocumentSelectionChange);
+    clearNativeLogViewerHighlights();
     stopLogPullAutoRefresh();
   });
 
@@ -6369,6 +6499,11 @@
 
   .log-context-line-content {
     white-space: inherit;
+  }
+
+  :global(::highlight(ticket-log-context-highlight)) {
+    color: #111827;
+    background: #fde047;
   }
 
   .log-context-highlight {
