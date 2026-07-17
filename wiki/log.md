@@ -17,6 +17,17 @@ updated: 2026-07-17
 - 变更传播链：版本号归一化工具 -> 详情返回与统计字段解析过滤无效版本 -> 编辑页保存以当前发生版本覆盖旧值 -> 同步入库/自动化/轻量 AI 统一过滤 -> 日志下载后处理先检查 `affected_version` 再提取 -> 提取成功写入 `affected_version` 并保留 `extra_data.version_key` 兼容。
 - 关键结论：`affected_version` 是 bug 首发/提单版本的权威字段；`versionKey` 和 `extra_data.version_key` 不删除，但只作为历史接口、旧数据和 AI 仓库映射兜底。日志中出现的字段名 `version` 不再被当作有效版本号。
 
+## [2026-07-17] INGEST-CODE | 工单详情弹窗组件化
+
+- 触发：用户要求按最终方案拆分工单详情组件，不保留 `ticketDetailContext` 过渡依赖，父页删除不再使用的详情状态和函数。
+- 架构层：Web 控制台 / 工单详情组件
+- 创建的页面：`web/public/docs/2026-07-17-ticket-detail-dialog-component.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/components/TicketDetailWithList.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailOverviewTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCollabTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCommentsTab.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailHistoryTab.vue`、`web/src/views/ticket/logPull.shared.js`、`web/src/views/ticket/hooks/useLogViewer.js`、`entities/services/ticket-domain.md`、`entities/services/web-feature-domains.md`、`web/public/docs/update_history.md`
+- 创建的双向链接：0 对
+- 变更传播链：`web/src/views/ticket/index.vue` 只保留 `ticketId/open` 入口 -> `web/src/views/ticket/components/TicketDetailWithList.vue` 自行拉取详情和管理 AI/日志/归因弹窗 -> 恢复描述/AI 翻译和详情 tabs -> tabs 拆分为概览、日志拉取、协同、评论、历史 5 个内部子组件 -> `web/src/views/ticket/logPull.shared.js` 下沉日志拉取表单默认值与清洗逻辑。
+- 关键结论：详情弹窗对工单列表页的契约收敛为 `ticketId/open`，详情页主体、描述和 tabs 都由详情组件内部闭环，不再依赖父页 `ticketDetailContext`。拆出的 tab 子组件若使用局部组件，必须在子组件内自行注册，例如日志拉取 tab 的 `LogPullConfigFields` 和 `LogPullNotifyConfigFields`。
+- 总共涉及页面：12
+
 ## [2026-07-16] INGEST-CODE | 工单日志选区候选词与非侵入高亮
 
 - 触发：用户要求工单详情页日志搜索结果详情中，选中文本同时作为高亮候选词并立即高亮，取消选中时对应高亮也取消，并评估 CSS Highlight API。
