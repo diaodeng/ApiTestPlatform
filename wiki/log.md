@@ -8,6 +8,15 @@ updated: 2026-07-17
 
 # 操作日志
 
+## [2026-07-17] INGEST-CODE | 工单列表与详情默认折叠优化
+
+- 触发：用户要求工单列表默认隐藏大部分筛选项，详情页顶部默认只显示前九项并把更多信息折叠到标题后的按钮里，同时协同 tab 有版本号时自动回填默认版本。
+- 架构层：Web 控制台 / 工单列表筛选 / 工单详情展示 / 协同版本默认值。
+- 创建的页面：`web/public/docs/2026-07-17-ticket-list-detail-collapse-and-collab-version-default.md`
+- 更新的页面：`web/src/views/ticket/index.vue`、`web/src/views/ticket/hooks/useTicketList.js`、`web/src/views/ticket/components/TicketDetailWithList.vue`、`web/src/views/ticket/components/detail-tabs/TicketDetailCollabTab.vue`、`web/public/docs/update_history.md`
+- 变更传播链：列表页搜索区折叠状态下只保留核心筛选字段 -> 重置后提供展开/收起按钮切换更多筛选 -> 详情页标题行提供更多信息展开/收起按钮，默认只展示前九项和描述/翻译 -> 协同 tab 等待项目版本选项加载完成后回填工单版本或首个可用版本。
+- 关键结论：这次调整只改变默认展示和回填时序，不清空任何被隐藏的筛选值；详情页隐藏区只是展示折叠，不影响 tabs、描述或翻译；协同版本默认值优先取工单版本，缺失时才用当前项目首个版本。
+
 ## [2026-07-17] INGEST-CODE | 工单发生版本权威字段与日志提取修复
 
 - 触发：用户反馈编辑页保存发生版本后再次打开显示 `version`，要求统一版本字段语义，并避免日志下载后重复或错误提取版本号。

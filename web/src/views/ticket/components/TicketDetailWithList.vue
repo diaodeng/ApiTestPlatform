@@ -90,6 +90,7 @@
   const detailMainTab = ref('overview');
   const descriptionExpanded = ref(true);
   const translationExpanded = ref(false);
+  const detailMoreInfoExpanded = ref(false);
   const descriptionTranslateLoading = ref(false);
   const issueCreateBindOpen = ref(false);
   const issueActionLoading = ref(false);
@@ -229,6 +230,21 @@
         ''
     ).trim()
   );
+
+  /**
+   * 解析详情页默认版本号。
+   * 优先使用工单自身版本号，其次使用当前项目版本选项中的第一个版本。
+   * @returns {string} 默认版本号。
+   */
+  function resolveDefaultVersionKey() {
+    return (
+      detail.value.versionKey ||
+      detail.value.extraData?.versionKey ||
+      detailVersionOptions.value[0]?.value ||
+      ''
+    );
+  }
+
   const latestSnapshotSummary = computed(
     () =>
       detail.value.latestSnapshot?.summary ||
@@ -650,8 +666,7 @@
       detail.value,
       resolveDefaultAiPromptTemplateCodes()
     );
-    aiAnalysisTaskForm.value.versionKey =
-      detail.value.versionKey || detail.value.extraData?.versionKey || '';
+    aiAnalysisTaskForm.value.versionKey = resolveDefaultVersionKey();
     aiAnalysisTaskForm.value.logPullRecordId = detail.value.latestLogPull?.id || undefined;
     aiAnalysisTaskForm.value.agentCode = aiDefaults.agentCode;
     aiAnalysisTaskForm.value.aiProviderCode = aiDefaults.aiProviderCode;
@@ -680,11 +695,6 @@
       return;
     }
     resetAiAnalysisDialog();
-    aiAnalysisTaskForm.value.versionKey =
-      detail.value.versionKey ||
-      detail.value.extraData?.versionKey ||
-      aiAnalysisTaskForm.value.versionKey ||
-      '';
     aiAnalysisOpen.value = true;
   }
 
@@ -803,6 +813,7 @@
     detailMainTab.value = 'overview';
     descriptionExpanded.value = true;
     translationExpanded.value = false;
+    detailMoreInfoExpanded.value = false;
     aiTaskHistoryOpen.value = false;
     aiTaskDetailOpen.value = false;
     aiTaskList.value = [];
@@ -812,9 +823,14 @@
     aiRepoMappingTotal.value = 0;
     return getTicket(ticketId).then((response) => {
       syncDetailBundle(response.data || {});
-      loadDetailVersionOptions(detail.value.projectId);
-      aiAnalysisTaskForm.value.mappingId =
-        detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId;
+      return loadDetailVersionOptions(detail.value.projectId)
+        .catch(() => {
+          detailVersionOptions.value = [];
+        })
+        .then(() => {
+          aiAnalysisTaskForm.value.mappingId =
+            detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId;
+        });
     });
   }
 
@@ -842,6 +858,7 @@
     detailMainTab.value = 'overview';
     descriptionExpanded.value = true;
     translationExpanded.value = false;
+    detailMoreInfoExpanded.value = false;
     detail.value = {};
     detailVersionOptions.value = [];
     aiTaskHistoryOpen.value = false;
@@ -916,7 +933,6 @@
 <template>
   <el-dialog
     v-model="detailOpen"
-    :title="detailTitle"
     fullscreen
     class="ticket-detail-dialog"
     append-to-body
@@ -924,6 +940,14 @@
     :close-on-click-modal="false"
     @closed="handleDetailClosed"
   >
+    <template #header>
+      <div class="ticket-detail-dialog__header">
+        <span class="ticket-detail-dialog__title">{{ detailTitle }}</span>
+        <el-button link type="primary" @click="detailMoreInfoExpanded = !detailMoreInfoExpanded">
+          {{ detailMoreInfoExpanded ? '收起更多信息' : '展开更多信息' }}
+        </el-button>
+      </div>
+    </template>
     <template v-if="detail.ticketId">
       <div class="ticket-detail-scroll">
         <el-descriptions :column="3" border>
@@ -936,77 +960,11 @@
           <el-descriptions-item label="当前处理人">{{
             detail.currentAssigneeName || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="1线人员">{{
-            detail.firstLineAssigneeName || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="内部负责人">{{
-            detail.internalOwnerName || '-'
-          }}</el-descriptions-item>
           <el-descriptions-item label="所属项目">{{
             detail.projectName || detail.merchantName || '-'
           }}</el-descriptions-item>
           <el-descriptions-item label="所属模块">{{
             detail.moduleName || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="工单类型">{{
-            formatIssueType(detail)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="问题性质">{{
-            formatProblemFlag(detail.isProblem)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="根因分类">{{
-            formatStatOption(rootCauseTypeOptions, detail.rootCauseType)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="解决方式">{{
-            formatStatOption(solutionTypeOptions, detail.solutionType)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="关闭结果">{{
-            formatResolution(detail)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="细分问题">{{
-            formatProblemPattern(detail)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="细分确认">
-            <el-tag v-if="detail.problemPatternVerified === true" type="success">已确认</el-tag>
-            <el-tag v-else-if="detail.problemPatternVerified === false" type="warning"
-              >待确认</el-tag
-            >
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="所属问题">
-            <template v-if="detail.issueId">
-              <div class="issue-summary-inline">
-                <el-tag type="primary">{{ detail.issueNo || detail.issueId }}</el-tag>
-                <span>{{ detail.issueTitle || '-' }}</span>
-              </div>
-            </template>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="归因确认">
-            <el-tag v-if="detail.issueId && detail.issueConfirmed" type="success">已确认</el-tag>
-            <el-tag v-else-if="detail.issueId" type="warning">待确认</el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="归因类型">{{
-            formatIssueRelationType(detail.issueRelationType)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="版本号">{{
-            detail.versionKey || detail.extraData?.versionKey || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="日志拉取状态">
-            <el-tag
-              v-if="detail.latestLogPull?.status"
-              :type="getLogPullStatusTagType(detail.latestLogPull.status)"
-            >
-              {{
-                detail.latestLogPull.statusDesc ||
-                getOptionLabel(logPullStatusOptions, detail.latestLogPull.status)
-              }}
-            </el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="来源">{{
-            getOptionLabel(sourceOptions, detail.source)
           }}</el-descriptions-item>
           <el-descriptions-item label="外部链接">
             <el-link
@@ -1019,41 +977,111 @@
             </el-link>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="对方优先级">{{
-            detail.customerPriority || '-'
+          <el-descriptions-item label="工单类型">{{
+            formatIssueType(detail)
+          }}</el-descriptions-item>
+          <el-descriptions-item label="根因分类">{{
+            formatStatOption(rootCauseTypeOptions, detail.rootCauseType)
           }}</el-descriptions-item>
           <el-descriptions-item label="内部优先级">{{
             detail.internalPriority || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="总耗时">{{
-            formatSeconds(detail.totalProcessSeconds)
-          }}</el-descriptions-item>
-          <el-descriptions-item label="根因" :span="3">{{
-            detail.rootCause || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="解决方案" :span="3">{{
-            detail.solution || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="问题实例操作" :span="3">
-            <el-button
-              v-if="!detail.issueId"
-              link
-              type="primary"
-              @click="openIssueCreateBindDialog"
-              v-hasPermi="['ticket:issue:add']"
-            >
-              新建问题实例并绑定
-            </el-button>
-            <el-button
-              v-if="detail.issueId"
-              link
-              type="danger"
-              @click="handleUnbindIssue"
-              v-hasPermi="['ticket:issue:remove']"
-            >
-              解除归因
-            </el-button>
-          </el-descriptions-item>
+          <template v-if="detailMoreInfoExpanded">
+            <el-descriptions-item label="1线人员">{{
+              detail.firstLineAssigneeName || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item label="内部负责人">{{
+              detail.internalOwnerName || '-'
+            }}</el-descriptions-item>
+
+            <el-descriptions-item label="问题性质">{{
+              formatProblemFlag(detail.isProblem)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="解决方式">{{
+              formatStatOption(solutionTypeOptions, detail.solutionType)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="关闭结果">{{
+              formatResolution(detail)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="细分问题">{{
+              formatProblemPattern(detail)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="细分确认">
+              <el-tag v-if="detail.problemPatternVerified === true" type="success">已确认</el-tag>
+              <el-tag v-else-if="detail.problemPatternVerified === false" type="warning"
+                >待确认</el-tag
+              >
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="所属问题">
+              <template v-if="detail.issueId">
+                <div class="issue-summary-inline">
+                  <el-tag type="primary">{{ detail.issueNo || detail.issueId }}</el-tag>
+                  <span>{{ detail.issueTitle || '-' }}</span>
+                </div>
+              </template>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="归因确认">
+              <el-tag v-if="detail.issueId && detail.issueConfirmed" type="success">已确认</el-tag>
+              <el-tag v-else-if="detail.issueId" type="warning">待确认</el-tag>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="归因类型">{{
+              formatIssueRelationType(detail.issueRelationType)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="版本号">{{
+              detail.versionKey || detail.extraData?.versionKey || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item label="日志拉取状态">
+              <el-tag
+                v-if="detail.latestLogPull?.status"
+                :type="getLogPullStatusTagType(detail.latestLogPull.status)"
+              >
+                {{
+                  detail.latestLogPull.statusDesc ||
+                  getOptionLabel(logPullStatusOptions, detail.latestLogPull.status)
+                }}
+              </el-tag>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="来源">{{
+              getOptionLabel(sourceOptions, detail.source)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="对方优先级">{{
+              detail.customerPriority || '-'
+            }}</el-descriptions-item>
+
+            <el-descriptions-item label="总耗时">{{
+              formatSeconds(detail.totalProcessSeconds)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="根因" :span="3">{{
+              detail.rootCause || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item label="解决方案" :span="3">{{
+              detail.solution || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item label="问题实例操作" :span="3">
+              <el-button
+                v-if="!detail.issueId"
+                link
+                type="primary"
+                @click="openIssueCreateBindDialog"
+                v-hasPermi="['ticket:issue:add']"
+              >
+                新建问题实例并绑定
+              </el-button>
+              <el-button
+                v-if="detail.issueId"
+                link
+                type="danger"
+                @click="handleUnbindIssue"
+                v-hasPermi="['ticket:issue:remove']"
+              >
+                解除归因
+              </el-button>
+            </el-descriptions-item>
+          </template>
         </el-descriptions>
         <div class="ticket-detail-description">
           <div class="ticket-detail-description__label">
@@ -1706,6 +1734,21 @@
 
   :deep(.ticket-detail-dialog .el-dialog__header) {
     flex: 0 0 auto;
+  }
+
+  .ticket-detail-dialog__header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .ticket-detail-dialog__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
   }
 
   :deep(.ticket-detail-dialog .el-dialog__body) {

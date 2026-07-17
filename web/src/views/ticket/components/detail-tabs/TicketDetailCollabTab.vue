@@ -102,7 +102,7 @@
     );
     messageForm.value = {
       ...createDefaultMessageForm(),
-      versionKey: detail.value.versionKey || detail.value.extraData?.versionKey || '',
+      versionKey: resolveDefaultMessageKey(),
       agentCode: aiDefaults.agentCode,
       aiProviderCode: aiDefaults.aiProviderCode,
     };
@@ -110,6 +110,34 @@
       applyMessageProviderAgent(messageForm.value.aiProviderCode);
     }
     messageDataText.value = '';
+  }
+
+  /**
+   * 解析协同消息的默认版本号。
+   * 优先使用工单自身版本号，其次使用当前项目已加载的第一个版本选项。
+   * @returns {string} 默认版本号。
+   */
+  function resolveDefaultMessageKey() {
+    return (
+      detail.value.versionKey ||
+      detail.value.extraData?.versionKey ||
+      detailVersionOptions.value[0]?.value ||
+      ''
+    );
+  }
+
+  /**
+   * 先加载当前项目的版本选项，再重置协同消息表单。
+   * @returns {Promise<void>} 加载和重置完成 Promise。
+   */
+  function reloadDetailVersionsAndResetMessageForm() {
+    return loadDetailVersionOptions(detail.value.projectId)
+      .catch(() => {
+        detailVersionOptions.value = [];
+      })
+      .then(() => {
+        resetMessageForm();
+      });
   }
 
   /**
@@ -153,17 +181,14 @@
   function refreshDetail() {
     if (hasExternalDetail.value) {
       detail.value = props.detail || {};
-      loadDetailVersionOptions(detail.value.projectId);
-      resetMessageForm();
-      return Promise.resolve();
+      return reloadDetailVersionsAndResetMessageForm();
     }
     if (!resolvedTicketId.value) return Promise.resolve();
     loading.value = true;
     return getTicket(resolvedTicketId.value)
       .then((response) => {
         detail.value = response.data || {};
-        loadDetailVersionOptions(detail.value.projectId);
-        resetMessageForm();
+        return reloadDetailVersionsAndResetMessageForm();
       })
       .finally(() => {
         loading.value = false;
@@ -380,7 +405,7 @@
     () => {
       if (hasExternalDetail.value) {
         detail.value = props.detail || {};
-        loadDetailVersionOptions(detail.value.projectId);
+        reloadDetailVersionsAndResetMessageForm();
       }
     },
     { immediate: true, deep: true }
@@ -390,8 +415,11 @@
     resolvedTicketId,
     () => {
       detail.value = hasExternalDetail.value ? props.detail || {} : {};
-      resetMessageForm();
-      if (props.active) refreshDetail();
+      if (props.active) {
+        refreshDetail();
+      } else {
+        reloadDetailVersionsAndResetMessageForm();
+      }
     },
     { immediate: true }
   );

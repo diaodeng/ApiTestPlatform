@@ -88,229 +88,268 @@
             style="width: 360px"
           />
         </el-form-item>
-        <el-form-item label="处理时间">
-          <el-date-picker
-            v-model="processedTimeRange"
-            type="datetimerange"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            format="YYYY-MM-DD HH:mm:ss"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            style="width: 360px"
-          />
-        </el-form-item>
-        <el-form-item label="项目" prop="projectIds">
-          <el-select
-            v-model="queryParams.projectIds"
-            placeholder="所属项目"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 220px"
-          >
-            <el-option
-              v-for="item in projectOptions"
-              :key="item.projectId"
-              :label="item.projectName"
-              :value="item.projectId"
+        <template v-if="showMoreSearchFilters">
+          <el-form-item label="处理时间">
+            <el-date-picker
+              v-model="processedTimeRange"
+              type="datetimerange"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              format="YYYY-MM-DD HH:mm:ss"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              style="width: 360px"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="模块" prop="moduleIds">
-          <el-select
-            v-model="queryParams.moduleIds"
-            placeholder="所属模块"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 220px"
-          >
-            <el-option
-              v-for="item in queryModuleOptions"
-              :key="item.moduleId"
-              :label="item.moduleName"
-              :value="item.moduleId"
+          </el-form-item>
+          <el-form-item label="日志/AI进度" prop="processStatuses">
+            <el-select
+              v-model="queryParams.processStatuses"
+              placeholder="日志/AI进度"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              style="width: 200px"
+            >
+              <el-option
+                v-for="item in ticketProcessStatusOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="处理结论" prop="processingConclusionStatus">
+            <el-select
+              v-model="queryParams.processingConclusionStatus"
+              placeholder="处理结论"
+              clearable
+              style="width: 140px"
+            >
+              <el-option label="已处理" value="processed" />
+              <el-option label="未处理" value="unprocessed" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="项目" prop="projectIds">
+            <el-select
+              v-model="queryParams.projectIds"
+              placeholder="所属项目"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 220px"
+            >
+              <el-option
+                v-for="item in projectOptions"
+                :key="item.projectId"
+                :label="item.projectName"
+                :value="item.projectId"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模块" prop="moduleIds">
+            <el-select
+              v-model="queryParams.moduleIds"
+              placeholder="所属模块"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 220px"
+            >
+              <el-option
+                v-for="item in queryModuleOptions"
+                :key="item.moduleId"
+                :label="item.moduleName"
+                :value="item.moduleId"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模块Code" prop="moduleCodes">
+            <el-select
+              v-model="queryParams.moduleCodes"
+              placeholder="模块Code"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 200px"
+            >
+              <el-option
+                v-for="item in queryModuleCodeOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="工单类型" prop="issueTypeIds">
+            <el-select
+              v-model="queryParams.issueTypeIds"
+              placeholder="工单类型"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="item in issueTypeOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="根因分类" prop="rootCauseTypes">
+            <el-select
+              v-model="queryParams.rootCauseTypes"
+              placeholder="根因分类"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="item in rootCauseTypeOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="解决方式" prop="solutionTypes">
+            <el-select
+              v-model="queryParams.solutionTypes"
+              placeholder="解决方式"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="item in solutionTypeOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="关闭结果" prop="resolutionCodes">
+            <el-select
+              v-model="queryParams.resolutionCodes"
+              placeholder="关闭结果"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 180px"
+            >
+              <el-option
+                v-for="item in resolutionOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="细分问题" prop="problemPatternCodes">
+            <el-select
+              v-model="queryParams.problemPatternCodes"
+              placeholder="细分问题"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              style="width: 220px"
+            >
+              <el-option
+                v-for="item in problemPatternOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="是否问题" prop="isProblems">
+            <el-select
+              v-model="queryParams.isProblems"
+              placeholder="是否问题"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              style="width: 160px"
+            >
+              <el-option label="真实问题" :value="true" />
+              <el-option label="非问题" :value="false" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="内部优先级" prop="internalPriorities">
+            <el-select
+              v-model="queryParams.internalPriorities"
+              placeholder="内部优先级"
+              multiple
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              style="width: 160px"
+            >
+              <el-option
+                v-for="item in priorityOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="当前处理人" prop="currentAssigneeIds">
+            <UserSelect
+              v-model="queryParams.currentAssigneeIds"
+              multiple
+              :initial-option="queryCurrentAssigneeOption"
+              @change="handleQueryCurrentAssigneeChange"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="模块Code" prop="moduleCodes">
-          <el-select
-            v-model="queryParams.moduleCodes"
-            placeholder="模块Code"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 200px"
-          >
-            <el-option
-              v-for="item in queryModuleCodeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
+          </el-form-item>
+          <el-form-item label="1线人员" prop="firstLineAssigneeIds">
+            <UserSelect
+              v-model="queryParams.firstLineAssigneeIds"
+              multiple
+              :initial-option="queryFirstLineAssigneeOption"
+              @change="handleQueryFirstLineAssigneeChange"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="工单类型" prop="issueTypeIds">
-          <el-select
-            v-model="queryParams.issueTypeIds"
-            placeholder="工单类型"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 180px"
-          >
-            <el-option
-              v-for="item in issueTypeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
+          </el-form-item>
+          <el-form-item label="内部负责人" prop="internalOwnerIds">
+            <UserSelect
+              v-model="queryParams.internalOwnerIds"
+              multiple
+              :initial-option="queryInternalOwnerOption"
+              @change="handleQueryInternalOwnerChange"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="根因分类" prop="rootCauseTypes">
-          <el-select
-            v-model="queryParams.rootCauseTypes"
-            placeholder="根因分类"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 180px"
-          >
-            <el-option
-              v-for="item in rootCauseTypeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="解决方式" prop="solutionTypes">
-          <el-select
-            v-model="queryParams.solutionTypes"
-            placeholder="解决方式"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 180px"
-          >
-            <el-option
-              v-for="item in solutionTypeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="关闭结果" prop="resolutionCodes">
-          <el-select
-            v-model="queryParams.resolutionCodes"
-            placeholder="关闭结果"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 180px"
-          >
-            <el-option
-              v-for="item in resolutionOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="细分问题" prop="problemPatternCodes">
-          <el-select
-            v-model="queryParams.problemPatternCodes"
-            placeholder="细分问题"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            filterable
-            style="width: 220px"
-          >
-            <el-option
-              v-for="item in problemPatternOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="是否问题" prop="isProblems">
-          <el-select
-            v-model="queryParams.isProblems"
-            placeholder="是否问题"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            style="width: 160px"
-          >
-            <el-option label="真实问题" :value="true" />
-            <el-option label="非问题" :value="false" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="内部优先级" prop="internalPriorities">
-          <el-select
-            v-model="queryParams.internalPriorities"
-            placeholder="内部优先级"
-            multiple
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            style="width: 160px"
-          >
-            <el-option
-              v-for="item in priorityOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="当前处理人" prop="currentAssigneeIds">
-          <UserSelect
-            v-model="queryParams.currentAssigneeIds"
-            multiple
-            :initial-option="queryCurrentAssigneeOption"
-            @change="handleQueryCurrentAssigneeChange"
-          />
-        </el-form-item>
-        <el-form-item label="1线人员" prop="firstLineAssigneeIds">
-          <UserSelect
-            v-model="queryParams.firstLineAssigneeIds"
-            multiple
-            :initial-option="queryFirstLineAssigneeOption"
-            @change="handleQueryFirstLineAssigneeChange"
-          />
-        </el-form-item>
-        <el-form-item label="内部负责人" prop="internalOwnerIds">
-          <UserSelect
-            v-model="queryParams.internalOwnerIds"
-            multiple
-            :initial-option="queryInternalOwnerOption"
-            @change="handleQueryInternalOwnerChange"
-          />
-        </el-form-item>
+          </el-form-item>
+        </template>
         <el-form-item>
           <el-button type="primary" icon="Search" @click="handleSearch">搜索</el-button>
           <el-button icon="Refresh" @click="resetQuery">重置</el-button>
+          <el-button
+            type="primary"
+            link
+            :icon="showMoreSearchFilters ? 'ArrowUp' : 'ArrowDown'"
+            @click="showMoreSearchFilters = !showMoreSearchFilters"
+          >
+            {{ showMoreSearchFilters ? '收起更多筛选' : '展开更多筛选' }}
+          </el-button>
         </el-form-item>
       </el-form>
 
@@ -1603,6 +1642,7 @@
   const {
     loading,
     showSearch,
+    showMoreSearchFilters,
     ticketList,
     total,
     naturalKeyword,

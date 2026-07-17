@@ -11,6 +11,9 @@
 9. 工单详情下方 tabs 拆分为概览、日志拉取、协同、评论、历史 5 个子组件，并二次收口为不接收父级上下文对象：评论和历史只接收 `ticketId/active`，概览、日志拉取、协同支持 `ticketId/detail/active` 双入口，父详情已持有详情时复用详情，未传详情时自行拉取。
 10. 修复日志拉取 tab 弹窗只显示按钮的问题：`TicketDetailLogPullTab.vue` 自行注册日志拉取表单字段组件，不再依赖父详情组件 import。
 11. 新增说明文档：`web/public/docs/2026-07-17-ticket-detail-dialog-component.md`。
+12. 工单列表搜索区默认只展示关键字、自然语言、状态、外部工单号和提交时间，其他筛选项默认折叠，并在重置按钮后增加“展开更多筛选/收起更多筛选”按钮。
+13. 工单详情页顶部信息默认只显示前九项，标题后增加“展开更多信息/收起更多信息”按钮；协同 tab 在版本选项加载完成后优先回填工单版本号，缺省时回填当前项目的首个可用版本。
+14. 新增说明文档：`web/public/docs/2026-07-17-ticket-list-detail-collapse-and-collab-version-default.md`。
 
 ## 2026-07-16
 

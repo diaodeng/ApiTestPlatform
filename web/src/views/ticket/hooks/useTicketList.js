@@ -15,6 +15,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   // === 列表状态 ===
   const loading = ref(false)
   const showSearch = ref(true)
+  const showMoreSearchFilters = ref(false)
   const ticketList = ref([])
   const total = ref(0)
   const naturalKeyword = ref('')
@@ -263,6 +264,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     submitTimeRange.value = []
     processedTimeRange.value = []
     naturalKeyword.value = ''
+    showMoreSearchFilters.value = false
     queryParams.value.submitBeginTime = undefined
     queryParams.value.submitEndTime = undefined
     queryParams.value.processedBeginTime = undefined
@@ -305,6 +307,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     // state
     loading, showSearch, ticketList, total, naturalKeyword, submitTimeRange, processedTimeRange,
     queryParams, queryCurrentAssigneeOption, queryFirstLineAssigneeOption, queryInternalOwnerOption,
+    showMoreSearchFilters,
     // column config
     columnConfigOpen, ticketColumnOptions, defaultTicketColumnKeys,
     requiredTicketColumnKeys, visibleTicketColumnKeys,
