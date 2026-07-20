@@ -803,6 +803,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "description": "远端描述",
                 "module_name": "远端模块",
                 "project_name": "远端项目",
+                "internalPriority": "P4",
                 "syncSummary": {"revision": 7, "ticketUrl": "https://example.com/ticket/1001"},
                 "extraData": {
                     "external_field_mapping": {
@@ -824,6 +825,10 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(sync_object.source.record_url, "https://example.com/ticket/1001")
         self.assertEqual(sync_object.sync_consumer, "inner")
         self.assertEqual(sync_object.status, "processing")
+        self.assertEqual(sync_object.customer_priority, "Level D")
+        self.assertEqual(sync_object.internal_priority, "P4")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["customerPriority"], "Level D")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["internalPriority"], "P4")
         self.assertEqual(
             sync_object.extra_data["external_field_mapping"]["internalOwnerEmail"],
             "owner@example.com",
@@ -1282,7 +1287,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
             "fields": {
                 "工单号": "T-PRIORITY",
                 "描述": "Checkout failed",
-                "对方优先级": "P1",
+                "对方优先级": "Level A",
                 "内部优先级": "",
                 "项目": "海外收银",
                 "模块": "POS - 支付",
@@ -1310,10 +1315,50 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(sync_object)
-        self.assertEqual(sync_object.customer_priority, "P1")
+        self.assertEqual(sync_object.customer_priority, "Level A")
         self.assertEqual(sync_object.internal_priority, "P1")
-        self.assertEqual(sync_object.extra_data["external_field_mapping"]["customerPriority"], "P1")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["customerPriority"], "Level A")
         self.assertEqual(sync_object.extra_data["external_field_mapping"]["internalPriority"], "P1")
+
+    def test_bitable_pull_uses_internal_priority_when_customer_priority_missing(self):
+        """主动拉取对方优先级为空时，应使用内部优先级转换外部优先级。"""
+        record = {
+            "record_id": "rec_priority_reverse",
+            "fields": {
+                "工单号": "T-PRIORITY-REVERSE",
+                "描述": "Checkout failed",
+                "对方优先级": "",
+                "内部优先级": "P2",
+                "项目": "海外收银",
+                "模块": "POS - 支付",
+                "提单人": "张三",
+                "创建时间": "2026-06-24 09:59:00",
+            },
+        }
+        field_mappings = TicketSyncConfigService.normalize_bitable_field_mappings(
+            [
+                {"sourceField": "工单号", "targetField": "ticketNo"},
+                {"sourceField": "描述", "targetField": "description"},
+                {"sourceField": "对方优先级", "targetField": "customerPriority"},
+                {"sourceField": "内部优先级", "targetField": "internalPriority"},
+                {"sourceField": "项目", "targetField": "projectName"},
+                {"sourceField": "模块", "targetField": "moduleName"},
+                {"sourceField": "提单人", "targetField": "reporterName"},
+                {"sourceField": "创建时间", "targetField": "createTime"},
+            ]
+        )
+
+        sync_object = TicketBitablePullService.build_bitable_pull_sync_object(
+            record=record,
+            config={"sourceSystem": "feishu_bitable_pull"},
+            field_mappings=field_mappings,
+        )
+
+        self.assertIsNotNone(sync_object)
+        self.assertEqual(sync_object.customer_priority, "Level B")
+        self.assertEqual(sync_object.internal_priority, "P2")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["customerPriority"], "Level B")
+        self.assertEqual(sync_object.extra_data["external_field_mapping"]["internalPriority"], "P2")
 
     def test_bitable_pull_preserves_current_assignee_and_internal_owner_aliases(self):
         """主动拉取当前处理人和内部负责人别名应进入顶层模型和外部字段快照。"""
@@ -1961,6 +2006,44 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertEqual(email, "lisi@example.com")
 
+    def test_group_template_assignee_variables_fallback_to_internal_owner(self):
+        """群消息模板当前处理人变量为空时，应使用内部负责人作为展示兜底。"""
+        ticket = SimpleNamespace(
+            ticket_id=1,
+            ticket_no="T-GROUP-FALLBACK",
+            title="群消息兜底",
+            merchant_name="海外收银",
+            module_name="POS",
+            status="processing",
+            reporter_name="张三",
+            first_line_assignee_name="",
+            current_assignee_name="",
+            internal_owner_name="王五",
+            customer_priority="Level B",
+            internal_priority="P2",
+            source="external_sync",
+            description="描述",
+            ticket_url="",
+            extra_data={},
+        )
+
+        variables = TicketSyncNotifyService._build_group_ticket_variables(ticket)
+
+        self.assertEqual(variables["assignee_name"], "王五")
+        self.assertEqual(variables["current_assignee_name"], "王五")
+        self.assertEqual(variables["currentAssigneeName"], "王五")
+        self.assertEqual(variables["raw_assignee_name"], "-")
+
+    def test_group_template_assignee_at_fallback_to_internal_owner_at(self):
+        """群消息模板当前处理人 @ 为空时，应使用内部负责人 @ 兜底。"""
+        variables = TicketSyncNotifyService._build_group_mention_template_variables(
+            [{"role": "internal_owner", "openId": "ou_owner"}]
+        )
+
+        self.assertEqual(variables["assignee_at"], '<at user_id="ou_owner"></at>')
+        self.assertEqual(variables["current_assignee_at"], '<at user_id="ou_owner"></at>')
+        self.assertEqual(variables["internal_owner_at"], '<at user_id="ou_owner"></at>')
+
     def test_batch_reclassification_service_runs_regex_batch_entry(self):
         """批量重归类入口应由独立服务编排，不再回到 TicketSyncService。"""
         ticket = SimpleNamespace(
@@ -2029,6 +2112,42 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(external_mapping["currentAssigneeEmail"], "lisi@example.com")
         self.assertEqual(external_mapping["internalOwnerEmail"], "wangwu@example.com")
         self.assertEqual(normalized["extraData"]["step_reason"], "20260704 张三：初步排查")
+
+    def test_external_sync_request_service_converts_customer_priority_when_internal_missing(self):
+        """外部推送只有对方优先级时，应按 Level 到 P 的关系补齐内部优先级。"""
+        payload = {
+            "ticketNo": "EXT-PRIORITY",
+            "description": "无法结账",
+            "customerPriority": "Level A",
+            "ticketVender": "海外收银",
+            "ticketModle": "POS",
+            "createTime": "2026-07-21 12:00:00",
+            "reporterName": "张三",
+        }
+
+        normalized = TicketExternalSyncRequestService.normalize_external_sync_payload(payload)
+
+        self.assertEqual(normalized["customerPriority"], "Level A")
+        self.assertEqual(normalized["internalPriority"], "P1")
+        self.assertEqual(normalized["extraData"]["external_field_mapping"]["customerPriority"], "Level A")
+        self.assertEqual(normalized["extraData"]["external_field_mapping"]["internalPriority"], "P1")
+
+    def test_external_sync_request_service_converts_internal_priority_when_customer_missing(self):
+        """外部推送只有内部优先级时，应按 P 到 Level 的关系补齐对方优先级。"""
+        payload = {
+            "ticketNo": "EXT-PRIORITY-INTERNAL",
+            "description": "无法结账",
+            "internalPriority": "P0",
+            "ticketVender": "海外收银",
+            "ticketModle": "POS",
+            "createTime": "2026-07-21 12:00:00",
+            "reporterName": "张三",
+        }
+
+        normalized = TicketExternalSyncRequestService.normalize_external_sync_payload(payload)
+
+        self.assertEqual(normalized["customerPriority"], "Level 0")
+        self.assertEqual(normalized["internalPriority"], "P0")
 
     def test_external_sync_request_service_validates_required_fields(self):
         """外部请求归一化应按配置必填字段提前拒绝缺失载荷。"""

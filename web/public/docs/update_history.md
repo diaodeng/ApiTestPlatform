@@ -1,3 +1,9 @@
+## 2026-07-21
+
+1. 工单外部推送、飞书多维表格主动拉取、远端拉取入库统一补齐外部优先级和内部优先级：`Level 0/A/B/C/D` 分别对应 `P0/P1/P2/P3/P4`，双方都有值时不互相覆盖。
+2. 群消息模板当前处理人变量为空时自动使用内部负责人兜底，`${assignee_name}`、`${currentAssigneeName}` 和 `${assignee_at}` 均可直接复用。
+3. 新增说明文档：`web/public/docs/2026-07-21-ticket-priority-pair-and-assignee-template-fallback.md`。
+
 ## 2026-07-20
 
 1. 工单列表新增“影响版本”列，默认列配置和列设置里都可按需显示或隐藏。

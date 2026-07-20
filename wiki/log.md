@@ -3,10 +3,19 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-17
+updated: 2026-07-21
 ---
 
 # 操作日志
+
+## [2026-07-21] INGEST-CODE | 工单优先级双向补齐与群模板处理人兜底
+
+- 触发：用户要求外部推送、内网拉取和飞书多维表格主动拉取入库时，外部优先级和内部优先级缺一侧也要同时入库，并要求群消息模板当前处理人为空时可用内部负责人替换。
+- 架构层：工单域 / 外部同步入库 / 飞书主动拉取 / 远端拉取 / 群消息通知模板。
+- 创建的页面：`web/public/docs/2026-07-21-ticket-priority-pair-and-assignee-template-fallback.md`
+- 更新的页面：`server/modules/ticket/util/ticket_priority_util.py`、`server/modules/ticket/service/sync/ticket_external_sync_request_service.py`、`server/modules/ticket/service/sync/ticket_bitable_pull_service.py`、`server/modules/ticket/service/sync/ticket_remote_sync_service.py`、`server/modules/ticket/service/sync/ticket_sync_payload_service.py`、`server/modules/ticket/service/sync/ticket_sync_notify_service.py`、`web/src/views/ticket/syncAutomation/hooks/useSyncConfig.js`、`server/tests/test_ticket_sync_mapping_boundary.py`、`web/public/docs/update_history.md`、`wiki/entities/services/ticket-domain.md`、`wiki/flows/ticket-external-sync-flow.md`
+- 变更传播链：`ticket_priority_util.complete_ticket_priority_pair` -> 外部推送请求归一化 / 主动拉取记录转换 / 远端拉取模型转换 / 入库 payload 兜底 -> `customer_priority/internal_priority` 同时入库；群消息变量构造 -> 当前处理人展示和 @ 变量为空时回退内部负责人。
+- 关键结论：本次不改变“双方都有值时各自入库”的语义，只在缺一侧时按 `Level 0/A/B/C/D <-> P0/P1/P2/P3/P4` 补齐；未安装 `pytest`，本地仅完成 ruff 检查，新增单测待环境补齐后执行。
 
 ## [2026-07-17] INGEST-CODE | 工单编辑页 tagText 缺失修复
 

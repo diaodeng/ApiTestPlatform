@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
 from utils.field_util import compatible_field_value, extract_person_name_email, normalize_email_text
 from utils.log_util import logger
 
@@ -43,10 +44,14 @@ class TicketExternalSyncRequestService:
                 data,
                 "customerPriority",
                 "customer_priority",
-                default=internal_priority,
+                default="",
             )
             or ""
         ).strip()
+        customer_priority, internal_priority = complete_ticket_priority_pair(
+            customer_priority,
+            internal_priority,
+        )
         ticket_vender = str(compatible_field_value(data, "ticketVender", "ticket_vender", default="") or "").strip()
         ticket_modle = str(compatible_field_value(data, "ticketModle", "ticket_modle", default="") or "").strip()
         create_time = compatible_field_value(data, "createTime", "create_time")
@@ -159,6 +164,8 @@ class TicketExternalSyncRequestService:
             "reporterEmail": reporter_email,
             "ticketPos": str(compatible_field_value(data, "ticketPos", "ticket_pos", default="") or "").strip(),
             "ticketSco": str(compatible_field_value(data, "ticketSco", "ticket_sco", default="") or "").strip(),
+            "customerPriority": customer_priority,
+            "internalPriority": internal_priority,
             "stepReason": step_reason,
         }
         external_field_mapping = {
@@ -185,7 +192,7 @@ class TicketExternalSyncRequestService:
         data["ticketNo"] = ticket_no
         data["description"] = description
         data["internalPriority"] = internal_priority
-        data["customerPriority"] = customer_priority or internal_priority
+        data["customerPriority"] = customer_priority
         data["ticketVender"] = ticket_vender
         data["ticketModle"] = ticket_modle
         data["createTime"] = create_time

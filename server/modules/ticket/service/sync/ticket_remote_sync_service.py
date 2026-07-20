@@ -10,6 +10,7 @@ from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel, Ti
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
+from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
 from utils.log_util import logger
 
 
@@ -222,6 +223,25 @@ class TicketRemoteSyncService:
             or external_field_mapping.get("stepReason")
             or ""
         ).strip()
+        customer_priority, internal_priority = complete_ticket_priority_pair(
+            (
+                item.get("customerPriority")
+                or item.get("customer_priority")
+                or external_field_mapping.get("customerPriority")
+            ),
+            (
+                item.get("internalPriority")
+                or item.get("internal_priority")
+                or external_field_mapping.get("internalPriority")
+            ),
+        )
+        if customer_priority or internal_priority:
+            updated_external_mapping = dict(external_field_mapping)
+            if customer_priority:
+                updated_external_mapping["customerPriority"] = customer_priority
+            if internal_priority:
+                updated_external_mapping["internalPriority"] = internal_priority
+            sync_extra_data["external_field_mapping"] = updated_external_mapping
         sync_payload = {
             "source": source_payload,
             "syncConsumer": str(remote_sync.get("consumer") or "").strip() or None,
@@ -247,8 +267,8 @@ class TicketRemoteSyncService:
             "solutionType": item.get("solutionType") or item.get("solution_type") or "",
             "resolutionCode": item.get("resolutionCode") or item.get("resolution_code") or "",
             "resolutionName": item.get("resolutionName") or item.get("resolution_name") or "",
-            "customerPriority": item.get("customerPriority") or item.get("customer_priority") or "P3",
-            "internalPriority": item.get("internalPriority") or item.get("internal_priority") or "P3",
+            "customerPriority": customer_priority,
+            "internalPriority": internal_priority,
             "severity": item.get("severity") or "",
             "reporterId": item.get("reporterId") or item.get("reporter_id"),
             "reporterName": item.get("reporterName") or item.get("reporter_name") or "",

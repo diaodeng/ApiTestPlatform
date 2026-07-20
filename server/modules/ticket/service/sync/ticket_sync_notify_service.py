@@ -1049,6 +1049,8 @@ class TicketSyncNotifyService:
                 internal_owner_open_id = open_id
         if not first_line_open_id:
             first_line_open_id = reporter_open_id
+        if not assignee_open_id:
+            assignee_open_id = internal_owner_open_id
         reporter_at = cls._build_feishu_at_tags([reporter_open_id]) if reporter_open_id else ""
         first_line_at = cls._build_feishu_at_tags([first_line_open_id]) if first_line_open_id else ""
         assignee_at = cls._build_feishu_at_tags([assignee_open_id]) if assignee_open_id else ""
@@ -1060,6 +1062,7 @@ class TicketSyncNotifyService:
             "first_line_at": first_line_at,
             "first_line_assignee_at": first_line_at,
             "assignee_at": assignee_at,
+            "current_assignee_at": assignee_at,
             "internal_owner_at": internal_owner_at,
             "mention_at": mention_at,
             "mention_all_at": mention_at,
@@ -2522,6 +2525,8 @@ class TicketSyncNotifyService:
         reporter_name = str(ticket.reporter_name or "").strip()
         first_line_assignee_name = str(getattr(ticket, "first_line_assignee_name", "") or "").strip()
         internal_owner_name = str(getattr(ticket, "internal_owner_name", "") or "").strip()
+        current_assignee_name = str(getattr(ticket, "current_assignee_name", "") or "").strip()
+        display_assignee_name = current_assignee_name or internal_owner_name
         return {
             "ticket_id": ticket.ticket_id,
             "ticket_no": ticket.ticket_no or "-",
@@ -2533,8 +2538,11 @@ class TicketSyncNotifyService:
             "reporterName": reporter_name or "-",
             "first_line_assignee_name": first_line_assignee_name or "-",
             "firstLineAssigneeName": first_line_assignee_name or "-",
-            "assignee_name": ticket.current_assignee_name or "-",
-            "currentAssigneeName": ticket.current_assignee_name or "-",
+            "assignee_name": display_assignee_name or "-",
+            "current_assignee_name": display_assignee_name or "-",
+            "currentAssigneeName": display_assignee_name or "-",
+            "raw_assignee_name": current_assignee_name or "-",
+            "rawCurrentAssigneeName": current_assignee_name or "-",
             "internal_owner_name": internal_owner_name or "-",
             "internalOwnerName": internal_owner_name or "-",
             "customer_priority": ticket.customer_priority or "-",

@@ -23,6 +23,7 @@ from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import user_id as _user_id
 from modules.ticket.util.ticket_common_util import user_name as _user_name
+from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
 
 
 class TicketSyncPayloadService:
@@ -217,12 +218,16 @@ class TicketSyncPayloadService:
         resolved_assignee_id = SyncUtil.safe_int((detected or {}).get("assigneeId"))
         resolved_assignee_name = str((detected or {}).get("assigneeName") or "").strip()
         sync_is_problem = getattr(sync_object, "is_problem", None)
+        customer_priority, internal_priority = complete_ticket_priority_pair(
+            getattr(sync_object, "customer_priority", None),
+            getattr(sync_object, "internal_priority", None),
+        )
         payload: dict[str, Any] = {
             "ticket_no": sync_object.ticket_no,
             "title": sync_object.title,
             "description": sync_object.description,
-            "customer_priority": sync_object.customer_priority or (ticket.customer_priority if ticket else "P3"),
-            "internal_priority": sync_object.internal_priority or (ticket.internal_priority if ticket else "P3"),
+            "customer_priority": customer_priority or (ticket.customer_priority if ticket else "P3"),
+            "internal_priority": internal_priority or (ticket.internal_priority if ticket else "P3"),
             "severity": sync_object.severity or (ticket.severity if ticket else ""),
             "source": cls.SOURCE_CODE,
             "issue_type_id": getattr(sync_object, "issue_type_id", None) or (ticket.issue_type_id if ticket else ""),

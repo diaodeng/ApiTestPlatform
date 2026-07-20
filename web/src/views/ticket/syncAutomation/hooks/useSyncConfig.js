@@ -72,6 +72,7 @@ export function useSyncConfig(proxy) {
   const externalSyncRequiredFieldOptions = [
     { label: 'ticketNo - 工单号', value: 'ticketNo' },
     { label: 'description - 问题描述', value: 'description' },
+    { label: 'customerPriority - 对方优先级', value: 'customerPriority' },
     { label: 'internalPriority - 内部优先级', value: 'internalPriority' },
     { label: 'ticketVender - 商家/供应商', value: 'ticketVender' },
     { label: 'ticketModle - 模块', value: 'ticketModle' },

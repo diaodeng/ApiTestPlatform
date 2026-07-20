@@ -20,7 +20,7 @@ entry_points:
     path: im.message.receive_v1
     trigger: 飞书官方 SDK 长连接接收群消息事件
 created: 2026-05-31
-updated: 2026-07-04
+updated: 2026-07-21
 ---
 
 # 工单外部同步与内网拉取流程
@@ -77,7 +77,8 @@ sequenceDiagram
 | 5.1.7 | 主动拉取字段映射目标字段会将 `moduleName/module_name/ticketModel/ticket_model` 归一为 `ticketModle`，避免模块别名配置被外部同步必填校验误判为缺失。 |
 | 5.1.8 | 主动拉取支持 `forceSync/force_sync`，开启后绕过本地 `recordId + snapshotHash` 跳过逻辑，重新执行入库与延后后处理；该参数不改变飞书查询范围，历史记录仍需通过 `createdAfter/filterFormula/viewId` 查到。 |
 | 5.1.9 | 主动拉取映射出的 `ticketVender/ticketModle/internalOwner` 会保存到 `extraData.external_field_mapping`，并同步为 `projectName/moduleName/internalOwnerName` 给入库识别使用；主动拉取 `automation.autoTranslate` 优先于全局 `autoTranslateOnSync`。 |
-| 5.1.10 | 主动拉取转换模型时会执行专用字段兜底：`internalPriority` 为空且 `customerPriority` 有值时使用对方优先级补齐内部优先级；`ticketAssigneeName/assigneeName` 等别名会归一为当前处理人，并写入顶层模型和 `extraData.external_field_mapping`。该逻辑只作用于主动拉取，不改变外部推送入口。 |
+| 5.1.10 | 主动拉取转换模型时会执行专用字段兜底：`ticketAssigneeName/assigneeName` 等别名会归一为当前处理人，并写入顶层模型和 `extraData.external_field_mapping`；优先级补齐规则已收敛为外部推送、主动拉取和远端拉取共用能力。 |
+| 5.1.10.1 | 2026-07-21 起，外部推送、主动拉取和远端拉取统一使用优先级成对补齐规则：`Level 0/Level A/Level B/Level C/Level D` 分别转换为 `P0/P1/P2/P3/P4`；只有一侧为空时补齐缺失侧，双方都有值时各自保留。 |
 | 5.1.11 | 主动拉取记录级必填校验直接使用“外部工单字段模型”中 `required=true` 的字段；字段不全时 `_build_bitable_pull_sync_object` 返回空，任务汇总计入 `failedCount`，不会进入 `sync_external_ticket`，因此不会入库或自动发群消息。 |
 | 5.1.12 | 主动拉取识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `"\n"` 为真实换行；空文本片段自然忽略，不再把换行或空片段 JSON 化为普通文本，保证描述格式和 `stepReason` 评论日期行分割不丢失。 |
 | 6 | 内网消费方调用 `GET /ticket/sync/pending` 时，控制器直接调用 `TicketSyncDeliveryService.pull_pending_tickets`，优先拿到 `external_sync.revision > consumers.{consumer}.delivered_revision` 且 `publish_ready=true` 的工单；若候选工单卡在 `processing_ai` 但没有活动 AI 任务，会先自动恢复发布状态再返回。 |

@@ -13,6 +13,7 @@ from modules.ticket.service.sync.ticket_sync_post_process_service import TicketS
 from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
+from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
 from utils.log_util import logger
 
 
@@ -433,10 +434,14 @@ class TicketBitablePullService:
         if not payload:
             return None
         # 主动拉取不经过外部推送 controller 的兼容层，这里补齐同等字段语义，避免优先级和人员字段丢失。
-        if payload.get("internalPriority") in (None, "", []) and payload.get("customerPriority") not in (None, "", []):
-            payload["internalPriority"] = payload.get("customerPriority")
-        if payload.get("customerPriority") in (None, "", []) and payload.get("internalPriority") not in (None, "", []):
-            payload["customerPriority"] = payload.get("internalPriority")
+        customer_priority, internal_priority = complete_ticket_priority_pair(
+            payload.get("customerPriority"),
+            payload.get("internalPriority"),
+        )
+        if customer_priority:
+            payload["customerPriority"] = customer_priority
+        if internal_priority:
+            payload["internalPriority"] = internal_priority
         if payload.get("currentAssigneeName") in (None, "", []) and payload.get("ticketAssignee") not in (None, "", []):
             payload["currentAssigneeName"] = payload.get("ticketAssignee")
         if (

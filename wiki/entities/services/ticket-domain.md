@@ -6,7 +6,7 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-20
+freshness: 2026-07-21
 created: 2026-05-20
 updated: 2026-07-20
 related_files:
@@ -167,7 +167,8 @@ graph TD
 - 主动拉取新增 `forceSync` 运行参数和页面开关；开启后只绕过本地快照去重，是否拉到历史远端数据仍取决于 `createdAfter/filterFormula/viewId`。任务参数兼容 `forceSync` 和 `force_sync`。
 - 主动拉取会把映射后的 `ticketVender/ticketModle/internalOwner` 写入 `extra_data.external_field_mapping`，并同步到 `projectName/moduleName/internalOwnerName`，避免 Pydantic 模型丢弃外部字段后导致项目、模块、内部负责人为空。
 - 外部推送 `/ticket/sync/external` 的 JSON/表单读取、必填校验、人员字段拆分、`extra_data.external_field_mapping` 和 `raw_payload` 构造由 `TicketExternalSyncRequestService` 承接；控制器只做协议、鉴权、配置读取、模型校验和响应转换。
-- 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：内部优先级为空时使用对方优先级，当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；外部推送 `/ticket/sync/external` 归一化规则由 `TicketExternalSyncRequestService` 维护。
+- 主动拉取不经过外部推送 controller 的入参归一化，因此 `_build_bitable_pull_sync_object` 内会补齐主动拉取专用兼容：当前处理人字段兼容 `ticketAssigneeName/assigneeName` 等别名，并同步写入顶层模型和 `extra_data.external_field_mapping`；优先级补齐已下沉到 `ticket_priority_util.complete_ticket_priority_pair`，由外部推送、主动拉取、远端拉取和入库 payload 构造共用。
+- 2026-07-21 起，外部推送、主动拉取和远端拉取统一执行优先级成对补齐：`Level 0/Level A/Level B/Level C/Level D` 对应 `P0/P1/P2/P3/P4`；只有外部优先级时补内部优先级，只有内部优先级时补外部优先级，双方都有值时不互相覆盖。群消息模板变量中当前处理人为空时，`${assignee_name}`、`${currentAssigneeName}` 和 `${assignee_at}` 会回退到内部负责人。
 - 主动拉取必填校验直接读取 `externalFieldModel.fields[].required`，不再优先使用历史兼容字段 `externalSyncRequiredFields`；缺少必填字段的记录只计入失败汇总和 `missing_required_fields` 日志，不调用入库，也不会触发延后后处理或自动群消息。
 - 主动拉取会识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `\n` 为真实换行；空文本片段不会被 JSON 化，避免描述内容挤在一起，也保证 `stepReason` 仍可按日期行拆分同步评论。
 - 飞书话题评论入站同步会使用 `sender.open_id` 查询飞书通讯录用户详情，工单评论 `user_name` 和多维表格排查过程 `{user}` 都写入解析后的用户名；飞书凭证缺失或查询失败时才回退事件自带名称或 ID。
