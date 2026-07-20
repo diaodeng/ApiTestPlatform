@@ -1,3 +1,9 @@
+## 2026-07-20
+
+1. 工单列表新增“影响版本”列，默认列配置和列设置里都可按需显示或隐藏。
+2. 列表返回装饰逻辑不再把 `affectedVersion` 强制覆盖成历史 `versionKey`，避免把主表发生版本和兼容字段混在一起。
+3. 新增说明文档：`web/public/docs/2026-07-20-ticket-list-affected-version-column.md`。
+
 ## 2026-07-17
 
 1. 修复工单编辑页缺失 `tagText` 响应式变量导致点击编辑按钮时报错的问题，打开编辑弹窗时不再触发 `Unhandled error during execution of native event handler`。

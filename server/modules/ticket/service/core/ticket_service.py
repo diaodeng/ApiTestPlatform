@@ -571,7 +571,7 @@ class TicketService:
     @classmethod
     def _decorate_ticket_item(cls, item: dict[str, Any]) -> dict[str, Any]:
         """
-        为工单返回结果补充项目名称兼容字段。
+        为工单返回结果补充项目名称、版本兼容字段和详情链接兜底。
         :param item: 工单字典
         :return: 补充后的工单字典
         """
@@ -581,12 +581,17 @@ class TicketService:
             item["merchantName"] = project_name
         extra_data = item.get("extraData")
         sync_summary = _extract_ticket_sync_summary(extra_data)
-        item["versionKey"] = (
-            normalize_ticket_version_key(item.get("versionKey"))
-            or normalize_ticket_version_key(item.get("affectedVersion"))
+        affected_version = (
+            normalize_ticket_version_key(item.get("affectedVersion"))
             or _extract_ticket_version_key(extra_data)
+            or normalize_ticket_version_key(item.get("versionKey"))
         )
-        item["affectedVersion"] = item["versionKey"]
+        version_key = (
+            normalize_ticket_version_key(item.get("versionKey"))
+            or affected_version
+        )
+        item["affectedVersion"] = affected_version or version_key
+        item["versionKey"] = version_key or item["affectedVersion"]
         if not str(item.get("ticketUrl") or "").strip() and isinstance(sync_summary, dict):
             item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
         if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):

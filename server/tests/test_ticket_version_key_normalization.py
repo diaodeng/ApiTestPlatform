@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key, resolve_ticket_current_version_key
 
@@ -77,3 +78,19 @@ def test_post_download_extract_ignores_plain_version_label(tmp_path):
     log_file.write_text("version: version\napp version: 3.4.5\n", encoding="utf-8")
 
     assert TicketLogPostProcessService.extract_version_key_from_files([log_file]) == "3.4.5"
+
+
+def test_ticket_decorate_preserves_affected_version_field():
+    """工单列表装饰时应保留主表发生版本，不再被历史 versionKey 覆盖。"""
+    item = {
+        "projectName": "",
+        "merchantName": "",
+        "versionKey": "1.0.0",
+        "affectedVersion": "2.0.0",
+        "extraData": {},
+    }
+
+    TicketService._decorate_ticket_item(item)
+
+    assert item["affectedVersion"] == "2.0.0"
+    assert item["versionKey"] == "1.0.0"

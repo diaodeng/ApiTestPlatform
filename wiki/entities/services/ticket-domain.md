@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-17
+freshness: 2026-07-20
 created: 2026-05-20
-updated: 2026-07-17
+updated: 2026-07-20
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -123,6 +123,7 @@ graph TD
 - 同一方案确认保留当前 `resolved_at` 终态写入逻辑，但语义明确为“工单处置完成时间”，不是只代表真实 Bug 修复完成；真实 Bug 修复统计应结合 `is_problem`、`solution_type`、`resolution_code`、`fixed_version`、`released_at` 和 `verified_at`。
 - 版本治理字段已从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，也是 bug 首发版本/提单版本的权威字段；`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`versionKey/extra_data.version_key` 仅作为历史接口、旧数据和 AI 仓库映射兜底兼容。
 - 2026-07-17 起，版本号读取和提取统一经过 `ticket_common_util.normalize_ticket_version_key`，会过滤 `version`、`版本号`、`appVersion` 等字段名误识别结果；详情返回会由有效发生版本派生 `affectedVersion/versionKey`。日志下载完成后自动提取版本号前先检查 `affected_version` 和兼容字段，已有有效版本时不再扫描日志，提取成功后写入 `affected_version` 并暂时同步 `extra_data.version_key` 兼容历史链路。
+- 2026-07-20 起，工单列表新增“影响版本”列，直接展示 `affected_version/affectedVersion` 并允许在列设置中按用户控制显隐；列表装饰层不再把 `affectedVersion` 强制覆盖成历史 `versionKey`，避免主表发现问题版本和兼容字段混用。
 - 2026-07-11 版本治理剩余能力已落地：`TicketReleaseService` 承接 `POST /ticket/release/batch` 和 `GET /ticket/release/statistics`，批量维护只更新版本治理字段并写 `DEPLOYED/VERIFIED` 事件；版本统计读取 `ticket` 当前态，按发生版本和修复/发版版本实时聚合。本轮不新增版本维度快照表，正式周报场景后续再新增 `ticket_version_statistics_daily`。
 - 处理统计已下沉到 `service/stats/TicketProcessingStatsService`，控制器 `/ticket/statistics/overview` 和 `/ticket/statistics/trend` 直接调用该服务；DAO 层仅通过 `TicketProcessingStatsDao` 提供范围查询，不在 `TicketService` 中继续增加统计门面。
 - 工单统计页趋势必须保留原有整体趋势、问题性质趋势、Top模块趋势和Top细分问题趋势；新增处理口径时只增加独立“处理率与存量趋势”图，`TicketProcessingStatsService.get_statistics_trend` 需要合并 `TicketDao.get_statistics_trend` 的旧趋势字段和新增处理字段，不能用处理口径结果覆盖旧曲线数据。历史用户的 `ticket_statistics_blocks.visibleTrendBlocks` 缺少 `processingTrend` 时，前端按 `configVersion` 自动补齐一次，之后保存为新版配置并尊重用户手动隐藏选择。

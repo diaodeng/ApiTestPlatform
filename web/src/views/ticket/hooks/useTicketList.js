@@ -69,6 +69,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     { key: 'submitTime', label: '工单提交时间' },
     { key: 'firstResponseAt', label: '首次响应时间' },
     { key: 'processedAt', label: '处理完成时间' },
+    { key: 'affectedVersion', label: '影响版本' },
     { key: 'plannedFixVersion', label: '计划修复版本' },
     { key: 'fixedVersion', label: '实际修复版本' },
     { key: 'releasedVersion', label: '实际发版版本' },

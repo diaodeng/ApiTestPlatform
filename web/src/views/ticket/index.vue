@@ -735,6 +735,16 @@
           <template #default="scope">{{ parseTime(scope.row.processedAt) }}</template>
         </el-table-column>
         <el-table-column
+          v-if="isTicketColumnVisible('affectedVersion')"
+          label="影响版本"
+          prop="affectedVersion"
+          width="140"
+          sortable="custom"
+          show-overflow-tooltip
+        >
+          <template #default="scope">{{ scope.row.affectedVersion || '-' }}</template>
+        </el-table-column>
+        <el-table-column
           v-if="isTicketColumnVisible('plannedFixVersion')"
           label="计划修复版本"
           prop="plannedFixVersion"
