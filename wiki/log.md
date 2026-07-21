@@ -1499,3 +1499,12 @@ updated: 2026-07-21
 - 创建的双向链接：0 对
 - 变更传播链：`TicketBitablePullService.build_bitable_pull_sync_object` -> 主动拉取人员字段映射日志；`TicketSyncNotifyService._resolve_ticket_person_email` -> 群推送邮箱来源日志；`TicketSyncNotifyService._resolve_group_mention_open_ids` -> 飞书用户名错配告警。
 - 总共涉及页面：2
+
+## [2026-07-21] INGEST-CODE | 新版客户端 POS 启动日志与任务生命周期保护
+- 触发：启动 POS 后客户端 Python 进程在 `Qt6Core.dll` 发生访问违规，但独立启动的 POS 继续运行。
+- 架构层：新版 PySide6 客户端 / POS 启动 / 本地日志查看
+- 创建的页面：`web/public/docs/2026-07-21-client-pos-start-qt-crash-guard.md`
+- 更新的页面：无
+- 创建的双向链接：0 对
+- 变更传播链：`pos_init` 响应 -> 安全日志摘要；`_FileTailThread` -> 超长单行截断 -> `QTextEdit`；`PosController.start_pos` -> Worker 强引用 -> 成功或失败信号后释放。
+- 总共涉及页面：1

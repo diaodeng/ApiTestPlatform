@@ -98,8 +98,22 @@ class PosController(QObject):
             return pid
 
         worker = Worker(run)
-        worker.signals.finished.connect(lambda pid: self._on_start_finished(path, pid))
-        worker.signals.error.connect(self._on_error)
+        self._track_worker(worker)
+
+        def finished(pid):
+            try:
+                self._on_start_finished(path, pid)
+            finally:
+                self._release_worker(worker)
+
+        def on_error(err):
+            try:
+                self._on_error(err)
+            finally:
+                self._release_worker(worker)
+
+        worker.signals.finished.connect(finished)
+        worker.signals.error.connect(on_error)
         self.pool.start(worker)
 
     def _on_start_finished(self, path, pid):
