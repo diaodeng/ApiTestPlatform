@@ -111,7 +111,7 @@ erDiagram
 - `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。
 - `ticket.logPull.storage` 除保存归档目录、FTP、轮询和下载配置外，还保存日志查看运行保护阈值：`maxContentChars` 控制入库文本字符数，`maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes` 控制日志查看准备解压，`maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes` 控制日志搜索和 Python 降级扫描。
 - 日志上下文行索引会记录文件编码；上下文读取前会重新探测文件编码，若与索引缓存不一致则重建索引，确保搜索结果和详情区对 UTF-8、GB18030 等中文日志使用一致解码。
-- `TicketLogSearchRequestModel` 支持 `keywords` 与 `searchMode`，并继续兼容旧 `keyword`；模型会去重、截断最多 10 个关键字，每个关键字最多 200 字符。`TicketLogSearchHitModel` 增加 `matchedKeywords`，标识当前命中行包含哪些搜索关键字。
+- `TicketLogSearchRequestModel` 支持 `keywords` 与 `searchMode`，并继续兼容旧 `keyword`；模型会去重、截断最多 10 个关键字，每个关键字最多 200 字符。`TicketLogSearchHitModel` 增加 `matchedKeywords`，标识当前命中行包含哪些搜索关键字；`/ticket/logs/search` 的 `content` 默认只返回行首 500 个字符，并通过 `contentLength/contentTruncated` 说明原始长度和截断状态，完整内容仍从上下文接口按文件和行号读取。
 - `TicketLogPullRecord.command_content` 会携带内部 `_automation` 扩展字段，用于记录日志拉取成功后是否自动触发 AI 以及目标 Agent 编码，外部提交前会自动剥离。
 - `TicketLogPullRecord.command_content` 还可携带 `notifyConfig`，用于在日志拉取成功、版本号提取失败或 AI 分析结束时继续沿用同一套通知配置。
 - `TicketAiRepoMapping` 记录项目、版本、仓库地址、分支、本地仓库路径和工作区根目录的兼容映射，用于历史任务审计和兜底；当前 AI Worker 执行时优先读取 Agent 本地配置中的仓库路径和工作区根目录。

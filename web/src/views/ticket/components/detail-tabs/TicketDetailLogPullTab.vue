@@ -764,7 +764,11 @@
         >
           <el-table-column label="文件" prop="file" min-width="100" show-overflow-tooltip />
           <el-table-column label="行号" prop="line" width="90" />
-          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip />
+          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip>
+            <template #default="scope">
+              {{ scope.row.content }}<span v-if="scope.row.contentTruncated">...</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="130" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click.stop="searchLogViewerInFile(scope.row.file)"

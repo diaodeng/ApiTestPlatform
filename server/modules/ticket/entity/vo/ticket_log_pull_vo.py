@@ -464,7 +464,9 @@ class TicketLogSearchHitModel(TicketLogPullBaseModel):
 
     file: str = Field(description="相对日志文件路径")
     line: int = Field(description="命中行号")
-    content: str = Field(default="", description="命中行内容")
+    content: str = Field(default="", description="命中行内容；搜索接口返回时最多保留行首 500 个字符")
+    content_length: int = Field(default=0, description="命中行原始字符数")
+    content_truncated: bool = Field(default=False, description="搜索接口中的命中行内容是否已截断")
     matched_keywords: list[str] = Field(default_factory=list, description="当前命中行匹配到的关键字")
     context: TicketLogContextModel | None = Field(default=None, description="命中上下文")
 
