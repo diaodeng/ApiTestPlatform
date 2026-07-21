@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bz2
+import codecs
 import gzip
 import json
 import lzma
@@ -1465,6 +1466,7 @@ class LogService:
         """
         index_path = cls._line_index_path(path)
         stat = path.stat()
+        detected_encoding = cls._detect_file_encoding(path)
         if index_path.exists():
             try:
                 with index_path.open("r", encoding="utf-8") as file_obj:
@@ -1473,13 +1475,19 @@ class LogService:
                     meta.get("size") == stat.st_size
                     and meta.get("mtime_ns") == stat.st_mtime_ns
                     and meta.get("encoding_version") == cls.LINE_INDEX_ENCODING_VERSION
+                    and meta.get("encoding") == detected_encoding
                 ):
                     return meta
+                if meta.get("encoding") != detected_encoding:
+                    logger.info(
+                        f"日志行索引编码与当前文件不一致，将重建索引，path={path}，"
+                        f"cached_encoding={meta.get('encoding')}，detected_encoding={detected_encoding}"
+                    )
             except Exception as exc:
                 logger.warning(f"读取日志行索引失败，将重建索引，path={path}，reason={exc}")
 
         logger.info(f"开始构建日志行索引，path={path}，size={stat.st_size}")
-        encoding = cls._detect_file_encoding(path)
+        encoding = detected_encoding
         line_count = 0
         index_path.parent.mkdir(parents=True, exist_ok=True)
         temp_index_path = index_path.with_name(f"{index_path.name}.tmp")
@@ -1614,16 +1622,23 @@ class LogService:
         """
         if end < start:
             return []
-        count = end - start + 1
         if os.name == "nt":
             executable = shutil.which("powershell") or shutil.which("powershell.exe")
             if not executable:
                 raise RuntimeError("未找到 PowerShell")
             escaped_path = str(path).replace("'", "''")
+            escaped_encoding = cls._detect_file_encoding(path).replace("'", "''")
             powershell_command = (
-                "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::UTF8;"
-                f"Get-Content -LiteralPath '{escaped_path}' "
-                f"| Select-Object -Skip {start - 1} -First {count}"
+                "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+                "$reader=$null;"
+                "try {"
+                f"$reader=[IO.StreamReader]::new('{escaped_path}',[Text.Encoding]::GetEncoding('{escaped_encoding}'),$true);"
+                f"for($lineNo=1;$lineNo -le {end};$lineNo++){{"
+                "$line=$reader.ReadLine();"
+                "if($null -eq $line){break};"
+                f"if($lineNo -ge {start}){{[Console]::Out.WriteLine($line)}}"
+                "}"
+                "} finally {if($null -ne $reader){$reader.Dispose()}}"
             )
             command = [
                 executable,
@@ -1722,13 +1737,13 @@ class LogService:
         if sample.startswith(b"\xef\xbb\xbf"):
             return "utf-8-sig"
         try:
-            sample.decode("utf-8")
+            codecs.getincrementaldecoder("utf-8")("strict").decode(sample, final=False)
             return "utf-8"
         except UnicodeDecodeError:
             pass
         for fallback_encoding in ("gb18030", "gbk", "big5"):
             try:
-                sample.decode(fallback_encoding)
+                codecs.getincrementaldecoder(fallback_encoding)("strict").decode(sample, final=False)
                 return fallback_encoding
             except UnicodeDecodeError:
                 continue
