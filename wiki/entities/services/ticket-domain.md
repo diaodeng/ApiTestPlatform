@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-21
 created: 2026-05-20
-updated: 2026-07-20
+updated: 2026-07-21
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -226,6 +226,7 @@ graph TD
 - 日志搜索不再一次性对整个目录执行 `rg` 并收集全部输出，而是按文件执行、按剩余命中上限截断，并由 `maxSearchSeconds` 控制总耗时；非 ASCII 关键字或无 `rg` 环境下的 Python 降级搜索会受 `maxPythonSearchBytes` 限制。
 - 日志搜索接口支持 `keywords/searchMode` 多关键字契约，`searchMode=any` 表示同一行任一关键字命中，`searchMode=all` 表示同一行必须包含全部关键字；响应命中项返回 `matchedKeywords`，旧 `keyword` 入参仍兼容。
 - 工单日志查看器前端支持多关键字输入、多字符串高亮和搜索/上下文面板剩余空间自适应；2026-07-15 起搜索关键字和高亮词均使用文本框输入，多个文本用英文逗号或换行分隔，高亮词输入和上下文行数配置位于日志详情区顶部。
+- 2026-07-21 起，日志搜索详情选区高亮在拆分后的 `TicketDetailLogPullTab.vue` 中恢复 CSS Highlight API 主路径；选中文本会作为临时高亮候选词且保留原生选区复制能力，取消选区时仅移除本次选区临时词。
 - 日志详情顶部的高亮摘要过长时单行省略，不再换行挤压清除高亮、上一段、下一段等操作；工单详情和日志拉取记录页的日志拉取表格常显横向滚动条，并移除固定操作列，减少横向拖动时的布局干扰。
 - 日志内容查看默认不换行，可通过开关切换换行显示。
 - 新增工单时可勾选自动拉日志和日志后自动 AI 分析，日志拉取配置与 Agent 编码会跟随工单/日志记录一起保存。

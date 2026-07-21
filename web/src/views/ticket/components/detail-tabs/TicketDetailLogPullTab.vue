@@ -1,5 +1,5 @@
 <script setup name="TicketDetailLogPullTab">
-  import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+  import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue';
   import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue';
   import { getTicket } from '@/api/ticket/ticket';
@@ -164,6 +164,8 @@
   };
   const logPullStoreOptions = computed(() => getVendorStoreOptions(logPullForm.value.vendorId));
   const logViewerContextBlockRef = ref(null);
+  const logViewerHighlightName = 'ticket-log-context-highlight';
+  const logViewerNativeHighlightSupported = computed(() => supportsNativeLogViewerHighlight());
   const logViewerFileOptions = computed(() => {
     const files = new Set();
     logViewerHits.value.forEach((item) => {
@@ -181,7 +183,7 @@
       line: item.line,
       paddedLine: `${String(item.line).padStart(6, ' ')}  `,
       content: item.content || '',
-      parts: splitLogViewerHighlightParts(item.content || ''),
+      parts: logViewerNativeHighlightSupported.value ? [] : splitLogViewerHighlightParts(item.content || ''),
     }));
   });
   const logViewerResultTableHeight = computed(() =>
@@ -211,6 +213,90 @@
     const resolvedVendorId = Number(vendorNo);
     logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId;
     resetStoreSelection(logPullForm.value, logPullForm.value.vendorId);
+  }
+
+  /**
+   * 判断当前浏览器是否支持 CSS Highlight API。
+   * @returns {boolean} 支持时返回 true。
+   */
+  function supportsNativeLogViewerHighlight() {
+    return Boolean(
+      window.CSS?.highlights &&
+        typeof window.Highlight === 'function' &&
+        typeof window.Range === 'function'
+    );
+  }
+
+  /**
+   * 清理日志上下文区域注册到浏览器的原生高亮。
+   * @returns {void}
+   */
+  function clearNativeLogViewerHighlights() {
+    if (!supportsNativeLogViewerHighlight()) return;
+    window.CSS.highlights.delete(logViewerHighlightName);
+  }
+
+  /**
+   * 为一个文本节点生成不重叠的关键字高亮 Range。
+   * @param {Text} textNode 文本节点。
+   * @param {string[]} keywords 已按长度降序排列的高亮词。
+   * @returns {Range[]} 当前文本节点中的高亮范围。
+   */
+  function buildLogViewerHighlightRanges(textNode, keywords) {
+    const text = textNode.textContent || '';
+    const ranges = [];
+    let cursor = 0;
+    while (cursor < text.length) {
+      let nextMatch = null;
+      keywords.forEach((keyword) => {
+        const index = text.indexOf(keyword, cursor);
+        if (index < 0) return;
+        if (
+          !nextMatch ||
+          index < nextMatch.index ||
+          (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
+        ) {
+          nextMatch = { index, keyword };
+        }
+      });
+      if (!nextMatch) break;
+      const range = new window.Range();
+      range.setStart(textNode, nextMatch.index);
+      range.setEnd(textNode, nextMatch.index + nextMatch.keyword.length);
+      ranges.push(range);
+      cursor = nextMatch.index + nextMatch.keyword.length;
+    }
+    return ranges;
+  }
+
+  /**
+   * 使用 CSS Highlight API 给当前日志上下文做非侵入高亮，避免重建日志文本 DOM。
+   * @returns {void}
+   */
+  function refreshNativeLogViewerHighlights() {
+    if (!supportsNativeLogViewerHighlight()) return;
+    const block = logViewerContextBlockRef.value;
+    const keywords = Array.from(new Set(logViewerHighlightKeywords.value || []))
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .sort((left, right) => right.length - left.length);
+    if (!block || !keywords.length || logViewerContextViewMode.value === 'minimized') {
+      clearNativeLogViewerHighlights();
+      return;
+    }
+    const ranges = [];
+    block.querySelectorAll('.log-context-line-content').forEach((contentNode) => {
+      contentNode.childNodes.forEach((node) => {
+        if (node.nodeType === window.Node.TEXT_NODE) {
+          ranges.push(...buildLogViewerHighlightRanges(node, keywords));
+        }
+      });
+    });
+    if (!ranges.length) {
+      clearNativeLogViewerHighlights();
+      return;
+    }
+    window.CSS.highlights.set(logViewerHighlightName, new window.Highlight(...ranges));
   }
 
   /**
@@ -337,8 +423,17 @@
         stopLogPullAutoRefresh();
         logPullContentOpen.value = false;
         logPullSubmitOpen.value = false;
+        clearNativeLogViewerHighlights();
       }
     }
+  );
+
+  watch(
+    [logViewerContext, logViewerHighlightKeywords, logViewerContextViewMode],
+    () => {
+      nextTick(() => refreshNativeLogViewerHighlights());
+    },
+    { deep: true }
   );
 
   onMounted(() => {
@@ -347,6 +442,7 @@
 
   onBeforeUnmount(() => {
     document.removeEventListener('selectionchange', handleLogViewerDocumentSelectionChange);
+    clearNativeLogViewerHighlights();
     stopLogPullAutoRefresh();
   });
 
@@ -706,7 +802,7 @@
               v-model="logViewerHighlightText"
               class="log-highlight-input"
               type="textarea"
-              :autosize="{ minRows: 1, maxRows: 2 }"
+              :rows="1"
               clearable
               placeholder="输入高亮文本，多个用英文逗号或换行分隔"
               @input="updateLogViewerHighlightKeywords(logViewerHighlightText)"
@@ -950,6 +1046,11 @@
     white-space: inherit;
   }
 
+  :global(::highlight(ticket-log-context-highlight)) {
+    color: #111827;
+    background: #fde047;
+  }
+
   .log-context-highlight {
     padding: 0 1px;
     color: #111827;
@@ -978,5 +1079,14 @@
 
   .log-context-highlight-5 {
     background: #fed7aa;
+  }
+
+  .log-highlight-input :deep(.el-textarea__inner) {
+    height: 32px;
+    min-height: 32px !important;
+    max-height: 32px;
+    overflow: auto;
+    resize: none;
+    white-space: pre;
   }
 </style>

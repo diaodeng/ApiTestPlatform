@@ -3,6 +3,8 @@
 1. 工单外部推送、飞书多维表格主动拉取、远端拉取入库统一补齐外部优先级和内部优先级：`Level 0/A/B/C/D` 分别对应 `P0/P1/P2/P3/P4`，双方都有值时不互相覆盖。
 2. 群消息模板当前处理人变量为空时自动使用内部负责人兜底，`${assignee_name}`、`${currentAssigneeName}` 和 `${assignee_at}` 均可直接复用。
 3. 新增说明文档：`web/public/docs/2026-07-21-ticket-priority-pair-and-assignee-template-fallback.md`。
+4. 修复工单详情页日志搜索详情选中文本不能稳定高亮和复制的问题：日志上下文在支持的浏览器恢复 CSS Highlight API 非侵入高亮，不重建正文 DOM；高亮输入框固定单行高度，多个高亮词不再撑高工具栏。
+5. 新增说明文档：`web/public/docs/2026-07-21-ticket-log-selection-highlight-regression-fix.md`。
 
 ## 2026-07-20
 

@@ -8,6 +8,15 @@ updated: 2026-07-21
 
 # 操作日志
 
+## [2026-07-21] INGEST-CODE | 工单日志选区高亮回归修复
+
+- 触发：用户反馈工单详情页日志搜索详情中，选中文本无法高亮也无法作为候选词复制，要求修复选中即高亮、取消选区移除临时高亮、保留其他高亮词，并分析是否改用编辑器展示日志详情。
+- 架构层：Web 前端 / 工单详情日志拉取 tab / 日志上下文高亮。
+- 创建的页面：`web/public/docs/2026-07-21-ticket-log-selection-highlight-regression-fix.md`
+- 更新的代码：`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`
+- 变更传播链：日志上下文浏览器选区 -> `captureLogViewerHighlight` 写入临时高亮词 -> `TicketDetailLogPullTab.vue` 使用 CSS Highlight API 注册文本节点 `Range` -> 浏览器原生选区保持可复制；不支持 CSS Highlight API 时继续使用 `<mark>` 分片回退。
+- 关键结论：当前日志详情只展示上下文窗口，短期继续使用 `<pre>` 更轻；若未来展示整份大日志再考虑 CodeMirror/Monaco，并需要自定义 gutter 才能保留原始日志行号。
+
 ## [2026-07-21] INGEST-CODE | 工单优先级双向补齐与群模板处理人兜底
 
 - 触发：用户要求外部推送、内网拉取和飞书多维表格主动拉取入库时，外部优先级和内部优先级缺一侧也要同时入库，并要求群消息模板当前处理人为空时可用内部负责人替换。
