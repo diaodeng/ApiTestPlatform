@@ -133,6 +133,25 @@ class TicketSyncNotifyService:
         return bool(cls._email_pattern.match(normalized))
 
     @classmethod
+    def _mask_email_for_log(cls, value: Any) -> str:
+        """
+        脱敏邮箱用于排查日志，避免直接输出完整邮箱。
+        :param value: 原始邮箱值。
+        :return: 脱敏后的邮箱文本。
+        """
+        normalized = cls._normalize_email(value)
+        if "@" not in normalized:
+            return normalized
+        local_part, domain = normalized.split("@", 1)
+        masked_local = f"{local_part[:2]}***{local_part[-1:]}" if len(local_part) > 2 else f"{local_part[:1]}*"
+        if "." in domain:
+            domain_name, suffix = domain.rsplit(".", 1)
+            masked_domain = f"{domain_name[:1]}***.{suffix}"
+        else:
+            masked_domain = f"{domain[:1]}***"
+        return f"{masked_local}@{masked_domain}"
+
+    @classmethod
     def _normalize_send_mode(cls, value: Any) -> str:
         """
         归一化通知发送模式。
@@ -842,6 +861,28 @@ class TicketSyncNotifyService:
         return ""
 
     @classmethod
+    def _extract_email_from_payload_with_source(
+        cls,
+        payload: Any,
+        candidate_keys: list[str],
+    ) -> tuple[str, str]:
+        """
+        从载荷中按候选键提取邮箱，并返回命中的字段名用于日志排查。
+        :param payload: 载荷对象，支持字典。
+        :param candidate_keys: 候选字段名列表。
+        :return: (命中的邮箱, 命中的字段名)，未命中返回空字符串。
+        """
+        if not isinstance(payload, dict):
+            return "", ""
+        for key in candidate_keys:
+            if key not in payload:
+                continue
+            normalized_email = cls._extract_email_from_value(payload.get(key))
+            if cls._is_valid_email(normalized_email):
+                return normalized_email, key
+        return "", ""
+
+    @classmethod
     def _extract_email_from_value(cls, value: Any) -> str:
         """
         从任意人员字段值中提取邮箱。
@@ -938,13 +979,36 @@ class TicketSyncNotifyService:
                 "currentAssignee",
                 "current_assignee",
             ]
-        direct_email = cls._extract_email_from_payload(raw_payload, candidate_keys)
-        if not direct_email:
-            direct_email = cls._extract_email_from_payload(external_mapping, candidate_keys)
+        direct_email, direct_key = cls._extract_email_from_payload_with_source(raw_payload, candidate_keys)
         if direct_email:
+            logger.info(
+                f"群推送人员邮箱解析: ticket_no={ticket.ticket_no}, role={role or '-'}, "
+                f"name={person_name or '-'}, source=raw_payload, key={direct_key or '-'}, "
+                f"email={cls._mask_email_for_log(direct_email)}"
+            )
             return direct_email
+        mapping_email, mapping_key = cls._extract_email_from_payload_with_source(external_mapping, candidate_keys)
+        if mapping_email:
+            logger.info(
+                f"群推送人员邮箱解析: ticket_no={ticket.ticket_no}, role={role or '-'}, "
+                f"name={person_name or '-'}, source=external_field_mapping, key={mapping_key or '-'}, "
+                f"email={cls._mask_email_for_log(mapping_email)}"
+            )
+            return mapping_email
         user = cls._resolve_sys_user_by_name(db, person_name)
-        return cls._normalize_email(getattr(user, "email", "")) if user else ""
+        user_email = cls._normalize_email(getattr(user, "email", "")) if user else ""
+        if user_email:
+            logger.info(
+                f"群推送人员邮箱解析: ticket_no={ticket.ticket_no}, role={role or '-'}, "
+                f"name={person_name or '-'}, source=sys_user_by_name, key=-, "
+                f"email={cls._mask_email_for_log(user_email)}"
+            )
+            return user_email
+        logger.info(
+            f"群推送人员邮箱解析为空: ticket_no={ticket.ticket_no}, role={role or '-'}, "
+            f"name={person_name or '-'}, candidate_keys={candidate_keys}"
+        )
+        return ""
 
     @classmethod
     def _resolve_group_mention_open_ids(
@@ -1005,6 +1069,13 @@ class TicketSyncNotifyService:
                     )
                 feishu_user = feishu_user_cache.get(email) if isinstance(feishu_user_cache.get(email), dict) else None
                 open_id = str((feishu_user or {}).get("openId") or "").strip()
+                feishu_user_name = str((feishu_user or {}).get("name") or "").strip()
+                if open_id and name and feishu_user_name and name.lower() != feishu_user_name.lower():
+                    logger.warning(
+                        f"群推送人员邮箱疑似错配: ticket_no={ticket.ticket_no}, role={role or '-'}, "
+                        f"candidate_name={name}, email={cls._mask_email_for_log(email)}, "
+                        f"feishu_user_name={feishu_user_name}, open_id={open_id}"
+                    )
                 if open_id and open_id not in open_ids:
                     open_ids.append(open_id)
             detail_rows.append(

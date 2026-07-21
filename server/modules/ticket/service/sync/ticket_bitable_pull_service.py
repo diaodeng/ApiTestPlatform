@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -433,6 +434,12 @@ class TicketBitablePullService:
         payload = FeishuBitableUtil.build_pull_field_mapping_from_record(fields, field_mappings=field_mappings)
         if not payload:
             return None
+        cls.log_bitable_pull_person_mapping(
+            record_id=record_id,
+            fields=fields,
+            field_mappings=field_mappings,
+            payload=payload,
+        )
         # 主动拉取不经过外部推送 controller 的兼容层，这里补齐同等字段语义，避免优先级和人员字段丢失。
         customer_priority, internal_priority = complete_ticket_priority_pair(
             payload.get("customerPriority"),
@@ -560,6 +567,62 @@ class TicketBitablePullService:
         except Exception as exc:
             logger.warning(f"飞书多维表格记录转换外部同步模型失败: record_id={record_id or '-'}, error={exc}")
             return None
+
+    @classmethod
+    def log_bitable_pull_person_mapping(
+        cls,
+        *,
+        record_id: str,
+        fields: dict[str, Any],
+        field_mappings: list[dict[str, Any]],
+        payload: dict[str, Any],
+    ) -> None:
+        """
+        输出主动拉取人员字段映射排查日志，帮助定位姓名和邮箱是否来自不同多维字段。
+        :param record_id: 飞书多维表格记录 ID。
+        :param fields: 飞书记录 fields。
+        :param field_mappings: 主动拉取字段映射配置。
+        :param payload: 已转换出的外部同步字段。
+        :return: 无。
+        """
+        person_targets = {
+            "reporterName",
+            "reporterEmail",
+            "currentAssigneeName",
+            "currentAssigneeEmail",
+            "ticketAssignee",
+            "ticketAssigneeEmail",
+            "internalOwner",
+            "internalOwnerEmail",
+        }
+        source_by_target: dict[str, str] = {}
+        for mapping in field_mappings or []:
+            if not isinstance(mapping, dict):
+                continue
+            target_field = FeishuBitableUtil.normalize_pull_target_field(mapping.get("targetField"))
+            source_field = str(mapping.get("sourceField") or "").strip()
+            if target_field in person_targets and source_field:
+                source_by_target[target_field] = source_field
+        if not source_by_target:
+            return
+
+        rows: list[dict[str, Any]] = []
+        for target_field in sorted(source_by_target):
+            source_field = source_by_target[target_field]
+            mapped_value = payload.get(target_field)
+            row = {
+                "targetField": target_field,
+                "sourceField": source_field,
+                "sourceSummary": FeishuBitableUtil.describe_field_value_for_log(fields.get(source_field)),
+                "mappedValue": mapped_value,
+            }
+            if "Email" in target_field:
+                row["mappedValue"] = FeishuBitableUtil.mask_email_for_log(str(mapped_value or ""))
+            rows.append(row)
+        logger.info(
+            f"飞书多维表格主动拉取人员字段映射: record_id={record_id or '-'}, "
+            f"detail={json.dumps(rows, ensure_ascii=False)}"
+        )
 
     @classmethod
     def should_skip_bitable_pull_record(

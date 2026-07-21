@@ -1490,3 +1490,12 @@ updated: 2026-07-21
 - 创建的双向链接：0 对
 - 变更传播链：`TicketLightAiService._normalize_structured_classification_result` -> `ticket.root_cause_type/solution_type` 新数据写编码；`TicketService._build_ticket_list_filter_query` -> `TicketDao.get_ticket_list` 根因分类和解决方式筛选同时匹配编码与历史中文标签。
 - 总共涉及页面：3
+
+## [2026-07-21] INGEST-CODE | 工单群推送一线人员邮箱错配排查日志
+- 触发：用户反馈主动拉取工单群推送中 reporter name 正确但 email 错误，导致飞书 @ 到错误人员；部分工单 email 为空导致无法 @ 一线人员。
+- 架构层：工单域 / 主动拉取 / 群消息推送
+- 创建的页面：`web/public/docs/2026-07-21-ticket-group-mention-email-diagnostic.md`
+- 更新的页面：`flows/ticket-external-sync-flow.md`
+- 创建的双向链接：0 对
+- 变更传播链：`TicketBitablePullService.build_bitable_pull_sync_object` -> 主动拉取人员字段映射日志；`TicketSyncNotifyService._resolve_ticket_person_email` -> 群推送邮箱来源日志；`TicketSyncNotifyService._resolve_group_mention_open_ids` -> 飞书用户名错配告警。
+- 总共涉及页面：2

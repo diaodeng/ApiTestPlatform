@@ -81,6 +81,7 @@ sequenceDiagram
 | 5.1.10.1 | 2026-07-21 起，外部推送、主动拉取和远端拉取统一使用优先级成对补齐规则：`Level 0/Level A/Level B/Level C/Level D` 分别转换为 `P0/P1/P2/P3/P4`；只有一侧为空时补齐缺失侧，双方都有值时各自保留。 |
 | 5.1.11 | 主动拉取记录级必填校验直接使用“外部工单字段模型”中 `required=true` 的字段；字段不全时 `_build_bitable_pull_sync_object` 返回空，任务汇总计入 `failedCount`，不会进入 `sync_external_ticket`，因此不会入库或自动发群消息。 |
 | 5.1.12 | 主动拉取识别飞书长文本富文本片段数组，按片段顺序拼接并保留 `"\n"` 为真实换行；空文本片段自然忽略，不再把换行或空片段 JSON 化为普通文本，保证描述格式和 `stepReason` 评论日期行分割不丢失。 |
+| 5.1.13 | 2026-07-21 起，主动拉取人员字段转换会记录 `飞书多维表格主动拉取人员字段映射` 日志，展示 `reporterName/reporterEmail/currentAssignee/internalOwner` 等目标字段对应的多维源字段和脱敏邮箱；群推送 @ 解析会记录邮箱来源，并在候选姓名与邮箱查询到的飞书用户名不一致时输出 `群推送人员邮箱疑似错配`。 |
 | 6 | 内网消费方调用 `GET /ticket/sync/pending` 时，控制器直接调用 `TicketSyncDeliveryService.pull_pending_tickets`，优先拿到 `external_sync.revision > consumers.{consumer}.delivered_revision` 且 `publish_ready=true` 的工单；若候选工单卡在 `processing_ai` 但没有活动 AI 任务，会先自动恢复发布状态再返回。 |
 | 7 | 内网将远端 pending 工单转换为本地入库模型时，会优先读取 `moduleName/module_name`，并兼容 `ticketModle/ticketModel/ticket_model` 与 `extraData.external_field_mapping.ticketModle`，避免模块文本在跨环境二次同步时丢失。 |
 | 7.1 | 远端拉取入库不会复用公网项目/模块/用户 ID，但已有本地工单会同步远端最新项目/模块文本并清空旧本地 ID；状态会使用内网本地 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析当前处理人、报告人和内部负责人；未命中时保留远端文本。 |
