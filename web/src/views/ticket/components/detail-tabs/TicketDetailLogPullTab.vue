@@ -183,7 +183,10 @@
       line: item.line,
       paddedLine: `${String(item.line).padStart(6, ' ')}  `,
       content: item.content || '',
-      parts: logViewerNativeHighlightSupported.value ? [] : splitLogViewerHighlightParts(item.content || ''),
+      // 原生高亮只是不拆分 mark，仍需保留文本节点供上下文内容和 Range 高亮渲染。
+      parts: logViewerNativeHighlightSupported.value
+        ? [{ text: item.content || '', highlight: false }]
+        : splitLogViewerHighlightParts(item.content || ''),
     }));
   });
   const logViewerResultTableHeight = computed(() =>
@@ -286,11 +289,13 @@
     }
     const ranges = [];
     block.querySelectorAll('.log-context-line-content').forEach((contentNode) => {
-      contentNode.childNodes.forEach((node) => {
-        if (node.nodeType === window.Node.TEXT_NODE) {
-          ranges.push(...buildLogViewerHighlightRanges(node, keywords));
-        }
-      });
+      // 模板中的普通文本由 span 承载，使用 TreeWalker 覆盖所有后代文本节点。
+      const walker = document.createTreeWalker(contentNode, window.NodeFilter.SHOW_TEXT);
+      let textNode = walker.nextNode();
+      while (textNode) {
+        ranges.push(...buildLogViewerHighlightRanges(textNode, keywords));
+        textNode = walker.nextNode();
+      }
     });
     if (!ranges.length) {
       clearNativeLogViewerHighlights();
