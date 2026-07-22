@@ -1,5 +1,13 @@
 <script setup name="TicketDetailLogPullTab">
-  import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+  import {
+    computed,
+    getCurrentInstance,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+  } from 'vue';
   import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue';
   import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue';
   import { getTicket } from '@/api/ticket/ticket';
@@ -211,8 +219,7 @@
   function applyProjectVendorMapping(projectId) {
     const vendorNo = getProjectVendorNo(projectId);
     if (!vendorNo) return;
-    const resolvedVendorId = Number(vendorNo);
-    logPullForm.value.vendorId = Number.isNaN(resolvedVendorId) ? vendorNo : resolvedVendorId;
+    logPullForm.value.vendorId = String(vendorNo);
     resetStoreSelection(logPullForm.value, logPullForm.value.vendorId);
   }
 
@@ -223,8 +230,8 @@
   function supportsNativeLogViewerHighlight() {
     return Boolean(
       window.CSS?.highlights &&
-        typeof window.Highlight === 'function' &&
-        typeof window.Range === 'function'
+      typeof window.Highlight === 'function' &&
+      typeof window.Range === 'function'
     );
   }
 

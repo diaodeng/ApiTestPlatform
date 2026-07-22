@@ -181,8 +181,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   function applyTicketDetailLogPullPrefill(ticketDetail) {
     const hints = resolveTicketLogPullHintsFromDetail(ticketDetail);
     let vendorApplied = false;
-    const vendorId = Number(hints.vendorId);
-    if (Number.isFinite(vendorId) && vendorId > 0) {
+    const vendorId = String(hints.vendorId || '').trim();
+    if (vendorId) {
       logPullForm.value.vendorId = vendorId;
       vendorApplied = true;
     }
