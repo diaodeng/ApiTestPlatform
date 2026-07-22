@@ -10,11 +10,13 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 import traceback
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as dt_time
 from ftplib import FTP, error_perm
 from ftplib import all_errors as ftp_errors
 from io import BytesIO
@@ -24,6 +26,7 @@ from urllib.parse import urlparse
 
 import requests
 from openpyxl import Workbook, load_workbook
+from requests import exceptions as requests_exceptions
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -206,7 +209,7 @@ class TicketLogPullService:
         if isinstance(value, datetime):
             return value
         if isinstance(value, date):
-            return datetime.combine(value, time.min)
+            return datetime.combine(value, dt_time.min)
         text = str(value).strip()
         if not text:
             return None
@@ -214,7 +217,7 @@ class TicketLogPullService:
             try:
                 parsed = datetime.strptime(text, pattern)
                 if pattern == "%Y-%m-%d":
-                    return datetime.combine(parsed.date(), time.min)
+                    return datetime.combine(parsed.date(), dt_time.min)
                 return parsed
             except ValueError:
                 continue
@@ -2867,6 +2870,76 @@ class TicketLogPullService:
             return row
         return None
 
+    # ---- 下载重试相关 ----
+    _DOWNLOAD_MAX_RETRIES = 3
+
+    @classmethod
+    def _is_retryable_download_error(cls, exc: BaseException) -> bool:
+        """
+        判断下载异常是否可重试（网络波动、连接中断、服务端临时故障）。
+        :param exc: 下载过程中捕获的异常
+        :return: 可重试返回 True
+        """
+        # HTTP 5xx 服务端错误可重试
+        if isinstance(exc, requests_exceptions.HTTPError):
+            status_code = getattr(getattr(exc, "response", None), "status_code", 0)
+            return 500 <= status_code < 600
+        # 连接错误、超时可重试
+        if isinstance(exc, (requests_exceptions.ConnectionError, requests_exceptions.Timeout)):
+            return True
+        # ChunkedEncodingError 通常由 IncompleteRead 引发，可重试
+        if isinstance(exc, requests_exceptions.ChunkedEncodingError):
+            return True
+        # urllib3 的 ProtocolError/IncompleteRead 可能直接抛出，通过异常类名或消息特征识别
+        error_type = type(exc).__name__
+        error_str = str(exc)
+        if "IncompleteRead" in error_type or "ProtocolError" in error_type:
+            return True
+        if "IncompleteRead" in error_str or "Connection broken" in error_str:
+            return True
+        return False
+
+    @classmethod
+    def _format_download_error(cls, exc: BaseException | None) -> str:
+        """
+        将下载异常转换为用户可读的错误消息。
+        :param exc: 下载异常
+        :return: 格式化后的错误消息
+        """
+        if exc is None:
+            return "下载日志压缩包失败，原因未知"
+        error_str = str(exc)
+        # 提取 IncompleteRead 中的关键信息
+        if "IncompleteRead" in error_str:
+            match = re.search(r"IncompleteRead\((\d+) bytes read, (\d+) more expected\)", error_str)
+            if match:
+                read_bytes = int(match.group(1))
+                expected_bytes = int(match.group(2))
+                read_mb = read_bytes / (1024 * 1024)
+                expected_mb = expected_bytes / (1024 * 1024)
+                return (
+                    f"日志压缩包下载中断：已接收 {read_mb:.1f} MB，"
+                    f"还需 {expected_mb:.1f} MB（远端服务器提前关闭了连接），"
+                    f"已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
+                )
+            return (
+                f"日志压缩包下载中断（远端服务器提前关闭了连接），"
+                f"已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
+            )
+        # HTTP 错误
+        if isinstance(exc, requests_exceptions.HTTPError):
+            status_code = getattr(getattr(exc, "response", None), "status_code", 0)
+            return f"下载日志压缩包失败（HTTP {status_code}），请检查下载地址是否有效"
+        # 连接/超时错误
+        if isinstance(exc, (requests_exceptions.ConnectionError, requests_exceptions.Timeout)):
+            return (
+                f"下载日志压缩包失败（网络连接异常），"
+                f"已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
+            )
+        # 其他错误，截断避免过长
+        truncated = error_str[:300]
+        return f"下载日志压缩包失败：{truncated}"
+
     @classmethod
     def _download_archive(
         cls,
@@ -2875,7 +2948,7 @@ class TicketLogPullService:
         progress_callback: Callable[[int, int | None, str], None] | None = None,
     ) -> tuple[Path, int]:
         """
-        下载外部压缩包到本地临时文件。
+        下载外部压缩包到本地临时文件，支持断连自动重试。
         :param record: 日志拉取记录
         :param db: 数据库会话
         :param progress_callback: 下载进度回调，参数依次为已下载字节数、总字节数、来源
@@ -2896,34 +2969,71 @@ class TicketLogPullService:
         cls.DEFAULT_TEMP_DIR.mkdir(parents=True, exist_ok=True)
         parsed_url = urlparse(str(record.command_result_url or ""))
         source_name = Path(parsed_url.path).name or f"{record.id}.zip"
-        temp_fd, temp_name = tempfile.mkstemp(
-            prefix=f"{record.id}_",
-            suffix=f"_{source_name}",
-            dir=cls.DEFAULT_TEMP_DIR,
-        )
-        os.close(temp_fd)
-        temp_file = Path(temp_name)
-        total_size = 0
-        with requests.get(
-            str(record.command_result_url),
-            stream=True,
-            timeout=(10, timeout_seconds),
-            headers=cls._build_external_request_headers(external_config),
-        ) as response:
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            total_bytes = int(content_length) if content_length and content_length.isdigit() else None
-            if progress_callback:
-                progress_callback(0, total_bytes, "http")
-            with temp_file.open("wb") as file_obj:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if not chunk:
-                        continue
-                    file_obj.write(chunk)
-                    total_size += len(chunk)
+        url = str(record.command_result_url)
+
+        last_error: BaseException | None = None
+        for attempt in range(cls._DOWNLOAD_MAX_RETRIES):
+            temp_fd, temp_name = tempfile.mkstemp(
+                prefix=f"{record.id}_",
+                suffix=f"_{source_name}",
+                dir=cls.DEFAULT_TEMP_DIR,
+            )
+            os.close(temp_fd)
+            temp_file = Path(temp_name)
+            total_size = 0
+            try:
+                with requests.get(
+                    url,
+                    stream=True,
+                    timeout=(10, timeout_seconds),
+                    headers=cls._build_external_request_headers(external_config),
+                ) as response:
+                    response.raise_for_status()
+                    content_length = response.headers.get("Content-Length")
+                    total_bytes = int(content_length) if content_length and content_length.isdigit() else None
                     if progress_callback:
-                        progress_callback(total_size, total_bytes, "http")
-        return temp_file, total_size
+                        progress_callback(0, total_bytes, "http")
+                    with temp_file.open("wb") as file_obj:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if not chunk:
+                                continue
+                            file_obj.write(chunk)
+                            total_size += len(chunk)
+                            if progress_callback:
+                                progress_callback(total_size, total_bytes, "http")
+                return temp_file, total_size
+            except requests_exceptions.HTTPError as exc:
+                last_error = exc
+                temp_file.unlink(missing_ok=True)
+                status_code = getattr(getattr(exc, "response", None), "status_code", 0)
+                if 400 <= status_code < 500:
+                    raise RuntimeError(
+                        f"下载日志压缩包失败（HTTP {status_code}），请检查下载地址是否有效"
+                    ) from exc
+                if attempt < cls._DOWNLOAD_MAX_RETRIES - 1:
+                    wait_seconds = 2 ** (attempt + 1)
+                    logger.warning(
+                        f"日志压缩包下载失败（HTTP {status_code}），{wait_seconds}s 后重试"
+                        f"（第 {attempt + 2}/{cls._DOWNLOAD_MAX_RETRIES} 次），"
+                        f"record_id={record.id}，错误：{exc}"
+                    )
+                    time.sleep(wait_seconds)
+            except Exception as exc:
+                last_error = exc
+                temp_file.unlink(missing_ok=True)
+                if cls._is_retryable_download_error(exc) and attempt < cls._DOWNLOAD_MAX_RETRIES - 1:
+                    wait_seconds = 2 ** (attempt + 1)
+                    error_clue = str(exc)[:200]
+                    logger.warning(
+                        f"日志压缩包下载中断，{wait_seconds}s 后重试"
+                        f"（第 {attempt + 2}/{cls._DOWNLOAD_MAX_RETRIES} 次），"
+                        f"record_id={record.id}，错误：{error_clue}"
+                    )
+                    time.sleep(wait_seconds)
+                else:
+                    raise RuntimeError(cls._format_download_error(exc)) from exc
+
+        raise RuntimeError(cls._format_download_error(last_error)) from last_error
 
     @classmethod
     def _store_archive(cls, record: TicketLogPullRecord, temp_file_path: Path, db: Session) -> str:
@@ -3948,7 +4058,7 @@ class TicketLogPullService:
         if isinstance(value, datetime):
             return value
         if isinstance(value, date):
-            return datetime.combine(value, time.min)
+            return datetime.combine(value, dt_time.min)
         text = str(value).strip()
         if not text:
             return None
@@ -3956,7 +4066,7 @@ class TicketLogPullService:
             try:
                 parsed = datetime.strptime(text[:19] if "T" in text or " " in text else text[:10], formatter)
                 if formatter == "%Y-%m-%d":
-                    return datetime.combine(parsed.date(), time.min)
+                    return datetime.combine(parsed.date(), dt_time.min)
                 return parsed
             except Exception:
                 continue
