@@ -38,6 +38,7 @@ export function useOptions() {
   const analysisPromptOptions = ref([]);
   const vendorOptions = ref([]);
   const parameterExamples = ref([]);
+  const environmentOptions = ref([]);
   const pushOptions = ref([]);
   const detailVersionOptions = ref([]);
 
@@ -70,7 +71,9 @@ export function useOptions() {
   function loadVendorOptions() {
     return getTicketLogPullVendorStoreOptions().then((response) => {
       vendorOptions.value = normalizeVendorOptions(response.data?.vendors || []);
-      console.log(vendorOptions.value);
+      environmentOptions.value = Array.isArray(response.data?.environments)
+        ? response.data.environments
+        : [];
       parameterExamples.value = Array.isArray(response.data?.parameterExamples)
         ? response.data.parameterExamples
         : [];
@@ -377,6 +380,7 @@ export function useOptions() {
     analysisPromptOptions,
     vendorOptions,
     parameterExamples,
+    environmentOptions,
     pushOptions,
     detailVersionOptions,
     // vendor/store functions

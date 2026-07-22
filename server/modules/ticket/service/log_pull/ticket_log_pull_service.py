@@ -370,17 +370,19 @@ class TicketLogPullService:
     @classmethod
     def _default_external_config(cls) -> dict[str, Any]:
         """
-        构建默认日志拉取外部接口配置。
-        :return: 默认外部接口配置
+        构建默认日志拉取外部接口配置（多环境格式）。
+        :return: 默认外部接口配置，以 "default" 为默认环境 key
         """
         return {
-            "insertUrl": cls.DEFAULT_INSERT_URL,
-            "pageUrl": cls.DEFAULT_PAGE_URL,
-            "headers": {
-                "cookie": "",
-                "origin": "https://erp.rta-os.com",
-            },
-            "vendors": [],
+            "default": {
+                "insertUrl": cls.DEFAULT_INSERT_URL,
+                "pageUrl": cls.DEFAULT_PAGE_URL,
+                "headers": {
+                    "cookie": "",
+                    "origin": "https://erp.rta-os.com",
+                },
+                "vendors": [],
+            }
         }
 
     @classmethod
@@ -453,27 +455,60 @@ class TicketLogPullService:
     @classmethod
     def _normalize_external_config(cls, raw_config: Any) -> dict[str, Any]:
         """
-        归一化日志拉取外部接口配置。
+        归一化日志拉取外部接口配置，兼容单环境与多环境两种格式。
+
+        旧格式（单环境）:
+          {"insertUrl": "...", "pageUrl": "...", "headers": {...}, "vendors": [...]}
+        新格式（多环境）:
+          {"env1": {"insertUrl": "...", "pageUrl": "...", "headers": {...}, "vendors": [...]},
+           "env2": {...}}
+
         :param raw_config: 原始配置对象
-        :return: 标准化后的外部接口配置
+        :return: 标准化后的多环境外部接口配置
         """
-        defaults = cls._default_external_config()
         config = dict(raw_config or {}) if isinstance(raw_config, dict) else {}
+        if not config:
+            return cls._default_external_config()
+
+        # 检测是否为旧格式（顶层包含 insertUrl 或 pageUrl）
+        if "insertUrl" in config or "pageUrl" in config:
+            return {"default": cls._normalize_single_env_config(config)}
+
+        # 新格式：逐环境归一化
+        normalized: dict[str, Any] = {}
+        for env_key, env_config in config.items():
+            if not isinstance(env_config, dict):
+                continue
+            normalized[env_key] = cls._normalize_single_env_config(env_config)
+        return normalized or cls._default_external_config()
+
+    @classmethod
+    def _normalize_single_env_config(cls, config: dict[str, Any]) -> dict[str, Any]:
+        """
+        归一化单个环境的配置。
+        :param config: 单个环境的原始配置字典
+        :return: 标准化后的单环境配置
+        """
+        defaults = {
+            "insertUrl": cls.DEFAULT_INSERT_URL,
+            "pageUrl": cls.DEFAULT_PAGE_URL,
+            "headers": {"cookie": "", "origin": "https://erp.rta-os.com"},
+        }
         headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
-        normalized = {
+        env_config = {
             **defaults,
             **config,
             "headers": {**defaults["headers"], **headers},
         }
-        normalized["insertUrl"] = str(normalized.get("insertUrl") or defaults["insertUrl"]).strip()
-        normalized["pageUrl"] = str(normalized.get("pageUrl") or defaults["pageUrl"]).strip()
-        normalized["headers"] = {
+        env_config["insertUrl"] = str(env_config.get("insertUrl") or defaults["insertUrl"]).strip()
+        env_config["pageUrl"] = str(env_config.get("pageUrl") or defaults["pageUrl"]).strip()
+        env_config["headers"] = {
             key: str(value or "").strip()
-            for key, value in normalized["headers"].items()
+            for key, value in env_config["headers"].items()
             if str(value or "").strip()
         }
-        normalized["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
-        return normalized
+        env_config["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
+        return env_config
 
     @classmethod
     def _normalize_vendor_store_options(cls, raw_vendors: Any) -> list[dict[str, Any]]:
@@ -638,6 +673,7 @@ class TicketLogPullService:
             TicketLogPullDao.list_store_configs_by_vender_no(query_db, resolved_vender_no)
         ) if resolved_vender_no else []
         return TicketLogPullVendorStoreOptionsModel(
+            environments=cls._get_environment_options(query_db),
             vendors=vendors,
             stores=stores,
             parameter_examples=cls._normalize_parameter_examples(raw_examples),
@@ -1736,6 +1772,7 @@ class TicketLogPullService:
                 query_db,
                 TicketLogPullRecord(
                     ticket_id=resolved_ticket_id,
+                    environment=str(payload.environment or "").strip() or None,
                     vendor_id=payload.vendor_id,
                     store_id=payload.store_id,
                     pos_no=payload.pos_no,
@@ -2622,7 +2659,7 @@ class TicketLogPullService:
         :param record: 日志拉取记录
         :return: 无
         """
-        external_config = cls._get_external_config_dict(db)
+        external_config = cls._get_external_config_dict(db, record.environment)
         request_url = str(external_config.get("insertUrl") or "").strip()
         page_url = str(external_config.get("pageUrl") or "").strip()
         loggable_config = dict(external_config)
@@ -2815,7 +2852,7 @@ class TicketLogPullService:
         :param record: 日志拉取记录
         :return: 外部平台列表数据
         """
-        external_config = cls._get_external_config_dict(db)
+        external_config = cls._get_external_config_dict(db, record.environment)
         response = requests.get(
             external_config["pageUrl"],
             params={
@@ -2955,7 +2992,7 @@ class TicketLogPullService:
         :return: 临时文件路径和文件大小
         """
         config = cls._get_storage_config_dict(db)
-        external_config = cls._get_external_config_dict(db)
+        external_config = cls._get_external_config_dict(db, record.environment)
         timeout_seconds = int(config.get("downloadTimeoutSec") or 300)
         cls._log_chain_step(
             db,
@@ -3974,6 +4011,7 @@ class TicketLogPullService:
             "storeId": str(record.store_id or "").strip(),
             "posNo": record.pos_no,
             "commandDataType": record.command_data_type,
+            "environment": record.environment,
             "fileMaxSize": cls._parse_positive_int(
                 cls._first_present_value(command_content, "fileMaxSize", "file_max_size"), 500
             ),
@@ -4218,16 +4256,41 @@ class TicketLogPullService:
         return cls._get_storage_config_dict(db)
 
     @classmethod
-    def _get_external_config_dict(cls, db: Session) -> dict[str, Any]:
+    def _get_external_config_dict(cls, db: Session, environment: str | None = None) -> dict[str, Any]:
         """
-        读取日志拉取外部接口配置字典。
+        读取日志拉取外部接口配置字典，可按环境标识返回指定环境的配置。
         :param db: 数据库会话
-        :return: 外部接口配置
+        :param environment: 环境标识，为 None 时返回全量多环境配置
+        :return: 外部接口配置（指定 environment 时返回单环境配置，否则返回全量多环境配置）
         """
         cls.ensure_param_config_rows(db)
         config_row = TicketLogPullDao.get_external_config_row(db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
-        return cls._normalize_external_config(payload)
+        normalized = cls._normalize_external_config(payload)
+        if environment and environment in normalized:
+            return normalized[environment]
+        if environment:
+            # 指定环境不存在，回退到第一个环境
+            first_key = next(iter(normalized.keys()), None)
+            if first_key:
+                logger.warning(
+                    f"日志拉取环境 '{environment}' 在配置中不存在，回退到环境 '{first_key}'"
+                )
+                return normalized[first_key]
+        return normalized
+
+    @classmethod
+    def _get_environment_options(cls, db: Session) -> list[str]:
+        """
+        获取所有可用环境标识列表。
+        :param db: 数据库会话
+        :return: 环境 key 列表
+        """
+        cls.ensure_param_config_rows(db)
+        config_row = TicketLogPullDao.get_external_config_row(db)
+        payload = cls._json_loads(getattr(config_row, "config_value", None), {})
+        normalized = cls._normalize_external_config(payload)
+        return list(normalized.keys())
 
     @classmethod
     def _add_ticket_event(

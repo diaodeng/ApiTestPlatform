@@ -151,6 +151,9 @@ class TicketLogPullDao:
             .filter(
                 TicketLogPullRecord.ticket_id == query.ticket_id if query.ticket_id is not None else True,
                 TicketLogPullRecord.status == query.status if query.status else True,
+                TicketLogPullRecord.environment == query.environment
+                if query.environment
+                else True,
                 TicketLogPullRecord.vendor_id == query.vendor_id if query.vendor_id is not None else True,
                 TicketLogPullRecord.store_id == query.store_id if query.store_id is not None else True,
                 TicketLogPullRecord.pos_no == query.pos_no if query.pos_no is not None else True,

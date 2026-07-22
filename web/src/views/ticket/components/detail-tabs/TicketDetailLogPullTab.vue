@@ -54,6 +54,7 @@
     agentOptions,
     providerOptions,
     vendorOptions,
+    environmentOptions,
     parameterExamples,
     pushOptions,
     loadVendorOptions,
@@ -631,6 +632,7 @@
       <LogPullConfigFields
         v-model="logPullForm"
         :vendor-options="vendorOptions"
+        :environment-options="environmentOptions"
         :parameter-examples="parameterExamples"
         :agent-options="agentOptions"
         :provider-options="providerOptions"

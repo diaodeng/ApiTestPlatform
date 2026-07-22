@@ -21,6 +21,7 @@ class TicketLogPullRecord(Base):
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="记录ID"
     )
     ticket_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="工单ID")
+    environment: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="拉取时使用的环境标识")
     vendor_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="商户vendorId")
     store_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="门店org_no")
     pos_no: Mapped[int] = mapped_column(Integer, nullable=False, comment="POS编号")

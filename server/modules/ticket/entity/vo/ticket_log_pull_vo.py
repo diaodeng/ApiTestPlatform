@@ -107,6 +107,8 @@ class TicketLogPullVendorStoreOptionsModel(TicketLogPullBaseModel):
     日志拉取商家与指定商家门店选项模型。
     """
 
+    environments: list[str] = Field(default_factory=list, description="可用环境标识列表")
+
     vendors: list[TicketLogPullVendorOptionModel] = Field(default_factory=list, description="商家列表")
 
     stores: list[TicketLogPullStoreOptionModel] = Field(default_factory=list, description="指定商家下的门店列表")
@@ -218,6 +220,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int | None = Field(default=None, description="关联工单ID，可为空表示独立管理记录")
+    environment: str | None = Field(default=None, description="日志拉取环境标识，对应外部配置中的环境key")
     vendor_id: int = Field(description="外部接口 venderId")
     store_id: str = Field(description="外部接口 storeId，实际使用门店org_no")
     pos_no: int = Field(description="外部接口 posNo")
@@ -307,6 +310,7 @@ class TicketLogPullQueryModel(QueryModel):
     ticket_no: str | None = Field(default=None, description="工单编号")
     keyword: str | None = Field(default=None, description="关键字")
     status: str | None = Field(default=None, description="内部处理状态")
+    environment: str | None = Field(default=None, description="环境标识筛选")
     vendor_id: int | None = Field(default=None, description="商家vendorId")
     store_id: str | None = Field(default=None, description="门店org_no")
     pos_no: int | None = Field(default=None, description="POS编号")
@@ -553,6 +557,7 @@ class TicketLogPullSummaryModel(TicketLogPullBaseModel):
     """
 
     id: int | None = None
+    environment: str | None = Field(default=None, description="拉取时使用的环境标识")
     status: str | None = Field(default=None, description="内部处理状态")
     status_desc: str | None = Field(default=None, description="内部处理状态描述")
     is_error: bool = Field(default=False, description="是否异常")

@@ -1,5 +1,22 @@
 <template>
   <template v-if="model">
+    <el-col v-if="showEnvironment && environmentOptions.length" :span="24">
+      <el-form-item label="环境" :prop="getProp('environment')">
+        <el-select
+          :model-value="model.environment"
+          placeholder="选择环境"
+          style="width: 100%"
+          @update:model-value="handleEnvironmentChange"
+        >
+          <el-option
+            v-for="item in environmentOptions"
+            :key="item"
+            :label="item"
+            :value="item"
+          />
+        </el-select>
+      </el-form-item>
+    </el-col>
     <el-col :span="24">
       <el-form-item label="商家" :prop="getProp('vendorId')">
         <el-select
@@ -242,6 +259,14 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  showEnvironment: {
+    type: Boolean,
+    default: true
+  },
+  environmentOptions: {
+    type: Array,
+    default: () => []
+  },
   fieldPrefix: {
     type: String,
     default: ''
@@ -359,6 +384,10 @@ function syncStoreSelection() {
   }
 }
 
+function handleEnvironmentChange(value) {
+  model.value.environment = value
+}
+
 function handleVendorChange() {
   model.value.storeId = undefined
 }
@@ -422,6 +451,16 @@ watch(
     loadStoreOptions(vendorId).then(() => {
       syncStoreSelection()
     })
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [props.environmentOptions, model.value?.environment],
+  ([envOptions, currentEnv]) => {
+    if (Array.isArray(envOptions) && envOptions.length && !currentEnv) {
+      model.value.environment = envOptions[0]
+    }
   },
   { immediate: true }
 )

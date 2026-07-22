@@ -21,6 +21,11 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="环境" prop="environment">
+        <el-select v-model="queryParams.environment" placeholder="全部环境" clearable style="width: 160px">
+          <el-option v-for="item in environmentOptions" :key="item" :label="item" :value="item" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="全部状态" clearable style="width: 160px">
           <el-option v-for="item in logPullStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -115,6 +120,9 @@
       scrollbar-always-on
     >
       <el-table-column label="记录ID" prop="id" width="180" show-overflow-tooltip />
+      <el-table-column label="环境" width="100" align="center">
+        <template #default="scope">{{ scope.row.environment || '-' }}</template>
+      </el-table-column>
       <el-table-column label="关联工单" min-width="220" show-overflow-tooltip>
         <template #default="scope">
           <div v-if="scope.row.ticketId">
@@ -289,6 +297,7 @@
           <LogPullConfigFields
             v-model="createForm"
             :vendor-options="vendorOptions"
+            :environment-options="environmentOptions"
             :parameter-examples="parameterExamples"
             :agent-options="agentOptions"
             :provider-options="providerOptions"
@@ -601,6 +610,7 @@ const vendorOptions = ref([])
 const queryStoreOptions = ref([])
 const queryStoreLoading = ref(false)
 const parameterExamples = ref([])
+const environmentOptions = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
 const contentDetail = ref(null)
@@ -625,6 +635,7 @@ const queryParams = ref({
   pageNum: 1,
   pageSize: 10,
   ticketId: undefined,
+  environment: '',
   status: '',
   keyword: '',
   vendorId: undefined,
@@ -655,6 +666,7 @@ const createRules = {
 function createDefaultForm() {
   return {
     ticketId: undefined,
+    environment: '',
     vendorId: undefined,
     storeId: undefined,
     posNo: undefined,
@@ -711,6 +723,7 @@ function resetQuery() {
     pageNum: 1,
     pageSize: 10,
     ticketId: undefined,
+    environment: '',
     status: '',
     keyword: '',
     vendorId: undefined,
@@ -886,6 +899,9 @@ function buildStoreOptionLabel(store) {
 function loadVendorOptions() {
   return getTicketLogPullVendorStoreOptions().then(response => {
     vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
+    environmentOptions.value = Array.isArray(response.data?.environments)
+      ? response.data.environments
+      : []
     parameterExamples.value = Array.isArray(response.data?.parameterExamples)
       ? response.data.parameterExamples
       : []

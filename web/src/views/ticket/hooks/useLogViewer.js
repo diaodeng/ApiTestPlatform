@@ -279,6 +279,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         return;
       }
       const payload = {
+        environment: String(logPullForm.value.environment || '').trim() || undefined,
         vendorId: logPullForm.value.vendorId,
         storeId: logPullForm.value.storeId,
         posNo: logPullForm.value.posNo,
