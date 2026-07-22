@@ -33,6 +33,8 @@ class TicketLogPullDao:
     PARAM_EXAMPLE_CONFIG_KEY = "ticket.logPull.parameterExamples"
     PARAM_EXAMPLE_CONFIG_NAME = "工单日志拉取参数示例配置"
     EXTERNAL_CONFIG_NAME = "工单日志拉取外部接口配置"
+    VENDOR_CONFIG_KEY = "ticket.logPull.vendors"
+    VENDOR_CONFIG_NAME = "工单日志拉取商家配置"
 
     @classmethod
     def add_record(cls, db: Session, record: TicketLogPullRecord) -> TicketLogPullRecord:
@@ -239,6 +241,15 @@ class TicketLogPullDao:
         return cls.get_config_row(db, cls.PARAM_EXAMPLE_CONFIG_KEY)
 
     @classmethod
+    def get_vendor_config_row(cls, db: Session) -> SysConfig | None:
+        """
+        获取日志拉取商家参数配置记录。
+        :param db: 数据库会话
+        :return: 系统参数记录
+        """
+        return cls.get_config_row(db, cls.VENDOR_CONFIG_KEY)
+
+    @classmethod
     def get_config_row(cls, db: Session, config_key: str) -> SysConfig | None:
         """
         按参数键获取系统参数记录。
@@ -393,6 +404,24 @@ class TicketLogPullDao:
         return (
             db.query(TicketLogPullStoreConfig)
             .order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc())
+            .all()
+        )
+
+    @classmethod
+    def list_store_configs_by_vender_no(cls, db: Session, vender_no: str) -> list[TicketLogPullStoreConfig]:
+        """
+        按商户编号查询门店配置，供日志拉取弹窗按需加载门店。
+        :param db: 数据库会话
+        :param vender_no: 商户编号
+        :return: 当前商户下的门店配置列表
+        """
+        resolved_vender_no = str(vender_no or "").strip()
+        if not resolved_vender_no:
+            return []
+        return (
+            db.query(TicketLogPullStoreConfig)
+            .filter(TicketLogPullStoreConfig.vender_no == resolved_vender_no)
+            .order_by(TicketLogPullStoreConfig.org_name.asc(), TicketLogPullStoreConfig.id.asc())
             .all()
         )
 

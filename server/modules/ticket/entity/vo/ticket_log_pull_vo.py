@@ -86,13 +86,11 @@ class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
 
 class TicketLogPullVendorOptionModel(TicketLogPullBaseModel):
     """
-    日志拉取商家选项模型。
+    日志拉取商家参数配置选项模型。
     """
 
-    vendor_id: int = Field(description="商家ID")
-    vendor_code: str | None = Field(default=None, description="商家编码")
+    vender_no: str = Field(description="商户编号，也是门店配置关联键")
     vendor_name: str = Field(description="商家名称")
-    stores: list[TicketLogPullStoreOptionModel] = Field(default_factory=list, description="商家下门店列表")
 
 
 class TicketLogPullParameterExampleModel(TicketLogPullBaseModel):
@@ -106,10 +104,12 @@ class TicketLogPullParameterExampleModel(TicketLogPullBaseModel):
 
 class TicketLogPullVendorStoreOptionsModel(TicketLogPullBaseModel):
     """
-    日志拉取商家门店联动选项模型。
+    日志拉取商家与指定商家门店选项模型。
     """
 
     vendors: list[TicketLogPullVendorOptionModel] = Field(default_factory=list, description="商家列表")
+
+    stores: list[TicketLogPullStoreOptionModel] = Field(default_factory=list, description="指定商家下的门店列表")
 
     parameter_examples: list[TicketLogPullParameterExampleModel] = Field(
         default_factory=list,

@@ -64,11 +64,11 @@ export function listTicketLogPullRecords(query) {
 }
 
 // 查询日志拉取商家/门店联动选项
-export function getTicketLogPullVendorStoreOptions(vendorId) {
+export function getTicketLogPullVendorStoreOptions(venderNo) {
   return request({
     url: '/ticket/log-pull/vendor-store-options',
     method: 'get',
-    params: vendorId ? { vendor_id: vendorId } : undefined,
+    params: venderNo ? { vender_no: venderNo } : undefined,
   });
 }
 

@@ -544,27 +544,6 @@ class TicketLogPullService:
         return normalized_examples
 
     @staticmethod
-    def _extract_option_id(*values: Any) -> int | None:
-        """
-        从门店配置字段中提取联动选项ID。
-        :param values: 候选值，优先使用可直接转成整数的值，其次提取文本中的数字
-        :return: 可用于前端联动的整数ID
-        """
-        for value in values:
-            if value in (None, ""):
-                continue
-            text = str(value).strip()
-            if not text:
-                continue
-            try:
-                return int(text)
-            except (TypeError, ValueError):
-                match = re.search(r"\d+", text)
-                if match:
-                    return int(match.group(0))
-        return None
-
-    @staticmethod
     def _normalize_store_option_value(*values: Any) -> str:
         """
         归一化门店下拉实际提交值，优先返回 org_no，其次回退到 SAP 编号。
@@ -578,94 +557,85 @@ class TicketLogPullService:
         return ""
 
     @classmethod
-    def _build_vendor_store_options_from_store_configs(
-        cls, store_configs: list[TicketLogPullStoreConfig]
-    ) -> list[TicketLogPullVendorOptionModel]:
+    def _normalize_vendor_options(cls, raw_vendors: Any) -> list[TicketLogPullVendorOptionModel]:
         """
-        按门店配置表聚合商家与门店联动选项。
-        :param store_configs: 门店配置列表
-        :return: 商家门店联动选项
+        归一化系统参数中的商家配置。
+        :param raw_vendors: 参数配置 JSON 中的商家列表
+        :return: 去重后的商家选项
         """
-        vendor_map: dict[str, dict[str, Any]] = {}
-        vendor_order: list[str] = []
-        for store_config in store_configs:
-            vendor_code = str(store_config.vender_no or "").strip()
-            vendor_id = cls._extract_option_id(store_config.vender_no, store_config.id)
-            if vendor_id is None:
-                continue
-            vendor_key = vendor_code or str(vendor_id)
-            vendor_entry = vendor_map.get(vendor_key)
-            if not vendor_entry:
-                vendor_entry = {
-                    "vendor_id": vendor_id,
-                    "vendor_code": vendor_code or None,
-                    "vendor_name": vendor_code or str(store_config.group_no or "").strip() or "未命名商家",
-                    "stores": [],
-                    "store_ids": set(),
-                }
-                vendor_map[vendor_key] = vendor_entry
-                vendor_order.append(vendor_key)
+        if not isinstance(raw_vendors, list):
+            return []
 
-            store_value = cls._normalize_store_option_value(store_config.org_no, store_config.sap_org_no)
-            if not store_value:
+        vendors: list[TicketLogPullVendorOptionModel] = []
+        seen_vender_nos: set[str] = set()
+        for item in raw_vendors:
+            if not isinstance(item, dict):
                 continue
-            store_key = store_value
-            if store_key in vendor_entry["store_ids"]:
+            vender_no = str(item.get("venderNo") or item.get("vender_no") or "").strip()
+            vendor_name = str(item.get("vendorName") or item.get("vendor_name") or "").strip()
+            if not vender_no or not vendor_name or vender_no in seen_vender_nos:
                 continue
-            vendor_entry["store_ids"].add(store_key)
+            seen_vender_nos.add(vender_no)
+            vendors.append(
+                TicketLogPullVendorOptionModel(vender_no=vender_no, vendor_name=vendor_name)
+            )
+        return vendors
+
+    @classmethod
+    def _build_store_options(cls, store_configs: list[TicketLogPullStoreConfig]) -> list[TicketLogPullStoreOptionModel]:
+        """
+        将指定商户的门店配置转换为前端下拉选项。
+        :param store_configs: 指定商户的门店配置
+        :return: 门店选项
+        """
+        stores: list[TicketLogPullStoreOptionModel] = []
+        seen_store_ids: set[str] = set()
+        for store_config in store_configs:
+            store_id = cls._normalize_store_option_value(store_config.org_no, store_config.sap_org_no)
+            if not store_id or store_id in seen_store_ids:
+                continue
+            seen_store_ids.add(store_id)
             store_code = str(store_config.org_no or "").strip() or None
             sap_org_no = str(store_config.sap_org_no or "").strip() or None
-            store_name = str(store_config.org_name or "").strip() or store_code or sap_org_no or str(
-                store_config.vender_no or ""
-            ).strip() or store_value
-            vendor_entry["stores"].append(
+            store_name = (
+                str(store_config.org_name or "").strip()
+                or store_code
+                or sap_org_no
+                or store_id
+            )
+            stores.append(
                 TicketLogPullStoreOptionModel(
-                    store_id=store_value,
+                    store_id=store_id,
                     store_code=store_code,
                     sap_org_no=sap_org_no,
                     store_name=store_name,
                 )
             )
-
-        vendors: list[TicketLogPullVendorOptionModel] = []
-        for vendor_key in vendor_order:
-            vendor_entry = vendor_map[vendor_key]
-            if not vendor_entry["stores"]:
-                continue
-            vendors.append(
-                TicketLogPullVendorOptionModel(
-                    vendor_id=int(vendor_entry["vendor_id"]),
-                    vendor_code=vendor_entry["vendor_code"],
-                    vendor_name=vendor_entry["vendor_name"],
-                    stores=vendor_entry["stores"],
-                )
-            )
-        return vendors
+        return stores
 
     @classmethod
     def get_vendor_store_options_services(
-        cls, query_db: Session, vendor_id: int | None = None
+        cls, query_db: Session, vender_no: str | None = None
     ) -> TicketLogPullVendorStoreOptionsModel:
         """
-        获取日志拉取页面使用的商家/门店联动选项。
+        获取日志拉取页面使用的商家及按需加载的门店选项。
         :param query_db: 数据库会话
-        :param vendor_id: 可选商家ID，传入后只返回该商家对应的门店
+        :param vender_no: 可选商户编号，传入后只查询该商户的门店
         :return: 商家/门店联动配置
         """
-        store_configs = TicketLogPullDao.list_all_store_configs(query_db)
-        if vendor_id is not None:
-            resolved_vendor_id = int(vendor_id)
-            store_configs = [
-                store_config
-                for store_config in store_configs
-                if cls._extract_option_id(store_config.vender_no, store_config.id) == resolved_vendor_id
-            ]
         cls.ensure_param_config_rows(query_db)
+        vendor_config_row = TicketLogPullDao.get_vendor_config_row(query_db)
+        raw_vendors = cls._json_loads(getattr(vendor_config_row, "config_value", None), [])
+        vendors = cls._normalize_vendor_options(raw_vendors)
         config_row = TicketLogPullDao.get_param_example_config_row(query_db)
         raw_examples = cls._json_loads(getattr(config_row, "config_value", None), [])
-        vendors = cls._build_vendor_store_options_from_store_configs(store_configs)
+        resolved_vender_no = str(vender_no or "").strip()
+        stores = cls._build_store_options(
+            TicketLogPullDao.list_store_configs_by_vender_no(query_db, resolved_vender_no)
+        ) if resolved_vender_no else []
         return TicketLogPullVendorStoreOptionsModel(
             vendors=vendors,
+            stores=stores,
             parameter_examples=cls._normalize_parameter_examples(raw_examples),
         )
 
@@ -1035,6 +1005,15 @@ class TicketLogPullService:
                 config_value=cls._json_dumps(cls._default_parameter_examples()),
                 user_name="system",
                 remark="工单日志拉取 modifyTime/path 参数示例配置",
+            )
+        if not TicketLogPullDao.get_vendor_config_row(query_db):
+            TicketLogPullDao.save_config_row(
+                query_db,
+                config_key=TicketLogPullDao.VENDOR_CONFIG_KEY,
+                config_name=TicketLogPullDao.VENDOR_CONFIG_NAME,
+                config_value="[]",
+                user_name="system",
+                remark="工单日志拉取商家配置，格式：[{\"venderNo\": \"商户编号\", \"vendorName\": \"商家名称\"}]",
             )
 
     @classmethod

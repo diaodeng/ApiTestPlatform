@@ -44,27 +44,16 @@ export function useOptions() {
   // === 商家/门店选项 ===
   function normalizeVendorOptions(rows = []) {
     return rows.map(item => ({
-      vendorId: Number(item.vendorId),
-      vendorCode: String(item.vendorCode || '').trim(),
-      vendorName: String(item.vendorName || item.vendorId || '').trim(),
+      venderNo: String(item.venderNo || '').trim(),
+      vendorName: String(item.vendorName || '').trim(),
       label: buildVendorOptionLabel(item),
-      stores: Array.isArray(item.stores)
-        ? item.stores.map(store => ({
-          storeId: String(store.storeId || '').trim(),
-          storeCode: String(store.storeCode || '').trim(),
-          sapOrgNo: String(store.sapOrgNo || '').trim(),
-          storeName: String(store.storeName || store.storeId || '').trim(),
-          label: buildStoreOptionLabel(store)
-        }))
-        : []
-    }))
+    })).filter(item => item.venderNo && item.vendorName)
   }
 
   function buildVendorOptionLabel(vendor) {
-    const name = String(vendor.vendorName || vendor.vendorId || '').trim()
-    const code = String(vendor.vendorCode || '').trim()
-    const id = String(vendor.vendorId || '').trim()
-    return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+    const venderNo = String(vendor.venderNo || '').trim()
+    const name = String(vendor.vendorName || '').trim()
+    return [venderNo, name].filter(Boolean).join(' - ')
   }
 
   function buildStoreOptionLabel(store) {
@@ -94,13 +83,6 @@ export function useOptions() {
     if (!resolvedProjectId) return ''
     const mapping = projectVendorMapOptions.value.find(item => Number(item.projectId) === resolvedProjectId)
     return String(mapping?.venderNo || '').trim()
-  }
-
-  function getVendorStoreOptions(vendorId) {
-    const resolvedVendorId = Number(vendorId)
-    if (!vendorId && vendorId !== 0) return []
-    const vendor = vendorOptions.value.find(v => Number(v.vendorId) === resolvedVendorId)
-    return vendor?.stores || []
   }
 
   // === Provider / Agent / Prompt 选项 ===
@@ -365,7 +347,7 @@ export function useOptions() {
     // vendor/store functions
     normalizeVendorOptions, buildVendorOptionLabel, buildStoreOptionLabel,
     loadVendorOptions, loadProjectVendorMapOptions,
-    getProjectVendorNo, getVendorStoreOptions,
+    getProjectVendorNo,
     // provider/agent/prompt functions
     loadProviderOptions, loadAnalysisPromptOptions,
     getTicketAutomationLogPullConfig, findAiProviderOption,

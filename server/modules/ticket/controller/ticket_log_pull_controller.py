@@ -57,18 +57,18 @@ async def get_ticket_log_pull_storage_config(request: Request, query_db: Session
 )
 async def get_ticket_log_pull_vendor_store_options(
     request: Request,
-    vendor_id: int | None = None,
+    vender_no: str | None = None,
     query_db: Session = Depends(get_db),
 ):
     """
     获取日志拉取页面商家/门店联动选项接口。
     :param request: 请求对象
-    :param vendor_id: 可选商家ID，传入后只返回该商家对应的门店列表
+    :param vender_no: 可选商户编号，传入后只返回该商户对应的门店列表
     :param query_db: 数据库会话
     :return: 脱敏后的商家与门店选项
     """
     try:
-        result = TicketLogPullService.get_vendor_store_options_services(query_db, vendor_id=vendor_id)
+        result = TicketLogPullService.get_vendor_store_options_services(query_db, vender_no=vender_no)
         return ResponseUtil.success(data=result.model_dump(by_alias=True))
     except Exception as e:
         logger.exception(e)

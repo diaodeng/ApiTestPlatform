@@ -1508,3 +1508,12 @@ updated: 2026-07-21
 - 创建的双向链接：0 对
 - 变更传播链：`pos_init` 响应 -> 安全日志摘要；`_FileTailThread` -> 超长单行截断 -> `QTextEdit`；`PosController.start_pos` -> Worker 强引用 -> 成功或失败信号后释放。
 - 总共涉及页面：1
+## [2026-07-22] INGEST-CODE | 日志拉取商家参数配置与门店按需加载
+
+- 触发：商家规模较小，要求不新增商家维护模块或商家表；商家由参数配置维护，选择商家后才按 `vender_no` 查询门店。
+- 架构层：工单域 / 日志拉取配置 / 系统参数配置 / 门店选项查询。
+- 创建的页面：`web/public/docs/2026-07-22-ticket-log-pull-vendor-config-lazy-store-options.md`。
+- 更新的代码：`server/modules/ticket/controller/ticket_log_pull_controller.py`、`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`server/sql/20260722_ticket_log_pull_vendor_config.sql`、`web/src/components/ticket/LogPullConfigFields.vue`、`web/src/views/ticket/logPullRecord/index.vue`。
+- 变更传播链：`sys_config.ticket.logPull.vendors` -> 日志拉取商家选项接口 -> 商家下拉 -> 携带 `vender_no` 查询 `ticket_log_pull_store_config` -> 门店下拉。
+- 关键结论：`vender_no` 是商家参数配置和门店配置的唯一关联键；首次加载不读取门店表，日志拉取记录和外部接口现有的整数 `vendorId` 字段保持兼容。
+- 补充交互：商家和门店选择器均保留 `filterable + allow-create + default-first-option`，用户输入并确认的文本可直接作为日志拉取参数，不会被配置选项限制。

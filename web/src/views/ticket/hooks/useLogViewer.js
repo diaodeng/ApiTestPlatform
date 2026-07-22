@@ -37,7 +37,6 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     getList,
     refreshDetail,
     applyProjectVendorMapping,
-    getVendorStoreOptions,
   } = options;
 
   const logPullLoading = ref(false);
@@ -84,24 +83,17 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     }
   }
 
-  function resetStoreSelection(target, vendorId) {
+  function resetStoreSelection(target) {
     const storeId = String(target.storeId || '').trim();
     if (!storeId) {
       target.storeId = undefined;
       return;
     }
-    const storeOptions =
-      typeof getVendorStoreOptions === 'function' ? getVendorStoreOptions(vendorId) : [];
-    if (
-      storeOptions.length &&
-      !storeOptions.some((item) => String(item.storeId || '').trim() === storeId)
-    ) {
-      target.storeId = storeId;
-    }
+    target.storeId = storeId;
   }
 
-  function handleLogPullVendorChange(vendorId) {
-    resetStoreSelection(logPullForm.value, vendorId);
+  function handleLogPullVendorChange() {
+    logPullForm.value.storeId = undefined;
   }
 
   function pickFirstFilledValue(candidates = []) {

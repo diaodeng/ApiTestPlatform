@@ -4,7 +4,7 @@
       <el-form-item label="商家" :prop="getProp('vendorId')">
         <el-select
           v-model="model.vendorId"
-          placeholder="选择或输入商家"
+          placeholder="选择商家"
           clearable
           filterable
           allow-create
@@ -14,9 +14,9 @@
         >
           <el-option
             v-for="item in vendorOptions"
-            :key="item.vendorId"
+            :key="item.venderNo"
             :label="item.label"
-            :value="item.vendorId"
+            :value="item.venderNo"
           />
         </el-select>
       </el-form-item>
@@ -25,11 +25,12 @@
       <el-form-item label="门店" :prop="getProp('storeId')">
         <el-select
           v-model="model.storeId"
-          placeholder="选择或输入门店"
+          placeholder="先选择商家"
           clearable
           filterable
           allow-create
           default-first-option
+          :disabled="!model.vendorId"
           style="width: 100%"
         >
           <el-option
@@ -274,7 +275,7 @@ const model = defineModel({
 
 const selectedParameterExample = ref('')
 const fetchedStoreOptions = ref([])
-const activeStoreVendorId = ref(null)
+const activeStoreVenderNo = ref('')
 let storeOptionsRequestSeq = 0
 
 const isDatabaseDataType = computed(() => Number(model.value?.commandDataType) === 2)
@@ -294,56 +295,48 @@ const parameterExampleOptions = computed(() => props.parameterExamples
 )
 
 const resolvedStoreOptions = computed(() => {
-  const vendorId = Number(model.value?.vendorId)
-  if (!vendorId) {
+  const venderNo = String(model.value?.vendorId || '').trim()
+  if (!venderNo) {
     return []
   }
-  if (activeStoreVendorId.value === vendorId) {
+  if (activeStoreVenderNo.value === venderNo) {
     return fetchedStoreOptions.value
   }
   if (props.storeOptions.length) {
     return props.storeOptions
   }
-  const vendor = props.vendorOptions.find(item => item.vendorId === vendorId)
-  return vendor?.stores || []
+  return []
 })
 
 function getProp(name) {
   return props.fieldPrefix ? `${props.fieldPrefix}.${name}` : name
 }
 
-function normalizeStoreOptions(responseData, vendorId) {
-  const resolvedVendorId = Number(vendorId)
-  if (!resolvedVendorId) {
-    return []
-  }
-  const vendors = Array.isArray(responseData?.vendors) ? responseData.vendors : []
-  const vendor = vendors.find(item => Number(item.vendorId) === resolvedVendorId)
-  return Array.isArray(vendor?.stores)
-    ? vendor.stores.map(store => ({
+function normalizeStoreOptions(responseData) {
+  const stores = Array.isArray(responseData?.stores) ? responseData.stores : []
+  return stores.map(store => ({
       storeId: String(store.storeId || '').trim(),
       storeCode: String(store.storeCode || '').trim(),
       sapOrgNo: String(store.sapOrgNo || '').trim(),
       storeName: String(store.storeName || store.storeId || '').trim(),
       label: buildStoreOptionLabel(store)
     }))
-    : []
 }
 
-function loadStoreOptions(vendorId) {
-  const resolvedVendorId = Number(vendorId)
-  activeStoreVendorId.value = resolvedVendorId || null
-  if (!resolvedVendorId) {
+function loadStoreOptions(venderNo) {
+  const resolvedVenderNo = String(venderNo || '').trim()
+  activeStoreVenderNo.value = resolvedVenderNo
+  if (!resolvedVenderNo) {
     fetchedStoreOptions.value = []
     return Promise.resolve()
   }
   const requestSeq = ++storeOptionsRequestSeq
   fetchedStoreOptions.value = []
-  return getTicketLogPullVendorStoreOptions(resolvedVendorId).then(response => {
+  return getTicketLogPullVendorStoreOptions(resolvedVenderNo).then(response => {
     if (requestSeq !== storeOptionsRequestSeq) {
       return
     }
-    fetchedStoreOptions.value = normalizeStoreOptions(response.data, resolvedVendorId)
+    fetchedStoreOptions.value = normalizeStoreOptions(response.data)
   }).catch(() => {
     if (requestSeq !== storeOptionsRequestSeq) {
       return

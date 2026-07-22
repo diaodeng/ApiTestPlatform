@@ -41,14 +41,16 @@
           placeholder="选择商家"
           clearable
           filterable
+          allow-create
+          default-first-option
           style="width: 220px"
           @change="handleQueryVendorChange"
         >
           <el-option
             v-for="item in vendorOptions"
-            :key="item.vendorId"
+            :key="item.venderNo"
             :label="item.label"
-            :value="item.vendorId"
+            :value="item.venderNo"
           />
         </el-select>
       </el-form-item>
@@ -58,7 +60,10 @@
           placeholder="先选择商家"
           clearable
           filterable
+          allow-create
+          default-first-option
           :disabled="!queryParams.vendorId"
+          :loading="queryStoreLoading"
           style="width: 260px"
         >
           <el-option
@@ -577,6 +582,8 @@ const ticketOptions = ref([])
 const agentOptions = ref([])
 const providerOptions = ref([])
 const vendorOptions = ref([])
+const queryStoreOptions = ref([])
+const queryStoreLoading = ref(false)
 const parameterExamples = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
@@ -841,27 +848,16 @@ function loadPushOptions() {
 
 function normalizeVendorOptions(rows = []) {
   return rows.map(item => ({
-    vendorId: Number(item.vendorId),
-    vendorCode: String(item.vendorCode || '').trim(),
-    vendorName: String(item.vendorName || item.vendorId || '').trim(),
+    venderNo: String(item.venderNo || '').trim(),
+    vendorName: String(item.vendorName || '').trim(),
     label: buildVendorOptionLabel(item),
-    stores: Array.isArray(item.stores)
-      ? item.stores.map(store => ({
-        storeId: String(store.storeId || '').trim(),
-        storeCode: String(store.storeCode || '').trim(),
-        sapOrgNo: String(store.sapOrgNo || '').trim(),
-        storeName: String(store.storeName || store.storeId || '').trim(),
-        label: buildStoreOptionLabel(store),
-      }))
-      : []
-  }))
+  })).filter(item => item.venderNo && item.vendorName)
 }
 
 function buildVendorOptionLabel(vendor) {
-  const name = String(vendor.vendorName || vendor.vendorId || '').trim()
-  const code = String(vendor.vendorCode || '').trim()
-  const id = String(vendor.vendorId || '').trim()
-  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+  const venderNo = String(vendor.venderNo || '').trim()
+  const name = String(vendor.vendorName || '').trim()
+  return [venderNo, name].filter(Boolean).join(' - ')
 }
 
 function buildStoreOptionLabel(store) {
@@ -880,31 +876,30 @@ function loadVendorOptions() {
   })
 }
 
-function getVendorStoreOptions(vendorId) {
-  const resolvedVendorId = Number(vendorId)
-  if (!resolvedVendorId) {
-    return []
+function loadQueryStoreOptions(venderNo) {
+  const resolvedVenderNo = String(venderNo || '').trim()
+  queryStoreOptions.value = []
+  if (!resolvedVenderNo) {
+    return Promise.resolve()
   }
-  const vendor = vendorOptions.value.find(item => item.vendorId === resolvedVendorId)
-  return vendor?.stores || []
+  queryStoreLoading.value = true
+  return getTicketLogPullVendorStoreOptions(resolvedVenderNo).then(response => {
+    const rows = Array.isArray(response.data?.stores) ? response.data.stores : []
+    queryStoreOptions.value = rows.map(store => ({
+      storeId: String(store.storeId || '').trim(),
+      storeCode: String(store.storeCode || '').trim(),
+      sapOrgNo: String(store.sapOrgNo || '').trim(),
+      storeName: String(store.storeName || store.storeId || '').trim(),
+      label: buildStoreOptionLabel(store)
+    })).filter(store => store.storeId)
+  }).finally(() => {
+    queryStoreLoading.value = false
+  })
 }
 
-const queryStoreOptions = computed(() => getVendorStoreOptions(queryParams.value.vendorId))
-
-function resetStoreSelection(target, vendorId) {
-  const storeId = String(target.storeId || '').trim()
-  if (!storeId) {
-    target.storeId = undefined
-    return
-  }
-  const storeOptions = getVendorStoreOptions(vendorId)
-  if (storeOptions.length && !storeOptions.some(item => String(item.storeId || '').trim() === storeId)) {
-    target.storeId = storeId
-  }
-}
-
-function handleQueryVendorChange(vendorId) {
-  resetStoreSelection(queryParams.value, vendorId)
+function handleQueryVendorChange(venderNo) {
+  queryParams.value.storeId = undefined
+  loadQueryStoreOptions(venderNo)
 }
 
 function openCreateDialog() {

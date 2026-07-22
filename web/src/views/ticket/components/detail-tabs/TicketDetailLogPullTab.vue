@@ -54,7 +54,6 @@
     loadPushOptions,
     loadAgentOptions,
     getProjectVendorNo,
-    getVendorStoreOptions,
   } = useOptions();
 
   /**
@@ -154,7 +153,6 @@
     getList: emitChanged,
     refreshDetail: refreshTicketDetailAndNotify,
     applyProjectVendorMapping,
-    getVendorStoreOptions,
   });
 
   const logPullRules = {
@@ -162,7 +160,6 @@
     storeId: [{ required: true, message: 'storeId不能为空', trigger: 'blur' }],
     posNo: [{ required: true, message: 'posNo不能为空', trigger: 'blur' }],
   };
-  const logPullStoreOptions = computed(() => getVendorStoreOptions(logPullForm.value.vendorId));
   const logViewerContextBlockRef = ref(null);
   const logViewerHighlightName = 'ticket-log-context-highlight';
   const logViewerNativeHighlightSupported = computed(() => supportsNativeLogViewerHighlight());
@@ -612,7 +609,6 @@
       <LogPullConfigFields
         v-model="logPullForm"
         :vendor-options="vendorOptions"
-        :store-options="logPullStoreOptions"
         :parameter-examples="parameterExamples"
         :agent-options="agentOptions"
         :provider-options="providerOptions"
