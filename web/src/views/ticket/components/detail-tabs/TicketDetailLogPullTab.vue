@@ -134,6 +134,7 @@
     copyLogPullArchiveDownloadUrl,
     downloadLogPullArchive,
     downloadLogPullOriginal,
+    getLogViewerDownloadProgress,
     openLogViewerFromPullRecord,
     handleLogPullDialogClosed,
     searchLogViewerInFile,
@@ -548,7 +549,21 @@
     <el-table-column label="操作" width="340">
       <template #default="scope">
         <el-button-group>
+          <el-tooltip
+            v-if="getLogViewerDownloadProgress(scope.row)"
+            :content="getLogViewerDownloadProgress(scope.row).message"
+            placement="top"
+          >
+            <el-progress
+              class="log-view-download-progress"
+              type="circle"
+              :percentage="getLogViewerDownloadProgress(scope.row).percentage"
+              :width="26"
+              :stroke-width="3"
+            />
+          </el-tooltip>
           <el-button
+            v-else
             link
             type="primary"
             @click="openLogViewerFromPullRecord(scope.row)"
@@ -1049,6 +1064,19 @@
 
   .log-context-line-content {
     white-space: inherit;
+  }
+
+  .log-view-download-progress {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    margin: 0 8px;
+    pointer-events: none;
+    vertical-align: middle;
+  }
+
+  .log-view-download-progress :deep(.el-progress__text) {
+    font-size: 8px !important;
   }
 
   :global(::highlight(ticket-log-context-highlight)) {

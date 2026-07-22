@@ -183,7 +183,20 @@
       </el-table-column>
       <el-table-column label="操作" width="300">
         <template #default="scope">
-          <el-button link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
+          <el-tooltip
+            v-if="getContentDownloadProgress(scope.row)"
+            :content="getContentDownloadProgress(scope.row).message"
+            placement="top"
+          >
+            <el-progress
+              class="log-view-download-progress"
+              type="circle"
+              :percentage="getContentDownloadProgress(scope.row).percentage"
+              :width="26"
+              :stroke-width="3"
+            />
+          </el-tooltip>
+          <el-button v-else link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
           </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
@@ -539,6 +552,7 @@ import {
   getTicket,
   getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
+  prepareTicketLogs,
   listTicket,
   listTicketLogPullStoreConfigs,
   listTicketLogPullRecords,
@@ -564,9 +578,11 @@ import {
   resolveLogPullOriginalLink,
   isHttpDownloadUrl
 } from '../logPull.shared'
+import { useLogPrepareProgress } from '../hooks/useLogPrepareProgress'
 import { blobValidate } from '@/utils/ruoyi'
 
 const { proxy } = getCurrentInstance()
+const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -1149,6 +1165,11 @@ function buildContentQuery() {
   return query
 }
 
+/**
+ * 打开日志查看弹窗，并根据记录配置预填实时查看范围。
+ * @param {object} row 日志拉取记录行数据。
+ * @returns {void} 无返回值。
+ */
 function openContentDialog(row) {
   selectedRecord.value = row
   contentOpen.value = true
@@ -1175,29 +1196,66 @@ function openContentDialog(row) {
   loadContent()
 }
 
+/**
+ * 加载当前记录的日志内容；实时查看原始文档时先准备本地缓存并轮询远程下载进度。
+ * @returns {Promise<void>} 日志内容加载完成 Promise。
+ */
 function loadContent() {
   if (!selectedRecord.value?.id) {
-    return
+    return Promise.resolve()
   }
   contentLoading.value = true
   contentDetail.value = {}
   contentText.value = ''
-  streamTicketLogPullContent(selectedRecord.value.id, buildContentQuery(), {
-    onMeta: data => {
-      contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
-    },
-    onChunk: text => {
-      contentText.value += text || ''
-    },
-    onDone: data => {
-      contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
-    }
-  }).catch(() => getTicketLogPullContent(selectedRecord.value.id, buildContentQuery()).then(response => {
-    contentDetail.value = response.data || {}
-    contentText.value = response.data?.text || ''
-  })).finally(() => {
-    contentLoading.value = false
-  })
+  return prepareSelectedArchiveForContent()
+    .then(() => streamTicketLogPullContent(selectedRecord.value.id, buildContentQuery(), {
+      onMeta: data => {
+        contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
+      },
+      onChunk: text => {
+        contentText.value += text || ''
+      },
+      onDone: data => {
+        contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
+      }
+    }).catch(() => getTicketLogPullContent(selectedRecord.value.id, buildContentQuery()).then(response => {
+      contentDetail.value = response.data || {}
+      contentText.value = response.data?.text || ''
+    })))
+    .finally(() => {
+      contentLoading.value = false
+    })
+}
+
+/**
+ * 为原始文档实时查看准备日志缓存；入库内容无需下载，直接跳过。
+ * @returns {Promise<object|void>} 日志准备接口响应或已完成 Promise。
+ */
+function prepareSelectedArchiveForContent() {
+  const record = selectedRecord.value
+  const ticketId = getRecordTicketId(record)
+  if (viewForm.value.viewMode !== 'archive' || !ticketId || !record?.id) {
+    return Promise.resolve()
+  }
+  return prepareWithDownloadProgress(ticketId, record.id, () => prepareTicketLogs(ticketId, record.id))
+}
+
+/**
+ * 获取管理列表行当前可展示的日志远程下载进度。
+ * @param {object} row 日志拉取记录行数据。
+ * @returns {object|null} 正在下载时返回进度信息，否则返回 null。
+ */
+function getContentDownloadProgress(row) {
+  return getDownloadProgress(getRecordTicketId(row), row?.id)
+}
+
+/**
+ * 兼容管理列表的驼峰和下划线字段，取得记录关联工单ID。
+ * @param {object} row 日志拉取记录行数据。
+ * @returns {number|string|undefined} 工单ID。
+ */
+function getRecordTicketId(row) {
+  return row?.ticketId || row?.ticket_id
 }
 
 const filteredContentText = computed(() => {
@@ -1215,8 +1273,12 @@ const filteredContentText = computed(() => {
 
 const canDownloadCurrent = computed(() => Boolean(selectedRecord.value?.commandResultUrl || selectedRecord.value?.storagePath))
 
+/**
+ * 按当前查看参数重新加载日志内容。
+ * @returns {Promise<void>} 日志内容加载完成 Promise。
+ */
 function reloadContent() {
-  loadContent()
+  return loadContent()
 }
 
 function runAction(request, successMessage, refreshContent = false) {
@@ -1494,6 +1556,19 @@ onBeforeUnmount(() => {
 
 .log-view-time-picker {
   width: 100%;
+}
+
+.log-view-download-progress {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  margin: 0 7px;
+  pointer-events: none;
+  vertical-align: middle;
+}
+
+.log-view-download-progress :deep(.el-progress__text) {
+  font-size: 8px !important;
 }
 
 .log-content-block {

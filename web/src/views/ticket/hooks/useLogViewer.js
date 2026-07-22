@@ -29,6 +29,7 @@ import {
   resolveLogPullArchiveLink,
   resolveLogPullOriginalLink,
 } from '@/views/ticket/logPull.shared';
+import { useLogPrepareProgress } from './useLogPrepareProgress';
 
 export function useLogViewer(proxy, currentTicketId, options = {}) {
   const {
@@ -75,6 +76,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     contextLines: 20,
     limit: 500,
   });
+  const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress();
 
   function resetLogPullForm() {
     logPullForm.value = createDefaultLogPullForm();
@@ -556,12 +558,17 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerForm.value.ticketId = ticketId;
   }
 
+  /**
+   * 准备并打开指定日志拉取记录的日志查看器。
+   * @param {object} row 工单或日志拉取记录行数据。
+   * @returns {Promise<void>} 日志准备和查看器打开完成 Promise。
+   */
   function openTicketLogViewer(row) {
     const ticketId = row?.ticketId;
     const recordId = row?.id;
-    if (!ticketId) return;
+    if (!ticketId) return Promise.resolve();
     logViewerSearching.value = true;
-    prepareTicketLogs(ticketId, recordId)
+    return prepareWithDownloadProgress(ticketId, recordId, () => prepareTicketLogs(ticketId, recordId))
       .then(() => {
         currentTicketId.value = ticketId;
         resetLogViewerState(ticketId);
@@ -592,6 +599,11 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       });
   }
 
+  /**
+   * 从日志拉取记录行打开对应工单的日志查看器。
+   * @param {object} row 日志拉取记录行数据。
+   * @returns {Promise<void>} 日志准备和查看器打开完成 Promise。
+   */
   function openLogViewerFromPullRecord(row) {
     const ticketMeta = {
       ticketId: row?.ticketId || currentTicketId.value || detail?.value?.ticketId,
@@ -600,10 +612,22 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     };
     if (!ticketMeta.ticketId) {
       proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志');
-      return;
+      return Promise.resolve();
     }
     selectedLogPullRecord.value = buildLogViewerRecord(row, ticketMeta);
-    openTicketLogViewer(buildLogViewerRecord(row, ticketMeta));
+    return openTicketLogViewer(buildLogViewerRecord(row, ticketMeta));
+  }
+
+  /**
+   * 获取列表行当前的日志远程下载进度。
+   * @param {object} row 工单或日志拉取记录行数据。
+   * @returns {object|null} 正在下载时返回进度信息，否则返回 null。
+   */
+  function getLogViewerDownloadProgress(row) {
+    return getDownloadProgress(
+      row?.ticketId || currentTicketId.value || detail?.value?.ticketId,
+      row?.id,
+    );
   }
 
   function handleLogPullDialogClosed() {
@@ -915,6 +939,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     downloadLogPullFile,
     downloadLogPullArchive,
     downloadLogPullOriginal,
+    getLogViewerDownloadProgress,
     syncLogViewerTicketMeta,
     buildLogViewerRecord,
     openTicketLogViewer,

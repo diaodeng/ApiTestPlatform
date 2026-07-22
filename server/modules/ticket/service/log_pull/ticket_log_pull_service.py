@@ -12,6 +12,7 @@ import tempfile
 import threading
 import traceback
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 from ftplib import FTP, error_perm
@@ -2867,11 +2868,17 @@ class TicketLogPullService:
         return None
 
     @classmethod
-    def _download_archive(cls, record: TicketLogPullRecord, db: Session) -> tuple[Path, int]:
+    def _download_archive(
+        cls,
+        record: TicketLogPullRecord,
+        db: Session,
+        progress_callback: Callable[[int, int | None, str], None] | None = None,
+    ) -> tuple[Path, int]:
         """
         下载外部压缩包到本地临时文件。
         :param record: 日志拉取记录
         :param db: 数据库会话
+        :param progress_callback: 下载进度回调，参数依次为已下载字节数、总字节数、来源
         :return: 临时文件路径和文件大小
         """
         config = cls._get_storage_config_dict(db)
@@ -2904,12 +2911,18 @@ class TicketLogPullService:
             headers=cls._build_external_request_headers(external_config),
         ) as response:
             response.raise_for_status()
+            content_length = response.headers.get("Content-Length")
+            total_bytes = int(content_length) if content_length and content_length.isdigit() else None
+            if progress_callback:
+                progress_callback(0, total_bytes, "http")
             with temp_file.open("wb") as file_obj:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
                     if not chunk:
                         continue
                     file_obj.write(chunk)
                     total_size += len(chunk)
+                    if progress_callback:
+                        progress_callback(total_size, total_bytes, "http")
         return temp_file, total_size
 
     @classmethod
@@ -3311,11 +3324,17 @@ class TicketLogPullService:
         )
 
     @classmethod
-    def _resolve_archive_source_for_view(cls, record: TicketLogPullRecord, db: Session) -> tuple[Path | None, bool]:
+    def _resolve_archive_source_for_view(
+        cls,
+        record: TicketLogPullRecord,
+        db: Session,
+        progress_callback: Callable[[int, int | None, str], None] | None = None,
+    ) -> tuple[Path | None, bool]:
         """
         解析查看日志时可用的压缩包来源。
         :param record: 日志拉取记录
         :param db: 数据库会话
+        :param progress_callback: 下载进度回调，参数依次为已下载字节数、总字节数、来源
         :return: 压缩包路径和是否需要清理临时文件
         """
         storage_path = str(record.storage_path or "").strip()
@@ -3323,19 +3342,48 @@ class TicketLogPullService:
             local_path = Path(storage_path)
             if local_path.exists() and local_path.is_file():
                 return local_path, False
+        prepared_source = cls._find_prepared_view_source(record)
+        if prepared_source:
+            return prepared_source, False
         storage_mode = str(record.storage_mode or "").strip().lower()
         if storage_mode == "ftp" and storage_path:
             try:
-                return cls._download_file_from_ftp_to_temp(db, storage_path), True
+                return cls._download_file_from_ftp_to_temp(db, storage_path, progress_callback=progress_callback), True
             except Exception as exc:
                 logger.warning(f"从 FTP 下载日志压缩包失败: {exc}")
         if str(record.command_result_url or "").strip():
             try:
-                temp_file, _ = cls._download_archive(record, db)
+                temp_file, _ = cls._download_archive(record, db, progress_callback=progress_callback)
                 return temp_file, True
             except Exception as exc:
                 logger.warning(f"从外部地址重新下载日志压缩包失败: {exc}")
         return None, False
+
+    @classmethod
+    def _find_prepared_view_source(cls, record: TicketLogPullRecord) -> Path | None:
+        """
+        查找日志查看准备流程已缓存的原始压缩包，避免同一记录重复远程下载。
+        :param record: 日志拉取记录
+        :return: 已缓存的压缩包路径，未命中时返回 None
+        """
+        ticket_id = int(record.ticket_id or 0)
+        record_id = int(record.id or 0)
+        if ticket_id <= 0 or record_id <= 0:
+            return None
+        source_dir = (
+            Path(__file__).resolve().parents[4]
+            / "data"
+            / "logs"
+            / f"ticket_{ticket_id}"
+            / f"record_{record_id}"
+            / "source"
+        )
+        if not source_dir.exists():
+            return None
+        for candidate in sorted(source_dir.iterdir()):
+            if candidate.is_file():
+                return candidate
+        return None
 
     @classmethod
     def _resolve_archive_source_for_download(
@@ -3396,11 +3444,17 @@ class TicketLogPullService:
         return f"ticket_log_pull_{record.id}.zip"
 
     @classmethod
-    def _download_file_from_ftp_to_temp(cls, db: Session, remote_path: str) -> Path:
+    def _download_file_from_ftp_to_temp(
+        cls,
+        db: Session,
+        remote_path: str,
+        progress_callback: Callable[[int, int | None, str], None] | None = None,
+    ) -> Path:
         """
         从 FTP 下载文件到临时路径。
         :param db: 数据库会话
         :param remote_path: FTP 文件路径
+        :param progress_callback: 下载进度回调，参数依次为已下载字节数、总字节数、来源
         :return: 临时文件路径
         """
         config = cls._get_storage_config_dict(db)
@@ -3411,8 +3465,28 @@ class TicketLogPullService:
         temp_path = Path(temp_name)
         ftp = cls._connect_ftp(config)
         try:
+            try:
+                total_bytes = ftp.size(remote_path)
+            except ftp_errors:
+                total_bytes = None
+            downloaded_bytes = 0
+
+            def write_chunk(chunk: bytes) -> None:
+                """
+                写入 FTP 下载块并通知调用方当前下载进度。
+                :param chunk: 本次收到的二进制数据块
+                :return: 无
+                """
+                nonlocal downloaded_bytes
+                file_obj.write(chunk)
+                downloaded_bytes += len(chunk)
+                if progress_callback:
+                    progress_callback(downloaded_bytes, total_bytes, "ftp")
+
             with temp_path.open("wb") as file_obj:
-                ftp.retrbinary(f"RETR {remote_path}", file_obj.write)
+                if progress_callback:
+                    progress_callback(0, total_bytes, "ftp")
+                ftp.retrbinary(f"RETR {remote_path}", write_chunk)
             return temp_path
         except ftp_errors as exc:
             try:

@@ -8,6 +8,16 @@ updated: 2026-07-21
 
 # 操作日志
 
+## [2026-07-22] INGEST-CODE | 工单日志查看下载进度迁移至 Redis
+
+- 触发：用户要求将日志准备下载进度从进程内存迁移到 Redis，解决多实例部署时的请求粘性问题。
+- 架构层：工单域 / 日志拉取准备进度。
+- 创建的页面：`web/public/docs/2026-07-21-ticket-log-view-download-progress.md`
+- 新增的文件：`server/modules/ticket/service/log_pull/ticket_log_prepare_progress_service.py`、`web/src/views/ticket/hooks/useLogPrepareProgress.js`
+- 更新的页面：`server/modules/ticket/controller/ticket_log_pull_controller.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/service/log_pull/ticket_log_service.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`、`web/src/views/ticket/logPullRecord/index.vue`、`wiki/flows/ticket-log-record-isolated-view.md`
+- 变更传播链：`TicketLogPrepareProgressService`（新）使用 `app.state.redis` 存储进度快照（key 前缀 `ticket:log-prepare-progress`，TTL 30 分钟）-> Controller 在线程池下载回调中用 `asyncio.run_coroutine_threadsafe` 安全跨线程写入 -> `TicketLogPullService._download_archive` / `_download_file_from_ftp_to_temp` 上报 HTTP/FTP 下载字节 -> 前端 `useLogPrepareProgress` 每 400ms 轮询 `GET /ticket/logs/prepare-progress`，`downloading=true` 时替换列表行"查看日志"按钮为圆形进度条。
+- 关键结论：进度状态不持久化，TTL 到期自动清除；若 `CACHE_BACKEND=memory` 则退化为单进程内存存储，行为等价于迁移前。
+
 ## [2026-07-21] INGEST-CODE | 工单日志选区高亮回归修复
 
 - 触发：用户反馈工单详情页日志搜索详情中，选中文本无法高亮也无法作为候选词复制，要求修复选中即高亮、取消选区移除临时高亮、保留其他高亮词，并分析是否改用编辑器展示日志详情。
@@ -1508,6 +1518,14 @@ updated: 2026-07-21
 - 创建的双向链接：0 对
 - 变更传播链：`pos_init` 响应 -> 安全日志摘要；`_FileTailThread` -> 超长单行截断 -> `QTextEdit`；`PosController.start_pos` -> Worker 强引用 -> 成功或失败信号后释放。
 - 总共涉及页面：1
+## [2026-07-21] INGEST-CODE | 查看日志远程下载进度
+- 触发：用户要求工单详情和日志拉取管理列表在查看日志需要后端下载时，显示禁用的圆形下载进度。
+- 架构层：工单域 / 日志查看 / 日志拉取 / Web 控制台。
+- 创建的页面：`web/public/docs/2026-07-21-ticket-log-view-download-progress.md`
+- 更新的页面：`wiki/flows/ticket-log-record-isolated-view.md`
+- 创建的双向链接：1 对（新增/修改）。
+- 变更传播链：详情或管理列表查看日志 -> `/ticket/logs/prepare` -> `TicketLogPrepareProgressService` -> HTTP/FTP 分块下载回调 -> `/ticket/logs/prepare-progress` -> `useLogPrepareProgress` -> 当前行圆形进度条；管理页实时查看复用准备后的 source 源包。
+- 总共涉及页面：2。
 ## [2026-07-22] INGEST-CODE | 日志拉取商家参数配置与门店按需加载
 
 - 触发：商家规模较小，要求不新增商家维护模块或商家表；商家由参数配置维护，选择商家后才按 `vender_no` 查询门店。

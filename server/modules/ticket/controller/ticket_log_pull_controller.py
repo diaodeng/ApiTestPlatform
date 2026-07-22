@@ -1,3 +1,4 @@
+import asyncio
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
@@ -25,6 +26,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogSearchRequestModel,
     TicketLogSearchTimeRequestModel,
 )
+from modules.ticket.service.log_pull.ticket_log_prepare_progress_service import TicketLogPrepareProgressService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.log_pull.ticket_log_service import LogService
 from modules.ticket.util.ticket_log_preview_util import build_ticket_log_search_hit_previews
@@ -32,6 +34,43 @@ from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
 ticketLogPullController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
+
+
+def _report_ticket_log_prepare_download_progress(
+    loop: asyncio.AbstractEventLoop,
+    redis,
+    ticket_id: int,
+    record_id: int | None,
+    downloaded: int,
+    total: int | None,
+    source: str,
+) -> None:
+    """
+    在线程池下载回调中安全写入 Redis 进度，写入失败不影响日志下载。
+    :param loop: 当前 FastAPI 请求所属的事件循环
+    :param redis: 应用生命周期初始化的异步 Redis 客户端
+    :param ticket_id: 工单ID
+    :param record_id: 日志拉取记录ID
+    :param downloaded: 已下载字节数
+    :param total: 远程文件总字节数，未知时为 None
+    :param source: 下载来源标识
+    :return: 无
+    """
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            TicketLogPrepareProgressService.report_download(
+                redis,
+                ticket_id,
+                record_id,
+                downloaded,
+                total,
+                source,
+            ),
+            loop,
+        )
+        future.result(timeout=5)
+    except Exception as exc:
+        logger.warning(f"工单日志下载进度写入Redis失败，ticket_id={ticket_id}，record_id={record_id}，错误：{exc}")
 
 @ticketLogPullController.get(
     "/log-pull/storage-config",
@@ -227,14 +266,85 @@ async def prepare_ticket_logs(
     :param query_db: 数据库会话
     :return: 日志准备结果
     """
+    redis = request.app.state.redis
+    try:
+        await TicketLogPrepareProgressService.start(redis, prepare_object.ticket_id, prepare_object.record_id)
+    except Exception as exc:
+        logger.warning(
+            f"工单日志准备进度初始化失败，ticket_id={prepare_object.ticket_id}，"
+            f"record_id={prepare_object.record_id}，错误：{exc}"
+        )
+    loop = asyncio.get_running_loop()
     try:
         result = await run_in_threadpool(
-            LogService.prepare, query_db, prepare_object.ticket_id, prepare_object.record_id
+            LogService.prepare,
+            query_db,
+            prepare_object.ticket_id,
+            prepare_object.record_id,
+            lambda downloaded, total, source: _report_ticket_log_prepare_download_progress(
+                loop,
+                redis,
+                prepare_object.ticket_id,
+                prepare_object.record_id,
+                downloaded,
+                total,
+                source,
+            ),
         )
+        try:
+            await TicketLogPrepareProgressService.complete(
+                redis,
+                prepare_object.ticket_id,
+                prepare_object.record_id,
+                result.prepared,
+                result.message or "",
+            )
+        except Exception as exc:
+            logger.warning(
+                f"工单日志准备进度完成状态写入失败，ticket_id={prepare_object.ticket_id}，"
+                f"record_id={prepare_object.record_id}，错误：{exc}"
+            )
         return ResponseUtil.success(data=result) if result.prepared else ResponseUtil.failure(msg=result.message)
     except Exception as e:
+        try:
+            await TicketLogPrepareProgressService.complete(
+                redis,
+                prepare_object.ticket_id,
+                prepare_object.record_id,
+                False,
+                str(e),
+            )
+        except Exception as progress_exc:
+            logger.warning(
+                f"工单日志准备失败状态写入失败，ticket_id={prepare_object.ticket_id}，"
+                f"record_id={prepare_object.record_id}，错误：{progress_exc}"
+            )
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
+    "/logs/prepare-progress",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_prepare_progress(
+    request: Request,
+    ticket_id: int,
+    record_id: int | None = None,
+):
+    """
+    查询工单日志准备过程中的远程下载进度。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param record_id: 日志拉取记录ID
+    :return: 当前准备阶段、下载标识和字节进度
+    """
+    try:
+        progress = await TicketLogPrepareProgressService.get(request.app.state.redis, ticket_id, record_id)
+    except Exception as exc:
+        logger.warning(f"工单日志准备进度查询失败，ticket_id={ticket_id}，record_id={record_id}，错误：{exc}")
+        progress = TicketLogPrepareProgressService._deserialize(None)
+    return ResponseUtil.success(data=progress)
 
 
 @ticketLogPullController.get(

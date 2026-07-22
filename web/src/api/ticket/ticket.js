@@ -709,6 +709,16 @@ export function prepareTicketLogs(ticketId, recordId) {
   });
 }
 
+// 查询工单日志准备阶段的远程下载进度
+export function getTicketLogPrepareProgress(ticketId, recordId) {
+  return request({
+    url: '/ticket/logs/prepare-progress',
+    method: 'get',
+    params: { ticket_id: ticketId, record_id: recordId },
+    showErrorMessage: false,
+  });
+}
+
 // 查询工单日志文件列表
 export function listTicketLogFiles(ticketId, recordId) {
   return request({

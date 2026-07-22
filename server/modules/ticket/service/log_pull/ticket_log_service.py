@@ -13,6 +13,7 @@ import tarfile
 import time
 import zipfile
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -52,12 +53,19 @@ class LogService:
     CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
 
     @classmethod
-    def prepare(cls, db: Session, ticket_id: int, record_id: int | None = None) -> TicketLogPrepareModel:
+    def prepare(
+        cls,
+        db: Session,
+        ticket_id: int,
+        record_id: int | None = None,
+        progress_callback: Callable[[int, int | None, str], None] | None = None,
+    ) -> TicketLogPrepareModel:
         """
         准备指定工单的日志目录：复用最新日志拉取归档，下载或复制到 source 后递归解压到 extract。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param record_id: 日志拉取记录ID，为空时使用当前工单最新日志记录
+        :param progress_callback: 远程归档下载进度回调，参数依次为已下载字节数、总字节数、来源
         :return: 准备结果
         """
         prepare_started_at = time.monotonic()
@@ -110,7 +118,11 @@ class LogService:
                 message="日志拉取记录不属于当前工单",
             )
 
-        archive_path, should_cleanup = TicketLogPullService._resolve_archive_source_for_view(record, db)
+        archive_path, should_cleanup = TicketLogPullService._resolve_archive_source_for_view(
+            record,
+            db,
+            progress_callback=progress_callback,
+        )
         if not archive_path:
             logger.warning(f"未解析到可用日志归档文件，ticket_id={ticket_id}，record_id={record.id}")
             return TicketLogPrepareModel(
