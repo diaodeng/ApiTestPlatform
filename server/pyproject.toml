@@ -26,6 +26,7 @@ dependencies = [
     "quickjs>=1.19.4",
     "redis==5.0.1",
     "redlock==1.2.0",
+    "py7zr>=0.21.0",
     "requests==2.31.0",
     "sqlalchemy==2.0.25",
     "user-agents==2.2.0",

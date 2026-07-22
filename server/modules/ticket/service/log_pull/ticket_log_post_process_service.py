@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import py7zr
 from charset_normalizer import from_bytes
 from sqlalchemy.orm import Session
 
@@ -297,6 +298,9 @@ class TicketLogPostProcessService:
             with lzma.open(archive_path, "rb") as source, output_path.open("wb") as target:
                 shutil.copyfileobj(source, target)
             return
+        if name.endswith(".7z"):
+            cls._extract_7z(archive_path, target_dir)
+            return
         cls._extract_by_7z(archive_path, target_dir)
 
     @classmethod
@@ -332,6 +336,18 @@ class TicketLogPostProcessService:
                     logger.warning(f"跳过非法 TAR 条目，archive={archive_path}，member={member.name}")
                     continue
                 archive.extract(member, target_dir)
+
+    @classmethod
+    def _extract_7z(cls, archive_path: Path, target_dir: Path) -> None:
+        """
+        使用 py7zr 解压 .7z 文件。
+        py7zr 内部已含路径穿越保护，无需额外逐条目校验。
+        :param archive_path: .7z 压缩包路径
+        :param target_dir: 解压目录
+        :return: 无
+        """
+        with py7zr.SevenZipFile(archive_path, "r") as archive:
+            archive.extractall(path=target_dir)
 
     @classmethod
     def _extract_by_7z(cls, archive_path: Path, target_dir: Path) -> None:

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import bz2
+import gzip
 import json
+import lzma
 import os
 import re
 import shutil
 import subprocess
+import tarfile
 import zipfile
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+import py7zr
 from dotenv import dotenv_values
 from loguru import logger
 import httpx
@@ -815,12 +820,33 @@ class TicketAiAnalysisService:
     @staticmethod
     def _extract_archive(archive_path: Path, extract_dir: Path) -> list[str]:
         """
-        解压日志压缩包到工作区目录。
+        解压日志压缩包到工作区目录。支持 zip / 7z / tar / tar.gz / tgz / bz2 / xz / gz 等常见格式。
         :param archive_path: 压缩包路径
         :param extract_dir: 解压目录
         :return: 解压后的文件相对路径列表
         """
         extract_dir.mkdir(parents=True, exist_ok=True)
+        name = archive_path.name.lower()
+        if name.endswith(".7z"):
+            return TicketAiAnalysisService._extract_7z(archive_path, extract_dir)
+        if name.endswith(".zip"):
+            return TicketAiAnalysisService._extract_zip(archive_path, extract_dir)
+        if tarfile.is_tarfile(archive_path):
+            return TicketAiAnalysisService._extract_tar(archive_path, extract_dir)
+        if name.endswith(".gz"):
+            return TicketAiAnalysisService._extract_gz(archive_path, extract_dir)
+        if name.endswith(".bz2"):
+            return TicketAiAnalysisService._extract_bz2(archive_path, extract_dir)
+        if name.endswith(".xz"):
+            return TicketAiAnalysisService._extract_xz(archive_path, extract_dir)
+        # 兜底：尝试 py7zr（不依赖后缀的场景），再失败则走系统 7z
+        try:
+            return TicketAiAnalysisService._extract_7z(archive_path, extract_dir)
+        except Exception:
+            return TicketAiAnalysisService._extract_by_system_7z(archive_path, extract_dir)
+
+    @staticmethod
+    def _extract_zip(archive_path: Path, extract_dir: Path) -> list[str]:
         extracted_files: list[str] = []
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
             for member in zip_ref.namelist():
@@ -829,6 +855,72 @@ class TicketAiAnalysisService:
                 zip_ref.extract(member, extract_dir)
                 extracted_files.append(member)
         return extracted_files
+
+    @staticmethod
+    def _extract_7z(archive_path: Path, extract_dir: Path) -> list[str]:
+        extracted_files: list[str] = []
+        with py7zr.SevenZipFile(archive_path, "r") as archive:
+            archive.extractall(path=extract_dir)
+            extracted_files = archive.getnames()
+        return [f for f in extracted_files if not f.endswith("/")]
+
+    @staticmethod
+    def _extract_tar(archive_path: Path, extract_dir: Path) -> list[str]:
+        extracted_files: list[str] = []
+        with tarfile.open(archive_path) as archive:
+            for member in archive.getmembers():
+                if member.isdir() or member.issym():
+                    continue
+                archive.extract(member, extract_dir)
+                extracted_files.append(member.name)
+        return extracted_files
+
+    @staticmethod
+    def _extract_gz(archive_path: Path, extract_dir: Path) -> list[str]:
+        output_name = archive_path.with_suffix("").name
+        output_path = extract_dir / output_name
+        with gzip.open(archive_path, "rb") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return [output_name]
+
+    @staticmethod
+    def _extract_bz2(archive_path: Path, extract_dir: Path) -> list[str]:
+        output_name = archive_path.with_suffix("").name
+        output_path = extract_dir / output_name
+        with bz2.open(archive_path, "rb") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return [output_name]
+
+    @staticmethod
+    def _extract_xz(archive_path: Path, extract_dir: Path) -> list[str]:
+        output_name = archive_path.with_suffix("").name
+        output_path = extract_dir / output_name
+        with lzma.open(archive_path, "rb") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return [output_name]
+
+    @staticmethod
+    def _extract_by_system_7z(archive_path: Path, extract_dir: Path) -> list[str]:
+        """使用系统 7z 命令解压（兜底方案，支持 rar 等 py7zr 不支持的格式）。"""
+        executable = shutil.which("7z") or shutil.which("7z.exe")
+        if not executable:
+            raise RuntimeError("当前环境未找到 7z 命令行工具，无法解压该格式压缩包")
+        process = subprocess.run(
+            [executable, "x", "-y", f"-o{extract_dir}", str(archive_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "7z 解压失败")
+        # 扫描解压后的非目录文件列表
+        extracted: list[str] = []
+        for root, _dirs, files in os.walk(extract_dir):
+            for file in files:
+                abs_path = os.path.join(root, file)
+                extracted.append(os.path.relpath(abs_path, extract_dir))
+        return extracted
 
     @classmethod
     def _build_log_digest_keywords(cls, ticket: dict[str, Any], context_payload: dict[str, Any]) -> list[str]:
