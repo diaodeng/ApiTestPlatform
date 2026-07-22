@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import bz2
 import codecs
-import gzip
 import json
-import lzma
 import os
 import re
 import shutil
 import subprocess
-import tarfile
 import time
-import zipfile
 from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
@@ -32,6 +27,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogSearchHitModel,
 )
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
 from utils.log_util import logger
 
 
@@ -44,9 +40,7 @@ class LogService:
     SOURCE_FILE_NAME = "log.zip"
     META_FILE_NAME = "meta.json"
     TEXT_EXTENSIONS = {".log", ".txt", ".out"}
-    COMPRESSED_SUFFIXES = (".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz", ".gz", ".bz2", ".xz")
     ERROR_KEYWORDS = ("ERROR", "Exception", "Traceback", "timeout", "failed")
-    MAX_RECURSIVE_EXTRACT_ROUNDS = 20
     LINE_INDEX_SUFFIX = ".lineidx"
     LINE_INDEX_ENCODING_VERSION = 2
     SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
@@ -142,7 +136,10 @@ class LogService:
                 f"archive_path={archive_path}，source_path={source_path}，extract_path={extract_dir}，"
                 f"should_cleanup={should_cleanup}"
             )
-            shutil.copy2(archive_path, source_path)
+            if archive_path.resolve() != source_path.resolve():
+                shutil.copy2(archive_path, source_path)
+            else:
+                logger.info(f"工单日志源文件已位于 source 目录，跳过复制，archive_path={archive_path}")
             if should_cleanup:
                 archive_path.unlink(missing_ok=True)
             cls._extract_recursive(source_path, extract_dir, runtime_config, time.monotonic())
@@ -1168,18 +1165,8 @@ class LogService:
 
     @staticmethod
     def _config_int(config: dict[str, Any], key: str, default: int) -> int:
-        """
-        从运行配置中安全读取正整数。
-        :param config: 运行配置字典
-        :param key: 配置键名
-        :param default: 默认值
-        :return: 正整数配置值
-        """
-        try:
-            value = int(float(str(config.get(key, default)).strip()))
-            return value if value > 0 else default
-        except Exception:
-            return default
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.config_int(config, key, default)
 
     @staticmethod
     def _normalize_keywords(keywords: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -1251,193 +1238,58 @@ class LogService:
     def _extract_recursive(
         cls, archive_path: Path, target_dir: Path, runtime_config: dict[str, Any], started_at: float
     ) -> None:
-        """
-        递归解压压缩包，直到目录内不再存在受支持的压缩文件或达到最大轮次。
-        :param archive_path: 初始压缩包路径
-        :param target_dir: 解压目标目录
-        :param runtime_config: 运行保护配置
-        :param started_at: 准备阶段开始时间戳
-        :return: 无
-        """
-        cls._ensure_prepare_budget(started_at, runtime_config)
-        cls._extract_one(archive_path, target_dir)
-        cls._validate_extracted_resource_usage(target_dir, runtime_config)
-        for round_index in range(cls.MAX_RECURSIVE_EXTRACT_ROUNDS):
-            cls._ensure_prepare_budget(started_at, runtime_config)
-            archives = [path for path in target_dir.rglob("*") if path.is_file() and cls._is_archive(path)]
-            if not archives:
-                logger.info(f"递归解压完成，target_dir={target_dir}，round={round_index}")
-                return
-            for archive in archives:
-                cls._ensure_prepare_budget(started_at, runtime_config)
-                extract_to = archive.parent / archive.stem
-                extract_to.mkdir(parents=True, exist_ok=True)
-                try:
-                    cls._extract_one(archive, extract_to)
-                    archive.unlink(missing_ok=True)
-                    cls._validate_extracted_resource_usage(target_dir, runtime_config)
-                    logger.info(f"完成一层日志压缩包解压，archive={archive}，extract_to={extract_to}")
-                except Exception as exc:
-                    logger.warning(f"日志压缩包解压失败，archive={archive}，reason={exc}")
-        logger.warning(f"递归解压达到最大轮次后停止，target_dir={target_dir}，max_rounds={cls.MAX_RECURSIVE_EXTRACT_ROUNDS}")
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_recursive(archive_path, target_dir, runtime_config, started_at, context="日志")
 
     @classmethod
     def _ensure_prepare_budget(cls, started_at: float, runtime_config: dict[str, Any]) -> None:
-        """
-        检查日志准备阶段是否超过配置的最大耗时。
-        :param started_at: 准备阶段开始时间戳
-        :param runtime_config: 运行保护配置
-        :return: 无
-        """
-        max_seconds = cls._config_int(runtime_config, "maxExtractSeconds", 300)
-        if time.monotonic() - started_at > max_seconds:
-            raise RuntimeError("日志解压准备超过当前保护超时，请缩小日志包或调整日志拉取存储配置")
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.ensure_prepare_budget(started_at, runtime_config, context="日志")
 
     @classmethod
     def _validate_extracted_resource_usage(cls, target_dir: Path, runtime_config: dict[str, Any]) -> None:
-        """
-        检查解压目录资源占用，避免异常日志包拖垮服务。
-        :param target_dir: 解压目标目录
-        :param runtime_config: 运行保护配置
-        :return: 无
-        """
-        max_file_count = cls._config_int(runtime_config, "maxExtractFileCount", 2000)
-        max_total_bytes = cls._config_int(runtime_config, "maxExtractTotalBytes", 2147483648)
-        file_count = 0
-        total_bytes = 0
-        for path in target_dir.rglob("*"):
-            if not path.is_file():
-                continue
-            file_count += 1
-            total_bytes += path.stat().st_size
-            if file_count > max_file_count:
-                raise RuntimeError("日志解压文件数量超过当前保护阈值，请缩小日志包或调整日志拉取存储配置")
-            if total_bytes > max_total_bytes:
-                raise RuntimeError("日志解压总大小超过当前保护阈值，请缩小日志包或调整日志拉取存储配置")
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.validate_extracted_resource_usage(target_dir, runtime_config, context="日志")
 
     @classmethod
     def _extract_one(cls, archive_path: Path, target_dir: Path) -> None:
-        """
-        解压单个压缩文件，优先使用标准库，RAR/7z 交给系统 7z。
-        :param archive_path: 压缩文件路径
-        :param target_dir: 目标目录
-        :return: 无
-        """
-        name = archive_path.name.lower()
-        if name.endswith(".zip"):
-            cls._extract_zip_safely(archive_path, target_dir)
-            return
-        if name.endswith((".tar", ".tar.gz", ".tgz", ".bz2", ".xz")) and tarfile.is_tarfile(archive_path):
-            cls._extract_tar_safely(archive_path, target_dir)
-            return
-        if name.endswith(".gz") and not name.endswith(".tar.gz"):
-            output_path = target_dir / archive_path.with_suffix("").name
-            with gzip.open(archive_path, "rb") as source, output_path.open("wb") as target:
-                shutil.copyfileobj(source, target)
-            return
-        if name.endswith(".bz2"):
-            output_path = target_dir / archive_path.with_suffix("").name
-            with bz2.open(archive_path, "rb") as source, output_path.open("wb") as target:
-                shutil.copyfileobj(source, target)
-            return
-        if name.endswith(".xz"):
-            output_path = target_dir / archive_path.with_suffix("").name
-            with lzma.open(archive_path, "rb") as source, output_path.open("wb") as target:
-                shutil.copyfileobj(source, target)
-            return
-        cls._extract_by_7z(archive_path, target_dir)
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_one(archive_path, target_dir)
 
     @classmethod
     def _extract_zip_safely(cls, archive_path: Path, target_dir: Path) -> None:
-        """
-        安全解压 ZIP 文件，避免压缩包内的相对路径写出目标目录。
-        :param archive_path: ZIP 文件路径
-        :param target_dir: 解压目标目录
-        :return: 无
-        """
-        root = target_dir.resolve()
-        with zipfile.ZipFile(archive_path) as archive:
-            for member in archive.infolist():
-                target_path = (target_dir / member.filename).resolve()
-                if not cls._is_relative_to(target_path, root):
-                    logger.warning(f"跳过非法 ZIP 条目，archive={archive_path}，member={member.filename}")
-                    continue
-                archive.extract(member, target_dir)
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_zip_safely(archive_path, target_dir)
 
     @classmethod
     def _extract_tar_safely(cls, archive_path: Path, target_dir: Path) -> None:
-        """
-        安全解压 TAR 文件，避免压缩包内的相对路径写出目标目录。
-        :param archive_path: TAR 文件路径
-        :param target_dir: 解压目标目录
-        :return: 无
-        """
-        root = target_dir.resolve()
-        with tarfile.open(archive_path) as archive:
-            for member in archive.getmembers():
-                target_path = (target_dir / member.name).resolve()
-                if not cls._is_relative_to(target_path, root):
-                    logger.warning(f"跳过非法 TAR 条目，archive={archive_path}，member={member.name}")
-                    continue
-                archive.extract(member, target_dir)
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_tar_safely(archive_path, target_dir)
+
+    @classmethod
+    def _extract_7z(cls, archive_path: Path, target_dir: Path) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_7z(archive_path, target_dir)
 
     @classmethod
     def _extract_by_7z(cls, archive_path: Path, target_dir: Path) -> None:
-        """
-        使用系统 7z 解压 Python 标准库不覆盖的格式。
-        :param archive_path: 压缩文件路径
-        :param target_dir: 目标目录
-        :return: 无
-        """
-        executable = shutil.which("7z") or shutil.which("7z.exe")
-        if not executable:
-            raise RuntimeError("当前环境未找到 7z，无法解压 rar/7z 等格式")
-        process = subprocess.run(
-            [executable, "x", "-y", f"-o{target_dir}", str(archive_path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if process.returncode != 0:
-            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "7z 解压失败")
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_by_7z(archive_path, target_dir)
 
     @classmethod
     def _is_archive(cls, path: Path) -> bool:
-        """
-        判断文件是否为支持递归处理的压缩文件。
-        :param path: 文件路径
-        :return: 是否压缩文件
-        """
-        name = path.name.lower()
-        return any(name.endswith(suffix) for suffix in cls.COMPRESSED_SUFFIXES)
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.is_archive(path)
 
     @classmethod
     def _is_relative_to(cls, path: Path, root: Path) -> bool:
-        """
-        判断路径是否位于指定根目录内。
-        :param path: 待判断路径
-        :param root: 根目录
-        :return: 是否位于根目录内
-        """
-        try:
-            path.relative_to(root)
-            return True
-        except ValueError:
-            return False
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.is_relative_to(path, root)
 
     @classmethod
     def _build_source_file_name(cls, archive_path: Path) -> str:
-        """
-        按真实压缩格式生成 source 目录中的文件名，避免 rar/7z 被误当成 zip。
-        :param archive_path: 原始压缩包路径
-        :return: 缓存文件名
-        """
-        name = archive_path.name.lower()
-        for suffix in (".tar.gz", ".tgz", ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"):
-            if name.endswith(suffix):
-                return f"log{suffix}"
-        return cls.SOURCE_FILE_NAME
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.build_source_file_name(archive_path, TicketLogArchiveUtil.DEFAULT_SOURCE_NAME)
 
     @classmethod
     def _find_source_archive(cls, source_dir: Path) -> Path | None:
