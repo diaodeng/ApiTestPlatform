@@ -232,12 +232,12 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
    */
   function handleOpenLogViewer(row) {
     const ticketMeta = {
-      ticketId: row?.ticketId || currentTicketId.value || detail.value?.ticketId,
+      ticketId: row?.ticketId || currentTicketId.value || detail.value?.ticketId || 0,
       ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
       title: row?.title || detail.value?.title || '',
     }
-    if (!ticketMeta.ticketId) {
-      proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志')
+    if (!row?.id) {
+      proxy.$modal.msgWarning('当前日志记录缺少记录ID，无法查看日志')
       return
     }
     selectedLogPullRecord.value = {

@@ -565,9 +565,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
    * @returns {Promise<void>} 日志准备和查看器打开完成 Promise。
    */
   function openTicketLogViewer(row) {
-    const ticketId = row?.ticketId;
+    const ticketId = row?.ticketId || 0;
     const recordId = row?.id;
-    if (!ticketId) return Promise.resolve();
+    if (!recordId) return Promise.resolve();
     logViewerSearching.value = true;
     return prepareWithDownloadProgress(ticketId, recordId, () => prepareTicketLogs(ticketId, recordId))
       .then(() => {
@@ -607,12 +607,12 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
    */
   function openLogViewerFromPullRecord(row) {
     const ticketMeta = {
-      ticketId: row?.ticketId || currentTicketId.value || detail?.value?.ticketId,
+      ticketId: row?.ticketId || currentTicketId.value || detail?.value?.ticketId || 0,
       ticketNo: row?.ticketNo || detail?.value?.ticketNo || '',
       title: row?.title || detail?.value?.title || '',
     };
-    if (!ticketMeta.ticketId) {
-      proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志');
+    if (!row?.id) {
+      proxy.$modal.msgWarning('当前日志记录缺少记录ID，无法查看日志');
       return Promise.resolve();
     }
     selectedLogPullRecord.value = buildLogViewerRecord(row, ticketMeta);
@@ -649,7 +649,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       ticketId:
         currentTicketId.value ||
         selectedLogPullRecord.value?.ticketId ||
-        logViewerForm.value.ticketId,
+        logViewerForm.value.ticketId ||
+        0,
       recordId,
       contextBefore: contextLines,
       contextAfter: contextLines,
@@ -820,8 +821,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     const ticketId =
       currentTicketId.value ||
       selectedLogPullRecord.value?.ticketId ||
-      logViewerForm.value.ticketId;
-    if (!ticketId) return;
+      logViewerForm.value.ticketId ||
+      0;
     const limit = Math.min(Math.max(Number(logViewerForm.value.limit || 500), 1), 5000);
     logViewerSearching.value = true;
     getTicketLogErrors({ ticketId, recordId: selectedLogPullRecord.value?.id, limit })
@@ -865,8 +866,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       currentTicketId.value ||
       selectedLogPullRecord.value?.ticketId ||
       logViewerTicketMeta.value?.ticketId ||
-      logViewerForm.value.ticketId;
-    if (!ticketId || !file || !line) return;
+      logViewerForm.value.ticketId ||
+      0;
+    if (!file || !line) return;
     const contextLines = Number(logViewerForm.value.contextLines || 0);
     logViewerSearching.value = true;
     getTicketLogContext({

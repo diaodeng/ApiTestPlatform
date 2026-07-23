@@ -402,7 +402,7 @@ class TicketLogPrepareRequestModel(TicketLogPullBaseModel):
     工单日志查看准备请求模型。
     """
 
-    ticket_id: int = Field(description="工单ID")
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
     record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
 
 
@@ -480,7 +480,7 @@ class TicketLogSearchRequestModel(TicketLogPullBaseModel):
     日志关键字搜索请求模型。
     """
 
-    ticket_id: int = Field(description="工单ID")
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
     record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     keyword: str | None = Field(default=None, description="搜索关键字，兼容旧单关键字入参")
     keywords: list[str] = Field(default_factory=list, description="搜索关键字列表，支持多个固定字符串")
@@ -521,7 +521,7 @@ class TicketLogSearchTimeRequestModel(TicketLogPullBaseModel):
     日志时间点搜索请求模型。
     """
 
-    ticket_id: int = Field(description="工单ID")
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
     record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     time: str = Field(description="时间关键字，例如 14:32")
     context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
@@ -535,7 +535,7 @@ class TicketLogErrorsRequestModel(TicketLogPullBaseModel):
     日志异常摘要请求模型。
     """
 
-    ticket_id: int = Field(description="工单ID")
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
     record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     limit: int = Field(default=500, ge=1, le=5000, description="最大扫描命中数量")
 

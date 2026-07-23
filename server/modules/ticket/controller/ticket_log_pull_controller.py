@@ -329,7 +329,7 @@ async def prepare_ticket_logs(
 )
 async def get_ticket_log_prepare_progress(
     request: Request,
-    ticket_id: int,
+    ticket_id: int = 0,
     record_id: int | None = None,
 ):
     """
@@ -351,7 +351,7 @@ async def get_ticket_log_prepare_progress(
     "/logs/files",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
-async def get_ticket_log_files(request: Request, ticket_id: int, record_id: int | None = None):
+async def get_ticket_log_files(request: Request, ticket_id: int = 0, record_id: int | None = None):
     """
     查询工单已准备日志文件列表接口。
     :param request: 请求对象
@@ -408,9 +408,9 @@ async def search_ticket_logs(
 )
 async def get_ticket_log_context(
     request: Request,
-    ticket_id: int,
     file: str,
     line: int,
+    ticket_id: int = 0,
     before: int = 20,
     after: int = 20,
     record_id: int | None = None,

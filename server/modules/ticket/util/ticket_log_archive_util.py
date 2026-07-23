@@ -79,7 +79,7 @@ class TicketLogArchiveUtil:
     @staticmethod
     def extract_one(archive_path: Path, target_dir: Path) -> None:
         """
-        解压单个压缩文件，优先使用标准库，.7z 走 py7zr，其他格式走系统 7z 兜底。
+        解压单个压缩文件，优先使用标准库，.7z 先尝试 py7zr 失败后 fallback 到系统 7z，其他未知格式走系统 7z 兜底。
         :param archive_path: 压缩文件路径
         :param target_dir: 解压目录
         """
@@ -106,7 +106,11 @@ class TicketLogArchiveUtil:
                 shutil.copyfileobj(source, target)
             return
         if name.endswith(".7z"):
-            TicketLogArchiveUtil.extract_7z(archive_path, target_dir)
+            try:
+                TicketLogArchiveUtil.extract_7z(archive_path, target_dir)
+            except Exception as exc:
+                logger.warning(f"py7zr 解压失败，fallback 到系统 7z，archive={archive_path}，reason={exc}")
+                TicketLogArchiveUtil.extract_by_7z(archive_path, target_dir)
             return
         TicketLogArchiveUtil.extract_by_7z(archive_path, target_dir, context="")
 

@@ -252,7 +252,7 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-const { prepareWithDownloadProgress } = useLogPrepareProgress()
+const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress()
 
 // ── 弹窗可见性 ──
 const visible = computed({
@@ -273,6 +273,7 @@ const dialogTitle = computed(() => {
 // ── 准备状态 ──
 const preparing = ref(false)
 const prepareProgress = ref(0)
+const prepareTimer = ref(null)
 
 // ── 搜索状态 ──
 const searching = ref(false)
@@ -348,17 +349,19 @@ watch(
   () => props.modelValue,
   (open) => {
     if (!open) return
-    const ticketId = props.record?.ticketId
+    const ticketId = props.record?.ticketId || 0
     const recordId = props.record?.id
-    if (!ticketId || !recordId) return
+    if (!recordId) return
     preparing.value = true
     prepareProgress.value = 0
+    startPrepareProgressPolling(ticketId, recordId)
     prepareWithDownloadProgress(ticketId, recordId, () => prepareTicketLogs(ticketId, recordId))
       .then(() => {
         // 日志准备完成，重置查看器状态
         resetViewerState()
       })
       .finally(() => {
+        stopPrepareProgressPolling()
         preparing.value = false
         prepareProgress.value = 0
       })
@@ -375,6 +378,31 @@ function resetViewerState() {
   resultViewMode.value = 'normal'
   contextViewMode.value = 'normal'
   wrapEnabled.value = false
+}
+
+/**
+ * 启动日志准备下载进度轮询，从 useLogPrepareProgress 获取后端下载进度并更新弹窗进度条。
+ * @param {number|string} ticketId 工单ID
+ * @param {number|string} recordId 日志拉取记录ID
+ */
+function startPrepareProgressPolling(ticketId, recordId) {
+  stopPrepareProgressPolling()
+  const poll = () => {
+    const progress = getDownloadProgress(ticketId, recordId)
+    if (progress) {
+      prepareProgress.value = progress.percentage
+    }
+    prepareTimer.value = window.setTimeout(poll, 400)
+  }
+  poll()
+}
+
+/** 停止日志准备进度轮询。 */
+function stopPrepareProgressPolling() {
+  if (prepareTimer.value) {
+    window.clearTimeout(prepareTimer.value)
+    prepareTimer.value = null
+  }
 }
 
 function handleClosed() {
@@ -406,7 +434,7 @@ function searchKeyword() {
   const contextLines = Number(form.value.contextLines || 0)
   const limit = Math.min(Math.max(Number(form.value.limit || 500), 1), 5000)
   const payload = {
-    ticketId: props.record?.ticketId,
+    ticketId: props.record?.ticketId || 0,
     recordId: props.record?.id,
     keywords,
     searchMode: String(form.value.searchMode || 'any').trim().toLowerCase() === 'all' ? 'all' : 'any',
@@ -443,8 +471,8 @@ function selectHit(row) {
 }
 
 function loadContext(file, line) {
-  const ticketId = props.record?.ticketId
-  if (!ticketId || !file || !line) return
+  const ticketId = props.record?.ticketId || 0
+  if (!file || !line) return
   const contextLines = Number(form.value.contextLines || 0)
   searching.value = true
   getTicketLogContext({
@@ -474,8 +502,7 @@ function pageContext(direction) {
 
 // ── 异常提取 ──
 function loadErrors() {
-  const ticketId = props.record?.ticketId
-  if (!ticketId) return
+  const ticketId = props.record?.ticketId || 0
   const limit = Math.min(Math.max(Number(form.value.limit || 500), 1), 5000)
   searching.value = true
   getTicketLogErrors({ ticketId, recordId: props.record?.id, limit })
@@ -705,6 +732,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', handleDocumentSelectionChange)
   clearNativeHighlights()
+  stopPrepareProgressPolling()
 })
 </script>
 

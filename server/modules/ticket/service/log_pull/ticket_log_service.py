@@ -99,7 +99,10 @@ class LogService:
                 message="未找到日志文件，且未配置下载地址",
             )
 
-        if record_id and int(record.ticket_id or 0) != int(ticket_id):
+        record_ticket_id = int(record.ticket_id or 0)
+        request_ticket_id = int(ticket_id or 0)
+        # 记录已关联工单时，请求的 ticket_id 必须匹配；记录未关联工单时，允许任意 ticket_id（含 0）
+        if record_id and record_ticket_id > 0 and record_ticket_id != request_ticket_id:
             logger.warning(
                 f"日志拉取记录不属于当前工单，拒绝准备，ticket_id={ticket_id}, "
                 f"record_id={record_id}, record_ticket_id={record.ticket_id}"
@@ -787,10 +790,44 @@ class LogService:
         try:
             stdout_text = cls._run_rg_pipeline(commands, extract_dir, max_seconds)
         except subprocess.TimeoutExpired:
-            logger.warning(f"rg 日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+            logger.warning(
+                f"rg 日志搜索达到保护超时，日志搜索降级为 Python，"
+                f"ticket_id={ticket_id}，record_id={record_id}"
+            )
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_timeout",
+                    "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+            )
             if search_started_at is not None:
-                cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
-            return hits
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
         except FileNotFoundError as exc:
             logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
             cls._log_search_execution(
