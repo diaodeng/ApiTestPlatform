@@ -255,14 +255,14 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     proxy.$refs.logPullRef.validate((valid) => {
       if (!valid) return;
       if (
-        Number(logPullForm.value.commandDataType) === 2 &&
+        logPullForm.value.pullMethod === 'path' &&
         !String(logPullForm.value.path || '').trim()
       ) {
-        proxy.$modal.msgWarning('数据类型为数据库时，path 不能为空');
+        proxy.$modal.msgWarning('拉取方式为路径时，path 不能为空');
         return;
       }
-      if (Number(logPullForm.value.commandDataType) !== 2 && !logPullForm.value.modifyTime) {
-        proxy.$modal.msgWarning('数据类型为日志时，modifyTime 不能为空');
+      if (logPullForm.value.pullMethod !== 'path' && !logPullForm.value.modifyTime) {
+        proxy.$modal.msgWarning('拉取方式为时间时，modifyTime 不能为空');
         return;
       }
       const timeRangeError = getOptionalLogPullTimeRangeError(logPullForm.value);
@@ -289,7 +289,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         storageMode: logPullForm.value.storageMode,
         notifyConfig: normalizeLogPullNotifyConfig(logPullForm.value.notifyConfig),
       };
-      if (Number(logPullForm.value.commandDataType) === 2) {
+      if (logPullForm.value.pullMethod === 'path') {
         payload.path = logPullForm.value.path;
       } else {
         payload.modifyTime = logPullForm.value.modifyTime;

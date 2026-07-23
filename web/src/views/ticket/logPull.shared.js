@@ -32,6 +32,7 @@ export function createDefaultLogPullForm() {
     storeId: undefined,
     posNo: undefined,
     commandDataType: 1,
+    pullMethod: 'time',
     modifyTime: undefined,
     path: '',
     cutLogEnabled: false,
@@ -126,7 +127,7 @@ export function getOptionalLogPullTimeRangeError(form) {
 export function buildCleanLogPullConfig(source) {
   const config = { ...(source || {}) };
   config.notifyConfig = normalizeLogPullNotifyConfig(config.notifyConfig);
-  if (Number(config.commandDataType) === 2) {
+  if (config.pullMethod === 'path') {
     delete config.modifyTime;
   } else {
     delete config.path;
@@ -196,8 +197,8 @@ export function buildLogPullApiDownloadUrl(recordId, source = 'auto') {
 }
 
 export function formatLogPullParameter(row) {
-  const commandDataType = Number(row?.commandDataType);
-  if (commandDataType === 2) {
+  const pullMethod = row?.pullMethod || (Number(row?.commandDataType) === 2 ? 'path' : 'time');
+  if (pullMethod === 'path') {
     const path = String(row?.path || '').trim();
     return path ? `路径：${path}` : '-';
   }

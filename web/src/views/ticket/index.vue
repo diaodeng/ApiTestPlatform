@@ -2318,12 +2318,12 @@
       proxy.$modal.msgWarning('启用日志拉取时，vendorId、storeId、posNo 不能为空');
       return false;
     }
-    if (Number(config.commandDataType) === 2 && !String(config.path || '').trim()) {
-      proxy.$modal.msgWarning('启用日志拉取且数据类型为数据库时，path 不能为空');
+    if (config.pullMethod === 'path' && !String(config.path || '').trim()) {
+      proxy.$modal.msgWarning('启用日志拉取且拉取方式为路径时，path 不能为空');
       return false;
     }
-    if (Number(config.commandDataType) !== 2 && !config.modifyTime) {
-      proxy.$modal.msgWarning('启用日志拉取且数据类型为日志时，modifyTime 不能为空');
+    if (config.pullMethod !== 'path' && !config.modifyTime) {
+      proxy.$modal.msgWarning('启用日志拉取且拉取方式为时间时，modifyTime 不能为空');
       return false;
     }
     const timeRangeError = getOptionalLogPullTimeRangeError(config);

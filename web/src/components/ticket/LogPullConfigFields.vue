@@ -76,7 +76,15 @@
         </el-select>
       </el-form-item>
     </el-col>
-    <el-col v-if="isLogDataType" :span="12">
+    <el-col :span="12">
+      <el-form-item label="拉取方式">
+        <el-radio-group v-model="model.pullMethod">
+          <el-radio value="time">时间</el-radio>
+          <el-radio value="path">路径</el-radio>
+        </el-radio-group>
+      </el-form-item>
+    </el-col>
+    <el-col v-if="model.pullMethod === 'time'" :span="12">
       <el-form-item label="modifyTime" :prop="getProp('modifyTime')">
         <el-date-picker
           v-model="model.modifyTime"
@@ -88,12 +96,12 @@
         />
       </el-form-item>
     </el-col>
-    <el-col v-if="isDatabaseDataType" :span="24">
+    <el-col v-if="model.pullMethod === 'path'" :span="24">
       <el-form-item label="path" :prop="getProp('path')">
         <el-input v-model="model.path" placeholder="可选，按路径拉取" clearable />
       </el-form-item>
     </el-col>
-    <el-col v-if="parameterExampleOptions.length" :span="24">
+    <el-col v-if="model.pullMethod === 'path' && parameterExampleOptions.length" :span="24">
       <el-form-item label="参数示例">
         <el-select
           v-model="selectedParameterExample"
@@ -303,8 +311,6 @@ const fetchedStoreOptions = ref([])
 const activeStoreVenderNo = ref('')
 let storeOptionsRequestSeq = 0
 
-const isDatabaseDataType = computed(() => Number(model.value?.commandDataType) === 2)
-const isLogDataType = computed(() => !isDatabaseDataType.value)
 const parameterExampleOptions = computed(() => props.parameterExamples
   .map(item => {
     const value = String(item?.value || '').trim()
@@ -397,11 +403,8 @@ function handleParameterExampleChange(value) {
   if (!resolvedValue) {
     return
   }
-  if (isDatabaseDataType.value) {
-    model.value.path = resolvedValue
-  } else {
-    model.value.modifyTime = resolvedValue
-  }
+  // 参数示例仅在路径模式下可见，直接填充 path
+  model.value.path = resolvedValue
 }
 
 function clearLogTimeRange() {
@@ -479,11 +482,8 @@ watch(
   () => model.value?.commandDataType,
   commandDataType => {
     selectedParameterExample.value = ''
-    if (Number(commandDataType) === 2) {
-      model.value.modifyTime = undefined
-    } else {
-      model.value.path = ''
-    }
+    // 切换数据类型时自动联动拉取方式默认值，日志→时间，DB→路径
+    model.value.pullMethod = Number(commandDataType) === 2 ? 'path' : 'time'
   }
 )
 

@@ -204,7 +204,7 @@
               :stroke-width="3"
             />
           </el-tooltip>
-          <el-button v-else link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
+          <el-button v-else link type="primary" icon="View" @click="openLogViewer(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
           </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
@@ -317,123 +317,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog
-      v-model="contentOpen"
-      title="日志内容"
-      width="80%"
-      top="5vh"
-      append-to-body
-      destroy-on-close
-      :close-on-click-modal="false"
-      @closed="resetContentDialog"
-    >
-      <div v-loading="contentLoading">
-        <el-descriptions :column="3" border class="mb16">
-          <el-descriptions-item label="记录ID">{{ selectedRecord?.id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="关联工单">
-            <span v-if="selectedRecord?.ticketId">
-              {{ selectedRecord?.ticketNo || selectedRecord?.ticketId }} {{ selectedRecord?.ticketTitle || '' }}
-            </span>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag v-if="selectedRecord?.status" :type="getLogPullStatusTagType(selectedRecord.status)">
-              {{ selectedRecord.statusDesc || getOptionLabel(logPullStatusOptions, selectedRecord.status) }}
-            </el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="查看模式">
-            <el-radio-group v-model="viewForm.viewMode">
-              <el-radio value="stored">入库内容</el-radio>
-              <el-radio value="archive">原始文档</el-radio>
-            </el-radio-group>
-          </el-descriptions-item>
-          <el-descriptions-item label="截取方式" :span="2">
-            <el-radio-group v-model="viewForm.viewRangeMode">
-              <el-radio value="between">开始 + 结束</el-radio>
-              <el-radio value="point">时间点 + 前后范围</el-radio>
-            </el-radio-group>
-          </el-descriptions-item>
-          <el-descriptions-item label="开始时间">
-            <el-date-picker
-              v-model="viewForm.logBeginTime"
-              type="datetime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              placeholder="开始时间"
-              clearable
-              :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'between'"
-              class="log-view-time-picker"
-            />
-          </el-descriptions-item>
-          <el-descriptions-item label="结束时间">
-            <el-date-picker
-              v-model="viewForm.logEndTime"
-              type="datetime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              placeholder="结束时间"
-              clearable
-              :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'between'"
-              class="log-view-time-picker"
-            />
-          </el-descriptions-item>
-          <el-descriptions-item label="时间点">
-            <el-date-picker
-              v-model="viewForm.logPointTime"
-              type="datetime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              placeholder="时间点"
-              clearable
-              :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'point'"
-              class="log-view-time-picker"
-            />
-          </el-descriptions-item>
-          <el-descriptions-item label="前后范围">
-            <div class="time-range-inline">
-              <span>前</span>
-              <el-input-number
-                v-model="viewForm.rangeBeforeMinutes"
-                :min="0"
-                controls-position="right"
-                :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'point'"
-              />
-              <span>分钟，后</span>
-              <el-input-number
-                v-model="viewForm.rangeAfterMinutes"
-                :min="0"
-                controls-position="right"
-                :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'point'"
-              />
-              <span>分钟</span>
-            </div>
-          </el-descriptions-item>
-          <el-descriptions-item label="日志字符数">{{ contentDetail?.contentCharCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="命中条目">{{ contentDetail?.matchedEntryCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="压缩包文件数">{{ contentDetail?.archiveEntryCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="归档地址" :span="2">{{ contentDetail?.storagePath || '-' }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="content-toolbar">
-          <el-input
-            v-model="contentKeyword"
-            placeholder="本地过滤关键字"
-            clearable
-            class="content-keyword"
-          />
-          <el-switch v-model="contentWrapEnabled" inline-prompt active-text="换行" inactive-text="不换行" />
-          <el-button type="primary" @click="reloadContent">{{ viewForm.viewMode === 'archive' ? '按当前范围查看' : '查看入库内容' }}</el-button>
-          <el-button type="warning" @click="retryLogPull(selectedRecord)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">重新拉取</el-button>
-          <el-button type="success" @click="redownloadLogPull(selectedRecord)" :disabled="actionLoading || !canDownloadCurrent" v-hasPermi="['ticket:logpull:add']">重新下载</el-button>
-        </div>
-        <el-alert
-          v-if="contentDetail?.contentTruncated"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="当前日志文本已按配置截断入库，如需更多内容请调整字符上限后重新拉取。"
-          class="mb16"
-        />
-        <pre :class="['log-content-block', { 'log-content-wrap': contentWrapEnabled }]">{{ filteredContentText }}</pre>
-      </div>
-    </el-dialog>
+    <LogViewerDialog v-model="viewerVisible" :record="viewerRecord" />
 
     <el-dialog
       v-model="storeConfigOpen"
@@ -559,16 +443,13 @@ import {
   downloadTicketLogPull,
   downloadTicketLogPullStoreConfigTemplate,
   getTicket,
-  getTicketLogPullContent,
   getTicketLogPullVendorStoreOptions,
-  prepareTicketLogs,
   listTicket,
   listTicketLogPullStoreConfigs,
   listTicketLogPullRecords,
   importTicketLogPullStoreConfigs,
   redownloadTicketLogPull,
-  retryTicketLogPull,
-  streamTicketLogPullContent
+  retryTicketLogPull
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
@@ -576,6 +457,7 @@ import { listAiProviderOptions } from '@/api/system/aiprovider'
 import { saveAs } from 'file-saver'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
+import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
 import {
   buildOptionalLogPullTimeRangePayload,
@@ -596,9 +478,9 @@ const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgre
 const loading = ref(false)
 const submitting = ref(false)
 const actionLoading = ref(false)
-const contentLoading = ref(false)
 const createOpen = ref(false)
-const contentOpen = ref(false)
+const viewerVisible = ref(false)
+const viewerRecord = ref(null)
 const showSearch = ref(true)
 const recordList = ref([])
 const total = ref(0)
@@ -613,10 +495,6 @@ const parameterExamples = ref([])
 const environmentOptions = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
-const contentDetail = ref(null)
-const contentText = ref('')
-const contentKeyword = ref('')
-const contentWrapEnabled = ref(false)
 const logPullRefreshTimer = ref(null)
 const storeConfigOpen = ref(false)
 const storeConfigLoading = ref(false)
@@ -655,7 +533,6 @@ const storeConfigQuery = ref({
 })
 
 const createForm = ref(createDefaultForm())
-const viewForm = ref(createDefaultViewForm())
 
 const createRules = {
   vendorId: [{ required: true, message: 'vendorId 不能为空', trigger: 'change' }],
@@ -671,6 +548,7 @@ function createDefaultForm() {
     storeId: undefined,
     posNo: undefined,
     commandDataType: 1,
+    pullMethod: 'time',
     modifyTime: '',
     path: '',
     cutLogEnabled: false,
@@ -690,16 +568,9 @@ function createDefaultForm() {
   }
 }
 
-function createDefaultViewForm() {
-  return {
-    viewMode: 'stored',
-    viewRangeMode: 'between',
-    logBeginTime: '',
-    logEndTime: '',
-    logPointTime: '',
-    rangeBeforeMinutes: 30,
-    rangeAfterMinutes: 30
-  }
+function openLogViewer(row) {
+  viewerRecord.value = row
+  viewerVisible.value = true
 }
 
 function getList() {
@@ -1086,12 +957,12 @@ function resetCreateForm() {
 function submitCreateForm() {
   proxy.$refs.createRef.validate(valid => {
     if (!valid) return
-    if (Number(createForm.value.commandDataType) === 2 && !createForm.value.path) {
-      proxy.$modal.msgWarning('数据类型为数据库时，path 不能为空')
+    if (createForm.value.pullMethod === 'path' && !createForm.value.path) {
+      proxy.$modal.msgWarning('拉取方式为路径时，path 不能为空')
       return
     }
-    if (Number(createForm.value.commandDataType) !== 2 && !createForm.value.modifyTime) {
-      proxy.$modal.msgWarning('数据类型为日志时，modifyTime 不能为空')
+    if (createForm.value.pullMethod !== 'path' && !createForm.value.modifyTime) {
+      proxy.$modal.msgWarning('拉取方式为时间时，modifyTime 不能为空')
       return
     }
     const timeRangeError = getOptionalLogPullTimeRangeError(createForm.value)
@@ -1118,7 +989,7 @@ function submitCreateForm() {
       ticketId: createForm.value.ticketId || null,
       notifyConfig: normalizeLogPullNotifyConfig(createForm.value.notifyConfig)
     }
-    if (Number(payload.commandDataType) === 2) {
+    if (payload.pullMethod === 'path') {
       delete payload.modifyTime
     } else {
       delete payload.path
@@ -1155,149 +1026,16 @@ function submitCreateForm() {
   })
 }
 
-function resetContentDialog() {
-  selectedRecord.value = null
-  contentDetail.value = null
-  contentText.value = ''
-  contentKeyword.value = ''
-  contentWrapEnabled.value = false
-  viewForm.value = createDefaultViewForm()
-}
-
-function buildContentQuery() {
-  const query = {
-    viewMode: viewForm.value.viewMode
-  }
-  if (viewForm.value.viewMode === 'archive') {
-    if (viewForm.value.viewRangeMode === 'between' && viewForm.value.logBeginTime && viewForm.value.logEndTime) {
-      query.logBeginTime = viewForm.value.logBeginTime
-      query.logEndTime = viewForm.value.logEndTime
-    } else if (viewForm.value.viewRangeMode === 'point' && viewForm.value.logPointTime) {
-      query.logPointTime = viewForm.value.logPointTime
-      query.rangeBeforeMinutes = viewForm.value.rangeBeforeMinutes
-      query.rangeAfterMinutes = viewForm.value.rangeAfterMinutes
-    }
-  }
-  return query
-}
-
-/**
- * 打开日志查看弹窗，并根据记录配置预填实时查看范围。
- * @param {object} row 日志拉取记录行数据。
- * @returns {void} 无返回值。
- */
-function openContentDialog(row) {
-  selectedRecord.value = row
-  contentOpen.value = true
-  viewForm.value = createDefaultViewForm()
-  const commandContent = row.commandContent || row.command_content || {}
-  const timeRangeMode = String(commandContent.timeRangeMode || '').trim().toLowerCase()
-  if (timeRangeMode === 'point') {
-    viewForm.value.viewMode = 'archive'
-    viewForm.value.viewRangeMode = 'point'
-    viewForm.value.logPointTime = commandContent.logPointTime || row.logPointTime || ''
-    viewForm.value.rangeBeforeMinutes = commandContent.rangeBeforeMinutes ?? row.rangeBeforeMinutes ?? 30
-    viewForm.value.rangeAfterMinutes = commandContent.rangeAfterMinutes ?? row.rangeAfterMinutes ?? 30
-  } else if (timeRangeMode === 'between') {
-    viewForm.value.viewMode = 'archive'
-    viewForm.value.viewRangeMode = 'between'
-    viewForm.value.logBeginTime = commandContent.logBeginTime || row.logBeginTime || ''
-    viewForm.value.logEndTime = commandContent.logEndTime || row.logEndTime || ''
-  } else if (row.logBeginTime && row.logEndTime) {
-    viewForm.value.viewMode = 'archive'
-    viewForm.value.viewRangeMode = 'between'
-    viewForm.value.logBeginTime = row.logBeginTime
-    viewForm.value.logEndTime = row.logEndTime
-  }
-  loadContent()
-}
-
-/**
- * 加载当前记录的日志内容；实时查看原始文档时先准备本地缓存并轮询远程下载进度。
- * @returns {Promise<void>} 日志内容加载完成 Promise。
- */
-function loadContent() {
-  if (!selectedRecord.value?.id) {
-    return Promise.resolve()
-  }
-  contentLoading.value = true
-  contentDetail.value = {}
-  contentText.value = ''
-  return prepareSelectedArchiveForContent()
-    .then(() => streamTicketLogPullContent(selectedRecord.value.id, buildContentQuery(), {
-      onMeta: data => {
-        contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
-      },
-      onChunk: text => {
-        contentText.value += text || ''
-      },
-      onDone: data => {
-        contentDetail.value = { ...(contentDetail.value || {}), ...(data || {}) }
-      }
-    }).catch(() => getTicketLogPullContent(selectedRecord.value.id, buildContentQuery()).then(response => {
-      contentDetail.value = response.data || {}
-      contentText.value = response.data?.text || ''
-    })))
-    .finally(() => {
-      contentLoading.value = false
-    })
-}
-
-/**
- * 为原始文档实时查看准备日志缓存；入库内容无需下载，直接跳过。
- * @returns {Promise<object|void>} 日志准备接口响应或已完成 Promise。
- */
-function prepareSelectedArchiveForContent() {
-  const record = selectedRecord.value
-  const ticketId = getRecordTicketId(record)
-  if (viewForm.value.viewMode !== 'archive' || !ticketId || !record?.id) {
-    return Promise.resolve()
-  }
-  return prepareWithDownloadProgress(ticketId, record.id, () => prepareTicketLogs(ticketId, record.id))
-}
-
 /**
  * 获取管理列表行当前可展示的日志远程下载进度。
  * @param {object} row 日志拉取记录行数据。
  * @returns {object|null} 正在下载时返回进度信息，否则返回 null。
  */
 function getContentDownloadProgress(row) {
-  return getDownloadProgress(getRecordTicketId(row), row?.id)
+  return getDownloadProgress(row?.ticketId || row?.ticket_id, row?.id)
 }
 
-/**
- * 兼容管理列表的驼峰和下划线字段，取得记录关联工单ID。
- * @param {object} row 日志拉取记录行数据。
- * @returns {number|string|undefined} 工单ID。
- */
-function getRecordTicketId(row) {
-  return row?.ticketId || row?.ticket_id
-}
-
-const filteredContentText = computed(() => {
-  const raw = String(contentText.value || '')
-  if (!contentKeyword.value.trim()) {
-    return raw || '暂无可展示日志内容'
-  }
-  const keyword = contentKeyword.value.trim().toLowerCase()
-  const filtered = raw
-    .split(/\r?\n/)
-    .filter(line => line.toLowerCase().includes(keyword))
-    .join('\n')
-  return filtered || '未匹配到日志内容'
-})
-
-const canDownloadCurrent = computed(() => Boolean(selectedRecord.value?.commandResultUrl || selectedRecord.value?.storagePath))
-
-/**
- * 按当前查看参数重新加载日志内容。
- * @returns {Promise<void>} 日志内容加载完成 Promise。
- */
-function reloadContent() {
-  return loadContent()
-}
-
-function runAction(request, successMessage, refreshContent = false) {
+function runAction(request, successMessage) {
   if (actionLoading.value) {
     return
   }
@@ -1305,9 +1043,6 @@ function runAction(request, successMessage, refreshContent = false) {
   request.then(() => {
     proxy.$modal.msgSuccess(successMessage)
     handleQuery()
-    if (refreshContent) {
-      loadContent()
-    }
   }).finally(() => {
     actionLoading.value = false
   })
@@ -1476,7 +1211,7 @@ function retryLogPull(row) {
 
 function redownloadLogPull(row) {
   if (!row?.id) return
-  runAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
+  runAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载')
 }
 
 function deleteLogPull(row) {
@@ -1489,10 +1224,8 @@ function deleteLogPull(row) {
   }).then(() => {
     proxy.$modal.msgSuccess('日志拉取记录已删除')
     if (selectedRecord.value?.id === row.id) {
-      contentOpen.value = false
+      viewerVisible.value = false
       selectedRecord.value = null
-      contentDetail.value = null
-      contentText.value = ''
     }
     return getList()
   }).catch(() => {}).finally(() => {
@@ -1510,7 +1243,7 @@ function updateAutoRefresh() {
     return
   }
   logPullRefreshTimer.value = window.setTimeout(() => {
-    if (createOpen.value || contentOpen.value) {
+    if (createOpen.value || viewerVisible.value) {
       return
     }
     getList()
@@ -1558,22 +1291,6 @@ onBeforeUnmount(() => {
   width: 140px;
 }
 
-.content-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.content-keyword {
-  width: 260px;
-}
-
-.log-view-time-picker {
-  width: 100%;
-}
-
 .log-view-download-progress {
   display: inline-flex;
   width: 26px;
@@ -1585,24 +1302,6 @@ onBeforeUnmount(() => {
 
 .log-view-download-progress :deep(.el-progress__text) {
   font-size: 8px !important;
-}
-
-.log-content-block {
-  min-height: 340px;
-  margin: 0;
-  padding: 16px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: Consolas, 'Courier New', monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: auto;
-}
-
-.log-content-wrap {
-  white-space: pre-wrap;
 }
 
 .log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal) {

@@ -9,7 +9,8 @@
     watch,
   } from 'vue';
   import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue';
-  import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue';
+  import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
+import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
   import { getTicket } from '@/api/ticket/ticket';
   import {
     getLogPullStatusTagType,
@@ -222,6 +223,30 @@
     if (!vendorNo) return;
     logPullForm.value.vendorId = String(vendorNo);
     resetStoreSelection(logPullForm.value, logPullForm.value.vendorId);
+  }
+
+  /**
+   * 打开云端搜索日志查看器。
+   * @param {object} row 日志拉取记录行数据。
+   * @returns {void}
+   */
+  function handleOpenLogViewer(row) {
+    const ticketMeta = {
+      ticketId: row?.ticketId || currentTicketId.value || detail.value?.ticketId,
+      ticketNo: row?.ticketNo || detail.value?.ticketNo || '',
+      title: row?.title || detail.value?.title || '',
+    }
+    if (!ticketMeta.ticketId) {
+      proxy.$modal.msgWarning('当前日志记录缺少工单ID，无法查看日志')
+      return
+    }
+    selectedLogPullRecord.value = {
+      ...(row || {}),
+      ticketId: ticketMeta.ticketId,
+      ticketNo: ticketMeta.ticketNo,
+      title: ticketMeta.title,
+    }
+    logPullContentOpen.value = true
   }
 
   /**
@@ -574,7 +599,7 @@
             v-else
             link
             type="primary"
-            @click="openLogViewerFromPullRecord(scope.row)"
+            @click="handleOpenLogViewer(scope.row)"
             :disabled="logPullActionLoading"
           >
             查看日志
@@ -649,277 +674,29 @@
     </el-form>
   </el-dialog>
 
-  <el-dialog
-    v-model="logPullContentOpen"
-    :title="logViewerDialogTitle"
-    fullscreen
-    append-to-body
-    destroy-on-close
-    :close-on-click-modal="false"
-    class="ticket-log-viewer-dialog"
-    @closed="handleLogPullDialogClosed"
-  >
-    <div v-loading="logViewerSearching" class="log-viewer-content">
-      <div class="panel-header mb16 log-view-controls">
-        <el-input
-          v-model="logViewerForm.keywords"
-          class="log-keyword-input"
-          type="textarea"
-          :autosize="{ minRows: 1, maxRows: 2 }"
-          clearable
-          placeholder="输入搜索关键字，多个用英文逗号或换行分隔"
-        />
-        <el-radio-group v-model="logViewerForm.searchMode" size="small">
-          <el-radio-button value="any">任一</el-radio-button>
-          <el-radio-button value="all">全部</el-radio-button>
-        </el-radio-group>
-        <el-button type="primary" :loading="logViewerSearching" @click="searchLogViewerKeyword"
-          >搜索</el-button
-        >
-        <el-select
-          v-model="logViewerForm.file"
-          class="log-file-scope-select"
-          clearable
-          filterable
-          placeholder="全局搜索"
-        >
-          <el-option v-for="file in logViewerFileOptions" :key="file" :label="file" :value="file" />
-        </el-select>
-        <el-button v-if="logViewerForm.file" link type="primary" @click="clearLogViewerFileScope"
-          >清除文件范围</el-button
-        >
-        <el-text>结果上限</el-text>
-        <el-input-number
-          v-model="logViewerForm.limit"
-          :min="1"
-          :max="5000"
-          :step="100"
-          controls-position="right"
-        />
-        <el-button
-          type="warning"
-          @click="retryLogPull(selectedLogPullRecord)"
-          :disabled="logPullActionLoading"
-          v-hasPermi="['ticket:logpull:add']"
-        >
-          重新拉取
-        </el-button>
-        <el-button
-          type="success"
-          @click="redownloadLogPull(selectedLogPullRecord)"
-          :disabled="
-            logPullActionLoading ||
-            (!selectedLogPullRecord?.commandResultUrl && !selectedLogPullRecord?.storagePath)
-          "
-          v-hasPermi="['ticket:logpull:add']"
-        >
-          重新下载
-        </el-button>
-        <el-button type="warning" :loading="logViewerSearching" @click="loadLogViewerErrors"
-          >异常提取</el-button
-        >
-      </div>
-      <el-alert
-        v-if="logViewerErrorSummary"
+  <LogViewerDialog v-model="logPullContentOpen" :record="selectedLogPullRecord">
+    <template #toolbar-actions>
+      <el-button
         type="warning"
-        show-icon
-        :closable="false"
-        class="mb16"
-        :title="`异常命中 ${logViewerErrorSummary.total || 0} 条`"
-      />
-      <div
-        v-if="logViewerHits.length"
-        :class="[
-          'log-view-panel',
-          'mb16',
-          {
-            'log-view-panel-fullscreen': logViewerResultViewMode === 'fullscreen',
-            'log-view-panel-minimized': logViewerResultViewMode === 'minimized',
-            'log-view-panel-fill':
-              logViewerResultViewMode !== 'minimized' &&
-              (!logViewerContext || logViewerContextViewMode === 'minimized'),
-          },
-        ]"
+        @click="retryLogPull(selectedLogPullRecord)"
+        :disabled="logPullActionLoading"
+        v-hasPermi="['ticket:logpull:add']"
       >
-        <div class="panel-header mb8 log-view-panel-header">
-          <span
-            >搜索结果：{{ logViewerHits.length }} 条（当前上限 {{ logViewerForm.limit }} 条）</span
-          >
-          <div class="panel-inline">
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerResultViewMode === 'minimized' ? 'Plus' : 'Minus'"
-              @click="
-                setLogViewerPanelMode(
-                  'result',
-                  logViewerResultViewMode === 'minimized' ? 'normal' : 'minimized'
-                )
-              "
-            >
-              {{ logViewerResultViewMode === 'minimized' ? '展开' : '最小化' }}
-            </el-button>
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerResultViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'"
-              @click="
-                setLogViewerPanelMode(
-                  'result',
-                  logViewerResultViewMode === 'fullscreen' ? 'normal' : 'fullscreen'
-                )
-              "
-            >
-              {{ logViewerResultViewMode === 'fullscreen' ? '还原' : '放大全屏' }}
-            </el-button>
-          </div>
-        </div>
-        <el-table
-          v-show="logViewerResultViewMode !== 'minimized'"
-          :data="logViewerHits"
-          row-key="hitKey"
-          size="small"
-          :max-height="logViewerResultTableHeight"
-          @row-click="selectLogViewerHit"
-        >
-          <el-table-column label="文件" prop="file" min-width="100" show-overflow-tooltip />
-          <el-table-column label="行号" prop="line" width="90" />
-          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip>
-            <template #default="scope">
-              {{ scope.row.content }}<span v-if="scope.row.contentTruncated">...</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="130" fixed="right">
-            <template #default="scope">
-              <el-button link type="primary" @click.stop="searchLogViewerInFile(scope.row.file)"
-                >在此文件搜索</el-button
-              >
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-      <div
-        v-if="logViewerContext"
-        :class="[
-          'log-context-panel',
-          'log-view-panel',
-          'mb16',
-          {
-            'log-view-panel-fullscreen': logViewerContextViewMode === 'fullscreen',
-            'log-view-panel-minimized': logViewerContextViewMode === 'minimized',
-            'log-view-panel-fill':
-              logViewerContextViewMode !== 'minimized' && logViewerResultViewMode === 'minimized',
-          },
-        ]"
+        重新拉取
+      </el-button>
+      <el-button
+        type="success"
+        @click="redownloadLogPull(selectedLogPullRecord)"
+        :disabled="
+          logPullActionLoading ||
+          (!selectedLogPullRecord?.commandResultUrl && !selectedLogPullRecord?.storagePath)
+        "
+        v-hasPermi="['ticket:logpull:add']"
       >
-        <div class="panel-header mb8 log-view-panel-header">
-          <span
-            >{{ logViewerContext.file }}:{{ logViewerContext.line }}（{{
-              logViewerContext.start
-            }}-{{ logViewerContext.end }}/{{ logViewerContext.totalLines }}）</span
-          >
-          <div class="panel-inline">
-            <el-text style="flex: none">上下文</el-text>
-            <el-input-number
-              v-model="logViewerForm.contextLines"
-              class="log-context-lines-input"
-              :min="0"
-              :max="500"
-              controls-position="right"
-            />
-            <el-input
-              v-model="logViewerHighlightText"
-              class="log-highlight-input"
-              type="textarea"
-              :rows="1"
-              clearable
-              placeholder="输入高亮文本，多个用英文逗号或换行分隔"
-              @input="updateLogViewerHighlightKeywords(logViewerHighlightText)"
-            />
-            <el-switch
-              v-model="logPullWrapEnabled"
-              inline-prompt
-              active-text="换行"
-              inactive-text="不换行"
-            />
-            <el-button
-              icon="Delete"
-              v-if="logViewerHighlightSummary"
-              link
-              type="primary"
-              @click="clearLogViewerHighlight"
-              title="清除高亮"
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              icon="ArrowLeftBold"
-              title="上一段"
-              :disabled="!logViewerContext.hasPrev || logViewerSearching"
-              @click="pageLogViewerContext(-1)"
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              icon="ArrowRightBold"
-              title="下一段"
-              :disabled="!logViewerContext.hasNext || logViewerSearching"
-              @click="pageLogViewerContext(1)"
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerContextViewMode === 'minimized' ? 'Plus' : 'Minus'"
-              :title="logViewerContextViewMode === 'minimized' ? '展开' : '最小化'"
-              @click="
-                setLogViewerPanelMode(
-                  'context',
-                  logViewerContextViewMode === 'minimized' ? 'normal' : 'minimized'
-                )
-              "
-            ></el-button>
-            <el-button
-              link
-              type="primary"
-              :icon="logViewerContextViewMode === 'fullscreen' ? 'FullScreen' : 'Rank'"
-              :title="logViewerContextViewMode === 'fullscreen' ? '还原' : '放大全屏'"
-              @click="
-                setLogViewerPanelMode(
-                  'context',
-                  logViewerContextViewMode === 'fullscreen' ? 'normal' : 'fullscreen'
-                )
-              "
-            ></el-button>
-          </div>
-        </div>
-        <pre
-          ref="logViewerContextBlockRef"
-          v-show="logViewerContextViewMode !== 'minimized'"
-          :class="[
-            'log-content-block',
-            'log-context-block',
-            { 'log-content-wrap': logPullWrapEnabled },
-          ]"
-          @mouseup="handleLogViewerContextSelection"
-          @keyup="handleLogViewerContextSelection"
-        ><span
-              v-for="item in logViewerContextDisplayLines"
-              :key="`${item.file}:${item.line}`"
-              class="log-context-line"
-              ><span class="log-context-line-no">{{ item.paddedLine }}</span
-              ><span class="log-context-line-content"
-                ><template v-for="(part, partIndex) in item.parts" :key="partIndex"
-                  ><mark
-                    v-if="part.highlight"
-                    :class="['log-context-highlight', part.highlightClass]"
-                    >{{ part.text }}</mark
-                  ><span v-else>{{ part.text }}</span></template
-                ></span
-              ></span
-            ></pre>
-      </div>
-    </div>
-  </el-dialog>
+        重新下载
+      </el-button>
+    </template>
+  </LogViewerDialog>
 </template>
 
 <style scoped lang="scss">
@@ -944,137 +721,6 @@
     margin-bottom: 8px;
   }
 
-  .log-view-controls {
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  :deep(.ticket-log-viewer-dialog .el-dialog__body) {
-    height: calc(100vh - 56px);
-    overflow: hidden;
-  }
-
-  .log-viewer-content {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-  }
-
-  .log-keyword-input {
-    width: min(460px, 100%);
-  }
-
-  .log-highlight-input {
-    width: min(360px, 100%);
-  }
-
-  .log-context-lines-input {
-    width: 120px;
-  }
-
-  .log-file-scope-select {
-    width: min(360px, 100%);
-  }
-
-  .log-view-panel {
-    display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    min-height: 0;
-    padding: 10px;
-    border: 1px solid #dcdfe6;
-    border-radius: 6px;
-    background: #ffffff;
-  }
-
-  .log-view-panel-header {
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: space-between;
-  }
-
-  .log-view-panel-header > span {
-    min-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .log-view-panel-fullscreen {
-    position: fixed;
-    inset: 16px;
-    z-index: 3000;
-    display: flex;
-    flex-direction: column;
-    padding: 14px;
-    overflow: hidden;
-    box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
-  }
-
-  .log-view-panel-fullscreen :deep(.el-table) {
-    flex: 1;
-  }
-
-  .log-view-panel-fullscreen .log-content-block {
-    flex: 1;
-    max-height: none;
-  }
-
-  .log-view-panel-minimized {
-    flex: 0 0 auto;
-    padding-bottom: 6px;
-  }
-
-  .log-view-panel-fill {
-    flex: 1 1 auto;
-    min-height: 0;
-  }
-
-  .log-view-panel-fill :deep(.el-table) {
-    flex: 1 1 auto;
-    min-height: 0;
-  }
-
-  .log-view-panel-fill .log-content-block {
-    flex: 1 1 auto;
-    max-height: none;
-  }
-
-  .log-content-block {
-    max-height: 52vh;
-    padding: 12px;
-    margin: 0;
-    overflow: auto;
-    white-space: pre;
-    word-break: normal;
-    background: #0f172a;
-    color: #e2e8f0;
-    border-radius: 6px;
-    font-size: 12px;
-    line-height: 1.55;
-  }
-
-  .log-content-wrap {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .log-context-line {
-    display: block;
-    min-height: 18px;
-  }
-
-  .log-context-line-no {
-    display: inline-block;
-    user-select: none;
-    color: #64748b;
-  }
-
-  .log-context-line-content {
-    white-space: inherit;
-  }
-
   .log-view-download-progress {
     display: inline-flex;
     width: 26px;
@@ -1086,49 +732,5 @@
 
   .log-view-download-progress :deep(.el-progress__text) {
     font-size: 8px !important;
-  }
-
-  :global(::highlight(ticket-log-context-highlight)) {
-    color: #111827;
-    background: #fde047;
-  }
-
-  .log-context-highlight {
-    padding: 0 1px;
-    color: #111827;
-    border-radius: 2px;
-  }
-
-  .log-context-highlight-0 {
-    background: #fde68a;
-  }
-
-  .log-context-highlight-1 {
-    background: #bfdbfe;
-  }
-
-  .log-context-highlight-2 {
-    background: #bbf7d0;
-  }
-
-  .log-context-highlight-3 {
-    background: #fecaca;
-  }
-
-  .log-context-highlight-4 {
-    background: #ddd6fe;
-  }
-
-  .log-context-highlight-5 {
-    background: #fed7aa;
-  }
-
-  .log-highlight-input :deep(.el-textarea__inner) {
-    height: 32px;
-    min-height: 32px !important;
-    max-height: 32px;
-    overflow: auto;
-    resize: none;
-    white-space: pre;
   }
 </style>
