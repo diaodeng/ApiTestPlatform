@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bz2
 import gzip
+import io
 import lzma
 import shutil
 import subprocess
@@ -175,6 +176,50 @@ class TicketLogArchiveUtil:
         )
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "7z 解压失败")
+
+    # ---------------- 压缩包读取适配器 ----------------
+
+    class _ArchiveReader:
+        """统一 ZIP / 7z 压缩包读取接口，提供 namelist() + open() 兼容 zipfile.ZipFile。"""
+
+        def __init__(self, path: Path) -> None:
+            name = path.name.lower()
+            if name.endswith(".7z"):
+                self._backend: Any = py7zr.SevenZipFile(path, "r")
+                self._is_7z = True
+            else:
+                self._backend: Any = zipfile.ZipFile(path)
+                self._is_7z = False
+
+        def namelist(self) -> list[str]:
+            """返回压缩包内所有条目名称（不含目录）。"""
+            if self._is_7z:
+                return self._backend.getnames()
+            return self._backend.namelist()
+
+        def open(self, name: str, mode: str = "r") -> io.BytesIO:
+            """读取压缩包内指定条目内容，返回 BytesIO。"""
+            if self._is_7z:
+                data = self._backend.read(targets=[name])
+                if name in data:
+                    return data[name]
+                raise KeyError(f"Entry '{name}' not found in 7z archive")
+            return self._backend.open(name, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            self._backend.close()
+
+    @staticmethod
+    def open_archive_reader(archive_path: Path) -> _ArchiveReader:
+        """
+        根据文件后缀返回 ZIP 或 7z 的统一读取器，供日志文本截取流程使用。
+        :param archive_path: 压缩包路径
+        :return: 读取器实例，支持上下文管理
+        """
+        return TicketLogArchiveUtil._ArchiveReader(archive_path)
 
     # ---------------- 保护检查 ----------------
 

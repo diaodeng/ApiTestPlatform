@@ -12,7 +12,6 @@ import tempfile
 import threading
 import time
 import traceback
-import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -60,6 +59,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
+from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key, resolve_ticket_current_version_key
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -3166,7 +3166,7 @@ class TicketLogPullService:
         content_buffer = io.StringIO() if return_text else None
         compressed_buffer = io.BytesIO() if not return_text else None
 
-        with zipfile.ZipFile(archive_path) as archive:
+        with TicketLogArchiveUtil.open_archive_reader(archive_path) as archive:
             entry_names = [name for name in archive.namelist() if not name.endswith("/")]
             archive_entry_count = len(entry_names)
             target_entry_names = [name for name in entry_names if cls._is_target_log_entry(name)]
@@ -3299,7 +3299,7 @@ class TicketLogPullService:
         matched_entry_count = 0
         current_char_count = 0
 
-        with zipfile.ZipFile(archive_path) as archive:
+        with TicketLogArchiveUtil.open_archive_reader(archive_path) as archive:
             entry_names = [name for name in archive.namelist() if not name.endswith("/")]
             archive_entry_count = len(entry_names)
             target_entry_names = [name for name in entry_names if cls._is_target_log_entry(name)]
@@ -3382,7 +3382,7 @@ class TicketLogPullService:
     def _extract_entry_logs(
         cls,
         *,
-        archive: zipfile.ZipFile,
+        archive,
         entry_name: str,
         record: TicketLogPullRecord,
         timestamp_start: datetime | None,
@@ -3754,7 +3754,7 @@ class TicketLogPullService:
     def _iter_entry_log_texts(
         cls,
         *,
-        archive: zipfile.ZipFile,
+        archive,
         entry_name: str,
         timestamp_start: datetime | None,
         timestamp_end: datetime | None,
@@ -3825,7 +3825,7 @@ class TicketLogPullService:
         return entry_text if entry_text.strip() else ""
 
     @classmethod
-    def _detect_archive_entry_encoding(cls, archive: zipfile.ZipFile, entry_name: str) -> str:
+    def _detect_archive_entry_encoding(cls, archive, entry_name: str) -> str:
         """
         尝试识别压缩包中文本文件编码。
         :param archive: 压缩包对象
@@ -3849,7 +3849,7 @@ class TicketLogPullService:
         :param archive_path: 压缩包路径
         :return: 文件数量
         """
-        with zipfile.ZipFile(archive_path) as archive:
+        with TicketLogArchiveUtil.open_archive_reader(archive_path) as archive:
             return len([name for name in archive.namelist() if not name.endswith("/")])
 
     @classmethod
