@@ -3,10 +3,20 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-21
+updated: 2026-07-24
 ---
 
 # 操作日志
+
+## [2026-07-24] INGEST-CODE | 版本号统一管理
+
+- 触发：用户要求统一 server/web/client_new 三端版本号，每端只需修改一处。
+- 架构层：基础设施 / 配置管理。
+- 创建的页面：`web/public/docs/2026-07-24-version-unified.md`
+- 新增的文件：`server/version.py`、`client_new/version.py`
+- 更新的页面：`server/config/env.py`（`app_version` 默认值从 `version.py` 导入）、`server/.env.base` / `.env.dev` / `.env.prod` / `.env.test`（删除 `APP_VERSION`）、`server/pyproject.toml`（注释指向 `version.py`）、`client_new/utils/__init__.py`（`VERSION` 从 `version.py` 导入）、`client_new/pyproject.toml`（版本号从 `0.1.0` 同步为 `1.0.4.4`）、`client_new/QTRClientNew.spec` / `QTRClientNewPortable.spec`（从 `version.py` 读取版本设置 exe 文件属性）
+- 变更传播链：无传播影响，纯配置变更。
+- 关键结论：三端版本独立演进。发版时只需修改 `server/version.py`、`client_new/version.py`、`web/package.json`。`pyproject.toml` 中的 `version` 字段仍需手动同步（Python 包元数据无法动态读取）。
 
 ## [2026-07-22] INGEST-CODE | 工单日志查看下载进度迁移至 Redis
 

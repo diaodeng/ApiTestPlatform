@@ -1,6 +1,6 @@
 [project]
 name = "client-new"
-version = "0.1.0"
+version = "1.0.4.4"  # 运行时版本以 version.py 为准，此处为包元数据需手动同步
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"

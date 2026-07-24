@@ -1,6 +1,6 @@
 [project]
 name = "server"
-version = "1.0.4.2"
+version = "1.1.1.0"  # 运行时版本以 version.py 为准，此处为包元数据需手动同步
 description = "一款现代化的多功能测试管理平台"
 readme = "README.md"
 target-version = "py310"  # 目标版本，ruff语法检测使用

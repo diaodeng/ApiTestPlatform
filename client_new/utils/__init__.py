@@ -1,1 +1,1 @@
-VERSION = "v1.0.4.4"
+from version import __version__ as VERSION
