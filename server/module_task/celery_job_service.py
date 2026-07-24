@@ -1240,3 +1240,52 @@ class CeleryJobService:
             .all()
         )
         return [cls._serialize_task(row) for row in rows]
+
+    @classmethod
+    def check_process_worker_available(cls, owner_type: str) -> dict:
+        """
+        检查指定类型的进程模式 Worker 是否在线。
+
+        通过 Celery inspect 查询当前活跃 Worker 及其监听的队列，
+        判断 sys_process / qtr_process 队列是否有 Worker 消费。
+
+        :param owner_type: 任务归属类型，sys 或 qtr。
+        :return: 包含 available 和 detail 的字典。
+        """
+        process_queue_map = {
+            "sys": "sys_process",
+            "qtr": "qtr_process",
+        }
+        process_queue = process_queue_map.get(owner_type)
+        if not process_queue:
+            return {"available": False, "detail": f"不支持的 owner_type: {owner_type}"}
+
+        try:
+            inspect = celery_app.control.inspect(timeout=3.0)
+            active_queues = inspect.active_queues()
+            if not active_queues:
+                return {
+                    "available": False,
+                    "detail": f"未检测到任何 Celery Worker 在线，请确认进程模式 Worker（队列: {process_queue}）已启动",
+                }
+
+            # 遍历所有 Worker，检查是否有任意 Worker 监听了目标进程队列
+            for worker_name, queues in active_queues.items():
+                for q in queues:
+                    if (isinstance(q, dict) and q.get("name") == process_queue) or (
+                        isinstance(q, str) and q == process_queue
+                    ):
+                        return {
+                            "available": True,
+                            "detail": f"进程模式 Worker 已就绪（worker: {worker_name}，队列: {process_queue}）",
+                        }
+
+            return {
+                "available": False,
+                "detail": f"未检测到监听 {process_queue} 队列的 Worker，请启动进程模式 Celery Worker",
+            }
+        except Exception as exc:
+            return {
+                "available": False,
+                "detail": f"无法连接 Celery Worker 检查: {exc}",
+            }

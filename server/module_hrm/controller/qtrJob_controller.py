@@ -21,6 +21,7 @@ from module_hrm.entity.vo.job_vo import (
 from module_hrm.service.job_log_service import JobLogService
 from module_hrm.service.job_service import JobService
 from module_task.celery_job_models import CeleryPeriodicTask
+from module_task.celery_job_service import CeleryJobService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -428,6 +429,17 @@ async def export_qtr_job_log_list(request: Request,
         job_log_export_result = await JobLogService.export_job_log_list_services(request, job_log_query_result)
         logger.info('导出成功')
         return ResponseUtil.streaming(data=bytes2file_response(job_log_export_result))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@qtrJobController.get("/job/worker-check", dependencies=[Depends(CheckUserInterfaceAuth('qtr:job:query'))])
+async def check_qtr_worker():
+    """检查 QTR 任务的进程模式 Celery Worker 是否在线。"""
+    try:
+        result = CeleryJobService.check_process_worker_available("qtr")
+        return ResponseUtil.success(data=result, msg=result.get("detail", ""))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

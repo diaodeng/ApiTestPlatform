@@ -149,6 +149,14 @@
                 <el-option v-for="item in executionModeOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
+            <el-alert
+              v-if="form.executionMode === 'process' && processWorkerAvailable === false"
+              title="未检测到进程模式 Worker（qtr_process 队列），该任务将无法被执行，请先启动 Worker 或切换为线程模式"
+              type="warning"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 18px"
+            />
           </el-col>
           <el-col :span="12">
             <el-form-item label="调度类型" prop="scheduleType">
@@ -289,6 +297,7 @@ import {
   addJob,
   cancelRunningJob,
   changeJobStatus,
+  checkWorker,
   delJob,
   getJob,
   listJob,
@@ -432,6 +441,35 @@ const data = reactive({
 });
 
 const { queryParams, form, rules } = toRefs(data);
+
+/** 进程模式 Worker 是否在线（null=尚未检测） */
+const processWorkerAvailable = ref(null);
+/** 是否正在检测 Worker */
+const checkingWorker = ref(false);
+
+/**
+ * 检查进程模式 Celery Worker 是否在线。
+ */
+async function doCheckWorker() {
+  if (form.value.executionMode !== "process") {
+    processWorkerAvailable.value = null;
+    return;
+  }
+  checkingWorker.value = true;
+  try {
+    const res = await checkWorker();
+    processWorkerAvailable.value = res?.data?.available ?? false;
+  } catch {
+    processWorkerAvailable.value = false;
+  } finally {
+    checkingWorker.value = false;
+  }
+}
+
+// 当用户切换执行方式为"进程"时，自动检测 Worker 状态
+watch(() => form.value.executionMode, () => {
+  doCheckWorker();
+});
 
 function defaultForm() {
   return {
@@ -643,34 +681,53 @@ function handleUpdate(row) {
 }
 
 function submitForm() {
-  proxy.$refs["jobRef"].validate((valid) => {
+  proxy.$refs["jobRef"].validate(async (valid) => {
     if (!valid) return;
 
-    const payload = { ...form.value };
-    payload.taskKey = QTR_TASK_KEY;
-    payload.queueName = undefined;
-    payload.taskArgs = "[]";
-    payload.taskKwargs = form.value.taskKwargs || JSON.stringify(deepCopyInitRunConfig());
-    if (payload.scheduleType !== "crontab") payload.cronExpression = undefined;
-    if (payload.scheduleType !== "interval") {
-      payload.intervalEvery = undefined;
-      payload.intervalPeriod = undefined;
-    }
-    if (payload.scheduleType !== "once") payload.oneOffEta = undefined;
+    const doSave = () => {
+      const payload = { ...form.value };
+      payload.taskKey = QTR_TASK_KEY;
+      payload.queueName = undefined;
+      payload.taskArgs = "[]";
+      payload.taskKwargs = form.value.taskKwargs || JSON.stringify(deepCopyInitRunConfig());
+      if (payload.scheduleType !== "crontab") payload.cronExpression = undefined;
+      if (payload.scheduleType !== "interval") {
+        payload.intervalEvery = undefined;
+        payload.intervalPeriod = undefined;
+      }
+      if (payload.scheduleType !== "once") payload.oneOffEta = undefined;
 
-    if (payload.taskId !== undefined) {
-      updateJob(payload).then(() => {
-        proxy.$modal.msgSuccess("修改成功");
-        open.value = false;
-        getList();
-      });
-    } else {
-      addJob(payload).then(() => {
-        proxy.$modal.msgSuccess("新增成功");
-        open.value = false;
-        getList();
-      });
+      if (payload.taskId !== undefined) {
+        updateJob(payload).then(() => {
+          proxy.$modal.msgSuccess("修改成功");
+          open.value = false;
+          getList();
+        });
+      } else {
+        addJob(payload).then(() => {
+          proxy.$modal.msgSuccess("新增成功");
+          open.value = false;
+          getList();
+        });
+      }
+    };
+
+    // 如果选择了进程模式，但 Worker 不可用，弹框警告
+    if (form.value.executionMode === "process" && processWorkerAvailable.value === false) {
+      proxy.$modal
+        .confirm(
+          "未检测到进程模式 Celery Worker（qtr_process 队列），该任务将无法被执行。<br/>是否仍要保存？",
+          "进程 Worker 缺失",
+          { confirmButtonText: "仍要保存", cancelButtonText: "取消", type: "warning", dangerouslyUseHTMLString: true }
+        )
+        .then(() => {
+          doSave();
+        })
+        .catch(() => {});
+      return;
     }
+
+    doSave();
   });
 }
 
