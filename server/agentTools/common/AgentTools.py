@@ -4,7 +4,7 @@ import threading
 import time
 from urllib.parse import parse_qs, unquote
 
-import requests
+import httpx
 from loguru import logger
 
 # 配置信息
@@ -72,7 +72,7 @@ class AgentTools:
 
         req_start_time = time.time()
         # 转发请求
-        response = requests.request(method, forward_url, params=params)
+        response = httpx.request(method, forward_url, params=params)
         req_res_time = time.time() - req_start_time
         logger.info(f'转发请求响应时长：{req_res_time}')
         # 将响应发送回客户端
