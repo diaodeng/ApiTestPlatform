@@ -11,8 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import jmespath
-import requests
-import urllib3
 import websockets
 
 from exceptions.exception import AgentForwardError
@@ -53,8 +51,6 @@ from module_hrm.utils.util import compress_text, replace_variables
 from module_qtr.service.agent_service import AgentResponse, AgentResponseWebSocket, HandleResponse, send_message
 from utils.log_util import logger
 
-# 忽略requests库https请求的警告
-urllib3.disable_warnings()
 
 
 class Response:
@@ -832,7 +828,7 @@ class RequestRunner:
         except Exception as e:
             self.logger.exception(e)
             msg = str(e)
-            if not isinstance(e, requests.exceptions.RequestException):
+            if not isinstance(e, httpx.HTTPError):
                 msg = f"请求异常：{msg}"
 
             self.logger.error(f'error:{json.dumps({"args": str(e.args), "msg": msg}, indent=4, ensure_ascii=False)}')
@@ -1217,7 +1213,7 @@ class TestRunner:
             raise TestFailError(f"测试用例执行失败: {e}", original_exception=e) from e
 
 
-def formate_response_body(response: requests.Response | None) -> dict | str:
+def formate_response_body(response: httpx.Response | None) -> dict | str:
     if response is None:
         return response
     try:

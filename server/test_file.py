@@ -9,7 +9,6 @@ import time
 
 import httpx
 import jmespath
-import requests
 
 from utils.log_util import logger
 
@@ -1150,7 +1149,7 @@ def check_status(i, client_id, headers, start_time):
     while not is_done:
         try:
             # https://newpricetag-partner.rta-os.com/api/print/async/info
-            res_status = requests.request(
+            res_status = httpx.request(
                 "GET",
                 "http://newpricetag-partner.rta-os.com/api/print/async/info",
                 params={"clientId": client_id},
@@ -1193,7 +1192,7 @@ def pricetag_test(concurrent_num=10):
         try:
             index = i
             start_time = datetime.datetime.now()
-            res = requests.post("https://newpricetag-partner.rta-os.com/api/print/all/async",
+            res = httpx.post("https://newpricetag-partner.rta-os.com/api/print/all/async",
                                 data={
                                     # 5千多品
                                     # "json": "%7B%22selectParam%22%3A%7B%22printed%22%3A%22%22%2C%22end%22%3A1742913596000%2C%22orderNoType%22%3A10%2C%22orderNos%22%3Anull%2C%22brandId%22%3Anull%2C%22pogType%22%3A-1%2C%22shelvesCodes%22%3Anull%2C%22storeId%22%3A%223%22%2C%22deptOp%22%3A1%2C%22deptIdList%22%3A%5B%2204%22%2C%2211%22%5D%2C%22deptLevel%22%3A2%2C%22effectTimes%22%3A%5B%5D%2C%22mainType%22%3A%5B%5D%2C%22selectedChangeReasonList%22%3A%5B%5D%2C%22current%22%3A1%2C%22size%22%3A20%2C%22sortField%22%3A%22pog_id%22%2C%22sortOrder%22%3A%22asc%22%2C%22layoutId%22%3A73%2C%22priceTagType%22%3A2%2C%22tab%22%3A2%2C%22effectiveStartPoint%22%3Anull%2C%22effectiveEndPoint%22%3Anull%2C%22selectedPriceChangeTypeList%22%3A%5B%5D%2C%22queryStockAndSaleFlag%22%3A-1%2C%22checkedWareItemStatus%22%3A%5B%5D%2C%22pogNameList%22%3A%5B%5D%2C%22scaleHalf%22%3A1%2C%22printType%22%3A%220%22%2C%22forceFlag%22%3Atrue%2C%22print%22%3Atrue%2C%22selectedPogLocation%22%3Atrue%7D%2C%22settings%22%3A%5B%5D%7D"
@@ -1236,7 +1235,7 @@ def check_ip(headers):
     count = defaultdict(int)
     for i in range(10):
         try:
-            res_status = requests.request(
+            res_status = httpx.request(
                 "GET",
                 "http://newpricetag-partner.rta-os.com/common/printType",
                 headers=headers)

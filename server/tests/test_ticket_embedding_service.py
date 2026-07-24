@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-import requests
+import httpx
 
 from modules.ticket.entity.vo.ticket_vo import TicketEmbeddingRebuildRequestModel
 from modules.ticket.service.ai.ticket_embedding_service import ExternalEmbeddingUnavailableError, TicketEmbeddingService
@@ -12,15 +12,12 @@ from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimi
 class TicketEmbeddingServiceTests(unittest.TestCase):
     """验证工单向量服务与 Qdrant 的边界处理。"""
 
-    def _response(self, status_code: int, body: dict | str) -> requests.Response:
-        """构造 requests 响应用于模拟 Qdrant HTTP 返回。"""
-        response = requests.Response()
-        response.status_code = status_code
-        response._content = (
+    def _response(self, status_code: int, body: dict | str) -> httpx.Response:
+        """构造 httpx 响应用于模拟 Qdrant HTTP 返回。"""
+        content = (
             json.dumps(body, ensure_ascii=False).encode("utf-8") if isinstance(body, dict) else body.encode("utf-8")
         )
-        response.headers["Content-Type"] = "application/json"
-        return response
+        return httpx.Response(status_code, content=content, headers={"Content-Type": "application/json"})
 
     def test_existing_qdrant_collection_dimension_mismatch_fails_early(self):
         """已存在 collection 的维度与当前向量不一致时，应在写入前给出明确错误。"""
@@ -33,7 +30,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             {"result": {"config": {"params": {"vectors": {"size": 128, "distance": "Cosine"}}}}},
         )
 
-        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response):
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response):
             with self.assertRaisesRegex(ValueError, "collectionDimension=128, vectorDimension=1536"):
                 TicketEmbeddingService._ensure_qdrant_collection(config, expected_dimension=1536)
 
@@ -56,12 +53,12 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         create_response = self._response(200, {"result": True})
 
         with (
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response),
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response),
             patch(
-                "modules.ticket.service.ai.ticket_embedding_service.requests.delete", return_value=delete_response
+                "modules.ticket.service.ai.ticket_embedding_service.httpx.delete", return_value=delete_response
             ) as delete_mock,
             patch(
-                "modules.ticket.service.ai.ticket_embedding_service.requests.put", return_value=create_response
+                "modules.ticket.service.ai.ticket_embedding_service.httpx.put", return_value=create_response
             ) as put_mock,
         ):
             TicketEmbeddingService._ensure_qdrant_collection(
@@ -88,8 +85,8 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         )
 
         with (
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response),
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.delete") as delete_mock,
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response),
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.delete") as delete_mock,
         ):
             with self.assertRaisesRegex(ValueError, "collectionDimension=128, vectorDimension=1536"):
                 TicketEmbeddingService._ensure_qdrant_collection(
@@ -108,9 +105,9 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         create_response = self._response(200, {"result": True})
 
         with (
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response),
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response),
             patch(
-                "modules.ticket.service.ai.ticket_embedding_service.requests.put", return_value=create_response
+                "modules.ticket.service.ai.ticket_embedding_service.httpx.put", return_value=create_response
             ) as put_mock,
         ):
             TicketEmbeddingService._ensure_qdrant_collection(config, expected_dimension=768)
@@ -127,7 +124,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             "timeoutSeconds": 15,
         }
 
-        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.post", return_value=response) as post:
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.post", return_value=response) as post:
             vector = TicketEmbeddingService._embed_text_openai_compatible("测试文本", config)
 
         self.assertEqual(vector, [0.1, 0.2, 0.3])
@@ -144,7 +141,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             "requestParams": {"dimensions": 3, "encoding_format": "float"},
         }
 
-        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.post", return_value=response) as post:
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.post", return_value=response) as post:
             vector = TicketEmbeddingService._embed_text_openai_compatible("测试文本", config)
 
         self.assertEqual(vector, [0.1, 0.2, 0.3])
@@ -177,7 +174,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             "timeoutSeconds": 15,
         }
 
-        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.post", return_value=response):
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.post", return_value=response):
             with self.assertRaisesRegex(ValueError, "expected=3, actual=2"):
                 TicketEmbeddingService._embed_text_openai_compatible("测试文本", config)
 
@@ -207,9 +204,9 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         )
 
         with (
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.delete", return_value=delete_response),
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.put", return_value=conflict_response),
-            patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response),
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.delete", return_value=delete_response),
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.put", return_value=conflict_response),
+            patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response),
         ):
             TicketEmbeddingService._recreate_qdrant_collection(
                 detail_url="http://qdrant.local/collections/ticket_similarity",
@@ -273,7 +270,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         }
 
         with patch(
-            "modules.ticket.service.ai.ticket_embedding_service.requests.get",
+            "modules.ticket.service.ai.ticket_embedding_service.httpx.get",
             side_effect=[list_response, detail_response],
         ):
             result = TicketEmbeddingService.list_qdrant_collections(config)
@@ -285,7 +282,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         """Qdrant 返回 4xx/5xx 时，异常信息应包含服务端响应体用于定位根因。"""
         response = self._response(400, {"status": {"error": "Vector dimension error"}})
 
-        with self.assertRaisesRegex(requests.HTTPError, "Vector dimension error"):
+        with self.assertRaisesRegex(httpx.HTTPStatusError, "Vector dimension error"):
             TicketEmbeddingService._raise_for_qdrant_status(response, "写入工单向量")
 
     def test_validate_qdrant_config_rejects_existing_collection_dimension_mismatch(self):
@@ -307,7 +304,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             {"result": {"config": {"params": {"vectors": {"size": 2560, "distance": "Cosine"}}}}},
         )
 
-        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response):
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response):
             with self.assertRaisesRegex(ValueError, "collectionDimension=2560, configuredDimension=1024"):
                 TicketEmbeddingService._validate_similarity_config(config)
 
@@ -327,7 +324,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         )
         detail_response = self._response(404, {"status": {"error": "Not found"}})
 
-        with patch("modules.ticket.service.ai.ticket_embedding_service.requests.get", return_value=detail_response):
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.get", return_value=detail_response):
             TicketEmbeddingService._validate_similarity_config(config)
 
     def test_cache_vector_similarity_search_does_not_call_external_embedding(self):
@@ -465,7 +462,7 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
             patch.object(TicketEmbeddingService, "_embed_text_openai_compatible") as embed_mock,
             patch.object(TicketEmbeddingService, "_ensure_qdrant_collection"),
             patch(
-                "modules.ticket.service.ai.ticket_embedding_service.requests.post",
+                "modules.ticket.service.ai.ticket_embedding_service.httpx.post",
                 return_value=response,
             ) as post_mock,
         ):

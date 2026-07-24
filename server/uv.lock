@@ -1890,7 +1890,7 @@ wheels = [
 
 [[package]]
 name = "server"
-version = "1.0.4.2"
+version = "1.1.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "bcrypt" },
@@ -1914,7 +1914,6 @@ dependencies = [
     { name = "quickjs" },
     { name = "redis" },
     { name = "redlock" },
-    { name = "requests" },
     { name = "sqlalchemy" },
     { name = "user-agents" },
     { name = "uvicorn" },
@@ -1949,7 +1948,6 @@ requires-dist = [
     { name = "quickjs", specifier = ">=1.19.4" },
     { name = "redis", specifier = "==5.0.1" },
     { name = "redlock", specifier = "==1.2.0" },
-    { name = "requests", specifier = "==2.31.0" },
     { name = "sqlalchemy", specifier = "==2.0.25" },
     { name = "user-agents", specifier = "==2.2.0" },
     { name = "uvicorn", specifier = "==0.29.0" },

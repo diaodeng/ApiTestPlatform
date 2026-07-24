@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-import requests
+import httpx
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -241,7 +241,7 @@ class TicketEmbeddingService:
             raise ValueError("Qdrant collection 未配置")
         detail_url = cls._qdrant_url(qdrant_config, f"/collections/{collection}")
         timeout = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
-        response = requests.get(detail_url, headers=cls._qdrant_headers(qdrant_config), timeout=timeout)
+        response = httpx.get(detail_url, headers=cls._qdrant_headers(qdrant_config), timeout=timeout)
         if response.status_code == 404:
             logger.info(f"Qdrant配置保存校验跳过: collection={collection}, reason=collection不存在")
             return
@@ -921,7 +921,7 @@ class TicketEmbeddingService:
             "with_payload": True,
             "score_threshold": config.get("threshold", 0.05),
         }
-        response = requests.post(
+        response = httpx.post(
             url,
             headers=cls._qdrant_headers(qdrant_config),
             json=payload,
@@ -1024,7 +1024,7 @@ class TicketEmbeddingService:
             "with_payload": True,
             "score_threshold": config.get("threshold", 0.05),
         }
-        response = requests.post(
+        response = httpx.post(
             url,
             headers=cls._qdrant_headers(qdrant_config),
             json=payload,
@@ -1125,7 +1125,7 @@ class TicketEmbeddingService:
                 }
             ]
         }
-        response = requests.put(
+        response = httpx.put(
             url,
             headers=cls._qdrant_headers(qdrant_config),
             json=payload,
@@ -1155,7 +1155,7 @@ class TicketEmbeddingService:
         headers = cls._qdrant_headers(qdrant_config)
         timeout = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
         detail_url = cls._qdrant_url(qdrant_config, f"/collections/{collection}")
-        detail_response = requests.get(detail_url, headers=headers, timeout=timeout)
+        detail_response = httpx.get(detail_url, headers=headers, timeout=timeout)
         if detail_response.status_code == 200:
             collection_dimension = cls._extract_qdrant_vector_size(detail_response.json())
             logger.info(
@@ -1199,7 +1199,7 @@ class TicketEmbeddingService:
             f"distance={qdrant_config.get('distance') or 'Cosine'}"
         )
         create_payload = {"vectors": {"size": vector_size, "distance": qdrant_config.get("distance") or "Cosine"}}
-        create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
+        create_response = httpx.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
         cls._raise_for_qdrant_status(create_response, f"创建 collection: collection={collection}")
         logger.info(f"Qdrant collection创建完成: collection={collection}, vectorSize={vector_size}")
 
@@ -1215,7 +1215,7 @@ class TicketEmbeddingService:
         url = cls._qdrant_url(qdrant_config, "/collections")
         headers = cls._qdrant_headers(qdrant_config)
         timeout = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
-        response = requests.get(url, headers=headers, timeout=timeout)
+        response = httpx.get(url, headers=headers, timeout=timeout)
         cls._raise_for_qdrant_status(response, "查询 collection 列表")
         rows = ((response.json().get("result") or {}).get("collections") or [])
         collections: list[dict[str, Any]] = []
@@ -1248,7 +1248,7 @@ class TicketEmbeddingService:
         :return: collection 摘要
         """
         detail_url = cls._qdrant_url(qdrant_config, f"/collections/{collection_name}")
-        detail_response = requests.get(detail_url, headers=headers, timeout=timeout)
+        detail_response = httpx.get(detail_url, headers=headers, timeout=timeout)
         cls._raise_for_qdrant_status(detail_response, f"读取 collection: collection={collection_name}")
         detail = detail_response.json()
         vector_info = cls._extract_qdrant_vector_info(detail)
@@ -1282,15 +1282,15 @@ class TicketEmbeddingService:
         :param distance: 向量距离算法
         :return: 无
         """
-        delete_response = requests.delete(detail_url, headers=headers, timeout=timeout)
+        delete_response = httpx.delete(detail_url, headers=headers, timeout=timeout)
         if delete_response.status_code != 404:
             cls._raise_for_qdrant_status(delete_response, f"删除 collection: collection={collection}")
         else:
             logger.info(f"Qdrant collection删除跳过: collection={collection}, reason=collection不存在")
         create_payload = {"vectors": {"size": vector_size, "distance": distance}}
-        create_response = requests.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
+        create_response = httpx.put(detail_url, headers=headers, json=create_payload, timeout=timeout)
         if create_response.status_code == 409:
-            detail_response = requests.get(detail_url, headers=headers, timeout=timeout)
+            detail_response = httpx.get(detail_url, headers=headers, timeout=timeout)
             cls._raise_for_qdrant_status(detail_response, f"确认 collection: collection={collection}")
             collection_dimension = cls._extract_qdrant_vector_size(detail_response.json())
             if collection_dimension == vector_size:
@@ -1360,7 +1360,7 @@ class TicketEmbeddingService:
         return cls._normalize_config_for_save(config)
 
     @classmethod
-    def _raise_for_qdrant_status(cls, response: requests.Response, action: str) -> None:
+    def _raise_for_qdrant_status(cls, response: httpx.Response, action: str) -> None:
         """
         检查 Qdrant HTTP 响应，失败时带上响应体，便于从日志判断具体原因。
         :param response: requests 响应对象
@@ -1370,7 +1370,7 @@ class TicketEmbeddingService:
         if response.status_code < 400:
             return
         detail = response.text[:1000] if response.text else ""
-        raise requests.HTTPError(
+        raise httpx.HTTPStatusError(
             f"Qdrant请求失败: action={action}, status={response.status_code}, detail={detail}",
             response=response,
         )
@@ -1400,7 +1400,7 @@ class TicketEmbeddingService:
             f"configuredDimension={dimension}, requestParamKeys={list(payload.keys())}, "
             f"textChars={len(text)}, endpoint={endpoint.split('?')[0]}"
         )
-        response = requests.post(
+        response = httpx.post(
             endpoint,
             headers=headers,
             json=payload,

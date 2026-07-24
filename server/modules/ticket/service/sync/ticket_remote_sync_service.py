@@ -1,6 +1,6 @@
 from typing import Any
 
-import requests
+import httpx
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -362,14 +362,14 @@ class TicketRemoteSyncService:
             f"consumer={remote_sync['consumer']} limit={remote_sync['limit']} "
             f"include_closed={remote_sync['includeClosed']}"
         )
-        response = requests.get(
+        response = httpx.get(
             remote_sync["pullUrl"],
             params={
                 "consumer": remote_sync["consumer"],
                 "limit": remote_sync["limit"],
                 "includeClosed": remote_sync["includeClosed"],
             },
-            timeout=(10, remote_sync["timeoutSec"]),
+            timeout=httpx.Timeout(10.0, read=remote_sync["timeoutSec"]),
             headers=cls.build_request_headers(remote_sync),
         )
         response.raise_for_status()
@@ -505,10 +505,10 @@ class TicketRemoteSyncService:
                     )
 
         if ack_items:
-            ack_response = requests.post(
+            ack_response = httpx.post(
                 remote_sync["ackUrl"],
                 json={"consumer": remote_sync["consumer"], "items": ack_items},
-                timeout=(10, remote_sync["timeoutSec"]),
+                timeout=httpx.Timeout(10.0, read=remote_sync["timeoutSec"]),
                 headers=cls.build_request_headers(remote_sync),
             )
             ack_response.raise_for_status()

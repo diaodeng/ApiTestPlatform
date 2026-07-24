@@ -1,6 +1,6 @@
 import json
 
-import requests
+import httpx
 
 from config.database import SessionLocal
 from config.env import FeishuBotConfig
@@ -137,10 +137,8 @@ class FeiShuHandler:
                 url = self._token
             else:
                 url = f"https://open.feishu.cn/open-apis/bot/v2/hook/{self._token}"
-            res = requests.post(url=url,
-                                headers=headers,
-                                data=json.dumps(json_str),
-                                verify=False)
+            with httpx.Client(verify=False) as client:
+                res = client.post(url=url, headers=headers, content=json.dumps(json_str))
             logger.info(f"飞书推送结果 {res.status_code}：{res.text}")
         except Exception as e:
             logger.error("==============飞书推送异常===========")

@@ -23,9 +23,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
+import httpx
 from openpyxl import Workbook, load_workbook
-from requests import exceptions as requests_exceptions
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -2691,7 +2690,7 @@ class TicketLogPullService:
             record.command_content, {}
         )
         command_content = cls._build_command_content(command_content)
-        response = requests.post(
+        response = httpx.post(
             request_url,
             data={
                 "venderId": record.vendor_id,
@@ -2701,7 +2700,7 @@ class TicketLogPullService:
                 "commandDataType": record.command_data_type,
                 "commandContent": cls._json_dumps(command_content),
             },
-            timeout=(10, 30),
+            timeout=httpx.Timeout(10.0, read=30.0),
             headers=cls._build_external_request_headers(external_config),
         )
         response.raise_for_status()
@@ -2853,7 +2852,7 @@ class TicketLogPullService:
         :return: 外部平台列表数据
         """
         external_config = cls._get_external_config_dict(db, record.environment)
-        response = requests.get(
+        response = httpx.get(
             external_config["pageUrl"],
             params={
                 "currentPage": 1,
@@ -2865,7 +2864,7 @@ class TicketLogPullService:
                 "commandStatus": "",
                 "_": int(datetime.now().timestamp() * 1000),
             },
-            timeout=(10, 30),
+            timeout=httpx.Timeout(10.0, read=30.0),
             headers=cls._build_external_request_headers(external_config),
         )
         response.raise_for_status()
@@ -2918,16 +2917,16 @@ class TicketLogPullService:
         :return: 可重试返回 True
         """
         # HTTP 5xx 服务端错误可重试
-        if isinstance(exc, requests_exceptions.HTTPError):
+        if isinstance(exc, httpx.HTTPStatusError):
             status_code = getattr(getattr(exc, "response", None), "status_code", 0)
             return 500 <= status_code < 600
         # 连接错误、超时可重试
-        if isinstance(exc, (requests_exceptions.ConnectionError, requests_exceptions.Timeout)):
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
             return True
-        # ChunkedEncodingError 通常由 IncompleteRead 引发，可重试
-        if isinstance(exc, requests_exceptions.ChunkedEncodingError):
+        # httpx 的流式下载中断/协议错误可重试
+        if isinstance(exc, httpx.TransportError):
             return True
-        # urllib3 的 ProtocolError/IncompleteRead 可能直接抛出，通过异常类名或消息特征识别
+        # 通过异常类名或消息特征识别其他可重试错误
         error_type = type(exc).__name__
         error_str = str(exc)
         if "IncompleteRead" in error_type or "ProtocolError" in error_type:
@@ -2964,11 +2963,11 @@ class TicketLogPullService:
                 f"已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
             )
         # HTTP 错误
-        if isinstance(exc, requests_exceptions.HTTPError):
+        if isinstance(exc, httpx.HTTPStatusError):
             status_code = getattr(getattr(exc, "response", None), "status_code", 0)
             return f"下载日志压缩包失败（HTTP {status_code}），请检查下载地址是否有效"
         # 连接/超时错误
-        if isinstance(exc, (requests_exceptions.ConnectionError, requests_exceptions.Timeout)):
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
             return (
                 f"下载日志压缩包失败（网络连接异常），"
                 f"已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
@@ -3019,10 +3018,10 @@ class TicketLogPullService:
             temp_file = Path(temp_name)
             total_size = 0
             try:
-                with requests.get(
+                with httpx.stream(
+                    "GET",
                     url,
-                    stream=True,
-                    timeout=(10, timeout_seconds),
+                    timeout=httpx.Timeout(10.0, read=timeout_seconds),
                     headers=cls._build_external_request_headers(external_config),
                 ) as response:
                     response.raise_for_status()
@@ -3031,7 +3030,7 @@ class TicketLogPullService:
                     if progress_callback:
                         progress_callback(0, total_bytes, "http")
                     with temp_file.open("wb") as file_obj:
-                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        for chunk in response.iter_bytes(chunk_size=1024 * 1024):
                             if not chunk:
                                 continue
                             file_obj.write(chunk)
@@ -3039,7 +3038,7 @@ class TicketLogPullService:
                             if progress_callback:
                                 progress_callback(total_size, total_bytes, "http")
                 return temp_file, total_size
-            except requests_exceptions.HTTPError as exc:
+            except httpx.HTTPStatusError as exc:
                 last_error = exc
                 temp_file.unlink(missing_ok=True)
                 status_code = getattr(getattr(exc, "response", None), "status_code", 0)

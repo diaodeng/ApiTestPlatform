@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import Any
 
-import requests
+import httpx
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -295,13 +295,13 @@ class TicketSyncNotifyService:
             headers = {"Content-Type": "application/json; charset=utf-8"}
             if tenant_access_token:
                 headers["Authorization"] = f"Bearer {tenant_access_token}"
-            response = requests.request(
+            response = httpx.request(
                 method=method.upper(),
                 url=url,
                 params=params,
                 json=json_body,
                 headers=headers,
-                timeout=(10, timeout_sec),
+                timeout=httpx.Timeout(10.0, read=timeout_sec),
             )
             if response.status_code != 200:
                 logger.error(
