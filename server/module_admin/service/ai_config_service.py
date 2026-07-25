@@ -113,7 +113,7 @@ class AiConfigService:
             "field_name": "log_extract_prompt_code",
             "config_key": "ticket.ai.log_extract.prompt.code",
             "config_name": "工单日志参数提取提示词编码",
-            "default_value": "ticket_log_extract_default",
+            "default_value": "ticket_sync_extract_default",
             "remark": "工单日志参数提取时使用的提示词模板编码",
             "section": "light_translate",
         },
@@ -412,7 +412,7 @@ class AiConfigService:
             == "true",
             log_extract_provider_code=cls._get_config_text(db, "ticket.ai.log_extract.provider.code", ""),
             log_extract_prompt_code=cls._get_config_text_with_blank_default(
-                db, "ticket.ai.log_extract.prompt.code", "ticket_log_extract_default"
+                db, "ticket.ai.log_extract.prompt.code", "ticket_sync_extract_default"
             ),
             knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
             knowledge_prompt_code=cls._get_config_text(

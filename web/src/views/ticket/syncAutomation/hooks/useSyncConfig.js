@@ -331,9 +331,29 @@ export function useSyncConfig(proxy) {
         externalPushEnabled: false,
         remotePullEnabled: false,
         bitablePullEnabled: false,
+        manualCreateEnabled: false,
         providerCode: '',
         promptCode: 'ticket_sync_extract_default',
         extractFields: ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
+      },
+      translateConfig: {
+        enabled: false,
+        translateOnExternalSync: true,
+        translateOnRemotePull: true,
+        translateOnBitablePull: true,
+        translateOnManualCreate: false,
+      },
+      automationConfig: {
+        enabled: false,
+        autoIdentifyOnExternalSync: false,
+        autoIdentifyOnRemotePull: false,
+        autoIdentifyOnBitablePull: true,
+        autoLogPullOnExternalSync: false,
+        autoLogPullOnRemotePull: false,
+        autoLogPullOnBitablePull: false,
+        autoAiAnalysisOnExternalSync: false,
+        autoAiAnalysisOnRemotePull: false,
+        autoAiAnalysisOnBitablePull: false,
       },
       statClassification: normalizeStatClassificationConfig(),
       externalSyncRequiredFields: [
@@ -707,11 +727,35 @@ export function useSyncConfig(proxy) {
       externalPushEnabled: Boolean(aiSyncExtract.externalPushEnabled),
       remotePullEnabled: Boolean(aiSyncExtract.remotePullEnabled),
       bitablePullEnabled: Boolean(aiSyncExtract.bitablePullEnabled),
+      manualCreateEnabled: Boolean(aiSyncExtract.manualCreateEnabled),
       providerCode: aiSyncExtract.providerCode || '',
       promptCode: aiSyncExtract.promptCode || '',
       extractFields: Array.isArray(aiSyncExtract.extractFields)
         ? aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)
         : ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
+    }
+
+    const translateConfig = payload.translateConfig || {}
+    form.translateConfig = {
+      enabled: Boolean(translateConfig.enabled),
+      translateOnExternalSync: translateConfig.translateOnExternalSync !== false,
+      translateOnRemotePull: translateConfig.translateOnRemotePull !== false,
+      translateOnBitablePull: translateConfig.translateOnBitablePull !== false,
+      translateOnManualCreate: Boolean(translateConfig.translateOnManualCreate),
+    }
+
+    const automationConfig = payload.automationConfig || {}
+    form.automationConfig = {
+      enabled: Boolean(automationConfig.enabled),
+      autoIdentifyOnExternalSync: Boolean(automationConfig.autoIdentifyOnExternalSync),
+      autoIdentifyOnRemotePull: Boolean(automationConfig.autoIdentifyOnRemotePull),
+      autoIdentifyOnBitablePull: automationConfig.autoIdentifyOnBitablePull !== false,
+      autoLogPullOnExternalSync: Boolean(automationConfig.autoLogPullOnExternalSync),
+      autoLogPullOnRemotePull: Boolean(automationConfig.autoLogPullOnRemotePull),
+      autoLogPullOnBitablePull: Boolean(automationConfig.autoLogPullOnBitablePull),
+      autoAiAnalysisOnExternalSync: Boolean(automationConfig.autoAiAnalysisOnExternalSync),
+      autoAiAnalysisOnRemotePull: Boolean(automationConfig.autoAiAnalysisOnRemotePull),
+      autoAiAnalysisOnBitablePull: Boolean(automationConfig.autoAiAnalysisOnBitablePull),
     }
 
     form.projectMappings = normalizeArray(payload.projectMappings)
@@ -967,11 +1011,31 @@ export function useSyncConfig(proxy) {
         externalPushEnabled: Boolean(payload.aiSyncExtract?.externalPushEnabled),
         remotePullEnabled: Boolean(payload.aiSyncExtract?.remotePullEnabled),
         bitablePullEnabled: Boolean(payload.aiSyncExtract?.bitablePullEnabled),
+        manualCreateEnabled: Boolean(payload.aiSyncExtract?.manualCreateEnabled),
         providerCode: String(payload.aiSyncExtract?.providerCode || '').trim(),
         promptCode: String(payload.aiSyncExtract?.promptCode || '').trim(),
         extractFields: Array.isArray(payload.aiSyncExtract?.extractFields)
           ? Array.from(new Set(payload.aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)))
           : ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
+      }
+      payload.translateConfig = {
+        enabled: Boolean(payload.translateConfig?.enabled),
+        translateOnExternalSync: payload.translateConfig?.translateOnExternalSync !== false,
+        translateOnRemotePull: payload.translateConfig?.translateOnRemotePull !== false,
+        translateOnBitablePull: payload.translateConfig?.translateOnBitablePull !== false,
+        translateOnManualCreate: Boolean(payload.translateConfig?.translateOnManualCreate),
+      }
+      payload.automationConfig = {
+        enabled: Boolean(payload.automationConfig?.enabled),
+        autoIdentifyOnExternalSync: Boolean(payload.automationConfig?.autoIdentifyOnExternalSync),
+        autoIdentifyOnRemotePull: Boolean(payload.automationConfig?.autoIdentifyOnRemotePull),
+        autoIdentifyOnBitablePull: payload.automationConfig?.autoIdentifyOnBitablePull !== false,
+        autoLogPullOnExternalSync: Boolean(payload.automationConfig?.autoLogPullOnExternalSync),
+        autoLogPullOnRemotePull: Boolean(payload.automationConfig?.autoLogPullOnRemotePull),
+        autoLogPullOnBitablePull: Boolean(payload.automationConfig?.autoLogPullOnBitablePull),
+        autoAiAnalysisOnExternalSync: Boolean(payload.automationConfig?.autoAiAnalysisOnExternalSync),
+        autoAiAnalysisOnRemotePull: Boolean(payload.automationConfig?.autoAiAnalysisOnRemotePull),
+        autoAiAnalysisOnBitablePull: Boolean(payload.automationConfig?.autoAiAnalysisOnBitablePull),
       }
       payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
         ? Array.from(new Set(payload.externalSyncRequiredFields.map((item) => String(item || '').trim()).filter(Boolean)))

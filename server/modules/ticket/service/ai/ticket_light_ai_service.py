@@ -184,6 +184,7 @@ class TicketLightAiService:
         "external_sync": "externalPushEnabled",
         "remote_pull": "remotePullEnabled",
         "bitable_pull": "bitablePullEnabled",
+        "manual_create": "manualCreateEnabled",
     }
 
     @classmethod

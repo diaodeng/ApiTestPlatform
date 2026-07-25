@@ -151,6 +151,9 @@ class TicketSyncConfigService:
             "summaryReport": cls.default_summary_report_config(),
             "statClassification": cls.default_stat_classification_config(),
             "aiClassification": cls.default_ai_classification_config(),
+            "aiSyncExtract": cls.default_ai_sync_extract_config(),
+            "translateConfig": cls.default_translate_config(),
+            "automationConfig": cls.default_automation_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
             "moduleMappings": [],
@@ -177,7 +180,6 @@ class TicketSyncConfigService:
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
             },
-            "aiSyncExtract": cls.default_ai_sync_extract_config(),
         }
 
     # --- AI 同步提取默认配置 ---
@@ -193,8 +195,48 @@ class TicketSyncConfigService:
             "externalPushEnabled": False,
             "remotePullEnabled": False,
             "bitablePullEnabled": False,
+            "manualCreateEnabled": False,
             "providerCode": "",
             "promptCode": "",
+        }
+
+    # --- 翻译默认配置 ---
+
+    @classmethod
+    def default_translate_config(cls) -> dict[str, Any]:
+        """
+        构建工单翻译默认配置（按场景独立控制）。
+
+        :return: 翻译配置默认值。
+        """
+        return {
+            "enabled": False,
+            "translateOnExternalSync": True,
+            "translateOnRemotePull": True,
+            "translateOnBitablePull": True,
+            "translateOnManualCreate": False,
+        }
+
+    # --- 自动化默认配置 ---
+
+    @classmethod
+    def default_automation_config(cls) -> dict[str, Any]:
+        """
+        构建同步后自动化默认配置（按场景独立控制）。
+
+        :return: 自动化配置默认值。
+        """
+        return {
+            "enabled": False,
+            "autoIdentifyOnExternalSync": False,
+            "autoIdentifyOnRemotePull": False,
+            "autoIdentifyOnBitablePull": True,
+            "autoLogPullOnExternalSync": False,
+            "autoLogPullOnRemotePull": False,
+            "autoLogPullOnBitablePull": False,
+            "autoAiAnalysisOnExternalSync": False,
+            "autoAiAnalysisOnRemotePull": False,
+            "autoAiAnalysisOnBitablePull": False,
         }
 
 
@@ -1477,9 +1519,71 @@ class TicketSyncConfigService:
         ai_sync_extract["externalPushEnabled"] = bool(ai_sync_extract.get("externalPushEnabled"))
         ai_sync_extract["remotePullEnabled"] = bool(ai_sync_extract.get("remotePullEnabled"))
         ai_sync_extract["bitablePullEnabled"] = bool(ai_sync_extract.get("bitablePullEnabled"))
+        ai_sync_extract["manualCreateEnabled"] = bool(ai_sync_extract.get("manualCreateEnabled"))
         ai_sync_extract["providerCode"] = str(ai_sync_extract.get("providerCode") or "").strip()
         ai_sync_extract["promptCode"] = str(ai_sync_extract.get("promptCode") or "").strip()
         merged["aiSyncExtract"] = ai_sync_extract
+
+        translate_config = merged.get("translateConfig") if isinstance(merged.get("translateConfig"), dict) else {}
+        default_translate = cls.default_translate_config()
+        translate_config = {**default_translate, **translate_config}
+        # 向后兼容：从旧字段迁移翻译开关值
+        if not translate_config.get("translateOnExternalSync"):
+            translate_config["translateOnExternalSync"] = bool(merged.get("autoTranslateOnSync", True))
+        if not translate_config.get("translateOnRemotePull"):
+            remote_sync = merged.get("remoteSync") if isinstance(merged.get("remoteSync"), dict) else {}
+            translate_config["translateOnRemotePull"] = bool(remote_sync.get("autoTranslateOnPull", True))
+        if not translate_config.get("translateOnBitablePull"):
+            bitable_pull = merged.get("bitablePull") if isinstance(merged.get("bitablePull"), dict) else {}
+            bitable_automation = (
+                bitable_pull.get("automation")
+                if isinstance(bitable_pull.get("automation"), dict)
+                else {}
+            )
+            translate_config["translateOnBitablePull"] = bool(bitable_automation.get("autoTranslate", True))
+        translate_config["enabled"] = bool(translate_config.get("enabled"))
+        merged["translateConfig"] = translate_config
+
+        automation_config = merged.get("automationConfig") if isinstance(merged.get("automationConfig"), dict) else {}
+        default_automation = cls.default_automation_config()
+        automation_config = {**default_automation, **automation_config}
+        # 向后兼容：从旧字段迁移自动化开关值
+        if bool(merged.get("autoRunOnSync")):
+            if not automation_config.get("autoIdentifyOnExternalSync"):
+                automation_config["autoIdentifyOnExternalSync"] = True
+            if not automation_config.get("autoIdentifyOnRemotePull"):
+                automation_config["autoIdentifyOnRemotePull"] = True
+            if not automation_config.get("autoLogPullOnExternalSync"):
+                automation_config["autoLogPullOnExternalSync"] = True
+            if not automation_config.get("autoLogPullOnRemotePull"):
+                automation_config["autoLogPullOnRemotePull"] = True
+            if not automation_config.get("autoAiAnalysisOnExternalSync"):
+                automation_config["autoAiAnalysisOnExternalSync"] = True
+            if not automation_config.get("autoAiAnalysisOnRemotePull"):
+                automation_config["autoAiAnalysisOnRemotePull"] = True
+        if not isinstance(merged.get("bitablePull"), dict):
+            bitable_pull_for_auto = {}
+        else:
+            bitable_pull_for_auto = merged["bitablePull"]
+        bitable_automation_for_auto = (
+            bitable_pull_for_auto.get("automation")
+            if isinstance(bitable_pull_for_auto.get("automation"), dict)
+            else {}
+        )
+        if not automation_config.get("autoIdentifyOnBitablePull"):
+            automation_config["autoIdentifyOnBitablePull"] = bool(
+                bitable_automation_for_auto.get("autoIdentify", True)
+            )
+        if not automation_config.get("autoLogPullOnBitablePull"):
+            automation_config["autoLogPullOnBitablePull"] = bool(
+                bitable_automation_for_auto.get("autoLogPull", False)
+            )
+        if not automation_config.get("autoAiAnalysisOnBitablePull"):
+            automation_config["autoAiAnalysisOnBitablePull"] = bool(
+                bitable_automation_for_auto.get("autoAiAnalysis", False)
+            )
+        automation_config["enabled"] = bool(automation_config.get("enabled"))
+        merged["automationConfig"] = automation_config
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
         if not isinstance(merged.get("moduleMappings"), list):

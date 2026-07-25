@@ -266,16 +266,30 @@ class TicketSyncPostProcessService:
 
         try:
             translation_enabled = TicketLightAiService.is_translation_enabled(db)
-            if sync_scene == "remote_pull":
-                sync_translate_enabled = bool(
-                    automation.auto_translate
-                    if automation is not None
-                    else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
-                )
+            translate_config = config.get("translateConfig") if isinstance(config.get("translateConfig"), dict) else {}
+            translate_config_enabled = bool(translate_config.get("enabled", False))
+            sync_translate_enabled = cls._resolve_translate_enabled_for_scene(
+                sync_scene=sync_scene,
+                automation=automation,
+                config=config,
+                translate_config=translate_config,
+            )
+            # 总开关: sys_config 翻译总开关 AND (新 translateConfig.enabled 场景开关 或 旧兜底)
+            if translate_config_enabled:
+                should_translate = translation_enabled and sync_translate_enabled
             else:
-                sync_translate_enabled = bool(
-                    automation.auto_translate if automation is not None else config.get("autoTranslateOnSync", True)
-                )
+                # 新 translateConfig 总开关未开时，兜底走旧逻辑避免回退
+                if sync_scene == "remote_pull":
+                    legacy_enabled = bool(
+                        automation.auto_translate
+                        if automation is not None
+                        else (config.get("remoteSync") or {}).get("autoTranslateOnPull", True)
+                    )
+                else:
+                    legacy_enabled = bool(
+                        automation.auto_translate if automation is not None else config.get("autoTranslateOnSync", True)
+                    )
+                should_translate = translation_enabled and legacy_enabled
             translation_already_succeeded = cls.has_successful_ai_translation(
                 ticket,
                 source_description=sync_object.description,
@@ -380,16 +394,10 @@ class TicketSyncPostProcessService:
             apply_external_mappings=apply_external_mappings,
         )
 
-        should_run_automation = bool(
-            (
-                automation
-                and (
-                    automation.auto_identify
-                    or automation.auto_log_pull
-                    or automation.auto_ai_analysis
-                )
-            )
-            or config.get("autoRunOnSync")
+        should_run_automation = cls._resolve_automation_enabled_for_scene(
+            sync_scene=sync_scene,
+            automation=automation,
+            config=config,
         )
         if should_run_automation:
             try:
@@ -399,6 +407,7 @@ class TicketSyncPostProcessService:
                     sync_object,
                     detected,
                     current_user,
+                    sync_scene=sync_scene,
                 )
             except Exception as exc:
                 logger.warning(f"外部工单同步延后自动化失败: ticket_no={sync_object.ticket_no}, error={exc}")
@@ -686,3 +695,63 @@ class TicketSyncPostProcessService:
             False,
             "sync_scene",
         )
+
+    @classmethod
+    def _resolve_translate_enabled_for_scene(
+        cls,
+        *,
+        sync_scene: str,
+        automation: Any,
+        config: dict[str, Any],
+        translate_config: dict[str, Any],
+    ) -> bool:
+        """
+        判断当前场景是否需要执行翻译。
+        优先级: 任务级 automation.auto_translate > translateConfig 场景开关。
+        新 translateConfig 总开关关闭时，兜底走旧逻辑。
+        """
+        if automation is not None:
+            return bool(automation.auto_translate)
+        scene_map = {
+            "external_sync": "translateOnExternalSync",
+            "remote_pull": "translateOnRemotePull",
+            "bitable_pull": "translateOnBitablePull",
+            "manual_create": "translateOnManualCreate",
+        }
+        config_key = scene_map.get(sync_scene)
+        if config_key:
+            return bool(translate_config.get(config_key, True))
+        return True
+
+    @classmethod
+    def _resolve_automation_enabled_for_scene(
+        cls,
+        *,
+        sync_scene: str,
+        automation: Any,
+        config: dict[str, Any],
+    ) -> bool:
+        """
+        判断当前场景是否需要执行自动化（识别/日志拉取/AI分析）。
+        优先级: 任务级 automation > automationConfig 场景开关 > 旧 autoRunOnSync。
+        """
+        if automation is not None:
+            return bool(
+                automation.auto_identify
+                or automation.auto_log_pull
+                or automation.auto_ai_analysis
+            )
+        auto_config = config.get("automationConfig") if isinstance(config.get("automationConfig"), dict) else {}
+        if bool(auto_config.get("enabled")):
+            scene_prefix = {
+                "external_sync": "ExternalSync",
+                "remote_pull": "RemotePull",
+                "bitable_pull": "BitablePull",
+            }.get(sync_scene, "")
+            if scene_prefix:
+                return bool(
+                    auto_config.get(f"autoIdentifyOn{scene_prefix}")
+                    or auto_config.get(f"autoLogPullOn{scene_prefix}")
+                    or auto_config.get(f"autoAiAnalysisOn{scene_prefix}")
+                )
+        return bool(config.get("autoRunOnSync"))

@@ -705,16 +705,9 @@ class TicketSyncService:
         except Exception as exc:
             logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
-        should_run_automation = bool(
-            (
-                automation
-                and (
-                    automation.auto_identify
-                    or automation.auto_log_pull
-                    or automation.auto_ai_analysis
-                )
-            )
-            or config.get("autoRunOnSync")
+        should_run_automation = cls._resolve_automation_enabled(
+            automation=automation,
+            config=config,
         )
         automation_summary = None
         if should_run_automation:
