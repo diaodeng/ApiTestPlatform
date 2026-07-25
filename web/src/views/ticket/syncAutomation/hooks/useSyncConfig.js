@@ -219,8 +219,6 @@ export function useSyncConfig(proxy) {
 
   function createDefaultForm() {
     return {
-      autoRunOnSync: false,
-      autoTranslateOnSync: true,
       defaultPullLimit: 50,
       feishuAuth: { appId: '', appSecret: '' },
       bitableCommon: {
@@ -239,7 +237,7 @@ export function useSyncConfig(proxy) {
       remoteSync: {
         enabled: false, pullUrl: '', ackUrl: '', consumer: '',
         sourceSystem: 'public', limit: 50, includeClosed: true,
-        autoTranslateOnPull: true, timeoutSec: 30,
+        timeoutSec: 30,
         headers: { cookie: '', authorization: '', origin: '' },
       },
       groupPush: {
@@ -251,6 +249,7 @@ export function useSyncConfig(proxy) {
           { priorities: ['P3', 'P4'], pushIds: [], chatIds: [] },
         ],
         sendAfterExternalSync: false, sendAfterRemotePull: false,
+        sendAfterBitablePull: false, sendAfterManualCreate: false,
         autoSendAfterTime: '', template: '', manualTemplate: '',
       },
       messageSync: {
@@ -348,12 +347,15 @@ export function useSyncConfig(proxy) {
         autoIdentifyOnExternalSync: false,
         autoIdentifyOnRemotePull: false,
         autoIdentifyOnBitablePull: true,
+        autoIdentifyOnManualCreate: false,
         autoLogPullOnExternalSync: false,
         autoLogPullOnRemotePull: false,
         autoLogPullOnBitablePull: false,
+        autoLogPullOnManualCreate: false,
         autoAiAnalysisOnExternalSync: false,
         autoAiAnalysisOnRemotePull: false,
         autoAiAnalysisOnBitablePull: false,
+        autoAiAnalysisOnManualCreate: false,
       },
       statClassification: normalizeStatClassificationConfig(),
       externalSyncRequiredFields: [
@@ -484,8 +486,6 @@ export function useSyncConfig(proxy) {
   // === Config load ===
 
   function applyConfig(payload) {
-    form.autoRunOnSync = Boolean(payload.autoRunOnSync)
-    form.autoTranslateOnSync = payload.autoTranslateOnSync !== false
     form.defaultPullLimit = Number(payload.defaultPullLimit || 50)
     form.statClassification = normalizeStatClassificationConfig(payload.statClassification)
 
@@ -528,7 +528,6 @@ export function useSyncConfig(proxy) {
       sourceSystem: remoteSync.sourceSystem || 'public',
       limit: Number(remoteSync.limit || 50),
       includeClosed: remoteSync.includeClosed !== false,
-      autoTranslateOnPull: remoteSync.autoTranslateOnPull !== false,
       timeoutSec: Number(remoteSync.timeoutSec || 30),
       headers: {
         cookie: remoteSync.headers?.cookie || '',
@@ -571,12 +570,6 @@ export function useSyncConfig(proxy) {
             joinSeparator: String(item?.joinSeparator || ',').trim() || ',',
           }))
         : [],
-      automation: {
-        autoIdentify: bitablePull.automation?.autoIdentify !== false,
-        autoLogPull: Boolean(bitablePull.automation?.autoLogPull),
-        autoAiAnalysis: Boolean(bitablePull.automation?.autoAiAnalysis),
-        autoTranslate: bitablePull.automation?.autoTranslate !== false,
-      },
     }
 
     const groupPush = payload.groupPush || {}
@@ -607,6 +600,8 @@ export function useSyncConfig(proxy) {
         : [],
       sendAfterExternalSync: Boolean(groupPush.sendAfterExternalSync),
       sendAfterRemotePull: Boolean(groupPush.sendAfterRemotePull),
+      sendAfterBitablePull: Boolean(groupPush.sendAfterBitablePull),
+      sendAfterManualCreate: Boolean(groupPush.sendAfterManualCreate),
       autoSendAfterTime: normalizeDateTimeText(groupPush.autoSendAfterTime || groupPush.auto_send_after_time),
       template: groupPush.template || '',
       manualTemplate: groupPush.manualTemplate || '',
@@ -750,12 +745,15 @@ export function useSyncConfig(proxy) {
       autoIdentifyOnExternalSync: Boolean(automationConfig.autoIdentifyOnExternalSync),
       autoIdentifyOnRemotePull: Boolean(automationConfig.autoIdentifyOnRemotePull),
       autoIdentifyOnBitablePull: automationConfig.autoIdentifyOnBitablePull !== false,
+      autoIdentifyOnManualCreate: Boolean(automationConfig.autoIdentifyOnManualCreate),
       autoLogPullOnExternalSync: Boolean(automationConfig.autoLogPullOnExternalSync),
       autoLogPullOnRemotePull: Boolean(automationConfig.autoLogPullOnRemotePull),
       autoLogPullOnBitablePull: Boolean(automationConfig.autoLogPullOnBitablePull),
+      autoLogPullOnManualCreate: Boolean(automationConfig.autoLogPullOnManualCreate),
       autoAiAnalysisOnExternalSync: Boolean(automationConfig.autoAiAnalysisOnExternalSync),
       autoAiAnalysisOnRemotePull: Boolean(automationConfig.autoAiAnalysisOnRemotePull),
       autoAiAnalysisOnBitablePull: Boolean(automationConfig.autoAiAnalysisOnBitablePull),
+      autoAiAnalysisOnManualCreate: Boolean(automationConfig.autoAiAnalysisOnManualCreate),
     }
 
     form.projectMappings = normalizeArray(payload.projectMappings)
@@ -953,12 +951,6 @@ export function useSyncConfig(proxy) {
               }))
               .filter((item) => item.sourceField && item.targetField)
           : [],
-        automation: {
-          autoIdentify: payload.bitablePull?.automation?.autoIdentify !== false,
-          autoLogPull: Boolean(payload.bitablePull?.automation?.autoLogPull),
-          autoAiAnalysis: Boolean(payload.bitablePull?.automation?.autoAiAnalysis),
-          autoTranslate: payload.bitablePull?.automation?.autoTranslate !== false,
-        },
       }
       payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
       payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()
@@ -1030,12 +1022,15 @@ export function useSyncConfig(proxy) {
         autoIdentifyOnExternalSync: Boolean(payload.automationConfig?.autoIdentifyOnExternalSync),
         autoIdentifyOnRemotePull: Boolean(payload.automationConfig?.autoIdentifyOnRemotePull),
         autoIdentifyOnBitablePull: payload.automationConfig?.autoIdentifyOnBitablePull !== false,
+        autoIdentifyOnManualCreate: Boolean(payload.automationConfig?.autoIdentifyOnManualCreate),
         autoLogPullOnExternalSync: Boolean(payload.automationConfig?.autoLogPullOnExternalSync),
         autoLogPullOnRemotePull: Boolean(payload.automationConfig?.autoLogPullOnRemotePull),
         autoLogPullOnBitablePull: Boolean(payload.automationConfig?.autoLogPullOnBitablePull),
+        autoLogPullOnManualCreate: Boolean(payload.automationConfig?.autoLogPullOnManualCreate),
         autoAiAnalysisOnExternalSync: Boolean(payload.automationConfig?.autoAiAnalysisOnExternalSync),
         autoAiAnalysisOnRemotePull: Boolean(payload.automationConfig?.autoAiAnalysisOnRemotePull),
         autoAiAnalysisOnBitablePull: Boolean(payload.automationConfig?.autoAiAnalysisOnBitablePull),
+        autoAiAnalysisOnManualCreate: Boolean(payload.automationConfig?.autoAiAnalysisOnManualCreate),
       }
       payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
         ? Array.from(new Set(payload.externalSyncRequiredFields.map((item) => String(item || '').trim()).filter(Boolean)))

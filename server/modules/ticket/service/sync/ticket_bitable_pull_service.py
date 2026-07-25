@@ -557,9 +557,6 @@ class TicketBitablePullService:
             "sourceSystem": payload["source"]["system"],
             "pulledAt": SyncUtil.now_iso(),
         }
-        send_group_override = config.get("sendGroupMessage") if isinstance(config, dict) else None
-        if send_group_override is not None:
-            bitable_pull_meta["sendGroupMessage"] = bool(send_group_override)
         extra_data["bitable_pull"] = bitable_pull_meta
         payload["extraData"] = extra_data
         try:

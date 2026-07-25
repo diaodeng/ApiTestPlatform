@@ -136,7 +136,7 @@ class TicketSyncPayloadService:
             normalized_date = cls.normalize_auto_log_pull_date_text(candidate)
             if normalized_date:
                 return normalized_date
-        return cls.normalize_auto_log_pull_date_text(sync_object.create_time)
+        return ""
 
     @classmethod
     def build_upsert_payload(

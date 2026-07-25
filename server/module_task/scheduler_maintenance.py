@@ -133,7 +133,6 @@ def _build_bitable_pull_config_override(kwargs: dict[str, Any]) -> dict[str, Any
         "createdAfter": ("createdAfter", "created_after", "startTime", "start_time", "beginTime", "begin_time"),
         "createdBefore": ("createdBefore", "created_before", "endTime", "end_time"),
         "forceSync": ("forceSync", "force_sync"),
-        "sendGroupMessage": ("sendGroupMessage", "send_group_message"),
         "autoAppendTimeFilter": ("autoAppendTimeFilter", "auto_append_time_filter"),
         "fieldMappings": ("fieldMappings", "field_mappings"),
         "automation": ("automation",),

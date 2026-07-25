@@ -327,7 +327,6 @@ class TicketRemoteSyncService:
         remote_sync["sourceSystem"] = str(remote_sync.get("sourceSystem") or "public").strip() or "public"
         remote_sync["limit"] = min(max(int(remote_sync.get("limit") or config.get("defaultPullLimit") or 50), 1), 200)
         remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
-        remote_sync["autoTranslateOnPull"] = bool(remote_sync.get("autoTranslateOnPull", True))
         remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
         remote_sync["headers"] = {
             **TicketSyncConfigService.default_remote_sync_config()["headers"],
@@ -430,7 +429,6 @@ class TicketRemoteSyncService:
                         auto_identify=False,
                         auto_log_pull=False,
                         auto_ai_analysis=False,
-                        auto_translate=bool(remote_sync.get("autoTranslateOnPull", True)),
                     )
                 }
             )

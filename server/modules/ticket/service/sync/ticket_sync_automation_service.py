@@ -492,14 +492,11 @@ class TicketSyncAutomationService:
                 "external_sync": "ExternalSync",
                 "remote_pull": "RemotePull",
                 "bitable_pull": "BitablePull",
+                "manual_create": "ManualCreate",
             }
             scene_suffix = scene_map.get(sync_scene, "")
-            if scene_suffix and bool(auto_config.get("enabled")):
-                auto_log_pull = bool(auto_config.get(f"autoLogPullOn{scene_suffix}"))
-                auto_ai_analysis = bool(auto_config.get(f"autoAiAnalysisOn{scene_suffix}"))
-            else:
-                auto_log_pull = bool(config.get("autoRunOnSync"))
-                auto_ai_analysis = bool(config.get("autoRunOnSync"))
+            auto_log_pull = bool(auto_config.get(f"autoLogPullOn{scene_suffix}"))
+            auto_ai_analysis = bool(auto_config.get(f"autoAiAnalysisOn{scene_suffix}"))
             ai_agent_code = str(config.get("logPullDefaults", {}).get("aiAgentCode") or "").strip() or None
             ai_provider_code = str(config.get("logPullDefaults", {}).get("aiProviderCode") or "").strip() or None
             log_pull_config = None

@@ -256,10 +256,11 @@ def _extract_ticket_automation_config(data: dict[str, Any]) -> tuple[bool, dict[
 def _extract_ticket_manual_automation_config(data: dict[str, Any]) -> bool:
     """
     提取工单创建或编辑时的手动自动翻译开关。
+    从 translateConfig 读取手动创建场景开关。
     :param data: 工单字段字典
     :return: 是否自动翻译
     """
-    return bool(data.pop("auto_translate", True))
+    return bool(data.pop("auto_translate", False))
 
 
 def _is_end_status(status: str) -> bool:

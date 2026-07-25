@@ -136,8 +136,6 @@ class TicketSyncConfigService:
     @classmethod
     def default_sync_config(cls) -> dict[str, Any]:
         return {
-            "autoRunOnSync": False,
-            "autoTranslateOnSync": True,
             "defaultPullLimit": 50,
             "feishuAuth": cls.default_feishu_auth_config(),
             "bitableCommon": cls.default_bitable_common_config(),
@@ -231,12 +229,15 @@ class TicketSyncConfigService:
             "autoIdentifyOnExternalSync": False,
             "autoIdentifyOnRemotePull": False,
             "autoIdentifyOnBitablePull": True,
+            "autoIdentifyOnManualCreate": False,
             "autoLogPullOnExternalSync": False,
             "autoLogPullOnRemotePull": False,
             "autoLogPullOnBitablePull": False,
+            "autoLogPullOnManualCreate": False,
             "autoAiAnalysisOnExternalSync": False,
             "autoAiAnalysisOnRemotePull": False,
             "autoAiAnalysisOnBitablePull": False,
+            "autoAiAnalysisOnManualCreate": False,
         }
 
 
@@ -331,14 +332,7 @@ class TicketSyncConfigService:
             "createdAfter": "",
             "createdBefore": "",
             "forceSync": False,
-            "sendGroupMessage": None,
             "autoAppendTimeFilter": True,
-            "automation": {
-                "autoIdentify": True,
-                "autoLogPull": False,
-                "autoAiAnalysis": False,
-                "autoTranslate": True,
-            },
         }
 
     # --- migrated from TicketSyncService._default_group_push_config ---
@@ -359,6 +353,8 @@ class TicketSyncConfigService:
             "priorityRoutes": [],
             "sendAfterExternalSync": False,
             "sendAfterRemotePull": False,
+            "sendAfterBitablePull": False,
+            "sendAfterManualCreate": False,
             "autoSendAfterTime": "",
             "template": "",
             "manualTemplate": "",
@@ -477,7 +473,6 @@ class TicketSyncConfigService:
             "sourceSystem": "public",
             "limit": 50,
             "includeClosed": True,
-            "autoTranslateOnPull": True,
             "timeoutSec": 30,
             "headers": {
                 "cookie": "",
@@ -977,20 +972,8 @@ class TicketSyncConfigService:
         config["createdAfter"] = str(config.get("createdAfter") or "").strip()
         config["createdBefore"] = str(config.get("createdBefore") or "").strip()
         config["forceSync"] = SyncUtil.to_bool(config.get("forceSync"), False)
-        raw_send_group = config.get("sendGroupMessage")
-        if raw_send_group is None or (isinstance(raw_send_group, str) and str(raw_send_group).strip() == ""):
-            config["sendGroupMessage"] = None
-        else:
-            config["sendGroupMessage"] = SyncUtil.to_bool(raw_send_group)
         config["autoAppendTimeFilter"] = SyncUtil.to_bool(config.get("autoAppendTimeFilter"), True)
         config["fieldMappings"] = cls.normalize_bitable_field_mappings(config.get("fieldMappings"))
-        automation = config.get("automation") if isinstance(config.get("automation"), dict) else {}
-        config["automation"] = {
-            "autoIdentify": SyncUtil.to_bool(automation.get("autoIdentify"), True),
-            "autoLogPull": SyncUtil.to_bool(automation.get("autoLogPull"), False),
-            "autoAiAnalysis": SyncUtil.to_bool(automation.get("autoAiAnalysis"), False),
-            "autoTranslate": SyncUtil.to_bool(automation.get("autoTranslate"), True),
-        }
         return config
 
     # --- migrated from TicketSyncService._resolve_bitable_pull_created_after ---
@@ -1327,7 +1310,6 @@ class TicketSyncConfigService:
             remote_sync["enabled"] = bool(remote_sync.get("enabled"))
             remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
             remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
-            remote_sync["autoTranslateOnPull"] = bool(remote_sync.get("autoTranslateOnPull", True))
             remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
             remote_sync["pullUrl"] = str(remote_sync.get("pullUrl") or "").strip()
             remote_sync["ackUrl"] = str(remote_sync.get("ackUrl") or "").strip()
@@ -1341,6 +1323,8 @@ class TicketSyncConfigService:
         group_push["enabled"] = bool(group_push.get("enabled"))
         group_push["sendAfterExternalSync"] = bool(group_push.get("sendAfterExternalSync"))
         group_push["sendAfterRemotePull"] = bool(group_push.get("sendAfterRemotePull"))
+        group_push["sendAfterBitablePull"] = bool(group_push.get("sendAfterBitablePull"))
+        group_push["sendAfterManualCreate"] = bool(group_push.get("sendAfterManualCreate"))
         group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
         group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
         group_push["autoPushStatuses"] = cls.normalize_group_push_auto_statuses(
@@ -1527,62 +1511,26 @@ class TicketSyncConfigService:
         translate_config = merged.get("translateConfig") if isinstance(merged.get("translateConfig"), dict) else {}
         default_translate = cls.default_translate_config()
         translate_config = {**default_translate, **translate_config}
-        # 向后兼容：从旧字段迁移翻译开关值
-        if not translate_config.get("translateOnExternalSync"):
-            translate_config["translateOnExternalSync"] = bool(merged.get("autoTranslateOnSync", True))
-        if not translate_config.get("translateOnRemotePull"):
-            remote_sync = merged.get("remoteSync") if isinstance(merged.get("remoteSync"), dict) else {}
-            translate_config["translateOnRemotePull"] = bool(remote_sync.get("autoTranslateOnPull", True))
-        if not translate_config.get("translateOnBitablePull"):
-            bitable_pull = merged.get("bitablePull") if isinstance(merged.get("bitablePull"), dict) else {}
-            bitable_automation = (
-                bitable_pull.get("automation")
-                if isinstance(bitable_pull.get("automation"), dict)
-                else {}
-            )
-            translate_config["translateOnBitablePull"] = bool(bitable_automation.get("autoTranslate", True))
         translate_config["enabled"] = bool(translate_config.get("enabled"))
+        translate_config["translateOnExternalSync"] = bool(translate_config.get("translateOnExternalSync"))
+        translate_config["translateOnRemotePull"] = bool(translate_config.get("translateOnRemotePull"))
+        translate_config["translateOnBitablePull"] = bool(translate_config.get("translateOnBitablePull"))
+        translate_config["translateOnManualCreate"] = bool(translate_config.get("translateOnManualCreate"))
         merged["translateConfig"] = translate_config
 
         automation_config = merged.get("automationConfig") if isinstance(merged.get("automationConfig"), dict) else {}
         default_automation = cls.default_automation_config()
         automation_config = {**default_automation, **automation_config}
-        # 向后兼容：从旧字段迁移自动化开关值
-        if bool(merged.get("autoRunOnSync")):
-            if not automation_config.get("autoIdentifyOnExternalSync"):
-                automation_config["autoIdentifyOnExternalSync"] = True
-            if not automation_config.get("autoIdentifyOnRemotePull"):
-                automation_config["autoIdentifyOnRemotePull"] = True
-            if not automation_config.get("autoLogPullOnExternalSync"):
-                automation_config["autoLogPullOnExternalSync"] = True
-            if not automation_config.get("autoLogPullOnRemotePull"):
-                automation_config["autoLogPullOnRemotePull"] = True
-            if not automation_config.get("autoAiAnalysisOnExternalSync"):
-                automation_config["autoAiAnalysisOnExternalSync"] = True
-            if not automation_config.get("autoAiAnalysisOnRemotePull"):
-                automation_config["autoAiAnalysisOnRemotePull"] = True
-        if not isinstance(merged.get("bitablePull"), dict):
-            bitable_pull_for_auto = {}
-        else:
-            bitable_pull_for_auto = merged["bitablePull"]
-        bitable_automation_for_auto = (
-            bitable_pull_for_auto.get("automation")
-            if isinstance(bitable_pull_for_auto.get("automation"), dict)
-            else {}
-        )
-        if not automation_config.get("autoIdentifyOnBitablePull"):
-            automation_config["autoIdentifyOnBitablePull"] = bool(
-                bitable_automation_for_auto.get("autoIdentify", True)
-            )
-        if not automation_config.get("autoLogPullOnBitablePull"):
-            automation_config["autoLogPullOnBitablePull"] = bool(
-                bitable_automation_for_auto.get("autoLogPull", False)
-            )
-        if not automation_config.get("autoAiAnalysisOnBitablePull"):
-            automation_config["autoAiAnalysisOnBitablePull"] = bool(
-                bitable_automation_for_auto.get("autoAiAnalysis", False)
-            )
         automation_config["enabled"] = bool(automation_config.get("enabled"))
+        for key in (
+            "autoIdentifyOnExternalSync", "autoIdentifyOnRemotePull", "autoIdentifyOnBitablePull",
+            "autoIdentifyOnManualCreate",
+            "autoLogPullOnExternalSync", "autoLogPullOnRemotePull", "autoLogPullOnBitablePull",
+            "autoLogPullOnManualCreate",
+            "autoAiAnalysisOnExternalSync", "autoAiAnalysisOnRemotePull", "autoAiAnalysisOnBitablePull",
+            "autoAiAnalysisOnManualCreate",
+        ):
+            automation_config[key] = bool(automation_config.get(key))
         merged["automationConfig"] = automation_config
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
@@ -1602,8 +1550,6 @@ class TicketSyncConfigService:
             merged["scoPatterns"] = cls.default_sync_config()["scoPatterns"]
         if not isinstance(merged.get("versionPatterns"), list):
             merged["versionPatterns"] = cls.default_sync_config()["versionPatterns"]
-        merged["autoRunOnSync"] = bool(merged.get("autoRunOnSync"))
-        merged["autoTranslateOnSync"] = bool(merged.get("autoTranslateOnSync", True))
         merged["defaultPullLimit"] = min(max(int(merged.get("defaultPullLimit") or 50), 1), 200)
         return merged
 

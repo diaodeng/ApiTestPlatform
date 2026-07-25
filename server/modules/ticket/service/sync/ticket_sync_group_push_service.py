@@ -517,23 +517,6 @@ class TicketSyncGroupPushService:
         :param update_by: 更新人
         :return: (推送结果, 刷新后的工单, 最新元数据)
         """
-        # 检查主动拉取任务级群消息开关（bitable_pull.sendGroupMessage）
-        ticket_extra = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        bitable_pull_meta = (
-            ticket_extra.get("bitable_pull")
-            if isinstance(ticket_extra.get("bitable_pull"), dict)
-            else {}
-        )
-        if bitable_pull_meta.get("sendGroupMessage") is False:
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason=主动拉取任务级参数关闭了群消息推送"
-            )
-            return (
-                {"skipped": True, "skipReason": "主动拉取任务级参数关闭了群消息推送", "scene": scene},
-                ticket,
-                meta,
-            )
 
         skip_by_status, status_skip_reason = cls.should_skip_auto_group_push_by_status(
             ticket=ticket,
@@ -728,6 +711,16 @@ class TicketSyncGroupPushService:
         )
         config = TicketSyncConfigService.load_sync_config(db)
         group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        if not cls._should_send_group_push_for_scene(group_config, sync_scene):
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, "
+                f"reason=群推送配置未对当前场景启用"
+            )
+            return ticket, meta, {
+                "skipped": True,
+                "skipReason": f"群推送未对场景 {sync_scene} 启用",
+                "scene": sync_scene,
+            }
         group_push_result, ticket, meta = cls.send_auto_group_message_once(
             db,
             ticket=ticket,
@@ -1019,5 +1012,21 @@ class TicketSyncGroupPushService:
             "forcePush": force_push_enabled,
             "groupPushSentOnceUpdated": group_push_state_updated,
         }
+
+    @classmethod
+    def _should_send_group_push_for_scene(cls, group_config: dict[str, Any], sync_scene: str) -> bool:
+        """
+        判断群推送配置是否对当前场景启用。
+        """
+        scene_map = {
+            "external_sync": "sendAfterExternalSync",
+            "remote_pull": "sendAfterRemotePull",
+            "bitable_pull": "sendAfterBitablePull",
+            "manual_create": "sendAfterManualCreate",
+        }
+        config_key = scene_map.get(sync_scene)
+        if config_key:
+            return bool(group_config.get(config_key, False))
+        return False
 
 
