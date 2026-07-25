@@ -4365,8 +4365,15 @@ class TicketLogPullService:
         store_id = payload.get("storeId")
         if store_id is not None:
             payload["storeId"] = str(store_id).strip() or None
-        if not payload.get("modifyTime") and isinstance(command_content, dict):
-            payload["modifyTime"] = command_content.get("modifyTime")
+        if isinstance(command_content, dict):
+            if not payload.get("modifyTime"):
+                payload["modifyTime"] = command_content.get("modifyTime")
+            if not payload.get("path"):
+                payload["path"] = command_content.get("path")
+            if not payload.get("pullMethod"):
+                payload["pullMethod"] = "path" if command_content.get("path") else "time"
+        if not payload.get("path") and not payload.get("pullMethod"):
+            payload["pullMethod"] = "time"
         payload["hasContent"] = bool(payload.get("compressedContent"))
         payload.pop("compressedContent", None)
         payload.pop("exceptionDetail", None)

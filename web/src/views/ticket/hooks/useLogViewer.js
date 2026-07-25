@@ -28,6 +28,7 @@ import {
   normalizeLogPullNotifyConfig,
   resolveLogPullArchiveLink,
   resolveLogPullOriginalLink,
+  applyLogPullRecordToForm,
 } from '@/views/ticket/logPull.shared';
 import { useLogPrepareProgress } from './useLogPrepareProgress';
 
@@ -373,6 +374,20 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       return;
     }
     runLogPullAction(retryTicketLogPull(row.id), '已重新提交拉取任务');
+  }
+
+  function handleCopyLogPull(row) {
+    if (!row) return;
+    if (activeLogPullStatuses.includes(String(row.status || '').toLowerCase())) {
+      proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能复制');
+      return;
+    }
+    resetLogPullForm();
+    if (currentTicketId.value) {
+      logPullForm.value.ticketId = currentTicketId.value;
+    }
+    applyLogPullRecordToForm(logPullForm.value, row);
+    logPullSubmitOpen.value = true;
   }
 
   function redownloadLogPull(row) {
@@ -930,6 +945,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     deleteLogPull,
     retryLogPull,
     redownloadLogPull,
+    handleCopyLogPull,
     openBrowserDownload,
     getLogPullOriginalDownloadUrl,
     getLogPullArchiveDownloadUrl,

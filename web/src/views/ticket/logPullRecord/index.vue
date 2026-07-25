@@ -189,7 +189,7 @@
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="300">
+      <el-table-column label="操作" width="340">
         <template #default="scope">
           <el-tooltip
             v-if="getContentDownloadProgress(scope.row)"
@@ -206,6 +206,9 @@
           </el-tooltip>
           <el-button v-else link type="primary" icon="View" @click="openLogViewer(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
+          </el-button>
+          <el-button link type="primary" icon="CopyDocument" @click="handleCopyLogPull(scope.row)" :disabled="actionLoading || activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:add']">
+            复制
           </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
@@ -460,6 +463,7 @@ import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFi
 import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
 import {
+  applyLogPullRecordToForm,
   buildOptionalLogPullTimeRangePayload,
   createDefaultLogPullNotifyConfig,
   formatLogPullParameter,
@@ -1033,6 +1037,18 @@ function submitCreateForm() {
  */
 function getContentDownloadProgress(row) {
   return getDownloadProgress(row?.ticketId || row?.ticket_id, row?.id)
+}
+
+function handleCopyLogPull(row) {
+  if (!row) return
+  if (activeLogPullStatuses.includes(row.status)) {
+    proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能复制')
+    return
+  }
+  createForm.value = createDefaultForm()
+  createForm.value.ticketId = row.ticketId || undefined
+  applyLogPullRecordToForm(createForm.value, row)
+  createOpen.value = true
 }
 
 function runAction(request, successMessage) {

@@ -136,6 +136,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
     deleteLogPull,
     retryLogPull,
     redownloadLogPull,
+    handleCopyLogPull,
     getLogPullOriginalDownloadUrl,
     getLogPullArchiveDownloadUrl,
     getLogPullArchiveDisplayText,
@@ -579,7 +580,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="操作" width="340">
+    <el-table-column label="操作" width="380">
       <template #default="scope">
         <el-button-group>
           <el-tooltip
@@ -603,6 +604,15 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
             :disabled="logPullActionLoading"
           >
             查看日志
+          </el-button>
+          <el-button
+            link
+            type="primary"
+            @click="handleCopyLogPull(scope.row)"
+            :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+            v-hasPermi="['ticket:logpull:add']"
+          >
+            复制
           </el-button>
           <el-button
             link

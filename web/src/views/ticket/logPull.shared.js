@@ -197,13 +197,53 @@ export function buildLogPullApiDownloadUrl(recordId, source = 'auto') {
 }
 
 export function formatLogPullParameter(row) {
-  const pullMethod = row?.pullMethod || (Number(row?.commandDataType) === 2 ? 'path' : 'time');
+  const pullMethod = row?.pullMethod || (String(row?.path || '').trim() ? 'path' : 'time');
   if (pullMethod === 'path') {
     const path = String(row?.path || '').trim();
     return path ? `路径：${path}` : '-';
   }
   const modifyTime = String(row?.modifyTime || '').trim();
   return modifyTime ? `时间：${modifyTime}` : '-';
+}
+
+/**
+ * 将日志拉取记录的数据回填到表单对象，用于复制已有记录的拉取参数。
+ * @param {object} form 目标表单对象，会被直接修改
+ * @param {object} row 日志拉取记录行数据
+ * @returns {void}
+ */
+export function applyLogPullRecordToForm(form, row) {
+  if (!form || !row) return;
+  form.environment = row.environment || '';
+  form.vendorId = row.vendorId !== undefined ? row.vendorId : undefined;
+  form.storeId = row.storeId || undefined;
+  form.posNo = row.posNo !== undefined ? row.posNo : undefined;
+  form.commandDataType = row.commandDataType !== undefined ? row.commandDataType : 1;
+  const pullMethod = row.pullMethod || (String(row.path || '').trim() ? 'path' : 'time');
+  form.pullMethod = pullMethod;
+  if (pullMethod === 'path') {
+    form.path = String(row.path || '').trim();
+    form.modifyTime = undefined;
+  } else {
+    form.modifyTime = String(row.modifyTime || '').trim();
+    form.path = '';
+  }
+  // 从 commandContent 中提取切日志和时间范围参数
+  const commandContent = row.commandContent || {};
+  form.fileMaxSize = row.fileMaxSize ?? commandContent.fileMaxSize ?? 500;
+  form.zipMaxSize = row.zipMaxSize ?? commandContent.zipMaxSize ?? 500;
+  form.storageMode = row.storageMode || commandContent.storageMode || 'local';
+  form.cutLogEnabled = !!(commandContent.logBeginTime || commandContent.logEndTime || commandContent.logPointTime);
+  form.timeRangeMode = commandContent.timeRangeMode || 'between';
+  form.logBeginTime = commandContent.logBeginTime || '';
+  form.logEndTime = commandContent.logEndTime || '';
+  form.logPointTime = commandContent.logPointTime || '';
+  form.rangeBeforeMinutes = commandContent.rangeBeforeMinutes ?? 30;
+  form.rangeAfterMinutes = commandContent.rangeAfterMinutes ?? 30;
+  form.autoAiEnabled = !!(commandContent.autoAiEnabled || commandContent.auto_ai_enabled);
+  form.aiAgentCode = commandContent.aiAgentCode || '';
+  form.aiProviderCode = commandContent.aiProviderCode || '';
+  // 通知配置保留默认值
 }
 
 export function resolveLogPullArchiveLink(row, source = 'service') {

@@ -566,6 +566,8 @@ class TicketLogPullSummaryModel(TicketLogPullBaseModel):
     store_id: str | None = Field(default=None, description="门店ID")
     pos_no: int | None = Field(default=None, description="POS编号")
     modify_time: date | str | None = Field(default=None, description="日志拉取日期")
+    path: str | None = Field(default=None, description="日志拉取路径")
+    pull_method: str | None = Field(default=None, description="拉取方式 time/path")
     create_time: datetime | None = None
 
 
