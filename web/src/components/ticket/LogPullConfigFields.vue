@@ -46,12 +46,13 @@
           clearable
           filterable
           allow-create
+          :filter-method="handleStoreFilter"
           default-first-option
           :disabled="!model.vendorId"
           style="width: 100%"
         >
           <el-option
-            v-for="item in resolvedStoreOptions"
+            v-for="item in filteredStoreOptions"
             :key="item.storeId"
             :label="item.label"
             :value="item.storeId"
@@ -309,6 +310,7 @@ const model = defineModel({
 const selectedParameterExample = ref('')
 const fetchedStoreOptions = ref([])
 const activeStoreVenderNo = ref('')
+const storeFilterKeyword = ref('')
 let storeOptionsRequestSeq = 0
 
 const parameterExampleOptions = computed(() => props.parameterExamples
@@ -337,6 +339,16 @@ const resolvedStoreOptions = computed(() => {
     return props.storeOptions
   }
   return []
+})
+
+const filteredStoreOptions = computed(() => {
+  const keyword = String(storeFilterKeyword.value || '').trim().toLowerCase()
+  if (!keyword) return resolvedStoreOptions.value
+  return resolvedStoreOptions.value.filter(item =>
+    item.label.toLowerCase().includes(keyword) ||
+    String(item.storeCode || '').toLowerCase().includes(keyword) ||
+    String(item.sapOrgNo || '').toLowerCase().includes(keyword)
+  )
 })
 
 function getProp(name) {
@@ -384,18 +396,28 @@ function syncStoreSelection() {
   if (!resolvedStoreOptions.value.length) {
     return
   }
-  if (!resolvedStoreOptions.value.some(item => String(item.storeId || '').trim() === storeId)) {
-    // 允许保留非配置内门店值（兼容外部同步原样保存场景）。
-    model.value.storeId = storeId
+  // 只按 sap_org_no 精确匹配，匹配成功则替换为对应的 storeId (org_no)
+  const sapMatch = resolvedStoreOptions.value.find(
+    item => String(item.sapOrgNo || '').trim() === storeId
+  )
+  if (sapMatch) {
+    model.value.storeId = sapMatch.storeId
+    return
   }
+  // 不匹配则保留原值作为自由文本，供手动参考
 }
 
 function handleEnvironmentChange(value) {
   model.value.environment = value
 }
 
+function handleStoreFilter(keyword) {
+  storeFilterKeyword.value = keyword || ''
+}
+
 function handleVendorChange() {
   model.value.storeId = undefined
+  storeFilterKeyword.value = ''
 }
 
 function handleParameterExampleChange(value) {

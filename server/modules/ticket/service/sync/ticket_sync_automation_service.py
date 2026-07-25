@@ -16,6 +16,7 @@ from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum
 from modules.ticket.dao.ticket_dao import TicketDao
+from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel, TicketExternalSyncUpsertModel
@@ -577,6 +578,16 @@ class TicketSyncAutomationService:
                     missing_log_pull_fields.append("vendorId")
                 if not resolved_store_id:
                     missing_log_pull_fields.append("storeId")
+                else:
+                    # 按商家过滤后的门店中校验 sap_org_no 是否完全匹配
+                    if resolved_vendor_id:
+                        store_verified = TicketLogPullDao.verify_store_by_sap_org_no(
+                            db,
+                            vendor_no=str(resolved_vendor_id),
+                            sap_org_no=resolved_store_id,
+                        )
+                        if not store_verified:
+                            missing_log_pull_fields.append("storeId(门店未匹配到正确的sap_org_no)")
                 if not resolved_pos_no:
                     missing_log_pull_fields.append("posNo/SCO")
                 if not resolved_modify_time:

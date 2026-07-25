@@ -582,3 +582,28 @@ class TicketLogPullDao:
         db.add(project_vendor_map)
         db.flush()
         return project_vendor_map
+
+    @classmethod
+    def verify_store_by_sap_org_no(
+        cls, db: Session, *, vendor_no: str, sap_org_no: str
+    ) -> bool:
+        """
+        按商家编号 + sap_org_no 校验门店是否存在于 ticket_log_pull_store_config 表中。
+        :param db: 数据库会话
+        :param vendor_no: 商户编号
+        :param sap_org_no: SAP机构编号
+        :return: 匹配到记录返回 True，否则返回 False
+        """
+        resolved_vendor_no = str(vendor_no or "").strip()
+        resolved_sap = str(sap_org_no or "").strip()
+        if not resolved_vendor_no or not resolved_sap:
+            return False
+        row = (
+            db.query(TicketLogPullStoreConfig)
+            .filter(
+                TicketLogPullStoreConfig.vender_no == resolved_vendor_no,
+                TicketLogPullStoreConfig.sap_org_no == resolved_sap,
+            )
+            .first()
+        )
+        return row is not None
