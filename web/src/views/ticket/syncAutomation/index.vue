@@ -1271,34 +1271,69 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
-                  <el-form-item label="自动推送状态条件">
-                    <el-select
-                      v-model="form.groupPush.autoPushStatuses"
-                      multiple
-                      filterable
-                      allow-create
-                      default-first-option
-                      collapse-tags
-                      placeholder="留空表示不按状态限制；默认保留原有三种状态"
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in groupPushAutoStatusOptions"
-                        :key="`group-auto-status-${item}`"
-                        :label="item"
-                        :value="item"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="自动推送起始时间">
-                    <el-date-picker
-                      v-model="form.groupPush.autoSendAfterTime"
-                      type="datetime"
-                      value-format="YYYY-MM-DD HH:mm:ss"
-                      format="YYYY-MM-DD HH:mm:ss"
-                      placeholder="不填表示不限制提交时间"
+                  <el-form-item prop="autoPushCondition">
+                    <template #label>
+                      推送条件
+                      <el-tooltip placement="top" effect="light" :teleported="true" popper-class="condition-help-popover-wrap">
+                        <template #content>
+                          <div class="condition-help-popover">
+                            <div class="condition-help-title">语法说明</div>
+                            <table class="condition-help-table">
+                              <thead>
+                                <tr><th>类型</th><th>写法</th></tr>
+                              </thead>
+                              <tbody>
+                                <tr><td>比较</td><td><code>status == '3. 待产研处理'</code>（支持 ==、!=、&gt;、&lt;、&gt;=、&lt;=）</td></tr>
+                                <tr><td>成员</td><td><code>status in ['2. 1.5线处理', '3. 待产研处理']</code></td></tr>
+                                <tr><td>排除</td><td><code>status not in ['5. 已关闭', '6. 已取消']</code></td></tr>
+                                <tr><td>有值</td><td><code>has(module_id)</code> — 字段非 None 且非空字符串</td></tr>
+                                <tr><td>空值</td><td><code>module_id is None</code> — 字段为 None</td></tr>
+                                <tr><td>非空</td><td><code>module_id is not None</code> — 字段不为 None</td></tr>
+                                <tr><td>逻辑</td><td><code>and</code> / <code>or</code> / <code>not</code> + 括号 <code>( )</code></td></tr>
+                                <tr><td>时间比较</td><td><code>submit_time &gt;= '2026-01-01'</code>（日期时间可用引号括起来比较）</td></tr>
+                              </tbody>
+                            </table>
+                            <div class="condition-help-subtitle">常用示例</div>
+                            <table class="condition-help-table">
+                              <thead>
+                                <tr><th>场景</th><th>表达式</th></tr>
+                              </thead>
+                              <tbody>
+                                <tr><td>特定状态+高优先级</td><td><code>status in ['3. 待产研处理', '4. 产研处理中'] and internal_priority in ['P0', 'P1']</code></td></tr>
+                                <tr><td>有模块归属才推送</td><td><code>status in ['2. 1.5线处理', '3. 待产研处理'] and has(module_id)</code></td></tr>
+                                <tr><td>指定项目+严重等级</td><td><code>has(project_id) and severity in ['S1', 'S2']</code></td></tr>
+                                <tr><td>有商家的P1工单</td><td><code>has(merchant_name) and internal_priority == 'P1'</code></td></tr>
+                                <tr><td>指定时间后创建</td><td><code>submit_time &gt;= '2026-07-01 00:00:00'</code></td></tr>
+                                <tr><td>排除关闭+有模块</td><td><code>status not in ['5. 已关闭', '6. 已取消'] and has(module_id)</code></td></tr>
+                              </tbody>
+                            </table>
+                            <div class="condition-help-subtitle">可用字段列表</div>
+                            <table class="condition-help-table condition-help-fields">
+                              <thead>
+                                <tr><th style="width:30%">分类</th><th>字段名</th></tr>
+                              </thead>
+                              <tbody>
+                                <tr><td>基本信息</td><td><code>ticket_id</code> <code>ticket_no</code> <code>ticket_url</code> <code>title</code> <code>status</code> <code>source</code> <code>del_flag</code></td></tr>
+                                <tr><td>项目/模块/分类</td><td><code>project_id</code> <code>module_id</code> <code>module_name</code> <code>category_id</code> <code>category_name</code> <code>issue_type_id</code> <code>issue_type_name</code></td></tr>
+                                <tr><td>优先级/严重度</td><td><code>customer_priority</code> <code>internal_priority</code> <code>severity</code></td></tr>
+                                <tr><td>人员</td><td><code>reporter_id</code> <code>reporter_name</code> <code>current_assignee_id</code> <code>current_assignee_name</code> <code>first_line_assignee_id</code> <code>first_line_assignee_name</code> <code>internal_owner_id</code> <code>internal_owner_name</code></td></tr>
+                                <tr><td>商家/版本</td><td><code>merchant_name</code> <code>affected_version</code> <code>planned_fix_version</code> <code>fixed_version</code> <code>released_version</code></td></tr>
+                                <tr><td>分析结果</td><td><code>is_problem</code> <code>root_cause_type</code> <code>solution_type</code> <code>resolution_code</code> <code>resolution_name</code> <code>problem_pattern_code</code> <code>problem_pattern_name</code> <code>problem_pattern_confidence</code> <code>problem_pattern_source</code> <code>problem_pattern_verified</code> <code>issue_id</code> <code>issue_relation_type</code> <code>issue_confirmed</code> <code>root_cause</code> <code>solution</code></td></tr>
+                                <tr><td>时间字段</td><td><code>submit_time</code> <code>started_at</code> <code>resolved_at</code> <code>closed_at</code> <code>first_response_at</code> <code>processed_at</code> <code>released_at</code> <code>verified_at</code> <code>total_process_seconds</code></td></tr>
+                                <tr><td>其他</td><td><code>description</code> <code>tags</code> <code>create_by</code> <code>update_by</code></td></tr>
+                              </tbody>
+                            </table>
+                            <div class="condition-help-note">留空表示不限制，所有工单均推送。填写后只有满足表达式的工单才会自动推送。</div>
+                          </div>
+                        </template>
+                        <el-icon><question-filled /></el-icon>
+                      </el-tooltip>
+                    </template>
+                    <el-input
+                      v-model="form.groupPush.autoPushCondition"
+                      type="textarea"
+                      :rows="2"
+                      placeholder='例: status in [&#39;2. 1.5线处理&#39;, &#39;3. 待产研处理&#39;] and has(module_id)'
                     />
                   </el-form-item>
                 </el-col>
@@ -2543,7 +2578,6 @@
     versionPatternsText,
     mappingSections,
     notifySendModes,
-    groupPushAutoStatusOptions,
     personDataSourceOptions,
     summaryDataSourceOptions,
     personLocalTimeFieldOptions,
@@ -2599,7 +2633,7 @@
     pageSize: 100,
     ticketIdsText: '',
   });
-  // mappingTexts + groupPushAutoStatusOptions 已通过 useSyncConfig() 提供
+  // mappingTexts 已通过 useSyncConfig() 提供
 
   /**
    * 创建远端同步字段的条件必填校验器。
@@ -3175,5 +3209,75 @@
 
   .mt16 {
     margin-top: 16px;
+  }
+
+  .condition-help-popover {
+    max-width: 680px;
+    max-height: 520px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.6;
+    padding-right: 4px;
+  }
+
+  .condition-help-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--el-border-color-lighter);
+  }
+
+  .condition-help-subtitle {
+    font-weight: 600;
+    font-size: 13px;
+    margin-top: 12px;
+    margin-bottom: 6px;
+  }
+
+  .condition-help-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .condition-help-table th,
+  .condition-help-table td {
+    padding: 4px 8px;
+    border: 1px solid var(--el-border-color-lighter);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .condition-help-table th {
+    background: var(--el-fill-color-light);
+    font-weight: 500;
+  }
+
+  .condition-help-table code {
+    background: var(--el-fill-color);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .condition-help-fields td code {
+    margin: 0 2px;
+    display: inline-block;
+  }
+
+  .condition-help-fields td {
+    line-height: 2;
+  }
+
+  .condition-help-note {
+    margin-top: 10px;
+    padding: 6px 8px;
+    background: var(--el-color-warning-light-9);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--el-color-warning-dark-2);
+    line-height: 1.5;
   }
 </style>

@@ -12,6 +12,7 @@ from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
+from modules.ticket.service.sync.ticket_sync_condition_evaluator import evaluate_ticket_condition
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
@@ -518,19 +519,19 @@ class TicketSyncGroupPushService:
         :return: (推送结果, 刷新后的工单, 最新元数据)
         """
 
-        skip_by_status, status_skip_reason = cls.should_skip_auto_group_push_by_status(
+        skip_by_condition, condition_skip_reason = cls.should_skip_auto_group_push_by_condition(
             ticket=ticket,
             group_config=group_config,
         )
-        if skip_by_status:
+        if skip_by_condition:
             logger.info(
                 f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason={status_skip_reason or '工单状态不满足自动推送条件'}"
+                f"reason={condition_skip_reason or '工单不满足推送条件'}"
             )
             return (
                 {
                     "skipped": True,
-                    "skipReason": status_skip_reason or "工单状态不满足自动推送条件",
+                    "skipReason": condition_skip_reason or "工单不满足推送条件",
                     "scene": scene,
                 },
                 ticket,
@@ -554,25 +555,6 @@ class TicketSyncGroupPushService:
             )
             return (
                 {"skipped": True, "skipReason": "工单已发送过群推送", "scene": scene},
-                ticket,
-                meta,
-            )
-        skip_by_submit_time, submit_time_skip_reason = cls.should_skip_auto_group_push_by_submit_time(
-            ticket=ticket,
-            meta=meta,
-            group_config=group_config,
-        )
-        if skip_by_submit_time:
-            logger.info(
-                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={scene}, "
-                f"reason={submit_time_skip_reason or '工单提交时间不满足自动推送起始时间'}"
-            )
-            return (
-                {
-                    "skipped": True,
-                    "skipReason": submit_time_skip_reason or "工单提交时间不满足自动推送起始时间",
-                    "scene": scene,
-                },
                 ticket,
                 meta,
             )
@@ -797,122 +779,43 @@ class TicketSyncGroupPushService:
             )
 
     @classmethod
-    def resolve_ticket_submit_time(cls, *, ticket: Ticket, meta: dict[str, Any] | None) -> datetime | None:
-        """
-        解析工单提交时间：优先外部 createTime，缺失时回退本地创建时间。
-
-        :param ticket: 工单对象。
-        :param meta: 同步元数据。
-        :return: 可比较的提交时间，无法解析时返回 None。
-        """
-        sync_meta = meta if isinstance(meta, dict) else {}
-        source_snapshot = sync_meta.get("source") if isinstance(sync_meta.get("source"), dict) else {}
-        external_create_time = (
-            sync_meta.get("externalCreateTime")
-            or source_snapshot.get("externalCreateTime")
-        )
-        parsed_external_time = SyncUtil.parse_datetime_value(external_create_time)
-        if parsed_external_time:
-            return parsed_external_time
-        return SyncUtil.parse_datetime_value(getattr(ticket, "create_time", None))
-
-    @classmethod
-    def resolve_group_push_auto_send_after_time(cls, group_config: dict[str, Any] | None) -> datetime | None:
-        """
-        解析自动群推送起始时间配置。
-
-        :param group_config: 群推送配置。
-        :return: 起始时间，未配置或解析失败时返回 None。
-        """
-        config = group_config if isinstance(group_config, dict) else {}
-        return SyncUtil.parse_datetime_value(
-            config.get("autoSendAfterTime")
-            or config.get("auto_send_after_time")
-        )
-
-    @classmethod
-    def normalize_group_push_auto_statuses(
-        cls,
-        value: Any,
-        *,
-        fallback: Any = None,
-    ) -> list[str]:
-        """
-        归一化自动群推送状态条件配置。
-
-        :param value: 原始状态条件，支持列表或逗号分隔字符串。
-        :param fallback: 回退配置值。
-        :return: 去重后的状态文本列表。
-        """
-        source_value = value
-        if source_value is None:
-            source_value = fallback
-        if isinstance(source_value, str):
-            source_list = [item.strip() for item in source_value.split(",")]
-        elif isinstance(source_value, list):
-            source_list = source_value
-        else:
-            source_list = []
-        normalized: list[str] = []
-        for item in source_list:
-            status_text = str(item or "").strip()
-            if status_text and status_text not in normalized:
-                normalized.append(status_text)
-        return normalized
-
-    @classmethod
-    def should_skip_auto_group_push_by_status(
+    def should_skip_auto_group_push_by_condition(
         cls,
         *,
         ticket: Ticket,
         group_config: dict[str, Any] | None,
     ) -> tuple[bool, str | None]:
         """
-        判断自动群推送是否因状态条件不满足而跳过。
+        根据自定义条件表达式判断是否跳过自动群推送。
 
         :param ticket: 工单对象。
         :param group_config: 群推送配置。
         :return: (是否跳过, 跳过原因)。
         """
         config = group_config if isinstance(group_config, dict) else {}
-        auto_push_statuses = cls.normalize_group_push_auto_statuses(
-            config.get("autoPushStatuses", config.get("auto_push_statuses")),
-        )
-        if not auto_push_statuses:
+        auto_push_condition = (config.get("autoPushCondition") or "").strip()
+        if not auto_push_condition:
             return False, None
-        ticket_status = str(getattr(ticket, "status", "") or "").strip()
-        if ticket_status in auto_push_statuses:
-            return False, None
-        return True, f"工单状态({ticket_status or '-'})未命中自动推送状态条件"
 
-    @classmethod
-    def should_skip_auto_group_push_by_submit_time(
-        cls,
-        *,
-        ticket: Ticket,
-        meta: dict[str, Any] | None,
-        group_config: dict[str, Any] | None,
-    ) -> tuple[bool, str | None]:
-        """
-        判断自动群推送是否因“起始提交时间”配置而跳过。
-
-        :param ticket: 工单对象。
-        :param meta: 同步元数据。
-        :param group_config: 群推送配置。
-        :return: (是否跳过, 跳过原因)。
-        """
-        auto_send_after_time = cls.resolve_group_push_auto_send_after_time(group_config)
-        if not auto_send_after_time:
-            return False, None
-        submit_time = cls.resolve_ticket_submit_time(ticket=ticket, meta=meta)
-        if submit_time is None:
-            return False, None
-        if submit_time <= auto_send_after_time:
-            return (
-                True,
-                f"工单提交时间({submit_time.isoformat()})未晚于自动推送起始时间({auto_send_after_time.isoformat()})",
+        ticket_fields = _ticket_to_condition_fields(ticket)
+        try:
+            matched = evaluate_ticket_condition(auto_push_condition, ticket_fields)
+        except SyntaxError as e:
+            logger.warning(
+                f"自动群推送条件表达式语法错误: ticket_no={ticket.ticket_no}, "
+                f"condition={auto_push_condition!r}, error={e}"
             )
-        return False, None
+            return True, f"条件表达式语法错误: {e}"
+        except Exception as e:
+            logger.error(
+                f"自动群推送条件表达式求值异常: ticket_no={ticket.ticket_no}, "
+                f"condition={auto_push_condition!r}, error={e}"
+            )
+            return True, f"条件表达式求值异常: {e}"
+
+        if matched:
+            return False, None
+        return True, "工单未满足自定义推送条件"
 
 
     @classmethod
@@ -1028,5 +931,72 @@ class TicketSyncGroupPushService:
         if config_key:
             return bool(group_config.get(config_key, False))
         return False
+
+
+def _ticket_to_condition_fields(ticket: Ticket) -> dict:
+    """
+    将工单对象转为条件表达式求值用的字段字典。
+    包含 Ticket 表所有业务字段，字段名与表达式中的引用名一致。
+    """
+    return {
+        "ticket_id": ticket.ticket_id,
+        "ticket_no": ticket.ticket_no,
+        "ticket_url": ticket.ticket_url,
+        "title": ticket.title,
+        "description": ticket.description,
+        "project_id": ticket.project_id,
+        "merchant_name": ticket.merchant_name,
+        "module_id": ticket.module_id,
+        "module_name": ticket.module_name,
+        "category_id": ticket.category_id,
+        "category_name": ticket.category_name,
+        "issue_type_id": ticket.issue_type_id,
+        "issue_type_name": ticket.issue_type_name,
+        "status": ticket.status,
+        "customer_priority": ticket.customer_priority,
+        "internal_priority": ticket.internal_priority,
+        "severity": ticket.severity,
+        "source": ticket.source,
+        "reporter_id": ticket.reporter_id,
+        "reporter_name": ticket.reporter_name,
+        "current_assignee_id": ticket.current_assignee_id,
+        "current_assignee_name": ticket.current_assignee_name,
+        "first_line_assignee_id": ticket.first_line_assignee_id,
+        "first_line_assignee_name": ticket.first_line_assignee_name,
+        "internal_owner_id": ticket.internal_owner_id,
+        "internal_owner_name": ticket.internal_owner_name,
+        "is_problem": ticket.is_problem,
+        "root_cause_type": ticket.root_cause_type,
+        "solution_type": ticket.solution_type,
+        "resolution_code": ticket.resolution_code,
+        "resolution_name": ticket.resolution_name,
+        "problem_pattern_code": ticket.problem_pattern_code,
+        "problem_pattern_name": ticket.problem_pattern_name,
+        "problem_pattern_confidence": ticket.problem_pattern_confidence,
+        "problem_pattern_source": ticket.problem_pattern_source,
+        "problem_pattern_verified": ticket.problem_pattern_verified,
+        "issue_id": ticket.issue_id,
+        "issue_relation_type": ticket.issue_relation_type,
+        "issue_confirmed": ticket.issue_confirmed,
+        "affected_version": ticket.affected_version,
+        "planned_fix_version": ticket.planned_fix_version,
+        "fixed_version": ticket.fixed_version,
+        "released_version": ticket.released_version,
+        "root_cause": ticket.root_cause,
+        "solution": ticket.solution,
+        "submit_time": ticket.submit_time,
+        "started_at": ticket.started_at,
+        "resolved_at": ticket.resolved_at,
+        "closed_at": ticket.closed_at,
+        "first_response_at": ticket.first_response_at,
+        "processed_at": ticket.processed_at,
+        "released_at": ticket.released_at,
+        "verified_at": ticket.verified_at,
+        "total_process_seconds": ticket.total_process_seconds,
+        "tags": ticket.tags,
+        "del_flag": ticket.del_flag,
+        "create_by": ticket.create_by,
+        "update_by": ticket.update_by,
+    }
 
 

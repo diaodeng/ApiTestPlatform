@@ -67,8 +67,6 @@ export function useSyncConfig(proxy) {
     { label: '两种都发', value: 'hybrid' },
   ]
 
-  const groupPushAutoStatusOptions = ['2. 1.5线处理', '3. 待产研处理', '4. 产研处理中']
-
   const externalSyncRequiredFieldOptions = [
     { label: 'ticketNo - 工单号', value: 'ticketNo' },
     { label: 'description - 问题描述', value: 'description' },
@@ -242,7 +240,7 @@ export function useSyncConfig(proxy) {
       },
       groupPush: {
         enabled: false, sendMode: 'push_config', pushIds: [], appChatIds: [],
-        autoPushStatuses: ['2. 1.5线处理', '3. 待产研处理', '4. 产研处理中'],
+        autoPushCondition: '',
         priorityRoutes: [
           { priorities: ['P1'], pushIds: [], chatIds: [] },
           { priorities: ['P2'], pushIds: [], chatIds: [] },
@@ -250,7 +248,7 @@ export function useSyncConfig(proxy) {
         ],
         sendAfterExternalSync: false, sendAfterRemotePull: false,
         sendAfterBitablePull: false, sendAfterManualCreate: false,
-        autoSendAfterTime: '', template: '', manualTemplate: '',
+        template: '', manualTemplate: '',
       },
       messageSync: {
         enabled: false, feishuEventEnabled: false, feishuWsEnabled: false,
@@ -582,9 +580,7 @@ export function useSyncConfig(proxy) {
       appChatIds: Array.isArray(groupPush.appChatIds)
         ? groupPush.appChatIds.map((item) => String(item).trim()).filter(Boolean)
         : [],
-      autoPushStatuses: Array.isArray(groupPush.autoPushStatuses)
-        ? groupPush.autoPushStatuses.map((item) => String(item || '').trim()).filter(Boolean)
-        : ['2. 1.5线处理', '3. 待产研处理', '4. 产研处理中'],
+      autoPushCondition: groupPush.autoPushCondition || '',
       priorityRoutes: Array.isArray(groupPush.priorityRoutes)
         ? groupPush.priorityRoutes.map((route) => ({
             priorities: Array.isArray(route?.priorities)
@@ -602,7 +598,7 @@ export function useSyncConfig(proxy) {
       sendAfterRemotePull: Boolean(groupPush.sendAfterRemotePull),
       sendAfterBitablePull: Boolean(groupPush.sendAfterBitablePull),
       sendAfterManualCreate: Boolean(groupPush.sendAfterManualCreate),
-      autoSendAfterTime: normalizeDateTimeText(groupPush.autoSendAfterTime || groupPush.auto_send_after_time),
+      autoPushCondition: groupPush.autoPushCondition || '',
       template: groupPush.template || '',
       manualTemplate: groupPush.manualTemplate || '',
     }
@@ -878,10 +874,7 @@ export function useSyncConfig(proxy) {
       payload.groupPush.appChatIds = Array.isArray(payload.groupPush?.appChatIds)
         ? payload.groupPush.appChatIds.map((item) => String(item || '').trim()).filter(Boolean)
         : []
-      payload.groupPush.autoPushStatuses = Array.isArray(payload.groupPush?.autoPushStatuses)
-        ? Array.from(new Set(payload.groupPush.autoPushStatuses.map((item) => String(item || '').trim()).filter(Boolean)))
-        : []
-      payload.groupPush.autoSendAfterTime = normalizeDateTimeText(payload.groupPush?.autoSendAfterTime)
+      payload.groupPush.autoPushCondition = (payload.groupPush?.autoPushCondition || '').trim()
       payload.groupPush.priorityRoutes = Array.isArray(payload.groupPush?.priorityRoutes)
         ? payload.groupPush.priorityRoutes
             .map((route) => ({
@@ -1113,7 +1106,7 @@ export function useSyncConfig(proxy) {
   return {
     loading, saving, workflowStatusOptions,
     mappingTexts, posPatternsText, scoPatternsText, versionPatternsText,
-    mappingSections, notifySendModes, groupPushAutoStatusOptions,
+    mappingSections, notifySendModes,
     externalSyncRequiredFieldOptions, personDataSourceOptions,
     summaryDataSourceOptions, personLocalTimeFieldOptions,
     summaryTimeFieldOptions, externalFieldModelOptions,

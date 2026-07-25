@@ -8,6 +8,26 @@ updated: 2026-07-24
 
 # 操作日志
 
+## [2026-07-25] INGEST-CODE | 工单群推送条件表达式引擎（v2: 移除旧条件）
+
+- 触发：用户要求完全移除旧的 `autoPushStatuses` 和 `autoSendAfterTime`，以及帮助提示缺少可用字段列表。
+- 架构层：工单模块 / 同步服务 / 群推送配置。
+- 更新的页面：`server/modules/ticket/service/sync/ticket_sync_group_push_service.py`（删除 `resolve_ticket_submit_time`、`resolve_group_push_auto_send_after_time`、`normalize_group_push_auto_statuses`、`should_skip_auto_group_push_by_status`、`_evaluate_auto_push_condition`、`should_skip_auto_group_push_by_submit_time`；新增 `should_skip_auto_group_push_by_condition`）、`server/modules/ticket/service/sync/ticket_sync_config_service.py`（删除 `DEFAULT_GROUP_PUSH_AUTO_STATUSES`、`normalize_group_push_auto_statuses`、`autoPushStatuses`/`autoSendAfterTime` 配置项）、`web/src/views/ticket/syncAutomation/index.vue`（删除两个旧表单项，更新帮助 popover 加入完整字段列表和更多示例）、`web/src/views/ticket/syncAutomation/hooks/useSyncConfig.js`（删除 `groupPushAutoStatusOptions`、`autoPushStatuses`/`autoSendAfterTime` 所有引用）
+- 更新的页面：`wiki/flows/ticket-external-sync-flow.md`（步骤 11.1 描述更新）
+- 变更传播链：仅影响自动群推送过滤配置；旧配置 `autoPushStatuses` 和 `autoSendAfterTime` 不再可用，需用 `autoPushCondition` 表达式重写。
+- 关键结论：`autoPushCondition` 是唯一过滤条件，留空表示全部推送。语法错误会安全跳过并记录日志。前端帮助 tooltip 已包含完整语法说明、6 个常用示例和按分类列出的所有可用字段。
+
+## [2026-07-25] INGEST-CODE | 工单群推送条件表达式引擎
+
+- 触发：用户要求支持自定义流推送过滤条件，不再仅按工单状态判断。
+- 架构层：工单模块 / 同步服务 / 群推送配置。
+- 创建的页面：`web/public/docs/2026-07-25-ticket-group-push-custom-condition.md`
+- 新增的文件：`server/modules/ticket/service/sync/ticket_sync_condition_evaluator.py`（条件表达式引擎）
+- 更新的页面：`server/modules/ticket/service/sync/ticket_sync_group_push_service.py`（`should_skip_auto_group_push_by_status` 优先使用 `autoPushCondition` 表达式）、`server/modules/ticket/service/sync/ticket_sync_config_service.py`（`default_group_push_config` 新增 `autoPushCondition: ""`）、`web/src/views/ticket/syncAutomation/index.vue`（新增自定义推送条件输入框与帮助 tooltip）、`web/src/views/ticket/syncAutomation/hooks/useSyncConfig.js`（默认值与序列化适配）
+- 更新的页面：`wiki/flows/ticket-external-sync-flow.md`（步骤 11.1 新增）
+- 变更传播链：仅影响自动群推送过滤判断，不影响其他链路；留空时完全向后兼容。
+- 关键结论：实现了安全受限的布尔表达式求值器，支持字段比较、列表成员、空值判断和逻辑运算。优先使用自定义表达式，否则回退到原有状态白名单。
+
 ## [2026-07-24] INGEST-CODE | 版本号统一管理
 
 - 触发：用户要求统一 server/web/client_new 三端版本号，每端只需修改一处。

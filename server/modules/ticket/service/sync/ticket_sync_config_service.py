@@ -19,14 +19,6 @@ class TicketSyncConfigService:
     """工单同步自动化配置管理。"""
 
     CONFIG_KEY = "ticket.sync.automation"
-
-    # --- constants migrated from TicketSyncService ---
-
-    DEFAULT_GROUP_PUSH_AUTO_STATUSES = [
-        "2. 1.5线处理",
-        "3. 待产研处理",
-        "4. 产研处理中",
-    ]
     DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS = [
         "ticketNo",
         "description",
@@ -349,13 +341,12 @@ class TicketSyncConfigService:
             "sendMode": "push_config",
             "pushIds": [],
             "appChatIds": [],
-            "autoPushStatuses": list(cls.DEFAULT_GROUP_PUSH_AUTO_STATUSES),
+            "autoPushCondition": "",
             "priorityRoutes": [],
             "sendAfterExternalSync": False,
             "sendAfterRemotePull": False,
             "sendAfterBitablePull": False,
             "sendAfterManualCreate": False,
-            "autoSendAfterTime": "",
             "template": "",
             "manualTemplate": "",
         }
@@ -1210,38 +1201,6 @@ class TicketSyncConfigService:
                 seen_record_ids.add(unique_key)
                 yield record
 
-    # --- migrated from TicketSyncService._normalize_group_push_auto_statuses ---
-
-    @classmethod
-    def normalize_group_push_auto_statuses(
-        cls,
-        value: Any,
-        *,
-        fallback: Any = None,
-    ) -> list[str]:
-        """
-        归一化自动群推送状态条件配置。
-
-        :param value: 原始状态条件，支持列表或逗号分隔字符串。
-        :param fallback: 回退配置值。
-        :return: 去重后的状态文本列表。
-        """
-        source_value = value
-        if source_value is None:
-            source_value = fallback
-        if isinstance(source_value, str):
-            source_list = [item.strip() for item in source_value.split(",")]
-        elif isinstance(source_value, list):
-            source_list = source_value
-        else:
-            source_list = []
-        normalized: list[str] = []
-        for item in source_list:
-            status_text = str(item or "").strip()
-            if status_text and status_text not in normalized:
-                normalized.append(status_text)
-        return normalized
-
     # --- migrated from TicketSyncService._normalize_sync_config ---
 
     @classmethod
@@ -1327,19 +1286,7 @@ class TicketSyncConfigService:
         group_push["sendAfterManualCreate"] = bool(group_push.get("sendAfterManualCreate"))
         group_push["pushIds"] = TicketSyncNotifyService._normalize_push_ids(group_push.get("pushIds"))
         group_push["appChatIds"] = TicketSyncNotifyService._normalize_chat_ids(group_push.get("appChatIds"))
-        group_push["autoPushStatuses"] = cls.normalize_group_push_auto_statuses(
-            group_push.get("autoPushStatuses", group_push.get("auto_push_statuses")),
-            fallback=default_group_push.get("autoPushStatuses"),
-        )
-        parsed_group_push_auto_send_after = SyncUtil.parse_datetime_value(
-            group_push.get("autoSendAfterTime")
-            or group_push.get("auto_send_after_time")
-        )
-        group_push["autoSendAfterTime"] = (
-            parsed_group_push_auto_send_after.isoformat()
-            if parsed_group_push_auto_send_after
-            else ""
-        )
+        group_push["autoPushCondition"] = str(group_push.get("autoPushCondition") or "").strip()
         group_push["appId"] = str(group_push.get("appId") or "").strip()
         group_push["appSecret"] = str(group_push.get("appSecret") or "").strip()
         priority_routes = group_push.get("priorityRoutes") if isinstance(group_push.get("priorityRoutes"), list) else []
