@@ -577,6 +577,24 @@
    * @param {object} response 提交接口响应
    * @returns {object | null} AI 分析任务对象，未找到时返回 null
    */
+  /**
+   * 判断是否应该 resume：当前选择的 Provider 和上一次相同且上一次分析成功。
+   * @returns {boolean} 是否启用 resume
+   */
+  function shouldResumeAiAnalysis() {
+    const latest = detail.value?.latestAiAnalysis || {};
+    const latestContext = latest.analysisContext || {};
+    const currentProvider = aiAnalysisTaskForm.value.aiProviderCode;
+    const lastProvider = latestContext.selectedAiProviderCode;
+    if (!currentProvider || !lastProvider) {
+      return false;
+    }
+    if (currentProvider !== lastProvider) {
+      return false;
+    }
+    return latest.status === 'success' || latest.status === 'SUCCESS';
+  }
+
   function extractSubmittedAiTask(response) {
     const payload = response?.data || response || {};
     const result = payload.result || payload.data?.result || {};
@@ -748,6 +766,7 @@
         promptTemplateCodes: aiAnalysisTaskForm.value.promptTemplateCodes?.length
           ? aiAnalysisTaskForm.value.promptTemplateCodes
           : undefined,
+        resume: shouldResumeAiAnalysis(),
       };
       if (aiAnalysisTaskForm.value.logTimeMode !== 'none') {
         payload.logWindowMissingStrategy =

@@ -784,6 +784,8 @@ class TicketAiAnalysisService:
     def _build_provider_env_overrides(cls, provider) -> dict[str, str]:
         """
         根据 Provider 配置构建 Worker 环境变量覆盖项。
+        Codex 使用 OPENAI_API_KEY，Claude Code 使用 ANTHROPIC_API_KEY，
+        同时保留对方 key 的兼容性。
         :param provider: Provider数据库对象
         :return: 环境变量覆盖项
         """
@@ -794,17 +796,25 @@ class TicketAiAnalysisService:
             secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
         except Exception as exc:
             raise ValueError(f"Provider密钥解密失败: {exc}") from exc
+        provider_type = str(getattr(provider, "provider_type", "") or "").strip().lower()
         if secret_key:
-            env_overrides["OPENAI_API_KEY"] = secret_key
+            if provider_type == "claude":
+                env_overrides["ANTHROPIC_API_KEY"] = secret_key
+                env_overrides["OPENAI_API_KEY"] = secret_key
+            else:
+                env_overrides["OPENAI_API_KEY"] = secret_key
+                env_overrides["ANTHROPIC_API_KEY"] = secret_key
         base_url = str(getattr(provider, "base_url", "") or "").strip()
         if base_url:
+            if provider_type == "claude":
+                env_overrides["ANTHROPIC_BASE_URL"] = base_url
             env_overrides["OPENAI_BASE_URL"] = base_url
         model_name = str(getattr(provider, "model_name", "") or "").strip()
         if model_name:
             env_overrides["OPENAI_MODEL"] = model_name
+            env_overrides["ANTHROPIC_MODEL"] = model_name
         provider_code = str(getattr(provider, "provider_code", "") or "").strip()
         provider_name = str(getattr(provider, "provider_name", "") or "").strip()
-        provider_type = str(getattr(provider, "provider_type", "") or "").strip()
         if provider_code:
             env_overrides["AI_PROVIDER_CODE"] = provider_code
         if provider_name:
@@ -830,6 +840,8 @@ class TicketAiAnalysisService:
         schema_payload: dict[str, Any],
         result_path: str,
         timeout_sec: int,
+        resume: bool = False,
+        resume_from_workspace_path: str | None = None,
     ) -> dict[str, Any]:
         """
         构建发送给 Agent 的 AI 分析请求体。
@@ -842,9 +854,11 @@ class TicketAiAnalysisService:
         :param prompt_template: 提示词模板
         :param schema_payload: JSON Schema
         :param result_path: 结果文件路径
+        :param resume: 是否复用上次分析会话
+        :param resume_from_workspace_path: 上次任务 workspace 路径
         :return: 请求体
         """
-        return {
+        payload = {
             "requestType": TstepTypeEnum.ai_analysis.value,
             "command": "run_ticket_ai_analysis",
             "taskId": task_id,
@@ -861,6 +875,11 @@ class TicketAiAnalysisService:
             "timeoutSec": timeout_sec,
             "providerEnv": TicketAiAnalysisService._json_safe_value(provider_env_overrides or {}),
         }
+        if resume:
+            payload["resume"] = True
+        if resume_from_workspace_path:
+            payload["resumeFromWorkspacePath"] = resume_from_workspace_path
+        return payload
 
     @staticmethod
     def _extract_agent_response_result(response: Any) -> dict[str, Any]:
@@ -1887,6 +1906,24 @@ class TicketAiAnalysisService:
             context_payload["selectedAiProviderName"] = selected_provider.provider_name
             context_payload["selectedAiProviderType"] = selected_provider.provider_type
             context_payload["selectedWorkerModel"] = selected_provider.model_name
+            # 判断是否需要 resume
+            resume_from_workspace_path: str | None = None
+            if request.resume and selected_provider_code:
+                last_task = TicketAiDao.get_last_successful_task_by_ticket(db, ticket.ticket_id)
+                if last_task:
+                    last_ctx = last_task.analysis_context or {}
+                    last_provider = str(last_ctx.get("selectedAiProviderCode") or "").strip()
+                    last_provider_type = str(last_ctx.get("selectedAiProviderType") or "").strip()
+                    current_provider_type = str(selected_provider.provider_type or "").strip().lower()
+                    if last_provider == selected_provider_code and last_provider_type == current_provider_type:
+                        last_ws = str(getattr(last_task, "workspace_path", "") or "").strip()
+                        if last_ws:
+                            resume_from_workspace_path = last_ws
+                            logger.info(
+                                f"工单 AI 分析 resume: ticket_id={ticket.ticket_id}, "
+                                f"provider={selected_provider_code}, type={current_provider_type}, "
+                                f"from={resume_from_workspace_path}"
+                            )
             if not request.agent_code and str(selected_provider.agent_code or "").strip():
                 context_payload["selectedAgentCode"] = str(selected_provider.agent_code).strip()
         if request.agent_code:

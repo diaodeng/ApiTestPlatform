@@ -493,6 +493,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
+    resume: bool = Field(default=False, description="是否复用上次 AI 分析会话继续分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
     prompt_template_codes: list[str] | None = Field(default=None, description="本次分析追加的提示词模板编码列表")
     log_analysis_mode: str | None = Field(

@@ -29,7 +29,7 @@ EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
 class TicketAiAnalysisService:
     """
-    client_new 侧工单 AI 分析执行服务。
+    client_new 侧工单 AI 分析执行服务，支持多种 AI Provider（Codex、Claude Code 等）。
     """
 
     DEFAULT_TIMEOUT_SEC = 3600
@@ -37,6 +37,33 @@ class TicketAiAnalysisService:
     DEFAULT_WORKER_SANDBOX = "workspace-write"
     DEFAULT_LOG_DIGEST_MAX_CHARS = 300000
     DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE = 80
+
+    # --- Provider 运行时配置映射 ---
+    # 每种 provider_type 对应一组 CLI 行为，新增 AI 工具时只需在此追加条目。
+    PROVIDER_WORKER_MAP: dict[str, dict[str, Any]] = {
+        "codex": {
+            "command": "codex exec",
+            "sandbox": "workspace-write",
+            "code_arg_flag": "-C",            # 代码目录参数
+            "output_mode": "file",             # 结果从文件读取
+            "output_schema_flag": "--output-schema",
+            "output_file_flag": "--output-last-message",
+            "resume_flag": "--resume",
+            "model_flag": "-m",
+            "skip_git_check_flag": "--skip-git-repo-check",
+        },
+        "claude": {
+            "command": "claude -p",
+            "sandbox": None,                   # Claude Code 无沙箱参数
+            "code_arg_flag": "--add-dir",      # 代码目录参数
+            "output_mode": "stdout",            # 结果从 stdout 解析
+            "output_schema_flag": None,         # 不支持 schema 文件
+            "output_file_flag": None,           # 不支持输出到文件
+            "resume_flag": "--resume",
+            "model_flag": "--model",
+            "skip_git_check_flag": None,
+        },
+    }
     DEFAULT_LOG_DIGEST_CONTEXT_LINES = 3
     DEFAULT_LOG_DIGEST_MAX_LINE_CHARS = 1200
     TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
@@ -226,6 +253,25 @@ class TicketAiAnalysisService:
                 logger.warning(f"修改 Codex auth.json 失败: {exc}")
 
     @classmethod
+    def _resolve_provider_type(cls, context_payload: dict[str, Any] | None) -> str:
+        """
+        从上下文解析当前请求的 Provider 类型。
+        :param context_payload: 上下文快照
+        :return: provider_type 字符串，默认 "codex"
+        """
+        raw = str((context_payload or {}).get("selectedAiProviderType") or "").strip().lower()
+        return raw if raw in cls.PROVIDER_WORKER_MAP else "codex"
+
+    @classmethod
+    def _get_provider_worker_config(cls, provider_type: str) -> dict[str, Any]:
+        """
+        获取指定 Provider 的 Worker 运行时配置。
+        :param provider_type: Provider 类型
+        :return: Worker 配置字典
+        """
+        return cls.PROVIDER_WORKER_MAP.get(provider_type, cls.PROVIDER_WORKER_MAP["codex"])
+
+    @classmethod
     def _resolve_worker_command_parts(cls, command_parts: list[str]) -> list[str]:
         """
         解析 Worker 命令为可直接执行的进程参数，并避免误用 Codex 桌面应用。
@@ -316,6 +362,314 @@ class TicketAiAnalysisService:
             if candidate_path.exists() and cls._is_codex_cli_executable(candidate_path):
                 return str(candidate_path)
         return None
+
+    @classmethod
+    def _resolve_claude_cli_executable(cls) -> str | None:
+        """
+        解析 Claude Code CLI 可执行文件。
+        :return: claude 可执行文件路径，未找到返回 None
+        """
+        config = AgentConfig.read_config()
+        configured_cli = str(getattr(config, "ticket_ai_claude_cli_path", "") or "").strip()
+        candidates: list[str | None] = [
+            configured_cli,
+            shutil.which("claude"),
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            candidate_path = Path(candidate)
+            if candidate_path.exists():
+                return str(candidate_path)
+        return None
+
+    @classmethod
+    def _resolve_provider_executable(cls, provider_type: str, command_parts: list[str]) -> list[str]:
+        """
+        按 provider_type 解析可执行文件并返回完整的命令行参数。
+        :param provider_type: Provider 类型
+        :param command_parts: 原始命令参数列表
+        :return: 可执行命令参数列表
+        """
+        if provider_type == "codex":
+            return cls._resolve_worker_command_parts(command_parts)
+        if provider_type == "claude":
+            parts = [str(p).strip() for p in command_parts if str(p).strip()]
+            if not parts:
+                parts = ["claude", "-p"]
+            executable = parts[0]
+            if Path(executable).suffix:
+                # 已有完整路径，直接使用
+                pass
+            else:
+                resolved = cls._resolve_claude_cli_executable()
+                if not resolved:
+                    raise FileNotFoundError(
+                        "未找到可执行的 Claude Code CLI。"
+                        "请安装 Claude Code，或在 Agent 配置 ticket_ai_claude_cli_path 中填写 CLI 路径"
+                    )
+                if resolved.lower().endswith((".cmd", ".bat")):
+                    return ["cmd", "/c", resolved, *parts[1:]]
+                parts[0] = resolved
+            return parts
+        # 兜底走 codex 逻辑
+        return cls._resolve_worker_command_parts(command_parts)
+
+    @classmethod
+    def _prepare_ai_home(
+        cls,
+        workspace_dir: Path,
+        provider_type: str,
+        provider_env_overrides: dict[str, str] | None = None,
+    ) -> Path | None:
+        """
+        为指定 Provider 准备独立的配置目录。
+        - codex: 复制 CODEX_HOME 到 .ai_home/
+        - claude: 无需额外配置（Claude Code 自动管理 .claude/），仅写 .env
+        :param workspace_dir: 任务工作区
+        :param provider_type: Provider 类型
+        :param provider_env_overrides: 环境变量覆盖项
+        :return: 配置目录路径（claude 时返回 None）
+        """
+        if provider_type == "claude":
+            cls._prepare_claude_env(workspace_dir, provider_env_overrides)
+            return None
+        return cls._prepare_codex_home(workspace_dir, provider_env_overrides)
+
+    @classmethod
+    def _prepare_claude_env(
+        cls,
+        workspace_dir: Path,
+        provider_env_overrides: dict[str, str] | None = None,
+    ) -> None:
+        """
+        为 Claude Code 准备环境：在 workspace_dir 下写入 .env 文件。
+        Claude Code 在 cwd（即 workspace_dir）下自动管理 .claude/ 会话目录。
+        :param workspace_dir: 任务工作区
+        :param provider_env_overrides: 环境变量覆盖项
+        """
+        overrides = provider_env_overrides or {}
+        env_lines: list[str] = []
+        api_key = str(overrides.get("ANTHROPIC_API_KEY") or overrides.get("OPENAI_API_KEY") or "").strip()
+        base_url = str(overrides.get("ANTHROPIC_BASE_URL") or overrides.get("OPENAI_BASE_URL") or "").strip()
+        if api_key:
+            env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
+        if base_url:
+            env_lines.append(f"ANTHROPIC_BASE_URL={base_url}")
+        if env_lines:
+            env_file = workspace_dir / ".env"
+            try:
+                existing_lines: list[str] = []
+                if env_file.exists():
+                    existing_lines = env_file.read_text(encoding="utf-8").splitlines()
+                existing_keys = {line.split("=", 1)[0] for line in existing_lines if "=" in line}
+                for line in env_lines:
+                    key = line.split("=", 1)[0]
+                    if key not in existing_keys:
+                        existing_lines.append(line)
+                env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+                logger.info(f"已为 Claude Code 写入 .env: api_key={'***' if api_key else ''}")
+            except Exception as exc:
+                logger.warning(f"写入 Claude Code .env 失败: {exc}")
+
+    @classmethod
+    def _load_worker_env(
+        cls,
+        ai_home: Path | None,
+        provider_type: str,
+    ) -> dict[str, str]:
+        """
+        加载 Worker 执行环境变量。
+        :param ai_home: 配置目录（codex），claude 时为 None
+        :param provider_type: Provider 类型
+        :return: 环境变量字典
+        """
+        if provider_type == "claude":
+            # Claude Code: 直接使用进程环境变量
+            return dict(os.environ)
+        # Codex: 读取隔离配置目录
+        env_values = cls._load_codex_env(ai_home) if ai_home else {}
+        if ai_home:
+            env_values["CODEX_HOME"] = str(ai_home)
+        return env_values
+
+    @classmethod
+    def _build_worker_command(
+        cls,
+        *,
+        provider_type: str,
+        worker_config: dict[str, Any],
+        repo_path: Path,
+        schema_file: Path | None,
+        result_file: Path | None,
+        selected_worker_model: str | None,
+    ) -> list[str]:
+        """
+        按 Provider 类型构建完整的 Worker 命令行。
+        :param provider_type: Provider 类型
+        :param worker_config: Worker 运行时配置
+        :param repo_path: 代码仓库路径
+        :param schema_file: JSON Schema 文件路径
+        :param result_file: 结果输出文件路径
+        :param selected_worker_model: 选择的模型名称
+        :return: 命令行参数列表
+        """
+        command_parts = [str(p).strip() for p in str(worker_config["command"]).split() if str(p).strip()]
+        command = cls._resolve_provider_executable(provider_type, command_parts)
+
+        # 沙箱参数（仅 codex）
+        sandbox = worker_config.get("sandbox")
+        if sandbox:
+            command.extend(["-s", str(sandbox)])
+
+        # 代码目录参数
+        code_flag = worker_config.get("code_arg_flag")
+        if code_flag:
+            command.extend([str(code_flag), str(repo_path)])
+
+        # git 检查跳过（仅 codex）
+        skip_flag = worker_config.get("skip_git_check_flag")
+        if skip_flag:
+            command.append(str(skip_flag))
+
+        # 输出 schema 文件（仅 codex）
+        schema_flag = worker_config.get("output_schema_flag")
+        if schema_flag and schema_file:
+            command.extend([str(schema_flag), str(schema_file)])
+
+        # 输出结果文件（仅 codex）
+        output_flag = worker_config.get("output_file_flag")
+        if output_flag and result_file:
+            command.extend([str(output_flag), str(result_file)])
+
+        # 模型参数
+        if selected_worker_model:
+            model_flag = worker_config.get("model_flag")
+            if model_flag and model_flag not in command:
+                command.extend([str(model_flag), str(selected_worker_model)])
+
+        return command
+
+    @classmethod
+    def _parse_worker_output(
+        cls,
+        *,
+        provider_type: str,
+        worker_config: dict[str, Any],
+        result_file: Path | None,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> dict[str, Any] | None:
+        """
+        按 Provider 类型解析 Worker 输出结果。
+        :param provider_type: Provider 类型
+        :param worker_config: Worker 运行时配置
+        :param result_file: Codex 结果文件
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :return: 解析后的结果字典，解析失败返回 None
+        """
+        result_text = ""
+        if worker_config.get("output_mode") == "file" and result_file and result_file.exists():
+            result_text = result_file.read_text(encoding="utf-8")
+        elif raw_stdout.strip():
+            result_text = raw_stdout.strip()
+        elif raw_stderr.strip():
+            result_text = raw_stderr.strip()
+
+        if not result_text.strip():
+            return None
+
+        # 尝试直接解析 JSON
+        try:
+            return json.loads(result_text)
+        except Exception:
+            pass
+
+        # Claude Code stdout 可能包含 markdown 包裹的 JSON，尝试提取
+        if provider_type == "claude":
+            return cls._extract_json_from_text(result_text)
+
+        # 尝试取最后一行 JSON
+        try:
+            return json.loads(raw_stdout.strip().splitlines()[-1])
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
+        """
+        从 Claude Code 输出文本中提取 JSON 结果块。
+        Claude Code 的 stdout 可能在 markdown 代码块中包含 JSON。
+        :param text: 原始输出文本
+        :return: 解析后的字典
+        """
+        # 尝试匹配 ```json ... ``` 代码块
+        import re as _re
+        json_block_match = _re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', text)
+        if json_block_match:
+            try:
+                return json.loads(json_block_match.group(1))
+            except Exception:
+                pass
+        # 尝试匹配纯 JSON 对象（从第一个 { 到最后一个 }）
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except Exception:
+                pass
+        return None
+
+    @classmethod
+    def _copy_session_for_resume(
+        cls,
+        workspace_dir: Path,
+        provider_type: str,
+        resume_from_workspace: str | None,
+    ) -> tuple[bool, str | list[str]]:
+        """
+        Resume 时将上一次任务的会话数据复制到当前工作区。
+        - codex: 复制 .ai_home/ 目录
+        - claude: 复制 .claude/ 目录
+        :param workspace_dir: 当前任务工作区
+        :param provider_type: Provider 类型
+        :param resume_from_workspace: 上次任务的 workspace 路径
+        :return: (是否成功复制, resume 命令行参数列表)
+        """
+        if not resume_from_workspace:
+            return False, []
+        source_ws = Path(resume_from_workspace)
+        if not source_ws.exists():
+            logger.warning(f"Resume 源工作区不存在: {resume_from_workspace}")
+            return False, []
+
+        worker_config = cls._get_provider_worker_config(provider_type)
+        resume_flag = worker_config.get("resume_flag")
+        if not resume_flag:
+            return False, []
+
+        try:
+            if provider_type == "claude":
+                # 复制 .claude/ 目录到当前 workspace
+                src_claude = source_ws / ".claude"
+                dst_claude = workspace_dir / ".claude"
+                if src_claude.exists() and not dst_claude.exists():
+                    shutil.copytree(src_claude, dst_claude)
+                    logger.info(f"已复制 Claude 会话: {src_claude} → {dst_claude}")
+                return True, [str(resume_flag)]
+            else:
+                # codex: 复制 .ai_home/ 目录
+                src_home = source_ws / ".ai_home"
+                dst_home = workspace_dir / ".ai_home"
+                if src_home.exists() and not dst_home.exists():
+                    shutil.copytree(src_home, dst_home)
+                    logger.info(f"已复制 Codex 会话: {src_home} → {dst_home}")
+                return True, [str(resume_flag)]
+        except Exception as exc:
+            logger.warning(f"复制 Resume 会话失败: provider={provider_type}, error={exc}")
+            return False, []
 
     @staticmethod
     def _build_hidden_subprocess_kwargs() -> dict[str, Any]:
@@ -661,15 +1015,17 @@ class TicketAiAnalysisService:
     async def _run_worker_process(
         command: list[str],
         resolved_prompt: str,
-        repo_path: Path,
+        cwd: Path,
         env_values: dict[str, str],
         timeout_sec: int,
     ) -> subprocess.CompletedProcess:
         """
         在后台线程中执行 Worker 进程，避免阻塞 Agent 事件循环。
+        cwd 统一为 workspace_dir，各工具通过自身参数定位代码目录
+        （Codex 用 -C，Claude Code 用 --add-dir）。
         :param command: Worker 命令
         :param resolved_prompt: 发送给 Worker 的提示词
-        :param repo_path: 仓库路径
+        :param cwd: 工作目录（workspace_dir）
         :param env_values: 执行环境变量
         :param timeout_sec: 超时时间
         :return: 进程执行结果
@@ -680,7 +1036,7 @@ class TicketAiAnalysisService:
             input=resolved_prompt,
             text=True,
             capture_output=True,
-            cwd=str(repo_path),
+            cwd=str(cwd),
             env=env_values,
             timeout=max(timeout_sec, 60),
             **TicketAiAnalysisService._build_hidden_subprocess_kwargs(),
@@ -1732,24 +2088,32 @@ class TicketAiAnalysisService:
                     )
                 prompt_file.write_text(resolved_prompt, encoding="utf-8")
 
-                command = cls._resolve_worker_command_parts(
-                    [
-                        *cls.DEFAULT_WORKER_COMMAND.split(),
-                        "-s",
-                        cls.DEFAULT_WORKER_SANDBOX,
-                        "-C",
-                        str(repo_path),
-                        "--skip-git-repo-check",
-                        "--output-schema",
-                        str(schema_file),
-                        "--output-last-message",
-                        str(result_file),
-                    ]
+                # --- 按 Provider 类型构建命令和准备环境 ---
+                provider_type = cls._resolve_provider_type(context_payload)
+                worker_config = cls._get_provider_worker_config(provider_type)
+
+                # Resume 支持：同工单同 Provider 时复制上次会话数据
+                resume_flags: list[str] = []
+                resume_from_workspace = str(req_data.get("resumeFromWorkspacePath") or "").strip()
+                resume_requested = bool(req_data.get("resume"))
+                if resume_requested and resume_from_workspace:
+                    _, resume_flags = cls._copy_session_for_resume(
+                        workspace_dir, provider_type, resume_from_workspace
+                    )
+
+                command = cls._build_worker_command(
+                    provider_type=provider_type,
+                    worker_config=worker_config,
+                    repo_path=repo_path,
+                    schema_file=schema_file,
+                    result_file=result_file,
+                    selected_worker_model=selected_worker_model,
                 )
-                command = cls._inject_worker_model(command, selected_worker_model)
-                codex_home = cls._prepare_codex_home(workspace_dir, provider_env_overrides)
-                env_values = cls._load_codex_env(codex_home)
-                env_values["CODEX_HOME"] = str(codex_home)
+                if resume_flags:
+                    command.extend(resume_flags)
+
+                ai_home = cls._prepare_ai_home(workspace_dir, provider_type, provider_env_overrides)
+                env_values = cls._load_worker_env(ai_home, provider_type)
                 env_values = cls._apply_env_overrides(env_values, provider_env_overrides)
 
                 await cls._emit_event(
@@ -1758,16 +2122,16 @@ class TicketAiAnalysisService:
                     task_id,
                     "开始执行 Worker",
                     command_line=" ".join(command),
+                    provider_type=provider_type,
                     repo_path=str(repo_path),
                     branch_name=current_branch,
                     workspace_root=str(workspace_root),
                     workspace_path=str(workspace_dir),
-                    codex_home=str(codex_home),
                     provider_code=request_provider_code or "<none>",
                     worker_model=selected_worker_model or "<default>",
                 )
                 worker_started_at = time.monotonic()
-                process = await cls._run_worker_process(command, resolved_prompt, repo_path, env_values, timeout_sec)
+                process = await cls._run_worker_process(command, resolved_prompt, workspace_dir, env_values, timeout_sec)
                 worker_elapsed = round(time.monotonic() - worker_started_at, 3)
                 raw_stdout = process.stdout or ""
                 raw_stderr = process.stderr or ""
@@ -1784,23 +2148,14 @@ class TicketAiAnalysisService:
                     stderr_context=cls._extract_stderr_context(raw_stderr),
                 )
 
-                result_text = ""
-                if result_file.exists():
-                    result_text = result_file.read_text(encoding="utf-8")
-                elif raw_stdout.strip():
-                    result_text = raw_stdout.strip().splitlines()[-1]
-                elif raw_stderr.strip():
-                    result_text = raw_stderr.strip()
+                parsed_result = cls._parse_worker_output(
+                    provider_type=provider_type,
+                    worker_config=worker_config,
+                    result_file=result_file,
+                    raw_stdout=raw_stdout,
+                    raw_stderr=raw_stderr,
+                )
 
-                parsed_result: dict[str, Any] | None = None
-                if result_text.strip():
-                    try:
-                        parsed_result = json.loads(result_text)
-                    except Exception:
-                        try:
-                            parsed_result = json.loads(raw_stdout.strip().splitlines()[-1])
-                        except Exception:
-                            parsed_result = None
                 if not parsed_result:
                     failure_message = (
                         cls._extract_stderr_context(raw_stderr)
@@ -1842,7 +2197,7 @@ class TicketAiAnalysisService:
                     "message": "AI 分析完成",
                     "result": {
                         "analysis_result": normalized_result,
-                        "raw_output": result_text or raw_stdout,
+                        "raw_output": raw_stdout or raw_stderr,
                         "workspace_path": str(workspace_dir),
                         "result_path": str(result_file),
                         "command_line": " ".join(command),

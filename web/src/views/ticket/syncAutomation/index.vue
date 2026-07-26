@@ -685,18 +685,38 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Agent 编码">
-                    <el-input
+                    <el-select
                       v-model="form.logPullDefaults.aiAgentCode"
                       placeholder="留空则走默认 Agent"
-                    />
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in agentOptions"
+                        :key="item.agentCode"
+                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                        :value="item.agentCode"
+                      />
+                    </el-select>
                   </el-form-item>
                 </el-col>
                 <el-col :span="24">
                   <el-form-item label="Provider 编码">
-                    <el-input
+                    <el-select
                       v-model="form.logPullDefaults.aiProviderCode"
                       placeholder="留空则走默认 Provider"
-                    />
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in providerOptions"
+                        :key="item.providerCode"
+                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.modelName ? '- ' + item.modelName : ''}`"
+                        :value="item.providerCode"
+                      />
+                    </el-select>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -2562,6 +2582,7 @@
   } from '@/api/ticket/ticket';
   import { listAiProviderOptions } from '@/api/system/aiprovider';
   import { listAiPromptTemplateOptions } from '@/api/system/aiprompt';
+  import { all as listAllAgents } from '@/api/hrm/agent';
   import { useSyncConfig } from './hooks/useSyncConfig';
 
   const { proxy } = getCurrentInstance();
@@ -2599,6 +2620,7 @@
   const pushOptions = ref([]);
   const providerOptions = ref([]);
   const promptOptions = ref([]);
+  const agentOptions = ref([]);
   const groupSendLoading = ref(false);
   const personPreviewLoading = ref(false);
   const personRunLoading = ref(false);
@@ -2703,6 +2725,13 @@
   }
 
   function loadAiOptions() {
+    listAllAgents()
+      .then((response) => {
+        agentOptions.value = Array.isArray(response.data) ? response.data : [];
+      })
+      .catch(() => {
+        agentOptions.value = [];
+      });
     listAiProviderOptions()
       .then((response) => {
         providerOptions.value = Array.isArray(response.data) ? response.data : [];

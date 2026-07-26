@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, defer
 
 from modules.ticket.entity.do.ticket_do import TicketAiAnalysisTask, TicketAiRepoMapping
 from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisTaskQueryModel, TicketAiRepoMappingQueryModel
+from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
 from utils.page_util import PageUtil
 
 
@@ -216,6 +217,27 @@ class TicketAiDao:
         return (
             db.query(TicketAiAnalysisTask)
             .filter(TicketAiAnalysisTask.ticket_id == ticket_id)
+            .order_by(TicketAiAnalysisTask.create_time.desc(), TicketAiAnalysisTask.task_id.desc())
+            .first()
+        )
+
+    @classmethod
+    def get_last_successful_task_by_ticket(
+        cls, db: Session, ticket_id: int
+    ) -> TicketAiAnalysisTask | None:
+        """
+        查询工单最近一次成功的 AI 分析任务。
+        用于 resume 时获取上次任务会话数据。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 最近成功的任务，无成功记录时返回 None
+        """
+        return (
+            db.query(TicketAiAnalysisTask)
+            .filter(
+                TicketAiAnalysisTask.ticket_id == ticket_id,
+                TicketAiAnalysisTask.status == TicketAiAnalysisStatus.SUCCESS.value,
+            )
             .order_by(TicketAiAnalysisTask.create_time.desc(), TicketAiAnalysisTask.task_id.desc())
             .first()
         )
