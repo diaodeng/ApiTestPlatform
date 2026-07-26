@@ -579,15 +579,15 @@ class TicketSyncAutomationService:
                 if not resolved_store_id:
                     missing_log_pull_fields.append("storeId")
                 else:
-                    # 按商家过滤后的门店中校验 sap_org_no 是否完全匹配
+                    # 按商家过滤后的门店中校验 org_no 是否匹配
                     if resolved_vendor_id:
-                        store_verified = TicketLogPullDao.verify_store_by_sap_org_no(
+                        store_verified = TicketLogPullDao.verify_store_by_org_no(
                             db,
                             vendor_no=str(resolved_vendor_id),
-                            sap_org_no=resolved_store_id,
+                            org_no=resolved_store_id,
                         )
                         if not store_verified:
-                            missing_log_pull_fields.append("storeId(门店未匹配到正确的sap_org_no)")
+                            missing_log_pull_fields.append("storeId(门店未匹配到正确的org_no)")
                 if not resolved_pos_no:
                     missing_log_pull_fields.append("posNo/SCO")
                 if not resolved_modify_time:

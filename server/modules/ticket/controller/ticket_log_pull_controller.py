@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFil
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import DataError, IntegrityError
 from starlette.background import BackgroundTask
 
 from config.get_db import get_db
@@ -799,6 +800,10 @@ async def create_ticket_log_pull(
             TicketLogPullService.create_log_pull_services, query_db, ticket_id, create_object, current_user
         )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except (DataError, IntegrityError) as e:
+        logger.exception(e)
+        query_db.rollback()
+        return ResponseUtil.error(msg="数据格式不正确，请检查门店编号是否为纯数字，或联系管理员处理")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -950,6 +955,10 @@ async def create_ticket_log_pull_manage(
             current_user,
         )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except (DataError, IntegrityError) as e:
+        logger.exception(e)
+        query_db.rollback()
+        return ResponseUtil.error(msg="数据格式不正确，请检查门店编号是否为纯数字，或联系管理员处理")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

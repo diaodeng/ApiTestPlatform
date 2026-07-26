@@ -6,6 +6,7 @@
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
+    :close-on-press-escape="true"
     class="ticket-log-viewer-dialog"
     @closed="handleClosed"
   >
@@ -218,10 +219,14 @@
         ></pre>
       </div>
 
-      <!-- 下载进度：以 slot 形式由外层控制表格列中的进度展示，此处仅处理弹窗内的准备态 -->
-      <div v-if="preparing" class="log-viewer-preparing">
-        <el-progress :percentage="prepareProgress" :stroke-width="6" />
-        <span class="preparing-text">正在准备日志文件...</span>
+      <!-- 日志准备全屏遮罩：覆盖弹窗 body，可点击关闭按钮或 ESC 取消 -->
+      <div v-if="preparing" class="log-viewer-overlay">
+        <div class="log-viewer-overlay-content">
+          <el-icon class="log-viewer-overlay-spinner" :size="48"><Loading /></el-icon>
+          <span class="log-viewer-overlay-title">正在准备日志文件...</span>
+          <el-progress :percentage="prepareProgress" :stroke-width="8" class="log-viewer-overlay-progress" />
+          <span class="log-viewer-overlay-hint">请稍候，可点击右上角关闭或按 ESC 取消</span>
+        </div>
       </div>
     </div>
   </el-dialog>
@@ -406,6 +411,9 @@ function stopPrepareProgressPolling() {
 }
 
 function handleClosed() {
+  stopPrepareProgressPolling()
+  preparing.value = false
+  prepareProgress.value = 0
   resetViewerState()
 }
 
@@ -895,6 +903,53 @@ onBeforeUnmount(() => {
   white-space: pre;
 }
 
+.log-viewer-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(2px);
+}
+
+.log-viewer-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 64px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+}
+
+.log-viewer-overlay-spinner {
+  color: #409eff;
+  animation: log-viewer-spin 1s linear infinite;
+}
+
+@keyframes log-viewer-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.log-viewer-overlay-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.log-viewer-overlay-progress {
+  width: 360px;
+}
+
+.log-viewer-overlay-hint {
+  font-size: 13px;
+  color: #909399;
+}
+
 .log-viewer-preparing {
   display: flex;
   flex-direction: column;
@@ -918,6 +973,7 @@ onBeforeUnmount(() => {
 
 /* LogViewerDialog 弹窗全屏高度适配 */
 .ticket-log-viewer-dialog .el-dialog__body {
+  position: relative;
   height: calc(100vh - 56px);
   overflow: hidden;
 }

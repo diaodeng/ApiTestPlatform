@@ -499,7 +499,6 @@ const parameterExamples = ref([])
 const environmentOptions = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
-const logPullRefreshTimer = ref(null)
 const storeConfigOpen = ref(false)
 const storeConfigLoading = ref(false)
 const storeConfigList = ref([])
@@ -582,7 +581,6 @@ function getList() {
   listTicketLogPullRecords(queryParams.value).then(response => {
     recordList.value = response.rows || []
     total.value = response.total || 0
-    updateAutoRefresh()
   }).finally(() => {
     loading.value = false
   })
@@ -1249,23 +1247,6 @@ function deleteLogPull(row) {
   })
 }
 
-function updateAutoRefresh() {
-  if (logPullRefreshTimer.value) {
-    window.clearTimeout(logPullRefreshTimer.value)
-    logPullRefreshTimer.value = null
-  }
-  const hasRunningTask = recordList.value.some(item => activeLogPullStatuses.includes(item.status))
-  if (!hasRunningTask) {
-    return
-  }
-  logPullRefreshTimer.value = window.setTimeout(() => {
-    if (createOpen.value || viewerVisible.value) {
-      return
-    }
-    getList()
-  }, 5000)
-}
-
 onMounted(() => {
   loadTicketOptions()
   loadAgentOptions()
@@ -1273,13 +1254,6 @@ onMounted(() => {
   loadVendorOptions()
   loadPushOptions()
   getList()
-})
-
-onBeforeUnmount(() => {
-  if (logPullRefreshTimer.value) {
-    window.clearTimeout(logPullRefreshTimer.value)
-    logPullRefreshTimer.value = null
-  }
 })
 </script>
 
