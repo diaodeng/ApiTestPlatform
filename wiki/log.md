@@ -3,10 +3,14 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-24
+updated: 2026-07-26
 ---
 
 # 操作日志
+
+## 2026-07-26
+- **群推送人员邮箱解析新增 raw_payload.fields 兜底**：`ticket_sync_notify_service.py` 的 `_resolve_ticket_person_email` 邮箱解析链路新增第四级回退，从 `raw_payload.fields`（多维表格原始字段）中按姓名匹配飞书人员对象直接提取邮箱。解决 bitable_pull 场景下当 email 类字段未映射到 external_field_mapping 且系统无对应用户时，@mention 始终为空的问题。同时将 bitable_pull 场景也纳入 `TicketExternalBitableEmailService.enrich_person_emails` 的反查补齐范围。
+- **wiki/flows/ticket-external-sync-flow.md**：更新 5.1.13 步描述，记录新增的邮箱兜底解析逻辑。
 
 ## [2026-07-25] INGEST-CODE | 工单群推送条件表达式引擎（v2: 移除旧条件）
 

@@ -418,7 +418,7 @@ class TicketSyncService:
         ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)
         config = TicketSyncConfigService.load_sync_config(db)
         automation = sync_object.automation
-        if sync_scene == "external_sync":
+        if sync_scene in ("external_sync", "bitable_pull"):
             sync_object = TicketExternalBitableEmailService.enrich_person_emails(config, sync_object, ticket)
         raw_title = str(sync_object.title or "").strip()
         existing_title = str(ticket.title or "").strip() if ticket else ""

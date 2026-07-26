@@ -915,6 +915,60 @@ class TicketSyncNotifyService:
         return ""
 
     @classmethod
+    def _extract_email_from_raw_fields_by_name(
+        cls,
+        raw_fields: dict[str, Any],
+        person_name: str,
+    ) -> str:
+        """
+        从多维表格 raw_payload.fields 中遍历所有字段值，查找姓名匹配的人员对象并提取邮箱。
+
+        飞书多维表格人员字段值为 [{"name":"张三","email":"foo@bar.com"}, ...] 格式，
+        当 raw_payload 顶层或 external_field_mapping 都没有邮箱时，从这里兜底搜索。
+
+        :param raw_fields: raw_payload.fields，key 为原始字段名，value 为人员数组。
+        :param person_name: 要匹配的人员姓名。
+        :return: 匹配到的邮箱，未命中返回空字符串。
+        """
+        if not raw_fields or not person_name:
+            return ""
+        normalized_name = str(person_name).strip().lower()
+        for field_value in raw_fields.values():
+            email = cls._match_person_email_by_name(field_value, normalized_name)
+            if email:
+                return email
+        return ""
+
+    @classmethod
+    def _match_person_email_by_name(cls, field_value: Any, normalized_name: str) -> str:
+        """
+        从单个字段值中按姓名匹配人员对象并提取邮箱。
+
+        :param field_value: 字段值（可能是人员对象列表、字典或文本）。
+        :param normalized_name: 已归一化为小写的人员姓名。
+        :return: 匹配到的邮箱，未命中返回空字符串。
+        """
+        items: list[Any] = []
+        if isinstance(field_value, list):
+            items = list(field_value)
+        elif isinstance(field_value, dict):
+            items = [field_value]
+        else:
+            return ""
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = str(
+                item.get("name") or item.get("text") or item.get("en_name") or item.get("nickname")
+                or ""
+            ).strip().lower()
+            if item_name and item_name == normalized_name:
+                email = cls._extract_email_from_value(item)
+                if email:
+                    return email
+        return ""
+
+    @classmethod
     def _resolve_ticket_person_email(
         cls,
         db: Session,
@@ -995,6 +1049,17 @@ class TicketSyncNotifyService:
                 f"email={cls._mask_email_for_log(mapping_email)}"
             )
             return mapping_email
+        # 从 raw_payload.fields（多维表格原始字段）中按姓名匹配人员对象提取邮箱
+        raw_fields = raw_payload.get("fields") if isinstance(raw_payload.get("fields"), dict) else {}
+        if raw_fields and person_name:
+            fields_email = cls._extract_email_from_raw_fields_by_name(raw_fields, person_name)
+            if fields_email:
+                logger.info(
+                    f"群推送人员邮箱解析: ticket_no={ticket.ticket_no}, role={role or '-'}, "
+                    f"name={person_name or '-'}, source=raw_payload_fields_by_name, key=-, "
+                    f"email={cls._mask_email_for_log(fields_email)}"
+                )
+                return fields_email
         user = cls._resolve_sys_user_by_name(db, person_name)
         user_email = cls._normalize_email(getattr(user, "email", "")) if user else ""
         if user_email:
