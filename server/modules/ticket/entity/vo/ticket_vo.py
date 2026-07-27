@@ -617,6 +617,7 @@ class TicketSyncAutomationModel(BaseModel):
     auto_identify: bool = Field(default=True, description="是否自动识别工单归属信息")
     auto_log_pull: bool = Field(default=False, description="是否根据识别结果自动拉取日志")
     auto_ai_analysis: bool = Field(default=False, description="是否自动发起 AI 分析")
+    auto_translate: bool = Field(default=False, description="是否自动翻译工单描述")
     ai_agent_code: str | None = Field(default=None, description="自动 AI 使用的 Agent 编码")
     ai_provider_code: str | None = Field(default=None, description="自动 AI 使用的 Provider 编码")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="默认日志拉取参数")

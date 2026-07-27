@@ -22,6 +22,7 @@ from loguru import logger
 import httpx
 
 from server.config import AgentConfig
+from services.ticket_ai_codex_config_service import TicketAiCodexConfigService
 from utils.common import get_client_root_dir
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
@@ -165,18 +166,9 @@ class TicketAiAnalysisService:
         """
         source_home = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
         codex_home = workspace_dir / ".codex_home"
-        codex_home.mkdir(parents=True, exist_ok=True)
         overrides = provider_env_overrides or {}
         has_provider_keys = bool(overrides.get("OPENAI_BASE_URL") or overrides.get("OPENAI_API_KEY"))
-        for file_name in ("config.toml", "config.self.toml", "auth.json", "version.json"):
-            source_file = source_home / file_name
-            target_file = codex_home / file_name
-            if source_file.exists() and not target_file.exists():
-                shutil.copy2(source_file, target_file)
-        source_env = source_home / ".env"
-        target_env = codex_home / ".env"
-        if source_env.exists() and not target_env.exists():
-            shutil.copy2(source_env, target_env)
+        TicketAiCodexConfigService.copy_task_home_files(source_home, codex_home)
         if has_provider_keys:
             cls._patch_codex_config_for_provider(codex_home, overrides)
         return codex_home

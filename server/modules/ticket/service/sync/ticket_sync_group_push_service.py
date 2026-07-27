@@ -937,8 +937,14 @@ def _ticket_to_condition_fields(ticket: Ticket) -> dict:
     """
     将工单对象转为条件表达式求值用的字段字典。
     包含 Ticket 表所有业务字段，字段名与表达式中的引用名一致。
+
+    注意：datetime/date 类型字段统一转为 ISO 字符串，确保与条件表达式中的
+    字符串字面量（如 submit_time >= "2026-07-20"）可正常比较。
+    ISO 格式字符串字典序等于时间序，>= / <= 比较结果正确。
     """
-    return {
+    from datetime import date, datetime
+
+    raw = {
         "ticket_id": ticket.ticket_id,
         "ticket_no": ticket.ticket_no,
         "ticket_url": ticket.ticket_url,
@@ -998,5 +1004,10 @@ def _ticket_to_condition_fields(ticket: Ticket) -> dict:
         "create_by": ticket.create_by,
         "update_by": ticket.update_by,
     }
+    # 将 datetime/date 类型字段转为 ISO 字符串，确保与条件表达式中的字符串比较正常
+    for key, value in raw.items():
+        if isinstance(value, (datetime, date)):
+            raw[key] = value.isoformat()
+    return raw
 
 

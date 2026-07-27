@@ -1569,3 +1569,12 @@ updated: 2026-07-26
 - 变更传播链：`sys_config.ticket.logPull.vendors` -> 日志拉取商家选项接口 -> 商家下拉 -> 携带 `vender_no` 查询 `ticket_log_pull_store_config` -> 门店下拉。
 - 关键结论：`vender_no` 是商家参数配置和门店配置的唯一关联键；首次加载不读取门店表，日志拉取记录和外部接口现有的整数 `vendorId` 字段保持兼容。
 - 补充交互：商家和门店选择器均保留 `filterable + allow-create + default-first-option`，用户输入并确认的文本可直接作为日志拉取参数，不会被配置选项限制。
+
+## [2026-07-27] INGEST-CODE | 工单 AI 任务级 Codex 模型目录复制
+- 触发：Agent 执行工单 AI 分析时，Codex Worker 启动后立即返回“系统找不到指定的文件。 (os error 2)”。
+- 架构层：新版 PySide6 客户端 / 工单 AI Worker / Codex 配置隔离。
+- 创建的页面：`web/public/docs/2026-07-27-ticket-ai-codex-model-catalog-copy-fix.md`。
+- 更新的页面：`flows/ticket-automation-flow.md`、`entities/services/ticket-domain.md`。
+- 创建的双向链接：0 对（沿用工单自动化流程与工单域既有双向链接）。
+- 变更传播链：用户级 `config.toml.model_catalog_json` -> `TicketAiCodexConfigService.copy_model_catalog` -> 任务级 `.codex_home` -> `codex exec` 启动。
+- 总共涉及页面：3。

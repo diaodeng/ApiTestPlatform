@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-21
+freshness: 2026-07-27
 created: 2026-05-20
-updated: 2026-07-21
+updated: 2026-07-27
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -32,6 +32,8 @@ related_files:
   - server/modules/ticket/service/ai/ticket_auto_classification_service.py
   - server/modules/ticket/service/ai/ticket_light_ai_service.py
   - server/modules/ticket/service/ai/ticket_ai_analysis_service.py
+  - client_new/services/ticket_ai_analysis_service.py
+  - client_new/services/ticket_ai_codex_config_service.py
   - server/modules/ticket/service/ai/ticket_embedding_service.py
   - server/modules/ticket/service/ai/ticket_similarity_query_service.py
   - server/modules/ticket/service/log_pull/ticket_log_pull_service.py
@@ -278,6 +280,7 @@ graph TD
 - AI 分析任务的执行过程会在系统日志里按阶段输出，失败时输出异常堆栈；数据库只保留最后失败原因，避免把调试细节落到业务表。
 - Windows 开发环境会优先解析 `codex` 的绝对路径再执行，避免 Agent 进程找不到 Worker 可执行文件。
 - AI 分析 Worker 会为每个任务准备独立 `CODEX_HOME` 并复制当前 Codex 配置，避免 Windows 下复用用户目录临时状态导致的初始化失败。
+- 任务级 `CODEX_HOME` 会同步复制 `config.toml` 中相对 `model_catalog_json` 引用的模型目录；绝对路径直接复用，引用缺失或越界时在启动 Worker 前明确失败，避免 Codex 仅返回不易定位的 `os error 2`。
 - AI 分析 Worker 的认证环境优先从 Codex 配置目录 `.env` 读取，再回退进程环境变量，避免开发机密钥只配置在 Codex 目录时失效。
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。
 - AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
