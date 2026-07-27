@@ -811,7 +811,7 @@
                   <el-form-item label="Provider 编码">
                     <el-select
                       v-model="form.aiSyncExtract.providerCode"
-                      placeholder="请选择 Provider；留空则使用 AI 配置中心"
+                      placeholder="请选择参数提取 Provider"
                       filterable
                       clearable
                       style="width: 100%"
@@ -890,6 +890,42 @@
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="Provider 编码">
+                    <el-select
+                      v-model="form.translateConfig.providerCode"
+                      placeholder="请选择翻译 Provider"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in providerOptions"
+                        :key="item.providerCode"
+                        :label="formatProviderOptionLabel(item)"
+                        :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="提示词编码">
+                    <el-select
+                      v-model="form.translateConfig.promptCode"
+                      placeholder="请选择翻译提示词"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in promptOptions"
+                        :key="item.templateCode || item.value"
+                        :label="formatPromptOptionLabel(item)"
+                        :value="item.templateCode || item.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="外部推送翻译">
                     <el-switch
                       v-model="form.translateConfig.translateOnExternalSync"
@@ -927,6 +963,72 @@
                       active-text="开"
                       inactive-text="关"
                     />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>工单标题总结</span>
+                <el-tag type="info" effect="plain">缺少标题时执行</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.titleSummaryConfig" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用标题总结">
+                    <el-switch v-model="form.titleSummaryConfig.enabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Provider 编码">
+                    <el-select v-model="form.titleSummaryConfig.providerCode" placeholder="请选择标题总结 Provider" filterable clearable style="width: 100%">
+                      <el-option v-for="item in providerOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="提示词编码">
+                    <el-select v-model="form.titleSummaryConfig.promptCode" placeholder="请选择标题总结提示词" filterable clearable style="width: 100%">
+                      <el-option v-for="item in promptOptions" :key="item.templateCode || item.value" :label="formatPromptOptionLabel(item)" :value="item.templateCode || item.value" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>工单知识提炼</span>
+                <el-tag type="info" effect="plain">关闭或手动提炼时执行</el-tag>
+              </div>
+            </template>
+
+            <el-form :model="form.knowledgeConfig" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用知识提炼">
+                    <el-switch v-model="form.knowledgeConfig.enabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Provider 编码">
+                    <el-select v-model="form.knowledgeConfig.providerCode" placeholder="请选择知识提炼 Provider" filterable clearable style="width: 100%">
+                      <el-option v-for="item in providerOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="提示词编码">
+                    <el-select v-model="form.knowledgeConfig.promptCode" placeholder="请选择知识提炼提示词" filterable clearable style="width: 100%">
+                      <el-option v-for="item in promptOptions" :key="item.templateCode || item.value" :label="formatPromptOptionLabel(item)" :value="item.templateCode || item.value" />
+                    </el-select>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -1037,7 +1139,7 @@
                   <el-form-item label="Provider 编码">
                     <el-select
                       v-model="form.aiClassification.providerCode"
-                      placeholder="请选择 Provider；留空则使用 AI 配置中心"
+                      placeholder="请选择分类 Provider"
                       filterable
                       clearable
                       style="width: 100%"
@@ -1071,15 +1173,6 @@
                 </el-col>
               </el-row>
             </el-form>
-            <el-alert
-              v-if="form.aiClassification.promptContent"
-              class="mt8"
-              type="warning"
-              show-icon
-              :closable="false"
-              title="检测到历史内联提示词"
-              description="系统会保留它作为旧配置兜底；新配置请到 AI 提示词管理中维护模板正文。保存本页不会继续写入新的提示词正文。"
-            />
           </el-card>
 
           <!-- 4. 自动识别与自动化（代码第四步） -->
@@ -1092,22 +1185,6 @@
             </template>
 
             <el-form :model="form.automationConfig" label-width="180px">
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="启用新自动化配置">
-                    <el-switch
-                      v-model="form.automationConfig.enabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                    <div class="mapping-desc" style="margin-top: 4px; font-size: 12px;">
-                      开启后以下场景的开关生效
-                    </div>
-                  </el-form-item>
-                </el-col>
-              </el-row>
-
               <el-divider content-position="left">自动识别（项目/模块/人员/门店）</el-divider>
               <el-row :gutter="16">
                 <el-col :xs="24" :md="6">
@@ -1303,9 +1380,9 @@
                                 <tr><th>类型</th><th>写法</th></tr>
                               </thead>
                               <tbody>
-                                <tr><td>比较</td><td><code>status == '3. 待产研处理'</code>（支持 ==、!=、&gt;、&lt;、&gt;=、&lt;=）</td></tr>
-                                <tr><td>成员</td><td><code>status in ['2. 1.5线处理', '3. 待产研处理']</code></td></tr>
-                                <tr><td>排除</td><td><code>status not in ['5. 已关闭', '6. 已取消']</code></td></tr>
+                                <tr><td>比较</td><td><code>status_name == '3. 待产研处理'</code>（支持 ==、!=、&gt;、&lt;、&gt;=、&lt;=）</td></tr>
+                                <tr><td>成员</td><td><code>status_name in ['2. 1.5线处理', '3. 待产研处理']</code></td></tr>
+                                <tr><td>排除</td><td><code>status_name not in ['5. 已关闭', '6. 已取消']</code></td></tr>
                                 <tr><td>有值</td><td><code>has(module_id)</code> — 字段非 None 且非空字符串</td></tr>
                                 <tr><td>空值</td><td><code>module_id is None</code> — 字段为 None</td></tr>
                                 <tr><td>非空</td><td><code>module_id is not None</code> — 字段不为 None</td></tr>
@@ -1319,12 +1396,12 @@
                                 <tr><th>场景</th><th>表达式</th></tr>
                               </thead>
                               <tbody>
-                                <tr><td>特定状态+高优先级</td><td><code>status in ['3. 待产研处理', '4. 产研处理中'] and internal_priority in ['P0', 'P1']</code></td></tr>
-                                <tr><td>有模块归属才推送</td><td><code>status in ['2. 1.5线处理', '3. 待产研处理'] and has(module_id)</code></td></tr>
+                                <tr><td>特定状态+高优先级</td><td><code>status_name in ['3. 待产研处理', '4. 产研处理中'] and internal_priority in ['P0', 'P1']</code></td></tr>
+                                <tr><td>有模块归属才推送</td><td><code>status_name in ['2. 1.5线处理', '3. 待产研处理'] and has(module_id)</code></td></tr>
                                 <tr><td>指定项目+严重等级</td><td><code>has(project_id) and severity in ['S1', 'S2']</code></td></tr>
                                 <tr><td>有商家的P1工单</td><td><code>has(merchant_name) and internal_priority == 'P1'</code></td></tr>
                                 <tr><td>指定时间后创建</td><td><code>submit_time &gt;= '2026-07-01 00:00:00'</code></td></tr>
-                                <tr><td>排除关闭+有模块</td><td><code>status not in ['5. 已关闭', '6. 已取消'] and has(module_id)</code></td></tr>
+                                <tr><td>排除关闭+有模块</td><td><code>status_name not in ['5. 已关闭', '6. 已取消'] and has(module_id)</code></td></tr>
                               </tbody>
                             </table>
                             <div class="condition-help-subtitle">可用字段列表</div>
@@ -1333,7 +1410,7 @@
                                 <tr><th style="width:30%">分类</th><th>字段名</th></tr>
                               </thead>
                               <tbody>
-                                <tr><td>基本信息</td><td><code>ticket_id</code> <code>ticket_no</code> <code>ticket_url</code> <code>title</code> <code>status</code> <code>source</code> <code>del_flag</code></td></tr>
+                                <tr><td>基本信息</td><td><code>ticket_id</code> <code>ticket_no</code> <code>ticket_url</code> <code>title</code> <code>status</code>（编码） <code>status_name</code>（显示名） <code>source</code> <code>del_flag</code></td></tr>
                                 <tr><td>项目/模块/分类</td><td><code>project_id</code> <code>module_id</code> <code>module_name</code> <code>category_id</code> <code>category_name</code> <code>issue_type_id</code> <code>issue_type_name</code></td></tr>
                                 <tr><td>优先级/严重度</td><td><code>customer_priority</code> <code>internal_priority</code> <code>severity</code></td></tr>
                                 <tr><td>人员</td><td><code>reporter_id</code> <code>reporter_name</code> <code>current_assignee_id</code> <code>current_assignee_name</code> <code>first_line_assignee_id</code> <code>first_line_assignee_name</code> <code>internal_owner_id</code> <code>internal_owner_name</code></td></tr>
@@ -1353,7 +1430,7 @@
                       v-model="form.groupPush.autoPushCondition"
                       type="textarea"
                       :rows="2"
-                      placeholder='例: status in [&#39;2. 1.5线处理&#39;, &#39;3. 待产研处理&#39;] and has(module_id)'
+                      placeholder='例: status_name in [&#39;2. 1.5线处理&#39;, &#39;3. 待产研处理&#39;] and has(module_id)'
                     />
                   </el-form-item>
                 </el-col>
@@ -2740,7 +2817,7 @@
         providerOptions.value = [];
       });
     listAiPromptTemplateOptions({
-      template_category: 'classification,analysis,common',
+      template_category: 'translate,knowledge,classification,analysis,common',
       enabled_only: true,
     })
       .then((response) => {

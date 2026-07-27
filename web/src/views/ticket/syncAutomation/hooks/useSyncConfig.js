@@ -269,9 +269,6 @@ export function useSyncConfig(proxy) {
         sourceSystem: 'feishu_bitable_pull',
         ticketNoField: 'ticketNo', updatedAtField: '', sortField: '',
         includeRecordUrl: true, forceSync: false, fieldMappings: [],
-        automation: {
-          autoIdentify: true, autoLogPull: false, autoAiAnalysis: false, autoTranslate: true,
-        },
       },
       personReminder: {
         enabled: false, sendMode: 'push_config', dataSource: 'bitable',
@@ -322,7 +319,6 @@ export function useSyncConfig(proxy) {
         statusChangeForceReclassify: false,
         providerCode: '',
         promptCode: 'ticket_stat_classify_default',
-        promptContent: '',
       },
       aiSyncExtract: {
         externalPushEnabled: false,
@@ -335,13 +331,24 @@ export function useSyncConfig(proxy) {
       },
       translateConfig: {
         enabled: false,
+        providerCode: '',
+        promptCode: 'ticket_translate_default',
         translateOnExternalSync: true,
         translateOnRemotePull: true,
         translateOnBitablePull: true,
         translateOnManualCreate: false,
       },
-      automationConfig: {
+      titleSummaryConfig: {
         enabled: false,
+        providerCode: '',
+        promptCode: 'ticket_title_summary_default',
+      },
+      knowledgeConfig: {
+        enabled: false,
+        providerCode: '',
+        promptCode: 'ticket_knowledge_extract_default',
+      },
+      automationConfig: {
         autoIdentifyOnExternalSync: false,
         autoIdentifyOnRemotePull: false,
         autoIdentifyOnBitablePull: true,
@@ -710,7 +717,6 @@ export function useSyncConfig(proxy) {
       statusChangeForceReclassify: Boolean(aiClassification.statusChangeForceReclassify),
       providerCode: aiClassification.providerCode || '',
       promptCode: aiClassification.promptCode || 'ticket_stat_classify_default',
-      promptContent: aiClassification.promptContent || '',
     }
 
     const aiSyncExtract = payload.aiSyncExtract || {}
@@ -720,7 +726,7 @@ export function useSyncConfig(proxy) {
       bitablePullEnabled: Boolean(aiSyncExtract.bitablePullEnabled),
       manualCreateEnabled: Boolean(aiSyncExtract.manualCreateEnabled),
       providerCode: aiSyncExtract.providerCode || '',
-      promptCode: aiSyncExtract.promptCode || '',
+      promptCode: aiSyncExtract.promptCode || 'ticket_sync_extract_default',
       extractFields: Array.isArray(aiSyncExtract.extractFields)
         ? aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)
         : ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
@@ -729,15 +735,30 @@ export function useSyncConfig(proxy) {
     const translateConfig = payload.translateConfig || {}
     form.translateConfig = {
       enabled: Boolean(translateConfig.enabled),
+      providerCode: translateConfig.providerCode || '',
+      promptCode: translateConfig.promptCode || 'ticket_translate_default',
       translateOnExternalSync: translateConfig.translateOnExternalSync !== false,
       translateOnRemotePull: translateConfig.translateOnRemotePull !== false,
       translateOnBitablePull: translateConfig.translateOnBitablePull !== false,
       translateOnManualCreate: Boolean(translateConfig.translateOnManualCreate),
     }
 
+    const titleSummaryConfig = payload.titleSummaryConfig || {}
+    form.titleSummaryConfig = {
+      enabled: Boolean(titleSummaryConfig.enabled),
+      providerCode: titleSummaryConfig.providerCode || '',
+      promptCode: titleSummaryConfig.promptCode || 'ticket_title_summary_default',
+    }
+
+    const knowledgeConfig = payload.knowledgeConfig || {}
+    form.knowledgeConfig = {
+      enabled: Boolean(knowledgeConfig.enabled),
+      providerCode: knowledgeConfig.providerCode || '',
+      promptCode: knowledgeConfig.promptCode || 'ticket_knowledge_extract_default',
+    }
+
     const automationConfig = payload.automationConfig || {}
     form.automationConfig = {
-      enabled: Boolean(automationConfig.enabled),
       autoIdentifyOnExternalSync: Boolean(automationConfig.autoIdentifyOnExternalSync),
       autoIdentifyOnRemotePull: Boolean(automationConfig.autoIdentifyOnRemotePull),
       autoIdentifyOnBitablePull: automationConfig.autoIdentifyOnBitablePull !== false,
@@ -990,7 +1011,6 @@ export function useSyncConfig(proxy) {
         statusChangeForceReclassify: Boolean(payload.aiClassification?.statusChangeForceReclassify),
         providerCode: String(payload.aiClassification?.providerCode || '').trim(),
         promptCode: String(payload.aiClassification?.promptCode || '').trim() || 'ticket_stat_classify_default',
-        promptContent: '',
       }
       payload.aiSyncExtract = {
         externalPushEnabled: Boolean(payload.aiSyncExtract?.externalPushEnabled),
@@ -998,20 +1018,31 @@ export function useSyncConfig(proxy) {
         bitablePullEnabled: Boolean(payload.aiSyncExtract?.bitablePullEnabled),
         manualCreateEnabled: Boolean(payload.aiSyncExtract?.manualCreateEnabled),
         providerCode: String(payload.aiSyncExtract?.providerCode || '').trim(),
-        promptCode: String(payload.aiSyncExtract?.promptCode || '').trim(),
+        promptCode: String(payload.aiSyncExtract?.promptCode || '').trim() || 'ticket_sync_extract_default',
         extractFields: Array.isArray(payload.aiSyncExtract?.extractFields)
           ? Array.from(new Set(payload.aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)))
           : ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
       }
       payload.translateConfig = {
         enabled: Boolean(payload.translateConfig?.enabled),
+        providerCode: String(payload.translateConfig?.providerCode || '').trim(),
+        promptCode: String(payload.translateConfig?.promptCode || '').trim() || 'ticket_translate_default',
         translateOnExternalSync: payload.translateConfig?.translateOnExternalSync !== false,
         translateOnRemotePull: payload.translateConfig?.translateOnRemotePull !== false,
         translateOnBitablePull: payload.translateConfig?.translateOnBitablePull !== false,
         translateOnManualCreate: Boolean(payload.translateConfig?.translateOnManualCreate),
       }
+      payload.titleSummaryConfig = {
+        enabled: Boolean(payload.titleSummaryConfig?.enabled),
+        providerCode: String(payload.titleSummaryConfig?.providerCode || '').trim(),
+        promptCode: String(payload.titleSummaryConfig?.promptCode || '').trim() || 'ticket_title_summary_default',
+      }
+      payload.knowledgeConfig = {
+        enabled: Boolean(payload.knowledgeConfig?.enabled),
+        providerCode: String(payload.knowledgeConfig?.providerCode || '').trim(),
+        promptCode: String(payload.knowledgeConfig?.promptCode || '').trim() || 'ticket_knowledge_extract_default',
+      }
       payload.automationConfig = {
-        enabled: Boolean(payload.automationConfig?.enabled),
         autoIdentifyOnExternalSync: Boolean(payload.automationConfig?.autoIdentifyOnExternalSync),
         autoIdentifyOnRemotePull: Boolean(payload.automationConfig?.autoIdentifyOnRemotePull),
         autoIdentifyOnBitablePull: payload.automationConfig?.autoIdentifyOnBitablePull !== false,

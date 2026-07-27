@@ -275,40 +275,6 @@ class TicketSyncService:
         return translated_description, translation_meta, origin_description
 
     @classmethod
-    def _merge_legacy_ai_classification_prompt_content(
-        cls,
-        current_config: dict[str, Any],
-        next_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        保存同步配置时保留旧版内联 AI 分类提示词正文。
-
-        新版页面只保存 Provider/Prompt 编码，提示词正文统一由 SysAiPromptTemplate 管理。
-        仅在前端未显式提交 promptContent 字段时才保留旧值，避免字段缺失导致的历史数据丢失。
-        如果前端显式提交了 promptContent（包括空字符串），则以前端值为准。
-        :param current_config: 当前已生效配置。
-        :param next_config: 本次待保存配置。
-        :return: 合并后的配置。
-        """
-        current_ai_config = (
-            current_config.get("aiClassification")
-            if isinstance(current_config.get("aiClassification"), dict)
-            else {}
-        )
-        next_ai_config = (
-            next_config.get("aiClassification")
-            if isinstance(next_config.get("aiClassification"), dict)
-            else {}
-        )
-        # 仅在前端未显式提交 promptContent 字段时才保留旧值
-        if "promptContent" not in next_ai_config:
-            legacy_prompt_content = str(current_ai_config.get("promptContent") or "").strip()
-            if legacy_prompt_content:
-                next_ai_config["promptContent"] = legacy_prompt_content
-                next_config["aiClassification"] = next_ai_config
-        return next_config
-
-    @classmethod
     def _resolve_ai_classification_scene_for_sync_status(
         cls,
         config: dict[str, Any],

@@ -505,61 +505,6 @@ class TicketService:
                 )
         query_db.commit()
 
-    @classmethod
-    def ensure_param_config_rows(cls, query_db: Session) -> None:
-        """
-        初始化工单翻译与轻量 AI 相关系统参数。
-        :param query_db: 数据库会话
-        :return: 无
-        """
-        from module_admin.entity.do.config_do import SysConfig
-
-        defaults = [
-            (
-                "ticket.ai.translate.provider.code",
-                "工单AI翻译Provider编码",
-                "",
-                "工单创建或编辑后执行轻量翻译时使用的AI Provider编码",
-            ),
-            (
-                "ticket.ai.translate.prompt.code",
-                "工单AI翻译提示词编码",
-                "ticket_translate_default",
-                "工单创建或编辑后执行轻量翻译时使用的提示词模板编码",
-            ),
-            (
-                "ticket.ai.knowledge.provider.code",
-                "工单知识提炼Provider编码",
-                "",
-                "工单关闭后自动提炼知识库案例时使用的AI Provider编码",
-            ),
-            (
-                "ticket.ai.knowledge.prompt.code",
-                "工单知识提炼提示词编码",
-                "ticket_knowledge_extract_default",
-                "工单关闭后自动提炼知识库案例时使用的提示词模板编码",
-            ),
-        ]
-        now = datetime.now()
-        for config_key, config_name, config_value, remark in defaults:
-            existing = query_db.query(SysConfig).filter(SysConfig.config_key == config_key).first()
-            if existing:
-                continue
-            query_db.add(
-                SysConfig(
-                    config_name=config_name,
-                    config_key=config_key,
-                    config_value=config_value,
-                    config_type="Y",
-                    create_by="system",
-                    update_by="system",
-                    create_time=now,
-                    update_time=now,
-                    remark=remark,
-                )
-            )
-        query_db.flush()
-
     @staticmethod
     def _extract_version_key_from_text(text: str | None) -> str:
         """

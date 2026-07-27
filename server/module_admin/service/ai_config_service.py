@@ -4,13 +4,9 @@ from typing import Any
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from module_admin.dao.ai_prompt_template_dao import AiPromptTemplateDao
-from module_admin.dao.ai_provider_dao import AiProviderDao
 from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.ai_config_vo import AiConfigSummaryItemModel, AiConfigSummaryModel, AiConfigUpdateModel
-from module_admin.entity.vo.ai_prompt_template_vo import AiPromptTemplateOptionModel
-from module_admin.entity.vo.ai_provider_vo import AiProviderOptionModel
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 
@@ -21,118 +17,6 @@ class AiConfigService:
     """
 
     CONFIG_DEFS: tuple[dict[str, Any], ...] = (
-        {
-            "field_name": "translate_enabled",
-            "config_key": "ticket.ai.translate.enabled",
-            "config_name": "工单AI翻译开关",
-            "default_value": "false",
-            "remark": "控制工单创建、编辑和外部同步后是否自动执行轻量翻译",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "translate_provider_code",
-            "config_key": "ticket.ai.translate.provider.code",
-            "config_name": "工单AI翻译Provider编码",
-            "default_value": "",
-            "remark": "工单创建或编辑后执行轻量翻译时使用的AI Provider编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "translate_prompt_code",
-            "config_key": "ticket.ai.translate.prompt.code",
-            "config_name": "工单AI翻译提示词编码",
-            "default_value": "ticket_translate_default",
-            "remark": "工单创建或编辑后执行轻量翻译时使用的提示词模板编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "title_summary_enabled",
-            "config_key": "ticket.ai.title.summary.enabled",
-            "config_name": "工单标题总结开关",
-            "default_value": "false",
-            "remark": "控制外部工单未传标题时是否自动调用轻量AI总结标题",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "title_summary_provider_code",
-            "config_key": "ticket.ai.title.summary.provider.code",
-            "config_name": "工单标题总结Provider编码",
-            "default_value": "",
-            "remark": "外部工单标题总结时使用的AI Provider编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "title_summary_prompt_code",
-            "config_key": "ticket.ai.title.summary.prompt.code",
-            "config_name": "工单标题总结提示词编码",
-            "default_value": "ticket_title_summary_default",
-            "remark": "外部工单标题总结时使用的提示词模板编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "category_classify_enabled",
-            "config_key": "ticket.ai.category.classify.enabled",
-            "config_name": "工单自动分类开关",
-            "default_value": "false",
-            "remark": "控制工单同步后是否自动执行轻量AI分类",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "category_classify_provider_code",
-            "config_key": "ticket.ai.category.classify.provider.code",
-            "config_name": "工单自动分类Provider编码",
-            "default_value": "",
-            "remark": "工单自动分类时使用的AI Provider编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "category_classify_prompt_code",
-            "config_key": "ticket.ai.category.classify.prompt.code",
-            "config_name": "工单自动分类提示词编码",
-            "default_value": "ticket_stat_classify_default",
-            "remark": "工单分类统计时使用的提示词模板编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "log_extract_enabled",
-            "config_key": "ticket.ai.log_extract.enabled",
-            "config_name": "工单日志参数提取开关",
-            "default_value": "false",
-            "remark": "控制外部工单同步后是否调用轻量AI提取POS/SCO与日志日期，并复用同次结果做标题/分类理解",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "log_extract_provider_code",
-            "config_key": "ticket.ai.log_extract.provider.code",
-            "config_name": "工单日志参数提取Provider编码",
-            "default_value": "",
-            "remark": "工单日志参数提取时使用的AI Provider编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "log_extract_prompt_code",
-            "config_key": "ticket.ai.log_extract.prompt.code",
-            "config_name": "工单日志参数提取提示词编码",
-            "default_value": "ticket_sync_extract_default",
-            "remark": "工单日志参数提取时使用的提示词模板编码",
-            "section": "light_translate",
-        },
-        {
-            "field_name": "knowledge_provider_code",
-            "config_key": "ticket.ai.knowledge.provider.code",
-            "config_name": "工单知识提炼Provider编码",
-            "default_value": "",
-            "remark": "工单关闭后自动提炼知识库案例时使用的AI Provider编码",
-            "section": "knowledge_extract",
-        },
-        {
-            "field_name": "knowledge_prompt_code",
-            "config_key": "ticket.ai.knowledge.prompt.code",
-            "config_name": "工单知识提炼提示词编码",
-            "default_value": "ticket_knowledge_extract_default",
-            "remark": "工单关闭后自动提炼知识库案例时使用的提示词模板编码",
-            "section": "knowledge_extract",
-        },
         {
             "field_name": "analysis_worker_command",
             "config_key": TicketAiAnalysisService.CONFIG_WORKER_COMMAND,
@@ -277,32 +161,6 @@ class AiConfigService:
             return int(default_value)
 
     @classmethod
-    def _get_config_text_with_blank_default(cls, db: Session, config_key: str, default_value: str) -> str:
-        """
-        获取系统参数文本值，若值为空字符串则回退默认值。
-        :param db: orm对象
-        :param config_key: 参数键名
-        :param default_value: 默认值
-        :return: 参数值
-        """
-        value = cls._get_config_text(db, config_key, "")
-        if str(value or "").strip():
-            return str(value)
-        return str(default_value)
-
-    @classmethod
-    def _normalize_classify_prompt_code(cls, prompt_code: str | None) -> str:
-        """
-        归一化工单分类提示词编码。
-        :param prompt_code: 系统参数或前端提交的提示词编码。
-        :return: 可用的分类统计提示词编码。
-        """
-        normalized = str(prompt_code or "").strip()
-        if not normalized or normalized == "ticket_category_classify_default":
-            return "ticket_stat_classify_default"
-        return normalized
-
-    @classmethod
     def _upsert_config(
         cls,
         db: Session,
@@ -372,52 +230,7 @@ class AiConfigService:
             )
             for item in cls.CONFIG_DEFS
         ]
-        provider_options = [
-            AiProviderOptionModel.model_validate(provider)
-            for provider in AiProviderDao.get_ai_provider_options(db, enabled_only=False)
-        ]
-        prompt_options = {
-            category: [
-                AiPromptTemplateOptionModel.model_validate(template)
-                for template in AiPromptTemplateDao.get_prompt_template_options(
-                    db, enabled_only=False, template_categories=[category]
-                )
-            ]
-            for category in ("translate", "knowledge", "analysis", "common")
-        }
         summary = AiConfigSummaryModel(
-            translate_enabled=str(cls._get_config_text(db, "ticket.ai.translate.enabled", "false")).lower()
-            == "true",
-            translate_provider_code=cls._get_config_text(db, "ticket.ai.translate.provider.code", ""),
-            translate_prompt_code=cls._get_config_text(
-                db, "ticket.ai.translate.prompt.code", "ticket_translate_default"
-            ),
-            title_summary_enabled=str(cls._get_config_text(db, "ticket.ai.title.summary.enabled", "false")).lower()
-            == "true",
-            title_summary_provider_code=cls._get_config_text(db, "ticket.ai.title.summary.provider.code", ""),
-            title_summary_prompt_code=cls._get_config_text(
-                db, "ticket.ai.title.summary.prompt.code", "ticket_title_summary_default"
-            ),
-            category_classify_enabled=str(
-                cls._get_config_text(db, "ticket.ai.category.classify.enabled", "false")
-            ).lower()
-            == "true",
-            category_classify_provider_code=cls._get_config_text(db, "ticket.ai.category.classify.provider.code", ""),
-            category_classify_prompt_code=cls._normalize_classify_prompt_code(
-                cls._get_config_text_with_blank_default(
-                    db, "ticket.ai.category.classify.prompt.code", "ticket_stat_classify_default"
-                )
-            ),
-            log_extract_enabled=str(cls._get_config_text(db, "ticket.ai.log_extract.enabled", "false")).lower()
-            == "true",
-            log_extract_provider_code=cls._get_config_text(db, "ticket.ai.log_extract.provider.code", ""),
-            log_extract_prompt_code=cls._get_config_text_with_blank_default(
-                db, "ticket.ai.log_extract.prompt.code", "ticket_sync_extract_default"
-            ),
-            knowledge_provider_code=cls._get_config_text(db, "ticket.ai.knowledge.provider.code", ""),
-            knowledge_prompt_code=cls._get_config_text(
-                db, "ticket.ai.knowledge.prompt.code", "ticket_knowledge_extract_default"
-            ),
             analysis_worker_command=cls._get_config_text(
                 db, TicketAiAnalysisService.CONFIG_WORKER_COMMAND, TicketAiAnalysisService.DEFAULT_WORKER_COMMAND
             ),
@@ -453,8 +266,6 @@ class AiConfigService:
                 )
             ),
             config_rows=config_rows,
-            provider_options=provider_options,
-            prompt_options=prompt_options,
             quick_links=[dict(item) for item in cls.QUICK_LINKS],
         )
         return summary
@@ -482,8 +293,6 @@ class AiConfigService:
                 if field_name not in field_to_config:
                     continue
                 config_def = field_to_config[field_name]
-                if field_name == "category_classify_prompt_code":
-                    value = cls._normalize_classify_prompt_code(value)
                 cls._upsert_config(
                     query_db,
                     config_key=config_def["config_key"],

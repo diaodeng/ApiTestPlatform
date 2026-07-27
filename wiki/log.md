@@ -1578,3 +1578,12 @@ updated: 2026-07-26
 - 创建的双向链接：0 对（沿用工单自动化流程与工单域既有双向链接）。
 - 变更传播链：用户级 `config.toml.model_catalog_json` -> `TicketAiCodexConfigService.copy_model_catalog` -> 任务级 `.codex_home` -> `codex exec` 启动。
 - 总共涉及页面：3。
+
+## [2026-07-27] INGEST-CODE | 工单轻量 AI 配置统一收敛
+- 触发：用户要求清理 AI 配置中心与工单同步配置之间的重复配置，不保留旧配置兼容，并让群推送按工作流状态显示名判断。
+- 架构层：工单域 / 同步配置 / 轻量 AI / 定时任务 / 群推送 / Web 控制台。
+- 创建的页面：`web/public/docs/2026-07-27-ticket-sync-light-ai-config-consolidation.md`。
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`flows/ticket-external-sync-flow.md`、`web/public/docs/update_history.md`。
+- 创建的双向链接：0 对（沿用工单域与同步流程既有双向链接）。
+- 变更传播链：`ticket.sync.automation` -> `TicketSyncAiConfigService` -> 翻译/标题总结/分类/参数提取/知识提炼；定时任务显式 `automation` -> 主动拉取任务级覆盖；工作流状态编码 -> `status_name` -> 群推送条件表达式。
+- 总共涉及页面：5。

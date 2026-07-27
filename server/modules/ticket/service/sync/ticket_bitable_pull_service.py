@@ -164,12 +164,15 @@ class TicketBitablePullService:
             TicketSyncConfigService.default_bitable_pull_config(),
         )
 
+        task_automation_override: dict[str, Any] | None = None
         if isinstance(bitable_pull_override, dict):
             nested_override = (
                 bitable_pull_override.get("bitablePull")
                 if isinstance(bitable_pull_override.get("bitablePull"), dict)
                 else bitable_pull_override
             )
+            if isinstance(nested_override, dict) and isinstance(nested_override.get("automation"), dict):
+                task_automation_override = dict(nested_override["automation"])
             pull_config = TicketSyncConfigService.merge_non_empty_runtime_override(pull_config, nested_override)
         pull_config = TicketSyncConfigService.normalize_bitable_pull_config(
             pull_config,
@@ -331,7 +334,11 @@ class TicketBitablePullService:
             if current_user is None
             else cls.normalize_current_user_payload(current_user.model_dump())
         )
-        automation_override = pull_config.get("automation") if isinstance(pull_config.get("automation"), dict) else {}
+        automation_model = (
+            TicketSyncAutomationModel.model_validate(task_automation_override)
+            if task_automation_override is not None
+            else None
+        )
 
         for record in records:
             summary["recordCount"] += 1
@@ -349,7 +356,7 @@ class TicketBitablePullService:
                 continue
             sync_object = sync_object.model_copy(
                 update={
-                    "automation": TicketSyncAutomationModel.model_validate(automation_override),
+                    "automation": automation_model,
                 }
             )
             existing_ticket = TicketDao.get_ticket_by_no(db, sync_object.ticket_no)

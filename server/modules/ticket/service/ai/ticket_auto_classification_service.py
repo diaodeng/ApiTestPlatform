@@ -107,12 +107,7 @@ class TicketAutoClassificationService:
         logger.info(
             f"工单AI分类统计调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
             f"provider_code={str(ai_config.get('providerCode') or '').strip() or '-'}, "
-            f"prompt_code={ai_prompt_code or str(ai_config.get('promptCode') or '').strip() or '-'}, "
-            f"has_prompt_content={bool(str(ai_config.get('promptContent') or '').strip())}"
-        )
-        legacy_prompt_content = cls.resolve_legacy_ai_classification_prompt_content(
-            ai_config,
-            prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
+            f"prompt_code={ai_prompt_code or str(ai_config.get('promptCode') or '').strip() or '-'}"
         )
         result_payload, meta = TicketLightAiService.classify_ticket_statistics(
             db,
@@ -123,7 +118,6 @@ class TicketAutoClassificationService:
             stat_options=stat_options,
             override_provider_code=str(ai_config.get("providerCode") or "").strip() or None,
             override_prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
-            override_prompt_content=legacy_prompt_content,
             source_type=source_type,
             source_id=ticket.ticket_id,
             source_ref=source_ref,
@@ -229,27 +223,6 @@ class TicketAutoClassificationService:
             "problemPatternName": result_payload.get("problemPatternName"),
             "meta": meta,
         }
-
-    @classmethod
-    def resolve_legacy_ai_classification_prompt_content(
-        cls,
-        ai_config: dict[str, Any],
-        *,
-        prompt_code: str | None,
-    ) -> str | None:
-        """
-        解析旧版同步配置内联提示词正文，仅作为历史兼容兜底。
-        :param ai_config: 同步配置中的 AI 分类配置
-        :param prompt_code: 本次选择的提示词编码
-        :return: 需要覆盖的提示词正文；不需要覆盖时返回 None
-        """
-        legacy_content = str((ai_config or {}).get("promptContent") or "").strip()
-        if not legacy_content:
-            return None
-        normalized_prompt_code = str(prompt_code or "").strip()
-        if normalized_prompt_code and normalized_prompt_code != "ticket_stat_classify_default":
-            return None
-        return legacy_content
 
     @classmethod
     def build_ticket_stat_current_fields(cls, ticket: Ticket) -> dict[str, Any]:

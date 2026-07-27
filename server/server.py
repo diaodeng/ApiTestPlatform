@@ -91,7 +91,6 @@ async def lifespan(app: FastAPI):
         sync_registered_menus(app)
         with SessionLocal() as db:
             TicketService.init_default_workflow(db)
-            TicketService.ensure_param_config_rows(db)
             TicketLogPullService.ensure_param_config_rows(db)
             TicketAiAnalysisService.ensure_param_config_rows(db)
             AiPromptTemplateService.ensure_default_prompt_templates(db)

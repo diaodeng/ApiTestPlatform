@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.do.config_do import SysConfig
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
@@ -143,6 +144,8 @@ class TicketSyncConfigService:
             "aiClassification": cls.default_ai_classification_config(),
             "aiSyncExtract": cls.default_ai_sync_extract_config(),
             "translateConfig": cls.default_translate_config(),
+            "titleSummaryConfig": cls.default_title_summary_config(),
+            "knowledgeConfig": cls.default_knowledge_config(),
             "automationConfig": cls.default_automation_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
@@ -181,14 +184,7 @@ class TicketSyncConfigService:
 
         :return: AI 同步提取配置默认值。
         """
-        return {
-            "externalPushEnabled": False,
-            "remotePullEnabled": False,
-            "bitablePullEnabled": False,
-            "manualCreateEnabled": False,
-            "providerCode": "",
-            "promptCode": "",
-        }
+        return TicketSyncAiConfigService.default_section("aiSyncExtract")
 
     # --- 翻译默认配置 ---
 
@@ -199,13 +195,25 @@ class TicketSyncConfigService:
 
         :return: 翻译配置默认值。
         """
-        return {
-            "enabled": False,
-            "translateOnExternalSync": True,
-            "translateOnRemotePull": True,
-            "translateOnBitablePull": True,
-            "translateOnManualCreate": False,
-        }
+        return TicketSyncAiConfigService.default_section("translateConfig")
+
+    @classmethod
+    def default_title_summary_config(cls) -> dict[str, Any]:
+        """
+        构建工单标题总结默认配置。
+
+        :return: 标题总结配置默认值。
+        """
+        return TicketSyncAiConfigService.default_section("titleSummaryConfig")
+
+    @classmethod
+    def default_knowledge_config(cls) -> dict[str, Any]:
+        """
+        构建工单知识提炼默认配置。
+
+        :return: 知识提炼配置默认值。
+        """
+        return TicketSyncAiConfigService.default_section("knowledgeConfig")
 
     # --- 自动化默认配置 ---
 
@@ -217,7 +225,6 @@ class TicketSyncConfigService:
         :return: 自动化配置默认值。
         """
         return {
-            "enabled": False,
             "autoIdentifyOnExternalSync": False,
             "autoIdentifyOnRemotePull": False,
             "autoIdentifyOnBitablePull": True,
@@ -499,7 +506,7 @@ class TicketSyncConfigService:
         :return: AI 分类统计配置。
         """
         return {
-            "enabled": False,
+            **TicketSyncAiConfigService.default_section("aiClassification"),
             "runOnExternalSync": False,
             "runOnRemotePull": False,
             "runOnManualCreate": False,
@@ -507,9 +514,6 @@ class TicketSyncConfigService:
             "runOnBitablePull": False,
             "statusChangeTriggerStatuses": [],
             "statusChangeForceReclassify": False,
-            "providerCode": "",
-            "promptCode": "ticket_stat_classify_default",
-            "promptContent": "",
         }
 
     # --- migrated from TicketSyncService._normalize_stat_option_rows ---
@@ -638,7 +642,6 @@ class TicketSyncConfigService:
                 or defaults["promptCode"]
                 or ""
             ).strip(),
-            "promptContent": str(source.get("promptContent") or source.get("prompt_content") or "").strip(),
         }
 
     # --- migrated from TicketSyncService._normalize_ai_classification_status_triggers ---
@@ -965,6 +968,7 @@ class TicketSyncConfigService:
         config["forceSync"] = SyncUtil.to_bool(config.get("forceSync"), False)
         config["autoAppendTimeFilter"] = SyncUtil.to_bool(config.get("autoAppendTimeFilter"), True)
         config["fieldMappings"] = cls.normalize_bitable_field_mappings(config.get("fieldMappings"))
+        config.pop("automation", None)
         return config
 
     # --- migrated from TicketSyncService._resolve_bitable_pull_created_after ---
@@ -1444,31 +1448,22 @@ class TicketSyncConfigService:
         summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
         merged["summaryReport"] = summary_report
 
-        ai_sync_extract = merged.get("aiSyncExtract") if isinstance(merged.get("aiSyncExtract"), dict) else {}
-        default_ai_sync_extract = cls.default_ai_sync_extract_config()
-        ai_sync_extract = {**default_ai_sync_extract, **ai_sync_extract}
-        ai_sync_extract["externalPushEnabled"] = bool(ai_sync_extract.get("externalPushEnabled"))
-        ai_sync_extract["remotePullEnabled"] = bool(ai_sync_extract.get("remotePullEnabled"))
-        ai_sync_extract["bitablePullEnabled"] = bool(ai_sync_extract.get("bitablePullEnabled"))
-        ai_sync_extract["manualCreateEnabled"] = bool(ai_sync_extract.get("manualCreateEnabled"))
-        ai_sync_extract["providerCode"] = str(ai_sync_extract.get("providerCode") or "").strip()
-        ai_sync_extract["promptCode"] = str(ai_sync_extract.get("promptCode") or "").strip()
-        merged["aiSyncExtract"] = ai_sync_extract
-
-        translate_config = merged.get("translateConfig") if isinstance(merged.get("translateConfig"), dict) else {}
-        default_translate = cls.default_translate_config()
-        translate_config = {**default_translate, **translate_config}
-        translate_config["enabled"] = bool(translate_config.get("enabled"))
-        translate_config["translateOnExternalSync"] = bool(translate_config.get("translateOnExternalSync"))
-        translate_config["translateOnRemotePull"] = bool(translate_config.get("translateOnRemotePull"))
-        translate_config["translateOnBitablePull"] = bool(translate_config.get("translateOnBitablePull"))
-        translate_config["translateOnManualCreate"] = bool(translate_config.get("translateOnManualCreate"))
-        merged["translateConfig"] = translate_config
+        merged["aiSyncExtract"] = TicketSyncAiConfigService.normalize_section(
+            "aiSyncExtract", merged.get("aiSyncExtract")
+        )
+        merged["translateConfig"] = TicketSyncAiConfigService.normalize_section(
+            "translateConfig", merged.get("translateConfig")
+        )
+        merged["titleSummaryConfig"] = TicketSyncAiConfigService.normalize_section(
+            "titleSummaryConfig", merged.get("titleSummaryConfig")
+        )
+        merged["knowledgeConfig"] = TicketSyncAiConfigService.normalize_section(
+            "knowledgeConfig", merged.get("knowledgeConfig")
+        )
 
         automation_config = merged.get("automationConfig") if isinstance(merged.get("automationConfig"), dict) else {}
         default_automation = cls.default_automation_config()
         automation_config = {**default_automation, **automation_config}
-        automation_config["enabled"] = bool(automation_config.get("enabled"))
         for key in (
             "autoIdentifyOnExternalSync", "autoIdentifyOnRemotePull", "autoIdentifyOnBitablePull",
             "autoIdentifyOnManualCreate",
@@ -1559,42 +1554,6 @@ class TicketSyncConfigService:
         config = cls.load_sync_config(db)
         return cls.normalize_stat_classification_config(config.get("statClassification"))
 
-    # --- migrated from TicketSyncService._merge_legacy_ai_classification_prompt_content ---
-
-    @classmethod
-    def merge_legacy_ai_classification_prompt_content(
-        cls,
-        current_config: dict[str, Any],
-        next_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        保存同步配置时保留旧版内联 AI 分类提示词正文。
-
-        新版页面只保存 Provider/Prompt 编码，提示词正文统一由 SysAiPromptTemplate 管理。
-        仅在前端未显式提交 promptContent 字段时才保留旧值，避免字段缺失导致的历史数据丢失。
-        如果前端显式提交了 promptContent（包括空字符串），则以前端值为准。
-        :param current_config: 当前已生效配置。
-        :param next_config: 本次待保存配置。
-        :return: 合并后的配置。
-        """
-        current_ai_config = (
-            current_config.get("aiClassification")
-            if isinstance(current_config.get("aiClassification"), dict)
-            else {}
-        )
-        next_ai_config = (
-            next_config.get("aiClassification")
-            if isinstance(next_config.get("aiClassification"), dict)
-            else {}
-        )
-        # 仅在前端未显式提交 promptContent 字段时才保留旧值
-        if "promptContent" not in next_ai_config:
-            legacy_prompt_content = str(current_ai_config.get("promptContent") or "").strip()
-            if legacy_prompt_content:
-                next_ai_config["promptContent"] = legacy_prompt_content
-                next_config["aiClassification"] = next_ai_config
-        return next_config
-
     # --- migrated from TicketSyncService.update_sync_automation_config_services ---
 
     @classmethod
@@ -1604,14 +1563,20 @@ class TicketSyncConfigService:
         config_value: dict[str, Any],
         current_user_name: str,
     ) -> CrudResponseModel:
+        """
+        保存工单同步自动化配置。
+
+        :param db: 数据库会话。
+        :param config_value: 前端提交的完整同步配置。
+        :param current_user_name: 当前用户名。
+        :return: 保存结果。
+        """
         try:
-            current_config = cls.load_sync_config(db)
             merged = cls.normalize_sync_config(config_value)
-            merged = cls.merge_legacy_ai_classification_prompt_content(current_config, merged)
             now = datetime.now()
             row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_KEY).first()
             if row:
-                row.config_name = "宸ュ崟鍚屾鑷姩鍖栭厤缃?"
+                row.config_name = "工单同步自动化配置"
                 row.config_value = SyncUtil.json_dumps(merged)
                 row.config_type = "Y"
                 row.update_by = current_user_name
@@ -1619,7 +1584,7 @@ class TicketSyncConfigService:
             else:
                 db.add(
                     SysConfig(
-                        config_name="宸ュ崟鍚屾鑷姩鍖栭厤缃?",
+                        config_name="工单同步自动化配置",
                         config_key=cls.CONFIG_KEY,
                         config_value=SyncUtil.json_dumps(merged),
                         config_type="Y",
@@ -1627,11 +1592,11 @@ class TicketSyncConfigService:
                         update_by=current_user_name,
                         create_time=now,
                         update_time=now,
-                        remark="澶栭儴宸ュ崟鍚屾銆佸唴缃戞媺鍙栥€佽鍒欒瘑鍒拰鑷姩鍖栭摼璺厤缃?JSON",
+                        remark="外部工单同步、内网拉取、规则识别和自动化链路配置 JSON",
                     )
                 )
             db.commit()
-            return CrudResponseModel(is_success=True, message="淇濆瓨鎴愬姛", result=merged)
+            return CrudResponseModel(is_success=True, message="保存成功", result=merged)
         except Exception as exc:
             db.rollback()
             raise exc

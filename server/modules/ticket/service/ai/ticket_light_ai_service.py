@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
 from module_admin.dao.ai_provider_dao import AiProviderDao
-from module_admin.entity.do.config_do import SysConfig
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.service.ai_task_execution_service import AiTaskExecutionService
+from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from utils.api_key_util import ApiKeyUtil
 from utils.log_util import logger
@@ -29,19 +29,6 @@ class TicketLightAiService:
         re.IGNORECASE,
     )
     JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
-    CONFIG_TRANSLATE_ENABLED = "ticket.ai.translate.enabled"
-    CONFIG_TRANSLATE_PROVIDER = "ticket.ai.translate.provider.code"
-    CONFIG_TRANSLATE_PROMPT = "ticket.ai.translate.prompt.code"
-    CONFIG_TITLE_SUMMARY_ENABLED = "ticket.ai.title.summary.enabled"
-    CONFIG_TITLE_SUMMARY_PROVIDER = "ticket.ai.title.summary.provider.code"
-    CONFIG_TITLE_SUMMARY_PROMPT = "ticket.ai.title.summary.prompt.code"
-    CONFIG_LOG_EXTRACT_ENABLED = "ticket.ai.log_extract.enabled"
-    CONFIG_LOG_EXTRACT_PROVIDER = "ticket.ai.log_extract.provider.code"
-    CONFIG_LOG_EXTRACT_PROMPT = "ticket.ai.log_extract.prompt.code"
-    # 三场景独立开关：外部推送、远端拉取、多维表格拉取
-    CONFIG_SYNC_EXTRACT_EXTERNAL_PUSH_ENABLED = "ticket.ai.sync_extract.external_push.enabled"
-    CONFIG_SYNC_EXTRACT_REMOTE_PULL_ENABLED = "ticket.ai.sync_extract.remote_pull.enabled"
-    CONFIG_SYNC_EXTRACT_BITABLE_PULL_ENABLED = "ticket.ai.sync_extract.bitable_pull.enabled"
     TICKET_CATEGORY_CANDIDATES = (
         "促销",
         "券",
@@ -156,8 +143,7 @@ class TicketLightAiService:
         :param db: 数据库会话
         :return: 是否启用翻译
         """
-        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_TRANSLATE_ENABLED).first()
-        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
+        return TicketSyncAiConfigService.is_enabled(db, "translateConfig")
 
     @classmethod
     def is_title_summary_enabled(cls, db: Session) -> bool:
@@ -166,26 +152,7 @@ class TicketLightAiService:
         :param db: 数据库会话
         :return: 是否启用标题总结
         """
-        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_TITLE_SUMMARY_ENABLED).first()
-        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
-
-    @classmethod
-    def is_log_extract_enabled(cls, db: Session) -> bool:
-        """
-        读取工单日志参数提取总开关。
-        :param db: 数据库会话
-        :return: 是否启用日志参数提取
-        """
-        config_row = db.query(SysConfig).filter(SysConfig.config_key == cls.CONFIG_LOG_EXTRACT_ENABLED).first()
-        return str(getattr(config_row, "config_value", "false") or "false").strip().lower() == "true"
-
-    # 场景名称映射：sync_scene -> aiSyncExtract 配置键
-    SCENE_SYNC_EXTRACT_CONFIG_MAP = {
-        "external_sync": "externalPushEnabled",
-        "remote_pull": "remotePullEnabled",
-        "bitable_pull": "bitablePullEnabled",
-        "manual_create": "manualCreateEnabled",
-    }
+        return TicketSyncAiConfigService.is_enabled(db, "titleSummaryConfig")
 
     @classmethod
     def is_sync_extract_enabled_for_scene(cls, db: Session, sync_scene: str) -> bool:
@@ -196,16 +163,7 @@ class TicketLightAiService:
         :param sync_scene: 同步场景，支持 external_sync/remote_pull/bitable_pull
         :return: 是否启用该场景的AI提取
         """
-        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
-        sync_config = TicketSyncConfigService.load_sync_config(db)
-        ai_sync_extract = sync_config.get("aiSyncExtract") if isinstance(sync_config.get("aiSyncExtract"), dict) else {}
-        scene_config_key = cls.SCENE_SYNC_EXTRACT_CONFIG_MAP.get(sync_scene)
-        if scene_config_key:
-            scene_value = ai_sync_extract.get(scene_config_key)
-            if scene_value is not None:
-                return bool(scene_value)
-        # 场景独立开关未配置时，默认不启用
-        return False
+        return TicketSyncAiConfigService.is_sync_extract_enabled_for_scene(db, sync_scene)
 
     @classmethod
     def extract_version_key_from_text(cls, text: str | None) -> str:
@@ -563,19 +521,14 @@ class TicketLightAiService:
         return ""
 
     @classmethod
-    def _resolve_task_settings(cls, db: Session, provider_config_key: str, prompt_config_key: str) -> tuple[str, str]:
+    def _resolve_task_settings(cls, db: Session, section_name: str) -> tuple[str, str]:
         """
         解析轻量 AI 任务使用的 Provider 和提示词编码。
         :param db: 数据库会话
+        :param section_name: 工单同步配置中的任务配置段名称
         :return: (provider_code, prompt_code)
         """
-        from module_admin.entity.do.config_do import SysConfig
-
-        provider_row = db.query(SysConfig).filter(SysConfig.config_key == provider_config_key).first()
-        prompt_row = db.query(SysConfig).filter(SysConfig.config_key == prompt_config_key).first()
-        provider_code = str(provider_row.config_value or "").strip() if provider_row else ""
-        prompt_code = str(prompt_row.config_value or "").strip() if prompt_row else ""
-        return provider_code, prompt_code
+        return TicketSyncAiConfigService.resolve_task_settings(db, section_name)
 
     @classmethod
     def _resolve_classification_task_settings(cls, db: Session) -> tuple[str, str]:
@@ -584,11 +537,7 @@ class TicketLightAiService:
         :param db: 数据库会话。
         :return: (provider_code, prompt_code)。
         """
-        provider_code, prompt_code = cls._resolve_task_settings(
-            db,
-            "ticket.ai.category.classify.provider.code",
-            "ticket.ai.category.classify.prompt.code",
-        )
+        provider_code, prompt_code = cls._resolve_task_settings(db, "aiClassification")
         if not prompt_code or prompt_code == "ticket_category_classify_default":
             prompt_code = "ticket_stat_classify_default"
         return provider_code, prompt_code
@@ -828,9 +777,12 @@ class TicketLightAiService:
         :param current_user_name: 当前用户名称
         :return: (结构化结果, 元信息)
         """
-        provider_code, prompt_code = cls._resolve_task_settings(
-            db, "ticket.ai.knowledge.provider.code", "ticket.ai.knowledge.prompt.code"
-        )
+        if not TicketSyncAiConfigService.is_enabled(db, "knowledgeConfig"):
+            logger.info(
+                f"工单知识提炼AI跳过: 总开关关闭, ticket_no={getattr(ticket, 'ticket_no', '') or '-'}"
+            )
+            return {}, {"provider_code": "", "prompt_code": "", "skipped": True}
+        provider_code, prompt_code = cls._resolve_task_settings(db, "knowledgeConfig")
         context_text = cls._build_knowledge_context(ticket, timeline)
         extra_data = getattr(ticket, "extra_data", None)
         origin_description = (
@@ -1201,27 +1153,14 @@ class TicketLightAiService:
         }
         if not title_text and not content and not isinstance(raw_payload, dict):
             return empty_result, {"provider_code": "", "prompt_code": "", "skipped": True}
-        # 使用场景级开关控制 AI 提取，不再依赖总开关 ticket.ai.log_extract.enabled
+        # 参数提取只由工单同步配置中的场景开关控制。
         if sync_scene and not cls.is_sync_extract_enabled_for_scene(db, sync_scene):
             logger.info(f"AI同步提取已跳过：场景 {sync_scene} 未启用")
             return empty_result, {"provider_code": "", "prompt_code": "", "skipped": True}
 
-        # 从同步配置 JSON 中读取 AI 提取的 Provider 和提示词编码
-        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
-        sync_config = TicketSyncConfigService.load_sync_config(db)
-        ai_sync_extract = sync_config.get("aiSyncExtract") if isinstance(sync_config.get("aiSyncExtract"), dict) else {}
+        ai_sync_extract = TicketSyncAiConfigService.load_section(db, "aiSyncExtract")
         provider_code = str(ai_sync_extract.get("providerCode") or "").strip()
         prompt_code = str(ai_sync_extract.get("promptCode") or "").strip()
-        # 兜底：如果同步配置中未配置，则使用旧的 sys_config 键
-        if not provider_code or not prompt_code:
-            fallback_provider, fallback_prompt = cls._resolve_task_settings(
-                db, cls.CONFIG_LOG_EXTRACT_PROVIDER, cls.CONFIG_LOG_EXTRACT_PROMPT
-            )
-            provider_code = provider_code or fallback_provider
-            prompt_code = prompt_code or fallback_prompt
-        # 最终兜底：使用默认提示词编码
-        if not prompt_code:
-            prompt_code = "ticket_sync_extract_default"
         if not provider_code:
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
@@ -1447,9 +1386,7 @@ class TicketLightAiService:
             )
             return "", {"provider_code": "", "prompt_code": "", "summary_title": "", "skipped": True}
 
-        provider_code, prompt_code = cls._resolve_task_settings(
-            db, cls.CONFIG_TITLE_SUMMARY_PROVIDER, cls.CONFIG_TITLE_SUMMARY_PROMPT
-        )
+        provider_code, prompt_code = cls._resolve_task_settings(db, "titleSummaryConfig")
         if not provider_code or not prompt_code:
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
@@ -1609,7 +1546,6 @@ class TicketLightAiService:
         stat_options: dict[str, Any] | None = None,
         override_provider_code: str | None = None,
         override_prompt_code: str | None = None,
-        override_prompt_content: str | None = None,
         source_type: str = "ticket",
         source_id: int | None = None,
         source_ref: str | None = None,
@@ -1625,7 +1561,6 @@ class TicketLightAiService:
         :param stat_options: 可视化维护的统计枚举。
         :param override_provider_code: 可选覆盖 Provider 编码。
         :param override_prompt_code: 可选覆盖提示词编码。
-        :param override_prompt_content: 可选覆盖 system prompt 内容。
         :param source_type: 来源类型。
         :param source_id: 来源ID。
         :param source_ref: 来源引用。
@@ -1668,7 +1603,6 @@ class TicketLightAiService:
             "statOptions": options,
             "overrideProviderCode": str(override_provider_code or "").strip() or None,
             "overridePromptCode": str(override_prompt_code or "").strip() or None,
-            "overridePromptContent": str(override_prompt_content or "").strip() or None,
         }
         if not provider_code or not prompt_code:
             logger.info(
@@ -1723,10 +1657,7 @@ class TicketLightAiService:
             cls._finish_execution_record(db, execution_id, status="skipped", error_message="Provider不存在或已停用")
             return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
 
-        # 优先使用 DB 模板表（SysAiPromptTemplate）中的新版提示词；
-        # override_prompt_content（同步配置中的旧版内联 promptContent）仅作为 DB 模板为空时的兜底。
         prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(db, [prompt_code])
-        legacy_prompt_content = str(override_prompt_content or "").strip()
         if prompt_templates:
             prompt_template = prompt_templates[0]
             system_prompt = AiPromptTemplateService.render_prompt_text(
@@ -1738,8 +1669,6 @@ class TicketLightAiService:
                     "stat_options": json.dumps(options, ensure_ascii=False, default=str),
                 },
             )
-        elif legacy_prompt_content:
-            system_prompt = legacy_prompt_content
         else:
             system_prompt = cls.DEFAULT_STRUCTURED_CLASSIFICATION_PROMPT
         user_prompt = cls._build_structured_classification_prompt(
@@ -1845,11 +1774,7 @@ class TicketLightAiService:
                 f"source_id={source_id}, source_ref={source_ref}"
             )
             return origin_text, {"provider_code": "", "prompt_code": "", "translated_text": "", "skipped": True}
-        provider_code, prompt_code = cls._resolve_task_settings(
-            db,
-            cls.CONFIG_TRANSLATE_PROVIDER,
-            cls.CONFIG_TRANSLATE_PROMPT,
-        )
+        provider_code, prompt_code = cls._resolve_task_settings(db, "translateConfig")
         if not provider_code or not prompt_code:
             logger.info(
                 f"工单轻量翻译跳过: provider/prompt 未配置, provider={provider_code or '-'}, "

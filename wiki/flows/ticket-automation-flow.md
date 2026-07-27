@@ -28,12 +28,14 @@ sequenceDiagram
   participant U as 工单操作人
   participant W as 工单前端
   participant C as ticket_controller
+  participant CFG as 工单同步AI配置服务
   participant S as TicketService/LogPullService/AIService
   participant A as Agent
   participant X as 外部日志平台
 
   U->>W: 新增/导入/拉取工单，选择是否自动拉日志/自动AI
   W->>C: POST /ticket
+  C->>CFG: 读取 ticket.sync.automation 场景配置
   C->>S: 创建工单并在 extra_data 中记录自动化配置
   S->>S: 根据商家/门店/POS/日期创建日志拉取任务
   S->>X: 提交日志申请并下载/解析压缩包
@@ -78,6 +80,8 @@ sequenceDiagram
 | 13 | 日志拉取记录的重新拉取会从历史 `command_content` 反向恢复提交参数，补齐通知配置与自动化字段，降低“缺少对应参数”问题。 |
 | 14 | AI 结果通知在分析成功和失败两种情况下都会发送，方便业务侧闭环确认。 |
 | 15 | AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
+| 16 | 翻译、标题总结、分类、参数提取和知识提炼统一由 `TicketSyncAiConfigService` 从 `ticket.sync.automation` 读取开关、Provider 和提示词；旧 `ticket.ai.*` 配置不再参与运行。 |
+| 17 | 多维表格主动拉取任务显式提供 `automation` 时使用任务级配置；未提供时按 `ticket.sync.automation` 的 `bitable_pull` 场景开关执行。 |
 | 8 | 工单详情页中的时间线、评论、日志拉取和 AI 分析改为按需加载，评论作为详情一级 tab 独立请求，避免打开详情或历史页时一次性拉取所有数据。 |
 | 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；相似工单由 `ticket.similarity.config` 选择 `local_hash`、`embedding` 或 `qdrant` Provider，严格按配置查询，失败直接报错或记录日志，不再回退其他 Provider；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。 |
 | 10 | AI 分析成功后写回 `ticket.ai_analysis`、RCA、AI 消息和 `ticket_snapshot`；工单关闭时自动提炼 `knowledge_article` 供后续相似工单检索。 |

@@ -114,10 +114,6 @@ class TicketBatchReclassificationService:
             stat_options = (
                 config.get("statClassification") if isinstance(config.get("statClassification"), dict) else {}
             )
-            legacy_prompt_content = TicketAutoClassificationService.resolve_legacy_ai_classification_prompt_content(
-                ai_config,
-                prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
-            )
             logger.info(
                 f"工单AI分类统计调用轻量AI: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
                 f"source_type={source_type}, source_ref={source_ref}, strategy={normalized_strategy}, "
@@ -133,7 +129,6 @@ class TicketBatchReclassificationService:
                 stat_options=stat_options,
                 override_provider_code=str(ai_config.get("providerCode") or "").strip() or None,
                 override_prompt_code=ai_prompt_code or str(ai_config.get("promptCode") or "").strip() or None,
-                override_prompt_content=legacy_prompt_content,
                 source_type=source_type,
                 source_id=ticket.ticket_id,
                 source_ref=source_ref,

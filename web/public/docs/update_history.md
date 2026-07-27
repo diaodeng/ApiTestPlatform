@@ -1,3 +1,11 @@
+## 2026-07-27
+
+1. 工单翻译、标题总结、工单分类、参数提取和知识提炼配置统一迁移到 `ticket.sync.automation`，AI 配置中心只保留 AI 分析 Worker；旧 `ticket.ai.*` 配置不迁移、不读取且不保留回退。
+2. 工单同步配置页补齐五类轻量 AI 的 Provider、提示词和开关配置，删除无实际作用的 `automationConfig.enabled`、历史分类内联 `promptContent` 和全局 `bitablePull.automation`。
+3. 多维表格主动拉取仅在定时任务显式提供 `automation` 时使用任务级配置，未提供时按工单同步配置的场景开关执行。
+4. 群推送条件新增工作流状态显示名字段 `status_name`，中文状态条件不再误用状态编码字段 `status`。
+5. 新增说明文档：`web/public/docs/2026-07-27-ticket-sync-light-ai-config-consolidation.md`。
+
 ## 2026-07-21
 
 1. 工单外部推送、飞书多维表格主动拉取、远端拉取入库统一补齐外部优先级和内部优先级：`Level 0/A/B/C/D` 分别对应 `P0/P1/P2/P3/P4`，双方都有值时不互相覆盖。

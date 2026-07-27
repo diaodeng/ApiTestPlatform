@@ -2,234 +2,13 @@
   <div class="app-container ai-config-center-page" v-loading="loading">
     <section class="page-intro">
       <div class="page-intro__eyebrow">AI 配置中心</div>
-      <h2 class="page-intro__title">集中管理工单 AI 相关配置</h2>
+      <h2 class="page-intro__title">集中管理工单 AI 分析运行配置</h2>
       <p class="page-intro__desc">
-        轻量翻译、标题总结、工单分类、日志参数提取与知识提炼在工单链路中触发。Provider 和提示词正文统一维护，这里只负责选择和组合。
+        此处仅维护 AI 分析 Worker。翻译、标题总结、分类、参数提取和知识提炼已统一迁移到工单同步配置。
       </p>
     </section>
 
     <el-card class="config-card" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>轻量 AI 配置</span>
-          <el-tag type="success" effect="plain">保存即生效</el-tag>
-        </div>
-      </template>
-
-        <el-form ref="formRef" :model="form" :rules="rules" label-width="170px">
-        <el-row :gutter="16">
-          <el-col :span="24">
-            <el-divider content-position="left">工单翻译</el-divider>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="翻译总开关" prop="translateEnabled">
-              <el-switch v-model="form.translateEnabled" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="翻译 Provider" prop="translateProviderCode">
-              <el-select
-                v-model="form.translateProviderCode"
-                placeholder="请选择 Provider"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in providerOptions"
-                  :key="item.providerId || item.providerCode"
-                  :label="formatProviderLabel(item)"
-                  :value="item.providerCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="翻译提示词" prop="translatePromptCode">
-              <el-select
-                v-model="form.translatePromptCode"
-                placeholder="请选择提示词模板"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions.translate"
-                  :key="item.templateId || item.templateCode"
-                  :label="formatPromptLabel(item)"
-                  :value="item.templateCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="标题总结开关" prop="titleSummaryEnabled">
-              <el-switch v-model="form.titleSummaryEnabled" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="标题总结 Provider" prop="titleSummaryProviderCode">
-              <el-select
-                v-model="form.titleSummaryProviderCode"
-                placeholder="请选择 Provider"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in providerOptions"
-                  :key="`title-summary-${item.providerId || item.providerCode}`"
-                  :label="formatProviderLabel(item)"
-                  :value="item.providerCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="标题总结提示词" prop="titleSummaryPromptCode">
-              <el-select
-                v-model="form.titleSummaryPromptCode"
-                placeholder="请选择提示词模板"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions.translate"
-                  :key="`title-summary-${item.templateId || item.templateCode}`"
-                  :label="formatPromptLabel(item)"
-                  :value="item.templateCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="分类统计开关" prop="categoryClassifyEnabled">
-              <el-switch v-model="form.categoryClassifyEnabled" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="分类统计 Provider" prop="categoryClassifyProviderCode">
-              <el-select
-                v-model="form.categoryClassifyProviderCode"
-                placeholder="请选择 Provider"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in providerOptions"
-                  :key="`category-${item.providerId || item.providerCode}`"
-                  :label="formatProviderLabel(item)"
-                  :value="item.providerCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="分类统计提示词" prop="categoryClassifyPromptCode">
-              <el-select
-                v-model="form.categoryClassifyPromptCode"
-                placeholder="请选择提示词模板"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions.common"
-                  :key="`category-${item.templateId || item.templateCode}`"
-                  :label="formatPromptLabel(item)"
-                  :value="item.templateCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="日志参数提取开关" prop="logExtractEnabled">
-              <el-switch v-model="form.logExtractEnabled" inline-prompt active-text="开" inactive-text="关" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="日志参数提取 Provider" prop="logExtractProviderCode">
-              <el-select
-                v-model="form.logExtractProviderCode"
-                placeholder="请选择 Provider"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in providerOptions"
-                  :key="`log-extract-${item.providerId || item.providerCode}`"
-                  :label="formatProviderLabel(item)"
-                  :value="item.providerCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="日志参数提取提示词" prop="logExtractPromptCode">
-              <el-select
-                v-model="form.logExtractPromptCode"
-                placeholder="请选择提示词模板"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions.common"
-                  :key="`log-extract-${item.templateId || item.templateCode}`"
-                  :label="formatPromptLabel(item)"
-                  :value="item.templateCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-
-          <el-col :span="24">
-            <el-divider content-position="left">知识提炼</el-divider>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="知识提炼 Provider" prop="knowledgeProviderCode">
-              <el-select
-                v-model="form.knowledgeProviderCode"
-                placeholder="请选择 Provider"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in providerOptions"
-                  :key="`knowledge-${item.providerId || item.providerCode}`"
-                  :label="formatProviderLabel(item)"
-                  :value="item.providerCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
-            <el-form-item label="知识提炼提示词" prop="knowledgePromptCode">
-              <el-select
-                v-model="form.knowledgePromptCode"
-                placeholder="请选择提示词模板"
-                filterable
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in promptOptions.knowledge"
-                  :key="`knowledge-${item.templateId || item.templateCode}`"
-                  :label="formatPromptLabel(item)"
-                  :value="item.templateCode"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <el-card class="config-card mt16" shadow="never">
       <template #header>
         <div class="card-header">
           <span>AI 分析 Worker 配置</span>
@@ -344,30 +123,9 @@ const { proxy } = getCurrentInstance()
 const loading = ref(false)
 const saving = ref(false)
 const configRows = ref([])
-const providerOptions = ref([])
 const quickLinks = ref([])
-const promptOptions = reactive({
-  translate: [],
-  knowledge: [],
-  analysis: [],
-  common: []
-})
 
 const defaultForm = () => ({
-  translateEnabled: true,
-  translateProviderCode: '',
-  translatePromptCode: '',
-  titleSummaryEnabled: false,
-  titleSummaryProviderCode: '',
-  titleSummaryPromptCode: '',
-  categoryClassifyEnabled: false,
-  categoryClassifyProviderCode: '',
-  categoryClassifyPromptCode: '',
-  logExtractEnabled: false,
-  logExtractProviderCode: '',
-  logExtractPromptCode: '',
-  knowledgeProviderCode: '',
-  knowledgePromptCode: '',
   analysisWorkerCommand: '',
   analysisWorkerModel: '',
   analysisWorkerSandbox: '',
@@ -388,38 +146,7 @@ function normalizePayload(payload) {
   return payload || {}
 }
 
-function formatProviderLabel(item) {
-  const code = item.providerCode || item.provider_code || '-'
-  const name = item.providerName || item.provider_name || code
-  const model = item.modelName || item.model_name || '-'
-  return `${name} / ${code} / ${model}`
-}
-
-function formatPromptLabel(item) {
-  const code = item.templateCode || item.template_code || '-'
-  const name = item.templateName || item.template_name || code
-  const category = item.templateCategory || item.template_category || '-'
-  return `${name} / ${code} / ${category}`
-}
-
 function applyFormData(payload) {
-  form.translateEnabled = payload.translateEnabled ?? payload.translate_enabled ?? true
-  form.translateProviderCode = payload.translateProviderCode ?? payload.translate_provider_code ?? ''
-  form.translatePromptCode = payload.translatePromptCode ?? payload.translate_prompt_code ?? ''
-  form.titleSummaryEnabled = payload.titleSummaryEnabled ?? payload.title_summary_enabled ?? false
-  form.titleSummaryProviderCode = payload.titleSummaryProviderCode ?? payload.title_summary_provider_code ?? ''
-  form.titleSummaryPromptCode = payload.titleSummaryPromptCode ?? payload.title_summary_prompt_code ?? ''
-  form.categoryClassifyEnabled = payload.categoryClassifyEnabled ?? payload.category_classify_enabled ?? false
-  form.categoryClassifyProviderCode = payload.categoryClassifyProviderCode ?? payload.category_classify_provider_code ?? ''
-  const classifyPromptCode = payload.categoryClassifyPromptCode ?? payload.category_classify_prompt_code ?? ''
-  form.categoryClassifyPromptCode = classifyPromptCode === 'ticket_category_classify_default'
-    ? 'ticket_stat_classify_default'
-    : classifyPromptCode
-  form.logExtractEnabled = payload.logExtractEnabled ?? payload.log_extract_enabled ?? false
-  form.logExtractProviderCode = payload.logExtractProviderCode ?? payload.log_extract_provider_code ?? ''
-  form.logExtractPromptCode = payload.logExtractPromptCode ?? payload.log_extract_prompt_code ?? ''
-  form.knowledgeProviderCode = payload.knowledgeProviderCode ?? payload.knowledge_provider_code ?? ''
-  form.knowledgePromptCode = payload.knowledgePromptCode ?? payload.knowledge_prompt_code ?? ''
   form.analysisWorkerCommand = payload.analysisWorkerCommand ?? payload.analysis_worker_command ?? ''
   form.analysisWorkerModel = payload.analysisWorkerModel ?? payload.analysis_worker_model ?? ''
   form.analysisWorkerSandbox = payload.analysisWorkerSandbox ?? payload.analysis_worker_sandbox ?? ''
@@ -433,14 +160,7 @@ function applyFormData(payload) {
     ?? 'agent_extract'
 
   configRows.value = payload.configRows ?? payload.config_rows ?? []
-  providerOptions.value = payload.providerOptions ?? payload.provider_options ?? []
   quickLinks.value = payload.quickLinks ?? payload.quick_links ?? []
-
-  const options = payload.promptOptions ?? payload.prompt_options ?? {}
-  promptOptions.translate = options.translate || []
-  promptOptions.knowledge = options.knowledge || []
-  promptOptions.analysis = options.analysis || []
-  promptOptions.common = options.common || []
 }
 
 function loadSummary() {
@@ -475,18 +195,12 @@ function goToPath(path) {
 }
 
 async function handleSave() {
-  const [basicValid, workerValid] = await Promise.all([
-    validateElForm('formRef'),
-    validateElForm('workerFormRef')
-  ])
-  if (!basicValid || !workerValid) {
+  const workerValid = await validateElForm('workerFormRef')
+  if (!workerValid) {
     return
   }
   saving.value = true
   const payload = { ...form }
-  if (!payload.categoryClassifyPromptCode || payload.categoryClassifyPromptCode === 'ticket_category_classify_default') {
-    payload.categoryClassifyPromptCode = 'ticket_stat_classify_default'
-  }
   updateAiConfig(payload)
     .then(() => {
       proxy.$modal.msgSuccess('保存成功')

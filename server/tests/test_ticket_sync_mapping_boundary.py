@@ -7,6 +7,8 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_task.scheduler_maintenance import (
     _build_bitable_pull_config_override,
 )
+from modules.ticket.dao.ticket_dao import TicketDao
+from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
@@ -17,6 +19,7 @@ from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitabl
 from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
 from modules.ticket.service.sync.ticket_external_sync_request_service import TicketExternalSyncRequestService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
+from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
@@ -1012,6 +1015,68 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
         self.assertEqual(config["bitablePull"]["viewId"], "")
         self.assertEqual(config["bitablePull"]["filterFormula"], "")
 
+    def test_sync_config_normalizes_light_ai_sections_without_legacy_fields(self):
+        """五类轻量 AI 配置应统一归一化到工单同步配置，并清理旧内联字段。"""
+        config = TicketSyncConfigService.normalize_sync_config(
+            {
+                "translateConfig": {"enabled": True, "providerCode": " provider_a "},
+                "titleSummaryConfig": {"enabled": True, "providerCode": "provider_b"},
+                "knowledgeConfig": {"enabled": True, "providerCode": "provider_c"},
+                "aiClassification": {"enabled": True, "promptContent": "旧内联提示词"},
+                "bitablePull": {"automation": {"autoTranslate": True}},
+            }
+        )
+
+        self.assertEqual(config["translateConfig"]["providerCode"], "provider_a")
+        self.assertEqual(config["translateConfig"]["promptCode"], "ticket_translate_default")
+        self.assertEqual(config["titleSummaryConfig"]["promptCode"], "ticket_title_summary_default")
+        self.assertEqual(config["knowledgeConfig"]["promptCode"], "ticket_knowledge_extract_default")
+        self.assertEqual(config["aiClassification"]["promptCode"], "ticket_stat_classify_default")
+        self.assertNotIn("promptContent", config["aiClassification"])
+        self.assertNotIn("automation", config["bitablePull"])
+
+    def test_light_ai_settings_only_read_ticket_sync_config(self):
+        """轻量 AI 任务设置应只读取 ticket.sync.automation，不再读取旧 ticket.ai 标量键。"""
+        row = SimpleNamespace(
+            config_value=(
+                '{"translateConfig":{"enabled":true,"providerCode":"provider_new",'
+                '"promptCode":"ticket_translate_default"}}'
+            )
+        )
+        db = SimpleNamespace(query=lambda *_args, **_kwargs: _SingleRowQuery(row))
+
+        section = TicketSyncAiConfigService.load_section(db, "translateConfig")
+
+        self.assertTrue(section["enabled"])
+        self.assertEqual(section["providerCode"], "provider_new")
+
+    def test_group_push_condition_uses_workflow_status_display_name(self):
+        """群推送条件应通过 status_name 匹配工作流状态显示名，同时保留 status 编码。"""
+        ticket = Ticket(
+            ticket_id=1,
+            ticket_no="T-STATUS-NAME",
+            title="状态条件测试",
+            description="状态条件测试",
+            status="processing_two",
+        )
+        with patch.object(
+            TicketDao,
+            "get_workflow_status_by_code",
+            return_value=SimpleNamespace(name="2. 1.5线处理"),
+        ):
+            skipped, reason = TicketSyncGroupPushService.should_skip_auto_group_push_by_condition(
+                db=SimpleNamespace(),
+                ticket=ticket,
+                group_config={
+                    "autoPushCondition": (
+                        "status == 'processing_two' and status_name == '2. 1.5线处理'"
+                    )
+                },
+            )
+
+        self.assertFalse(skipped)
+        self.assertIsNone(reason)
+
     def test_bitable_runtime_config_inherits_common_without_polluting_saved_config(self):
         """运行时多维表格配置应独立配置优先，独立为空时才继承公共配置。"""
         config = TicketSyncConfigService.normalize_sync_config(
@@ -1649,7 +1714,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
-            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[]),
+            patch.object(TicketSyncConfigService, "iter_bitable_pull_records", return_value=[]),
         ):
             result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
@@ -1680,7 +1745,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
-            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[]),
+            patch.object(TicketSyncConfigService, "iter_bitable_pull_records", return_value=[]),
         ):
             result = TicketBitablePullService.run_bitable_pull_services(
                 db=SimpleNamespace(),
@@ -1734,7 +1799,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         with (
             patch.object(TicketSyncConfigService, "load_sync_config", return_value=config),
-            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
+            patch.object(TicketSyncConfigService, "iter_bitable_pull_records", return_value=[record]),
             patch.object(
                 TicketBitablePullService,
                 "should_skip_bitable_pull_record",
@@ -1763,6 +1828,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         skip_check.assert_not_called()
         sync_external.assert_called_once()
+        self.assertIsNone(sync_external.call_args.args[1].automation)
         self.assertTrue(result["forceSync"])
         self.assertEqual(result["syncedCount"], 1)
         self.assertEqual(result["skippedCount"], 0)
@@ -1817,7 +1883,7 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 "load_sync_config",
                 return_value=TicketSyncConfigService.normalize_sync_config(config),
             ),
-            patch.object(TicketSyncConfigService, "query_bitable_pull_records", return_value=[record]),
+            patch.object(TicketSyncConfigService, "iter_bitable_pull_records", return_value=[record]),
             patch.object(TicketSyncService, "sync_external_ticket") as sync_external,
             patch.object(TicketSyncPostProcessService, "dispatch_deferred_sync_post_process_task") as dispatch_deferred,
         ):

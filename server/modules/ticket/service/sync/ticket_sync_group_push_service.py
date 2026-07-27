@@ -520,6 +520,7 @@ class TicketSyncGroupPushService:
         """
 
         skip_by_condition, condition_skip_reason = cls.should_skip_auto_group_push_by_condition(
+            db=db,
             ticket=ticket,
             group_config=group_config,
         )
@@ -782,12 +783,14 @@ class TicketSyncGroupPushService:
     def should_skip_auto_group_push_by_condition(
         cls,
         *,
+        db: Session,
         ticket: Ticket,
         group_config: dict[str, Any] | None,
     ) -> tuple[bool, str | None]:
         """
         根据自定义条件表达式判断是否跳过自动群推送。
 
+        :param db: 数据库会话。
         :param ticket: 工单对象。
         :param group_config: 群推送配置。
         :return: (是否跳过, 跳过原因)。
@@ -797,7 +800,9 @@ class TicketSyncGroupPushService:
         if not auto_push_condition:
             return False, None
 
-        ticket_fields = _ticket_to_condition_fields(ticket)
+        workflow_status = TicketDao.get_workflow_status_by_code(db, str(ticket.status or "").strip())
+        status_name = str(getattr(workflow_status, "name", "") or "").strip()
+        ticket_fields = _ticket_to_condition_fields(ticket, status_name=status_name)
         try:
             matched = evaluate_ticket_condition(auto_push_condition, ticket_fields)
         except SyntaxError as e:
@@ -933,10 +938,14 @@ class TicketSyncGroupPushService:
         return False
 
 
-def _ticket_to_condition_fields(ticket: Ticket) -> dict:
+def _ticket_to_condition_fields(ticket: Ticket, *, status_name: str = "") -> dict:
     """
     将工单对象转为条件表达式求值用的字段字典。
     包含 Ticket 表所有业务字段，字段名与表达式中的引用名一致。
+
+    :param ticket: 工单对象。
+    :param status_name: 工作流状态显示名。
+    :return: 条件表达式字段字典。
 
     注意：datetime/date 类型字段统一转为 ISO 字符串，确保与条件表达式中的
     字符串字面量（如 submit_time >= "2026-07-20"）可正常比较。
@@ -959,6 +968,7 @@ def _ticket_to_condition_fields(ticket: Ticket) -> dict:
         "issue_type_id": ticket.issue_type_id,
         "issue_type_name": ticket.issue_type_name,
         "status": ticket.status,
+        "status_name": str(status_name or "").strip(),
         "customer_priority": ticket.customer_priority,
         "internal_priority": ticket.internal_priority,
         "severity": ticket.severity,
