@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/{ticket_id}/ai-analysis
     trigger: 手工或日志拉取成功后触发AI分析任务
 created: 2026-05-22
-updated: 2026-07-27
+updated: 2026-07-28
 ---
 
 # 工单自动化链路流程
@@ -73,7 +73,7 @@ sequenceDiagram
 | 6 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
 | 7 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
 | 8 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；任务成功或失败结束时都会按通知配置发送消息。 |
-| 9 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
+| 9 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。Worker 失败时会回传脱敏的 Provider、模型、实际基础地址、认证来源和 API Key 指纹；仅当 Codex 输出命中 401/Unauthorized/Invalid token 时，才以同一认证信息异步调用 `GET /models`，不调用模型推理，用于区分 token 无效与 Responses 链路异常。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
 | 10 | 手工发起日志拉取、手工补录工单和工单详情页中的重新拉取入口仍保留；这些入口复用同一套日志拉取与 AI 分析服务，避免前后端出现两套流程。 |
 | 11 | 工单详情页的日志拉取、工单新增页的日志拉取、独立日志拉取管理页是三个前端页面，但共用同一套后端日志拉取模型、选项接口和重试逻辑。 |
 | 12 | 工单详情页中商家和门店已切换为联动下拉，不再要求手工输入纯文本或数字。 |
@@ -102,6 +102,7 @@ sequenceDiagram
 | AI 分析成功或失败 | 分别发送成功/失败通知，通知渠道由页面保存的推送配置决定。 |
 | Codex/OpenAI 返回 `bad_response_status_code` | Agent 返回更明确的上游异常摘要；服务端通过日志截断和放宽增强字段必填约束降低重试失败概率。 |
 | Codex 启动返回 `os error 2` | Agent 在启动 Worker 前校验并复制任务级 Codex Home 引用的模型目录文件；引用缺失时返回包含 `model_catalog_json` 路径的明确错误。 |
+| Codex 返回 401/Unauthorized/Invalid token | Agent 记录脱敏认证指纹并执行一次无推理的 `/models` 鉴权探测；若探测 401 则优先检查 Provider key，若探测 200 则携带 Worker 与探测 request ID 排查 Provider Responses 链路。 |
 
 ## 参见
 

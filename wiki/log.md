@@ -1594,3 +1594,12 @@ updated: 2026-07-26
 - 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`web/public/docs/update_history.md`。
 - 变更传播链：`TicketAiAnalysisRequestModel.log_pull_record_id` -> 成功日志归属校验 -> Agent `log_cache/ticket_<id>/log_pull_<id>/<sourceHash>` -> Worker 提示词实际日志目录；工单详情 AI 弹窗 -> 成功日志选择列表 -> 指定 `logPullRecordId`。
 - 关键日志：首次下载记录“下载并解压整包日志”，命中缓存记录“复用本地整包日志缓存”，本地归档可访问时记录“使用本地归档并解压整包日志”。
+
+## [2026-07-28] INGEST-CODE | 工单 AI Codex 鉴权故障诊断
+
+- 触发：历史任务返回 `401 Unauthorized: Invalid token`，需要区分任务级配置复制、当前 key 有效性与 Provider Responses 链路故障。
+- 架构层：工单域 / 新版 PySide6 Agent / Codex Worker / OpenAI 兼容 Provider。
+- 创建的页面：`web/public/docs/2026-07-28-ticket-ai-codex-auth-diagnostic.md`。
+- 更新的页面：`flows/ticket-automation-flow.md`、`entities/services/ticket-domain.md`、`web/public/docs/update_history.md`。
+- 变更传播链：任务级 `.codex_home/auth.json` 与 `config.toml` -> Worker 失败诊断 -> 命中 401 时 `GET /models` 探测 -> `ai_analysis_step` / `ai_analysis_error` 事件 -> 服务端系统日志。
+- 关键约束：只记录密钥长度与 SHA-256 前 16 位；探测不调用模型、不重试原任务；`/models` 返回 200 时仍需结合 Worker request ID 排查 Provider 的 Responses 链路。

@@ -138,6 +138,164 @@ class TicketAiAnalysisService:
         return merged_env
 
     @staticmethod
+    def _resolve_worker_api_key(
+        provider_type: str,
+        ai_home: Path | None,
+        env_values: dict[str, str],
+    ) -> tuple[str, str]:
+        """
+        解析 Worker 实际用于鉴权的 API Key，但不记录明文。
+        Codex 配置了 requires_openai_auth 时优先读取任务级 auth.json，避免仅依据
+        环境变量误判实际认证来源；其他 Provider 使用其约定的环境变量。
+        :param provider_type: 当前 Provider 类型
+        :param ai_home: 任务级配置目录
+        :param env_values: 已合并的 Worker 环境变量
+        :return: (API Key, 脱敏诊断中的来源标识)
+        """
+        if provider_type == "codex" and ai_home:
+            auth_file = ai_home / "auth.json"
+            if auth_file.exists():
+                try:
+                    auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
+                    auth_key = str((auth_data or {}).get("OPENAI_API_KEY") or "").strip()
+                    if auth_key:
+                        return auth_key, "auth.json.OPENAI_API_KEY"
+                except (OSError, json.JSONDecodeError, TypeError, AttributeError) as exc:
+                    logger.warning(f"读取任务级 Codex auth.json 失败，将回退环境变量: {exc}")
+            return str(env_values.get("OPENAI_API_KEY") or "").strip(), "OPENAI_API_KEY"
+        if provider_type == "claude":
+            return (
+                str(env_values.get("ANTHROPIC_API_KEY") or env_values.get("OPENAI_API_KEY") or "").strip(),
+                "ANTHROPIC_API_KEY/OPENAI_API_KEY",
+            )
+        return str(env_values.get("OPENAI_API_KEY") or "").strip(), "OPENAI_API_KEY"
+
+    @staticmethod
+    def _resolve_worker_base_url(
+        provider_type: str,
+        ai_home: Path | None,
+        env_values: dict[str, str],
+    ) -> str:
+        """
+        解析 Worker 实际请求的基础地址。
+        Codex 优先使用任务级 config.toml 中的 base_url，与 CLI 的配置优先级保持一致；
+        文件未配置或读取失败时才回退到环境变量。
+        :param provider_type: 当前 Provider 类型
+        :param ai_home: 任务级配置目录
+        :param env_values: 已合并的 Worker 环境变量
+        :return: 去除末尾斜杠后的基础地址，未配置时返回空字符串
+        """
+        if provider_type == "codex" and ai_home:
+            config_file = ai_home / "config.toml"
+            if config_file.exists():
+                try:
+                    config_text = config_file.read_text(encoding="utf-8")
+                    match = re.search(r'^\s*base_url\s*=\s*"([^"]+)"', config_text, flags=re.MULTILINE)
+                    if match:
+                        return match.group(1).strip().rstrip("/")
+                except OSError as exc:
+                    logger.warning(f"读取任务级 Codex config.toml 失败，将回退环境变量: {exc}")
+        env_key = "ANTHROPIC_BASE_URL" if provider_type == "claude" else "OPENAI_BASE_URL"
+        return str(env_values.get(env_key) or "").strip().rstrip("/")
+
+    @staticmethod
+    def _build_api_key_fingerprint(api_key: str) -> dict[str, Any]:
+        """
+        构造不包含明文 API Key 的鉴权指纹，用于关联问题日志。
+        :param api_key: 原始 API Key
+        :return: 是否存在、长度与 SHA-256 前 16 位组成的脱敏信息
+        """
+        normalized_key = str(api_key or "").strip()
+        return {
+            "api_key_present": bool(normalized_key),
+            "api_key_length": len(normalized_key),
+            "api_key_sha256_16": hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()[:16]
+            if normalized_key
+            else "",
+        }
+
+    @classmethod
+    def _build_worker_auth_diagnostic(
+        cls,
+        *,
+        provider_type: str,
+        provider_code: str,
+        worker_model: str,
+        ai_home: Path | None,
+        env_values: dict[str, str],
+    ) -> tuple[dict[str, Any], str]:
+        """
+        生成 Worker 鉴权故障诊断上下文，不暴露任何密钥明文。
+        :param provider_type: 当前 Provider 类型
+        :param provider_code: 当前 Provider 编码
+        :param worker_model: 实际下发的模型名
+        :param ai_home: 任务级配置目录
+        :param env_values: 已合并的 Worker 环境变量
+        :return: (诊断信息, 实际用于探测的 API Key)
+        """
+        api_key, api_key_source = cls._resolve_worker_api_key(provider_type, ai_home, env_values)
+        diagnostic = {
+            "provider_type": provider_type,
+            "provider_code": provider_code or "<none>",
+            "worker_model": worker_model or "<default>",
+            "base_url": cls._resolve_worker_base_url(provider_type, ai_home, env_values) or "<none>",
+            "api_key_source": api_key_source,
+            **cls._build_api_key_fingerprint(api_key),
+        }
+        return diagnostic, api_key
+
+    @staticmethod
+    def _is_unauthorized_worker_failure(raw_stdout: str, raw_stderr: str) -> bool:
+        """
+        判断 Worker 输出是否包含需要进行鉴权探测的 401 错误。
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :return: 是否命中 401、Unauthorized 或 Invalid token 特征
+        """
+        output_text = f"{raw_stderr}\n{raw_stdout}".lower()
+        return bool(
+            re.search(
+                r"\b401\b|\bunauthorized\b|\binvalid\s+token\b",
+                output_text,
+            )
+        )
+
+    @staticmethod
+    async def _probe_codex_authentication(base_url: str, api_key: str) -> dict[str, Any]:
+        """
+        使用 GET /models 对 Codex 兼容 Provider 执行轻量鉴权探测，不调用模型推理。
+        :param base_url: Provider OpenAI 兼容基础地址
+        :param api_key: 实际请求使用的 API Key，仅用于请求头，不记录日志
+        :return: 探测状态、请求 ID 或跳过/异常原因组成的脱敏结果
+        """
+        normalized_base_url = str(base_url or "").strip().rstrip("/")
+        normalized_api_key = str(api_key or "").strip()
+        if not normalized_base_url:
+            return {"auth_probe": "skipped", "auth_probe_reason": "base_url_missing"}
+        if not normalized_api_key:
+            return {"auth_probe": "skipped", "auth_probe_reason": "api_key_missing"}
+        if not normalized_base_url.lower().startswith(("http://", "https://")):
+            return {"auth_probe": "skipped", "auth_probe_reason": "base_url_invalid"}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                response = await client.get(
+                    f"{normalized_base_url}/models",
+                    headers={"Authorization": f"Bearer {normalized_api_key}"},
+                )
+            return {
+                "auth_probe": "completed",
+                "auth_probe_http_status": response.status_code,
+                "auth_probe_request_id": response.headers.get("x-request-id")
+                or response.headers.get("request-id")
+                or "",
+            }
+        except httpx.HTTPError as exc:
+            return {
+                "auth_probe": "failed",
+                "auth_probe_error": f"{type(exc).__name__}: {str(exc)[:300]}",
+            }
+
+    @staticmethod
     def _inject_worker_model(command: list[str], model_name: str | None) -> list[str]:
         """
         将 Provider 选择的模型注入 Worker 命令参数。
@@ -2289,6 +2447,13 @@ class TicketAiAnalysisService:
                 raw_stdout = process.stdout or ""
                 raw_stderr = process.stderr or ""
                 cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
+                worker_auth_diagnostic, worker_api_key = cls._build_worker_auth_diagnostic(
+                    provider_type=provider_type,
+                    provider_code=request_provider_code,
+                    worker_model=selected_worker_model,
+                    ai_home=ai_home,
+                    env_values=env_values,
+                )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_step",
@@ -2316,7 +2481,33 @@ class TicketAiAnalysisService:
                         or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
                     )
                     failure_message = cls._normalize_worker_failure_message(failure_message)
-                    await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
+                    if provider_type == "codex" and cls._is_unauthorized_worker_failure(raw_stdout, raw_stderr):
+                        auth_probe = await cls._probe_codex_authentication(
+                            str(worker_auth_diagnostic.get("base_url") or ""),
+                            worker_api_key,
+                        )
+                        worker_auth_diagnostic.update(auth_probe)
+                        logger.warning(
+                            f"AI分析Agent任务[{task_id}] Worker 鉴权失败诊断: {worker_auth_diagnostic}"
+                        )
+                        await cls._emit_event(
+                            event_sender,
+                            "ai_analysis_step",
+                            task_id,
+                            "Worker 401 后鉴权探测完成",
+                            auth_diagnostic=worker_auth_diagnostic,
+                        )
+                    else:
+                        logger.warning(
+                            f"AI分析Agent任务[{task_id}] Worker 执行失败诊断: {worker_auth_diagnostic}"
+                        )
+                    await cls._emit_event(
+                        event_sender,
+                        "ai_analysis_error",
+                        task_id,
+                        failure_message,
+                        auth_diagnostic=worker_auth_diagnostic,
+                    )
                     return {
                         "request_type": req_data.get("requestType"),
                         "command": req_data.get("command"),
@@ -2331,6 +2522,7 @@ class TicketAiAnalysisService:
                             "stdout_path": str(workspace_dir / "worker.stdout.txt"),
                             "stderr_path": str(workspace_dir / "worker.stderr.txt"),
                             "stderr_context": cls._extract_stderr_context(raw_stderr),
+                            "auth_diagnostic": worker_auth_diagnostic,
                         },
                     }
 

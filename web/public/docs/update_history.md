@@ -550,3 +550,10 @@
 2. 手动 AI 分析弹窗新增“分析日志”选择，可在当前工单多个成功日志记录中指定本次分析来源；默认使用最新成功日志。
 3. 后端校验手工选择的日志必须属于当前工单且状态为成功，未选择时也只回退到最新成功日志。
 4. 新增说明文档：`web/public/docs/2026-07-27-ticket-ai-log-cache-and-selection.md`。
+
+## 2026-07-28
+
+1. 工单 AI Codex Worker 失败时新增脱敏鉴权诊断：记录实际 Provider、模型、基础地址、认证来源及 API Key 长度和 SHA-256 前 16 位，不记录密钥明文。
+2. Codex Worker 输出包含 `401`、`Unauthorized` 或 `Invalid token` 时，异步调用同一 Provider 的 `GET /models` 做轻量鉴权探测，不调用模型推理、不重试原任务。
+3. 诊断结果通过 Agent 阶段事件、失败事件和失败任务结果返回，包含 HTTP 状态码及上游 request ID，便于区分 token 失效与 Responses 链路异常。
+4. 新增说明文档：`web/public/docs/2026-07-28-ticket-ai-codex-auth-diagnostic.md`。

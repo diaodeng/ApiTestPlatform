@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-27
 created: 2026-05-20
-updated: 2026-07-27
+updated: 2026-07-28
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -288,6 +288,7 @@ graph TD
 - 任务级 `CODEX_HOME` 会同步复制 `config.toml` 中相对 `model_catalog_json` 引用的模型目录；绝对路径直接复用，引用缺失或越界时在启动 Worker 前明确失败，避免 Codex 仅返回不易定位的 `os error 2`。
 - AI 分析 Worker 的认证环境优先从 Codex 配置目录 `.env` 读取，再回退进程环境变量，避免开发机密钥只配置在 Codex 目录时失效。
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。
+- Codex Worker 失败时会附带脱敏鉴权诊断：实际 Provider、模型、任务级 `config.toml` 解析的基础地址、任务级 `auth.json` 或环境变量认证来源，以及 API Key 的存在状态、长度和 SHA-256 前 16 位；不记录 API Key 明文。仅当输出命中 401、`Unauthorized` 或 `Invalid token` 时，Agent 才异步调用同一 Provider 的 `GET /models`，不执行模型推理也不重试任务；探测 401 指向当前 key/权限问题，探测 200 则保留两个 request ID 供 Provider 排查 Responses 链路瞬态异常。
 - AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
 - `client_new` Agent 执行工单 AI 分析时必须使用 Codex CLI；可执行文件通过 `codex --version` 校验，返回 `codex-cli` 才允许执行，即使入口位于 OpenAI Codex 安装目录也可使用；可通过本地配置 `ticket_ai_codex_cli_path` 显式指定 CLI 路径，Windows 子进程会隐藏控制台窗口。
 - 工单 AI Worker 失败时只向服务端返回错误摘要和工作区日志路径；Codex 账号并发限制会归一提示 `Concurrency limit exceeded`，完整 stdout/stderr 保留在任务工作区文件中。
