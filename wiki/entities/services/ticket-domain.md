@@ -284,6 +284,7 @@ graph TD
 - AI 分析任务的执行过程会在系统日志里按阶段输出，失败时输出异常堆栈；数据库只保留最后失败原因，避免把调试细节落到业务表。
 - Windows 开发环境会优先解析 `codex` 的绝对路径再执行，避免 Agent 进程找不到 Worker 可执行文件。
 - AI 分析 Worker 会为每个任务准备独立 `CODEX_HOME` 并复制当前 Codex 配置，避免 Windows 下复用用户目录临时状态导致的初始化失败。
+- AI 分析整包日志按 Agent 本地 `log_cache/ticket_<ticketId>/log_pull_<recordId>/<sourceHash>/` 缓存；同一成功日志再次分析会复用原始压缩包和解压目录，Agent 阶段日志会明确记录缓存命中。手动分析可选择当前工单任一成功日志，未选择时服务端只使用最新成功日志，并拒绝跨工单或未成功记录。
 - 任务级 `CODEX_HOME` 会同步复制 `config.toml` 中相对 `model_catalog_json` 引用的模型目录；绝对路径直接复用，引用缺失或越界时在启动 Worker 前明确失败，避免 Codex 仅返回不易定位的 `os error 2`。
 - AI 分析 Worker 的认证环境优先从 Codex 配置目录 `.env` 读取，再回退进程环境变量，避免开发机密钥只配置在 Codex 目录时失效。
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。

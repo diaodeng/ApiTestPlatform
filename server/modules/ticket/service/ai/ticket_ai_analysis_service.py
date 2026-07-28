@@ -572,11 +572,12 @@ class TicketAiAnalysisService:
         :return: 日志拉取记录对象
         """
         if record_id:
-            return TicketLogPullDao.get_record_by_id(db, record_id)
-        latest_summary = TicketLogPullService.get_latest_summary(db, ticket_id)
-        if not latest_summary or not latest_summary.get("id"):
-            return None
-        return TicketLogPullDao.get_record_by_id(db, int(latest_summary["id"]))
+            record = TicketLogPullDao.get_record_by_id(db, record_id)
+            if not record or record.ticket_id != ticket_id or record.status != "success":
+                return None
+            return record
+        # AI 分析只使用已完成下载的日志，避免“最新”记录仍在拉取或已经失败时下发无效日志。
+        return TicketLogPullDao.get_latest_success_record_by_ticket_id(db, ticket_id)
 
     @classmethod
     def _ensure_version_key_for_analysis(
@@ -1284,6 +1285,7 @@ class TicketAiAnalysisService:
         prompt_templates: list[dict[str, Any]] | None = None,
         extra_instruction: str = "",
         log_analysis_mode: str = "digest",
+        source_logs_path: str | None = None,
     ) -> str:
         """
         构建 Codex 分析提示词。
@@ -1294,6 +1296,7 @@ class TicketAiAnalysisService:
         :param prompt_templates: 选择追加的提示词模板列表。
         :param extra_instruction: 本次提交的额外说明。
         :param log_analysis_mode: 日志分析模式（digest/full_directory/hybrid）。
+        :param source_logs_path: Agent 实际读取的原始日志目录；未指定时使用任务目录中的 source_logs。
         :return: 提示词文本
         """
         prompt_layers = prompt_layers or {}
@@ -1311,6 +1314,7 @@ class TicketAiAnalysisService:
                 )
             )
         extra_instruction_text = str(extra_instruction or "").strip()
+        resolved_source_logs_path = str(source_logs_path or f"{workspace_path}/source_logs")
         layered_prompt_text = TicketPromptService._join_text(
             [
                 default_prompt_text,
@@ -1346,15 +1350,15 @@ class TicketAiAnalysisService:
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
 3. **本次日志分析模式为 `{log_analysis_mode}`**（已写入 context.json 的 logAnalysisMode 字段）：
    - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
-     {workspace_path}/source_logs/ 定点读取原始日志。
-   - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
+     {resolved_source_logs_path}/ 定点读取原始日志。
+   - `full_directory`：不要依赖摘要，直接读取 {resolved_source_logs_path}/；先用 rg 搜索错误关键词、
      工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
    - `hybrid`：摘要只作为定位索引。阅读摘要后，必须查看 {workspace_path}/source_logs_manifest.json
-     或列出 {workspace_path}/source_logs/ 文件清单，并至少对 {workspace_path}/source_logs/ 执行一次
+     或列出 {resolved_source_logs_path}/ 文件清单，并至少对 {resolved_source_logs_path}/ 执行一次
      rg 关键词检索；最终证据尽量引用原始日志文件路径和行号，不要只引用 logs_ai_digest.txt。
    **请严格按照上述模式执行，不要自行切换为其他模式。**
 4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
-   在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
+   在 {resolved_source_logs_path}/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
    OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
 4. 工单不是一次性分析，请结合 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
@@ -1879,6 +1883,11 @@ class TicketAiAnalysisService:
         if not ticket:
             return CrudResponseModel(is_success=False, message="工单不存在")
         version_key, log_record = cls._ensure_version_key_for_analysis(db, ticket, request)
+        if request.log_pull_record_id and not log_record:
+            return CrudResponseModel(
+                is_success=False,
+                message="选择的日志记录不存在、不属于当前工单，或尚未下载成功",
+            )
         if not version_key:
             return CrudResponseModel(is_success=False, message="未获取到版本号，请先选择版本号或确认日志中包含版本号")
         mapping = cls._resolve_mapping(db, ticket, request)
@@ -1950,6 +1959,7 @@ class TicketAiAnalysisService:
             prompt_templates=selected_prompt_templates,
             extra_instruction=request.extra_instruction or "",
             log_analysis_mode=str(context_payload.get("logAnalysisMode") or "digest"),
+            source_logs_path="{source_logs_path}",
         )
 
         now = datetime.now()
@@ -2417,7 +2427,11 @@ class TicketAiAnalysisService:
         if isinstance(task.analysis_context, dict):
             fallback_log_mode = str(task.analysis_context.get("logAnalysisMode") or "digest")
         prompt_template = task.prompt_text or cls._build_prompt(
-            "{workspace_path}", mapping, ticket, log_analysis_mode=fallback_log_mode,
+            "{workspace_path}",
+            mapping,
+            ticket,
+            log_analysis_mode=fallback_log_mode,
+            source_logs_path="{source_logs_path}",
         )
         schema_payload = cls._build_result_schema(ticket, mapping)
         timeout_sec = cls._get_config_int(db, cls.CONFIG_WORKER_TIMEOUT, cls.DEFAULT_WORKER_TIMEOUT)

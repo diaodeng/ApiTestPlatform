@@ -16,6 +16,7 @@
     translateTicketDescription,
     unbindTicketIssue,
   } from '@/api/ticket/ticket';
+  import { listTicketLogPulls } from '@/api/ticket/logPull';
   import {
     getLogPullStatusTagType,
     getOptionLabel,
@@ -100,6 +101,8 @@
   const aiAnalysisRetryLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
   const aiAnalysisOpen = ref(false);
+  const aiAnalysisLogPullLoading = ref(false);
+  const aiAnalysisLogPullOptions = ref([]);
   const aiTaskHistoryOpen = ref(false);
   const aiTaskDetailOpen = ref(false);
   const selectedAiTask = ref(null);
@@ -707,6 +710,44 @@
     aiAnalysisTaskForm.value.promptTemplateCodes = aiDefaults.promptTemplateCodes;
   }
 
+  /**
+   * 加载当前工单已成功下载的日志记录，供手动 AI 分析选择。
+   * @returns {Promise<void>} 日志选项加载完成 Promise。
+   */
+  function loadAiAnalysisLogPullOptions() {
+    if (!currentTicketId.value) {
+      aiAnalysisLogPullOptions.value = [];
+      return Promise.resolve();
+    }
+    aiAnalysisLogPullLoading.value = true;
+    return listTicketLogPulls(currentTicketId.value, { pageNum: 1, pageSize: 100, status: 'success' })
+      .then((response) => {
+        const rows = response.rows || [];
+        aiAnalysisLogPullOptions.value = rows;
+        const selectedRecordId = aiAnalysisTaskForm.value.logPullRecordId;
+        if (!rows.some((item) => item.id === selectedRecordId)) {
+          aiAnalysisTaskForm.value.logPullRecordId = rows[0]?.id;
+        }
+      })
+      .catch(() => {
+        aiAnalysisLogPullOptions.value = [];
+      })
+      .finally(() => {
+        aiAnalysisLogPullLoading.value = false;
+      });
+  }
+
+  /**
+   * 生成 AI 分析日志选择框的可读标签。
+   * @param {object} record 日志拉取记录。
+   * @returns {string} 日志选择标签。
+   */
+  function formatAiAnalysisLogPullOption(record) {
+    const timeText = record.modifyTime || record.finishedAt || record.createTime || '无时间';
+    const locationText = [record.storeId, record.posNo ? `POS${record.posNo}` : ''].filter(Boolean).join(' / ');
+    return `#${record.id} · ${timeText}${locationText ? ` · ${locationText}` : ''}`;
+  }
+
   function openAiAnalysisDialog() {
     if (!detail.value.projectId) {
       proxy.$modal.msgWarning('当前工单缺少项目，无法发起AI分析');
@@ -714,6 +755,7 @@
     }
     resetAiAnalysisDialog();
     aiAnalysisOpen.value = true;
+    loadAiAnalysisLogPullOptions();
   }
 
   function openAiTaskHistory() {
@@ -1267,6 +1309,24 @@
             :value="item.providerCode"
           />
         </el-select>
+      </el-form-item>
+      <el-form-item label="分析日志">
+        <el-select
+          v-model="aiAnalysisTaskForm.logPullRecordId"
+          :loading="aiAnalysisLogPullLoading"
+          placeholder="默认使用最新成功日志"
+          clearable
+          filterable
+          style="width: 100%"
+        >
+          <el-option
+            v-for="item in aiAnalysisLogPullOptions"
+            :key="item.id"
+            :label="formatAiAnalysisLogPullOption(item)"
+            :value="item.id"
+          />
+        </el-select>
+        <div class="form-item-tip">不选择时使用最新成功日志；选择后本次分析只使用指定日志。</div>
       </el-form-item>
       <el-form-item label="强制刷新">
         <el-switch v-model="aiAnalysisTaskForm.forceRefresh" />

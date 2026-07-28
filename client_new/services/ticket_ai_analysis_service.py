@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import bz2
 import gzip
+import hashlib
 import json
 import lzma
 import os
@@ -1166,6 +1167,79 @@ class TicketAiAnalysisService:
         return target_path
 
     @staticmethod
+    def _resolve_log_cache_paths(
+        workspace_root: Path,
+        ticket_id: int,
+        log_record_id: int,
+        source_key: str,
+    ) -> tuple[Path, Path, Path]:
+        """
+        根据工单、日志记录和日志来源生成 Agent 本地固定缓存路径。
+
+        :param workspace_root: AI 工作区根目录
+        :param ticket_id: 工单ID
+        :param log_record_id: 日志拉取记录ID
+        :param source_key: 日志来源标识（本地归档路径或下载地址）
+        :return: 压缩包缓存路径、解压目录、缓存元数据路径
+        """
+        source_hash = hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:16]
+        cache_dir = (
+            workspace_root
+            / "log_cache"
+            / f"ticket_{ticket_id}"
+            / f"log_pull_{log_record_id}"
+            / source_hash
+        )
+        return cache_dir / "source_logs.zip", cache_dir / "source_logs", cache_dir / "cache_manifest.json"
+
+    @classmethod
+    def _load_log_archive_cache(
+        cls,
+        cache_manifest_path: Path,
+        source_key: str,
+        archive_path: Path,
+        extract_dir: Path,
+    ) -> list[str]:
+        """
+        校验并读取已完成的日志缓存。
+
+        :param cache_manifest_path: 缓存元数据文件路径
+        :param source_key: 本次日志来源标识
+        :param archive_path: 本次可用压缩包路径
+        :param extract_dir: 缓存解压目录
+        :return: 已缓存的解压文件相对路径；无可用缓存时返回空列表
+        """
+        manifest = cls._read_json_file(cache_manifest_path)
+        if not manifest or str(manifest.get("sourceKey") or "") != source_key:
+            return []
+        if not archive_path.is_file() or archive_path.stat().st_size <= 0 or not extract_dir.is_dir():
+            return []
+        extracted_files = [
+            str(path.relative_to(extract_dir))
+            for path in extract_dir.rglob("*")
+            if path.is_file()
+        ]
+        return extracted_files
+
+    @staticmethod
+    def _resolve_existing_local_archive(storage_path: str) -> Path | None:
+        """
+        解析 Agent 当前机器可直接访问的日志归档文件。
+
+        :param storage_path: 服务端记录的归档路径
+        :return: 存在且非空的本地归档文件；当前机器不可访问时返回 None
+        """
+        if not storage_path:
+            return None
+        try:
+            archive_path = Path(storage_path).expanduser()
+            if archive_path.is_file() and archive_path.stat().st_size > 0:
+                return archive_path
+        except OSError:
+            return None
+        return None
+
+    @staticmethod
     def _extract_archive(archive_path: Path, extract_dir: Path) -> list[str]:
         """
         解压日志压缩包到工作区目录。支持 zip / 7z / tar / tar.gz / tgz / bz2 / xz / gz 等常见格式。
@@ -1667,6 +1741,7 @@ class TicketAiAnalysisService:
         repo_path: str | None = None,
         workspace_root: str | None = None,
         log_analysis_mode: str = "digest",
+        source_logs_path: str | None = None,
     ) -> str:
         """
         构建分析提示词。
@@ -1676,12 +1751,14 @@ class TicketAiAnalysisService:
         :param repo_path: 实际使用的本地仓库路径。
         :param workspace_root: 实际使用的工作区根目录。
         :param log_analysis_mode: 日志分析模式（digest/full_directory/hybrid）。
+        :param source_logs_path: 实际读取的原始日志目录。
         :return: 提示词文本
         """
         resolved_repo_path = repo_path or mapping.get("resolvedLocalRepoPath") or mapping.get("resolved_local_repo_path")
         resolved_repo_path = resolved_repo_path or mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""
         resolved_workspace_root = workspace_root or mapping.get("workspaceRoot") or mapping.get("workspace_root") or ""
         fallback_workspace_root = str(Path(workspace_path).parent.parent)
+        resolved_source_logs_path = source_logs_path or str(Path(workspace_path) / "source_logs")
         return f"""你是工单自动分析 Worker，请基于当前工作区中的上下文进行根因分析。
 
 当前任务目录:
@@ -1702,15 +1779,15 @@ class TicketAiAnalysisService:
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
 3. **本次日志分析模式为 `{log_analysis_mode}`**（已写入 context.json 的 logAnalysisMode 字段）：
    - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
-     {workspace_path}/source_logs/ 定点读取原始日志。
-   - `full_directory`：不要依赖摘要，直接读取 {workspace_path}/source_logs/；先用 rg 搜索错误关键词、
+     {resolved_source_logs_path}/ 定点读取原始日志。
+   - `full_directory`：不要依赖摘要，直接读取 {resolved_source_logs_path}/；先用 rg 搜索错误关键词、
      工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
    - `hybrid`：摘要只作为定位索引。阅读摘要后，必须查看 {workspace_path}/source_logs_manifest.json
-     或列出 {workspace_path}/source_logs/ 文件清单，并至少对 {workspace_path}/source_logs/ 执行一次
+     或列出 {resolved_source_logs_path}/ 文件清单，并至少对 {resolved_source_logs_path}/ 执行一次
      rg 关键词检索；最终证据尽量引用原始日志文件路径和行号，不要只引用 logs_ai_digest.txt。
    **请严格按照上述模式执行，不要自行切换为其他模式。**
 4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
-   在 {workspace_path}/source_logs/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
+   在 {resolved_source_logs_path}/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
    OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
 4. 工单不是一次性分析，请结合 context.json 中的 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
@@ -1966,6 +2043,10 @@ class TicketAiAnalysisService:
                 logs_text = str(source_log_pull.get("text") or "")
                 command_result_url = str(source_log_pull.get("commandResultUrl") or "").strip()
                 storage_path = str(source_log_pull.get("storagePath") or "").strip()
+                try:
+                    source_log_record_id = int(source_log_pull.get("recordId") or 0)
+                except (TypeError, ValueError):
+                    source_log_record_id = 0
                 whole_archive_mode = bool(source_log_pull.get("wholeArchiveMode"))
                 log_analysis_mode = str(
                     context_payload.get("logAnalysisMode")
@@ -2008,21 +2089,96 @@ class TicketAiAnalysisService:
                             "日志内容未入库，当前任务为时间范围模式或未配置整包分析。",
                             encoding="utf-8",
                         )
-                    if whole_archive_mode and archive_url and str(archive_url).lower().startswith(("http://", "https://")):
-                        await cls._emit_event(
-                            event_sender,
-                            "ai_analysis_status",
-                            task_id,
-                            "下载并解压整包日志",
-                            archive_url=archive_url,
-                            archive_path=str(source_logs_zip),
-                            extract_dir=str(source_logs_dir),
-                        )
-                        downloaded = cls._download_archive(str(archive_url), source_logs_zip)
+                    if whole_archive_mode:
+                        local_archive = cls._resolve_existing_local_archive(storage_path)
+                        source_key = ""
+                        active_archive_path: Path | None = local_archive
+                        cache_manifest_path: Path | None = None
+                        cache_hit = False
+                        if local_archive:
+                            source_key = (
+                                f"file:{local_archive.resolve()}:{local_archive.stat().st_size}:"
+                                f"{local_archive.stat().st_mtime_ns}"
+                            )
+                        elif archive_url.lower().startswith(("http://", "https://")):
+                            source_key = f"url:{archive_url}"
+
+                        if source_key and source_log_record_id:
+                            cache_archive_path, cache_extract_dir, cache_manifest_path = cls._resolve_log_cache_paths(
+                                workspace_root,
+                                ticket_id,
+                                source_log_record_id,
+                                source_key,
+                            )
+                            if not active_archive_path:
+                                active_archive_path = cache_archive_path
+                            cached_files = cls._load_log_archive_cache(
+                                cache_manifest_path,
+                                source_key,
+                                active_archive_path,
+                                cache_extract_dir,
+                            )
+                            if cached_files:
+                                source_logs_zip = active_archive_path
+                                source_logs_dir = cache_extract_dir
+                                extracted_files = cached_files
+                                cache_hit = True
+                                await cls._emit_event(
+                                    event_sender,
+                                    "ai_analysis_status",
+                                    task_id,
+                                    "复用本地整包日志缓存",
+                                    log_record_id=source_log_record_id,
+                                    archive_path=str(source_logs_zip),
+                                    extract_dir=str(source_logs_dir),
+                                    extracted_file_count=len(extracted_files),
+                                )
+
+                        if not cache_hit and active_archive_path:
+                            if local_archive:
+                                source_logs_zip = local_archive
+                                await cls._emit_event(
+                                    event_sender,
+                                    "ai_analysis_status",
+                                    task_id,
+                                    "使用本地归档并解压整包日志",
+                                    log_record_id=source_log_record_id or None,
+                                    archive_path=str(local_archive),
+                                )
+                            else:
+                                source_logs_zip = active_archive_path
+                                await cls._emit_event(
+                                    event_sender,
+                                    "ai_analysis_status",
+                                    task_id,
+                                    "下载并解压整包日志",
+                                    archive_url=archive_url,
+                                    archive_path=str(source_logs_zip),
+                                    extract_dir=str(source_logs_dir),
+                                )
+                                active_archive_path = cls._download_archive(archive_url, source_logs_zip)
+                            if active_archive_path:
+                                if cache_manifest_path:
+                                    source_logs_dir = cache_manifest_path.parent / "source_logs"
+                                extracted_files = cls._extract_archive(active_archive_path, source_logs_dir)
+                                if cache_manifest_path:
+                                    cache_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                                    cache_manifest_path.write_text(
+                                        cls._dumps(
+                                            {
+                                                "sourceKey": source_key,
+                                                "archivePath": str(active_archive_path),
+                                                "extractDir": str(source_logs_dir),
+                                                "extractedFiles": extracted_files,
+                                                "cachedAt": datetime.now().isoformat(),
+                                            }
+                                        ),
+                                        encoding="utf-8",
+                                    )
+
                         digest_payload: dict[str, Any] = {}
                         window_payload: dict[str, Any] = {}
-                        if downloaded:
-                            extracted_files = cls._extract_archive(downloaded, source_logs_dir)
+                        if extracted_files:
                             if agent_should_extract_window and (requested_begin_time or requested_end_time):
                                 window_payload = cls._extract_window_logs(
                                     extract_dir=source_logs_dir,
@@ -2057,6 +2213,7 @@ class TicketAiAnalysisService:
                                     "archivePath": str(source_logs_zip),
                                     "extractDir": str(source_logs_dir),
                                     "extractedFiles": extracted_files,
+                                    "cacheHit": cache_hit,
                                     "logAnalysisMode": log_analysis_mode,
                                     "aiDigest": digest_payload,
                                     "windowExtract": window_payload,
@@ -2068,7 +2225,10 @@ class TicketAiAnalysisService:
 
                 mapping["resolvedLocalRepoPath"] = str(repo_path)
                 mapping["resolvedBranchName"] = current_branch
-                resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))
+                resolved_prompt = (
+                    prompt_template.replace("{workspace_path}", str(workspace_dir))
+                    .replace("{source_logs_path}", str(source_logs_dir))
+                )
                 if not resolved_prompt:
                     resolved_prompt = cls._build_prompt(
                         str(workspace_dir),
@@ -2077,6 +2237,7 @@ class TicketAiAnalysisService:
                         repo_path=str(repo_path),
                         workspace_root=str(workspace_root),
                         log_analysis_mode=log_analysis_mode,
+                        source_logs_path=str(source_logs_dir),
                     )
                 prompt_file.write_text(resolved_prompt, encoding="utf-8")
 

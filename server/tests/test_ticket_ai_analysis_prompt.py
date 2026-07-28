@@ -35,6 +35,33 @@ class TicketAiAnalysisPromptTests(unittest.TestCase):
         self.assertIn("至少对 D:/workspace/task/source_logs/ 执行一次", prompt)
         self.assertIn("不要只引用 logs_ai_digest.txt", prompt)
 
+    def test_prompt_supports_agent_log_cache_path(self):
+        """Agent 复用日志缓存时，提示词应指向缓存目录而不是任务临时目录。"""
+        mapping = SimpleNamespace(
+            project_name="门店系统",
+            version_key="v1",
+            repo_url="https://example.invalid/repo.git",
+            branch_name="main",
+            local_repo_path="D:/repo",
+        )
+        ticket = SimpleNamespace(
+            ticket_id=1,
+            ticket_no="INC001",
+            title="支付失败",
+            description="用户反馈支付失败",
+        )
+
+        prompt = TicketAiAnalysisService._build_prompt(
+            "D:/workspace/task",
+            mapping,
+            ticket,
+            log_analysis_mode="hybrid",
+            source_logs_path="D:/workspace/log_cache/ticket_1/log_pull_2/source_logs",
+        )
+
+        self.assertIn("D:/workspace/log_cache/ticket_1/log_pull_2/source_logs/", prompt)
+        self.assertNotIn("D:/workspace/task/source_logs/ 执行一次", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

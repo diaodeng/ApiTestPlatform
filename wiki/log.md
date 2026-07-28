@@ -1587,3 +1587,10 @@ updated: 2026-07-26
 - 创建的双向链接：0 对（沿用工单域与同步流程既有双向链接）。
 - 变更传播链：`ticket.sync.automation` -> `TicketSyncAiConfigService` -> 翻译/标题总结/分类/参数提取/知识提炼；定时任务显式 `automation` -> 主动拉取任务级覆盖；工作流状态编码 -> `status_name` -> 群推送条件表达式。
 - 总共涉及页面：5。
+## [2026-07-27] INGEST-CODE | 工单 AI 整包日志缓存与手工选择
+- 触发：同一工单重复执行 AI 分析时，Agent 每次重复下载整包日志；用户要求默认使用最新日志，并可手动选择历史日志记录。
+- 架构层：工单域 / AI 分析 / 新版 PySide6 Agent / Web 控制台。
+- 创建的页面：`web/public/docs/2026-07-27-ticket-ai-log-cache-and-selection.md`。
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`web/public/docs/update_history.md`。
+- 变更传播链：`TicketAiAnalysisRequestModel.log_pull_record_id` -> 成功日志归属校验 -> Agent `log_cache/ticket_<id>/log_pull_<id>/<sourceHash>` -> Worker 提示词实际日志目录；工单详情 AI 弹窗 -> 成功日志选择列表 -> 指定 `logPullRecordId`。
+- 关键日志：首次下载记录“下载并解压整包日志”，命中缓存记录“复用本地整包日志缓存”，本地归档可访问时记录“使用本地归档并解压整包日志”。
