@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -6,12 +7,16 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.ai_provider_vo import (
     AiProviderPageQueryModel,
     CreateAiProviderModel,
+    PreviewAiProviderModelCatalogRequest,
     UpdateAiProviderModel,
+    ViewAiProviderSecretModel,
 )
+from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
+from module_admin.service.ai_provider_model_catalog_service import AiProviderModelCatalogService
 from module_admin.service.ai_provider_service import AiProviderService
 from module_admin.service.login_service import CurrentUserModel, LoginService
-from utils.response_util import ResponseUtil
 from utils.page_util import PageResponseModel
+from utils.response_util import ResponseUtil
 
 aiProviderController = APIRouter(prefix="/system/aiprovider", dependencies=[Depends(LoginService.get_current_user)])
 
@@ -46,17 +51,128 @@ async def get_ai_provider_list(
 )
 async def get_ai_provider_options(
     request: Request,
+    usage: str | None = None,
+    executor: str | None = None,
     query_db: Session = Depends(get_db),
 ):
     """
     获取可用于节点选择的 AI Provider 选项。
     :param request: Request对象
+    :param usage: 可选业务用途过滤
+    :param executor: 可选执行器过滤
     :param query_db: orm对象
     :return: Provider选项列表
     """
     try:
-        provider_options = AiProviderService.get_ai_provider_options_services(query_db)
+        provider_options = AiProviderService.get_ai_provider_options_services(query_db, usage, executor)
         return ResponseUtil.success(data=provider_options)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.get(
+    "/metadata/options",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:list"))],
+)
+async def get_ai_provider_metadata_options(request: Request):
+    """
+    获取Provider平台、协议、用途和执行器的元数据选项。
+    :param request: 请求对象
+    :return: Provider配置元数据
+    """
+    return ResponseUtil.success(
+        data={
+            "platforms": AiProviderCapabilityService.PLATFORM_OPTIONS,
+            "protocols": AiProviderCapabilityService.PROTOCOL_OPTIONS,
+            "usages": AiProviderCapabilityService.USAGE_OPTIONS,
+            "executors": AiProviderCapabilityService.EXECUTOR_OPTIONS,
+        }
+    )
+
+
+@aiProviderController.post(
+    "/model-catalog/preview",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
+)
+async def preview_ai_provider_models(request: Request, preview_object: PreviewAiProviderModelCatalogRequest):
+    """
+    使用未保存的Provider表单草稿探测上游模型目录，不写入数据库。
+    :param request: 请求对象
+    :param preview_object: Provider连接草稿
+    :return: 上游模型目录
+    """
+    try:
+        models = await run_in_threadpool(AiProviderModelCatalogService.preview_models, preview_object)
+        return ResponseUtil.success(data=models)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.get(
+    "/{provider_id}/model-catalog",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:query"))],
+)
+async def get_ai_provider_model_catalog(request: Request, provider_id: int, query_db: Session = Depends(get_db)):
+    """
+    获取已保存Provider的模型目录缓存。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param query_db: 数据库会话
+    :return: 模型目录列表
+    """
+    try:
+        models = AiProviderModelCatalogService.list_models(query_db, provider_id)
+        return ResponseUtil.success(data=models)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.post(
+    "/{provider_id}/model-catalog/refresh",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
+)
+async def refresh_ai_provider_model_catalog(request: Request, provider_id: int, query_db: Session = Depends(get_db)):
+    """
+    使用已保存Provider凭据刷新模型目录缓存。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param query_db: 数据库会话
+    :return: 刷新后的模型目录
+    """
+    try:
+        models = await run_in_threadpool(AiProviderModelCatalogService.refresh_models, query_db, provider_id)
+        return ResponseUtil.success(data=models)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.post(
+    "/{provider_id}/secret/view",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:view-secret"))],
+)
+async def view_ai_provider_secret(
+    request: Request,
+    provider_id: int,
+    view_object: ViewAiProviderSecretModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    校验当前登录用户密码后查看指定Provider密钥明文。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param view_object: 当前用户密码
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: Provider密钥明文
+    """
+    try:
+        result = AiProviderService.view_ai_provider_secret_services(
+            query_db, current_user, provider_id, view_object.password
+        )
+        if result.is_success:
+            return ResponseUtil.success(msg=result.message, data=result.result)
+        return ResponseUtil.failure(msg=result.message)
     except Exception as exc:
         return ResponseUtil.error(msg=str(exc))
 
@@ -135,7 +251,10 @@ async def update_ai_provider(
         return ResponseUtil.error(msg=str(exc))
 
 
-@aiProviderController.delete("/{provider_id}", dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:remove"))])
+@aiProviderController.delete(
+    "/{provider_id}",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:remove"))],
+)
 async def delete_ai_provider(
     request: Request,
     provider_id: int,
@@ -151,7 +270,11 @@ async def delete_ai_provider(
     :return: 删除结果
     """
     try:
-        delete_result = AiProviderService.delete_ai_provider_services(query_db, provider_id, current_user.user.user_name)
+        delete_result = AiProviderService.delete_ai_provider_services(
+            query_db,
+            provider_id,
+            current_user.user.user_name,
+        )
         if delete_result.is_success:
             return ResponseUtil.success(msg=delete_result.message)
         return ResponseUtil.failure(msg=delete_result.message)

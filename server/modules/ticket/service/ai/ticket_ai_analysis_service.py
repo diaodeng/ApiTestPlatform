@@ -22,6 +22,7 @@ from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
+from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum, TstepTypeEnum
 from module_qtr.service.agent_service import agents as connected_agents
@@ -766,16 +767,16 @@ class TicketAiAnalysisService:
         return AiProviderDao.get_ai_provider_by_code(db, normalized_code)
 
     @staticmethod
-    def _normalize_provider_extra_config(extra_config: Any) -> dict[str, str]:
+    def _normalize_provider_worker_env(worker_env: Any) -> dict[str, str]:
         """
-        将 Provider 扩展配置归一化为环境变量字典。
-        :param extra_config: 扩展配置
+        将 Provider Worker环境配置归一化为环境变量字典。
+        :param worker_env: Worker环境配置
         :return: 环境变量字典
         """
-        if not isinstance(extra_config, dict):
+        if not isinstance(worker_env, dict):
             return {}
         env_overrides: dict[str, str] = {}
-        for key, value in extra_config.items():
+        for key, value in worker_env.items():
             if key in (None, "") or value in (None, ""):
                 continue
             env_overrides[str(key)] = str(value)
@@ -797,9 +798,9 @@ class TicketAiAnalysisService:
             secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
         except Exception as exc:
             raise ValueError(f"Provider密钥解密失败: {exc}") from exc
-        provider_type = str(getattr(provider, "provider_type", "") or "").strip().lower()
+        api_protocol = str(getattr(provider, "api_protocol", "") or "").strip().lower()
         if secret_key:
-            if provider_type == "claude":
+            if api_protocol == "anthropic_messages":
                 env_overrides["ANTHROPIC_API_KEY"] = secret_key
                 env_overrides["OPENAI_API_KEY"] = secret_key
             else:
@@ -807,10 +808,10 @@ class TicketAiAnalysisService:
                 env_overrides["ANTHROPIC_API_KEY"] = secret_key
         base_url = str(getattr(provider, "base_url", "") or "").strip()
         if base_url:
-            if provider_type == "claude":
+            if api_protocol == "anthropic_messages":
                 env_overrides["ANTHROPIC_BASE_URL"] = base_url
             env_overrides["OPENAI_BASE_URL"] = base_url
-        model_name = str(getattr(provider, "model_name", "") or "").strip()
+        model_name = str(getattr(provider, "default_model", "") or "").strip()
         if model_name:
             env_overrides["OPENAI_MODEL"] = model_name
             env_overrides["ANTHROPIC_MODEL"] = model_name
@@ -820,11 +821,12 @@ class TicketAiAnalysisService:
             env_overrides["AI_PROVIDER_CODE"] = provider_code
         if provider_name:
             env_overrides["AI_PROVIDER_NAME"] = provider_name
-        if provider_type:
-            env_overrides["AI_PROVIDER_TYPE"] = provider_type
+        platform_code = str(getattr(provider, "platform_code", "") or "").strip()
+        if platform_code:
+            env_overrides["AI_PROVIDER_PLATFORM"] = platform_code
         if getattr(provider, "provider_level", None) is not None:
             env_overrides["AI_PROVIDER_LEVEL"] = str(provider.provider_level)
-        env_overrides.update(cls._normalize_provider_extra_config(getattr(provider, "extra_config", None)))
+        env_overrides.update(cls._normalize_provider_worker_env(getattr(provider, "worker_env", None)))
         return env_overrides
 
     @staticmethod
@@ -1169,8 +1171,11 @@ class TicketAiAnalysisService:
             snapshot["selectedAiProviderName"] = (
                 str(context_payload.get("selectedAiProviderName") or "").strip() or None
             )
-            snapshot["selectedAiProviderType"] = (
-                str(context_payload.get("selectedAiProviderType") or "").strip() or None
+            snapshot["selectedAiProviderPlatform"] = (
+                str(context_payload.get("selectedAiProviderPlatform") or "").strip() or None
+            )
+            snapshot["selectedAiProviderProtocol"] = (
+                str(context_payload.get("selectedAiProviderProtocol") or "").strip() or None
             )
             snapshot["selectedWorkerModel"] = str(context_payload.get("selectedWorkerModel") or "").strip() or None
 
@@ -1256,7 +1261,8 @@ class TicketAiAnalysisService:
                 "selectedAgentCode",
                 "selectedAiProviderCode",
                 "selectedAiProviderName",
-                "selectedAiProviderType",
+                "selectedAiProviderPlatform",
+                "selectedAiProviderProtocol",
                 "selectedWorkerModel",
             )
             for key in user_config_keys:
@@ -1909,12 +1915,19 @@ class TicketAiAnalysisService:
             selected_provider = cls._resolve_ai_provider(db, selected_provider_code)
             if not selected_provider:
                 return CrudResponseModel(is_success=False, message="未找到可用的AI Provider配置")
-            if not bool(getattr(selected_provider, "enabled", True)):
-                return CrudResponseModel(is_success=False, message="所选AI Provider已禁用")
+            try:
+                AiProviderCapabilityService.require_provider_eligibility(
+                    selected_provider,
+                    usage="ticket_analysis_worker",
+                    executor="codex",
+                )
+            except ValueError as exc:
+                return CrudResponseModel(is_success=False, message=str(exc))
             context_payload["selectedAiProviderCode"] = selected_provider.provider_code
             context_payload["selectedAiProviderName"] = selected_provider.provider_name
-            context_payload["selectedAiProviderType"] = selected_provider.provider_type
-            context_payload["selectedWorkerModel"] = selected_provider.model_name
+            context_payload["selectedAiProviderPlatform"] = selected_provider.platform_code
+            context_payload["selectedAiProviderProtocol"] = selected_provider.api_protocol
+            context_payload["selectedWorkerModel"] = selected_provider.default_model
             # 判断是否需要 resume
             resume_from_workspace_path: str | None = None
             if request.resume and selected_provider_code:
@@ -1922,19 +1935,19 @@ class TicketAiAnalysisService:
                 if last_task:
                     last_ctx = last_task.analysis_context or {}
                     last_provider = str(last_ctx.get("selectedAiProviderCode") or "").strip()
-                    last_provider_type = str(last_ctx.get("selectedAiProviderType") or "").strip()
-                    current_provider_type = str(selected_provider.provider_type or "").strip().lower()
-                    if last_provider == selected_provider_code and last_provider_type == current_provider_type:
+                    last_provider_protocol = str(last_ctx.get("selectedAiProviderProtocol") or "").strip()
+                    current_provider_protocol = str(selected_provider.api_protocol or "").strip().lower()
+                    if last_provider == selected_provider_code and last_provider_protocol == current_provider_protocol:
                         last_ws = str(getattr(last_task, "workspace_path", "") or "").strip()
                         if last_ws:
                             resume_from_workspace_path = last_ws
                             logger.info(
                                 f"工单 AI 分析 resume: ticket_id={ticket.ticket_id}, "
-                                f"provider={selected_provider_code}, type={current_provider_type}, "
+                                f"provider={selected_provider_code}, protocol={current_provider_protocol}, "
                                 f"from={resume_from_workspace_path}"
                             )
-            if not request.agent_code and str(selected_provider.agent_code or "").strip():
-                context_payload["selectedAgentCode"] = str(selected_provider.agent_code).strip()
+            if not request.agent_code and str(selected_provider.preferred_agent_code or "").strip():
+                context_payload["selectedAgentCode"] = str(selected_provider.preferred_agent_code).strip()
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
         agent_available, agent_error_message, resolved_agent_code = cls._validate_agent_connected(
@@ -2438,13 +2451,19 @@ class TicketAiAnalysisService:
         context_payload = cls._load_workspace_context_payload(db, task, ticket, mapping, workspace_dir)
         requested_provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip()
         selected_provider = cls._resolve_ai_provider(db, requested_provider_code) if requested_provider_code else None
+        if selected_provider:
+            AiProviderCapabilityService.require_provider_eligibility(
+                selected_provider,
+                usage="ticket_analysis_worker",
+                executor="codex",
+            )
         provider_env_overrides = cls._build_provider_env_overrides(selected_provider) if selected_provider else {}
         requested_agent_code = str((context_payload or {}).get("selectedAgentCode") or "").strip()
-        if not requested_agent_code and selected_provider and str(selected_provider.agent_code or "").strip():
-            requested_agent_code = str(selected_provider.agent_code).strip()
+        if not requested_agent_code and selected_provider and str(selected_provider.preferred_agent_code or "").strip():
+            requested_agent_code = str(selected_provider.preferred_agent_code).strip()
         worker_model_override = str((context_payload or {}).get("selectedWorkerModel") or "").strip()
-        if not worker_model_override and selected_provider and str(selected_provider.model_name or "").strip():
-            worker_model_override = str(selected_provider.model_name).strip()
+        if not worker_model_override and selected_provider and str(selected_provider.default_model or "").strip():
+            worker_model_override = str(selected_provider.default_model).strip()
         agent_code = cls._resolve_agent_code(db, requested_agent_code)
         cls._log_task_step(
             task_id,

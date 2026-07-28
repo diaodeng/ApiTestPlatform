@@ -541,7 +541,7 @@
                   <el-option
                     v-for="item in providerOptions"
                     :key="item.providerCode"
-                    :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.modelName ? `- ${item.modelName}` : ''}`"
+                    :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
                     :value="item.providerCode"
                   />
                 </el-select>

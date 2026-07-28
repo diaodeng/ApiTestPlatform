@@ -97,7 +97,7 @@ export function useOptions() {
 
   // === Provider / Agent / Prompt 选项 ===
   function loadProviderOptions() {
-    return listAiProviderOptions().then((response) => {
+    return listAiProviderOptions({ usage: 'ticket_analysis_worker', executor: 'codex' }).then((response) => {
       providerOptions.value = response.data || [];
     });
   }
@@ -127,7 +127,7 @@ export function useOptions() {
 
   function resolveAiAnalysisProviderAgent(providerCode) {
     const provider = findAiProviderOption(providerCode);
-    const providerAgentCode = String(provider?.agentCode || '').trim();
+    const providerAgentCode = String(provider?.preferredAgentCode || '').trim();
     return providerAgentCode || null;
   }
 

@@ -51,12 +51,15 @@ class AiProviderDao:
             query = query.filter(
                 (SysAiProvider.provider_code.like(like_keyword))
                 | (SysAiProvider.provider_name.like(like_keyword))
-                | (SysAiProvider.provider_type.like(like_keyword))
-                | (SysAiProvider.agent_code.like(like_keyword))
-                | (SysAiProvider.model_name.like(like_keyword))
+                | (SysAiProvider.platform_code.like(like_keyword))
+                | (SysAiProvider.api_protocol.like(like_keyword))
+                | (SysAiProvider.preferred_agent_code.like(like_keyword))
+                | (SysAiProvider.default_model.like(like_keyword))
             )
-        if query_object.provider_type:
-            query = query.filter(SysAiProvider.provider_type == query_object.provider_type)
+        if query_object.platform_code:
+            query = query.filter(SysAiProvider.platform_code == query_object.platform_code)
+        if query_object.api_protocol:
+            query = query.filter(SysAiProvider.api_protocol == query_object.api_protocol)
         if query_object.enabled is not None:
             query = query.filter(SysAiProvider.enabled == bool(query_object.enabled))
         query = query.order_by(SysAiProvider.provider_level.desc(), SysAiProvider.provider_id.desc())

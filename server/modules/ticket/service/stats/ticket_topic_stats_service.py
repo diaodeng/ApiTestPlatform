@@ -9,13 +9,13 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-import httpx
 from sqlalchemy.orm import Session
 
 from module_admin.dao.ai_provider_dao import AiProviderDao
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
+from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
+from module_admin.service.ai_provider_protocol_service import AiProviderProtocolService
 from module_admin.service.user_config_service import UserConfigService
-from utils.api_key_util import ApiKeyUtil
 from utils.log_util import logger
 
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -443,90 +443,9 @@ class TicketTopicStatsService:
         return resolved_provider_code, resolved_prompt_code, resolved_prompt_content
 
     @classmethod
-    def _resolve_provider_headers(cls, provider) -> dict[str, str]:
-        """
-        构建 AI Provider 请求头。
-
-        :param provider: Provider 数据库对象。
-        :return: 请求头字典。
-        """
-        headers = {"Content-Type": "application/json"}
-        api_key = ApiKeyUtil.decrypt_api_key(getattr(provider, "api_key_cipher_text", None))
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        return headers
-
-    @classmethod
-    def _resolve_provider_url(cls, provider) -> str:
-        """
-        解析 AI Provider 调用地址。
-
-        :param provider: Provider 数据库对象。
-        :return: 完整接口地址。
-        """
-        base_url = str(getattr(provider, "base_url", "") or "").strip().rstrip("/")
-        if not base_url:
-            raise ValueError("Provider基础地址不能为空")
-        if base_url.endswith("/chat/completions") or base_url.endswith("/responses"):
-            return base_url
-        return f"{base_url}/chat/completions"
-
-    @classmethod
-    def _extract_response_text(cls, response_data: dict[str, Any]) -> str:
-        """
-        从 OpenAI 兼容响应中提取正文。
-
-        :param response_data: 接口响应 JSON。
-        :return: 模型输出文本。
-        """
-        if not isinstance(response_data, dict):
-            return ""
-        output_text = str(response_data.get("output_text") or "").strip()
-        if output_text:
-            return output_text
-        choices = response_data.get("choices")
-        if isinstance(choices, list) and choices:
-            first_choice = choices[0] if isinstance(choices[0], dict) else {}
-            message = first_choice.get("message") if isinstance(first_choice, dict) else {}
-            content = message.get("content") if isinstance(message, dict) else None
-            if isinstance(content, list):
-                content_parts: list[str] = []
-                for item in content:
-                    if not isinstance(item, dict):
-                        continue
-                    if str(item.get("type") or "").lower() == "text":
-                        text = str(item.get("text") or "").strip()
-                        if text:
-                            content_parts.append(text)
-                return "\n".join(content_parts).strip()
-            if str(content or "").strip():
-                return str(content).strip()
-        output = response_data.get("output")
-        if isinstance(output, list):
-            content_parts: list[str] = []
-            for item in output:
-                if not isinstance(item, dict):
-                    continue
-                if str(item.get("type") or "").lower() != "message":
-                    continue
-                content = item.get("content")
-                if isinstance(content, list):
-                    for part in content:
-                        if not isinstance(part, dict):
-                            continue
-                        if str(part.get("type") or "").lower() == "output_text":
-                            text = str(part.get("text") or "").strip()
-                            if text:
-                                content_parts.append(text)
-                elif str(content or "").strip():
-                    content_parts.append(str(content).strip())
-            return "\n".join(content_parts).strip()
-        return ""
-
-    @classmethod
     def _call_model_api(cls, *, provider, system_prompt: str, user_prompt: str, temperature: float = 0.2) -> str:
         """
-        调用兼容 OpenAI 的模型接口。
+        调用具备工单轻量AI能力的Provider文本生成接口。
 
         :param provider: Provider 数据库对象。
         :param system_prompt: 系统提示词。
@@ -534,34 +453,18 @@ class TicketTopicStatsService:
         :param temperature: 采样温度。
         :return: 模型返回文本。
         """
-        url = cls._resolve_provider_url(provider)
-        model_name = str(getattr(provider, "model_name", "") or "").strip()
-        if not model_name:
-            raise ValueError("Provider模型名称不能为空")
-        is_responses_api = url.endswith("/responses")
-        if is_responses_api:
-            payload = {
-                "model": model_name,
-                "input": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": temperature,
-            }
-        else:
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": temperature,
-            }
-        with httpx.Client(timeout=60) as client:
-            response = client.post(url, json=payload, headers=cls._resolve_provider_headers(provider))
-            response.raise_for_status()
-            response_data = response.json()
-        content = cls._extract_response_text(response_data)
+        AiProviderCapabilityService.require_provider_eligibility(
+            provider,
+            usage="ticket_light_text",
+            executor="direct_http",
+        )
+        content = AiProviderProtocolService.generate_text(
+            provider=provider,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            timeout_sec=60,
+        )
         if not str(content or "").strip():
             raise ValueError("AI接口未返回可解析的内容")
         return str(content).strip()

@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
-from module_hrm.entity.vo.common_vo import QueryModel
 
 
 class AiProviderBaseModel(BaseModel):
@@ -23,15 +22,19 @@ class AiProviderBaseModel(BaseModel):
     provider_id: int | None = None
     provider_code: str | None = Field(default=None, description="Provider编码")
     provider_name: str | None = Field(default=None, description="Provider名称")
-    provider_type: str | None = Field(default=None, description="Provider类型")
-    agent_code: str | None = Field(default=None, description="绑定Agent编码")
-    model_name: str | None = Field(default=None, description="默认模型名称")
+    platform_code: str | None = Field(default=None, description="Provider所属平台")
+    api_protocol: str | None = Field(default=None, description="Provider API调用协议")
+    supported_usages: list[str] = Field(default_factory=list, description="Provider允许的业务用途")
+    supported_executors: list[str] = Field(default_factory=list, description="Provider兼容的执行器")
+    preferred_agent_code: str | None = Field(default=None, description="Provider首选Agent编码")
+    default_model: str | None = Field(default=None, description="Provider默认模型名称")
     provider_level: int | None = Field(default=0, description="Provider等级")
     base_url: str | None = Field(default=None, description="API基础地址")
     api_key_prefix: str | None = Field(default=None, description="密钥掩码前缀")
     api_key: str | None = Field(default=None, description="密钥明文，仅创建或更新时提交")
     enabled: bool | None = Field(default=True, description="是否启用")
-    extra_config: dict[str, Any] | None = Field(default=None, description="扩展配置")
+    connection_config: dict[str, Any] | None = Field(default=None, description="协议连接扩展配置")
+    worker_env: dict[str, Any] | None = Field(default=None, description="Worker环境变量覆盖配置")
     remark: str | None = Field(default=None, description="备注")
     has_secret: bool | None = Field(default=False, description="是否已配置密钥")
     create_by: str | None = None
@@ -47,9 +50,12 @@ class AiProviderBaseModel(BaseModel):
         """
         self.provider_code = str(self.provider_code or "").strip() or None
         self.provider_name = str(self.provider_name or "").strip() or None
-        self.provider_type = str(self.provider_type or "").strip() or None
-        self.agent_code = str(self.agent_code or "").strip() or None
-        self.model_name = str(self.model_name or "").strip() or None
+        self.platform_code = str(self.platform_code or "").strip() or None
+        self.api_protocol = str(self.api_protocol or "").strip() or None
+        self.supported_usages = [str(item).strip() for item in self.supported_usages if str(item).strip()]
+        self.supported_executors = [str(item).strip() for item in self.supported_executors if str(item).strip()]
+        self.preferred_agent_code = str(self.preferred_agent_code or "").strip() or None
+        self.default_model = str(self.default_model or "").strip() or None
         self.base_url = str(self.base_url or "").strip() or None
         self.api_key_prefix = str(self.api_key_prefix or "").strip() or None
         self.api_key = str(self.api_key or "").strip() or None
@@ -67,7 +73,10 @@ class AiProviderQueryModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     keyword: str | None = Field(default=None, description="关键字，匹配编码、名称、模型或Agent")
-    provider_type: str | None = Field(default=None, description="Provider类型")
+    platform_code: str | None = Field(default=None, description="Provider平台")
+    api_protocol: str | None = Field(default=None, description="Provider调用协议")
+    usage: str | None = Field(default=None, description="业务用途过滤条件")
+    executor: str | None = Field(default=None, description="执行器过滤条件")
     enabled: bool | None = Field(default=None, description="是否启用")
 
 
@@ -88,8 +97,11 @@ class CreateAiProviderModel(AiProviderBaseModel):
 
     provider_code: str = Field(description="Provider编码")
     provider_name: str = Field(description="Provider名称")
-    provider_type: str = Field(description="Provider类型")
-    model_name: str = Field(description="默认模型名称")
+    platform_code: str = Field(description="Provider所属平台")
+    api_protocol: str = Field(description="Provider API调用协议")
+    supported_usages: list[str] = Field(min_length=1, description="Provider允许的业务用途")
+    supported_executors: list[str] = Field(min_length=1, description="Provider兼容的执行器")
+    default_model: str = Field(description="默认模型名称")
     api_key: str = Field(description="Provider密钥明文")
 
 
@@ -117,9 +129,12 @@ class AiProviderOptionModel(BaseModel):
     provider_id: int | None = None
     provider_code: str | None = None
     provider_name: str | None = None
-    provider_type: str | None = None
-    agent_code: str | None = None
-    model_name: str | None = None
+    platform_code: str | None = None
+    api_protocol: str | None = None
+    supported_usages: list[str] = Field(default_factory=list)
+    supported_executors: list[str] = Field(default_factory=list)
+    preferred_agent_code: str | None = None
+    default_model: str | None = None
     provider_level: int | None = None
     base_url: str | None = None
     enabled: bool | None = None
@@ -131,3 +146,41 @@ class AiProviderDetailModel(AiProviderBaseModel):
     """
 
     pass
+
+
+class AiProviderModelCatalogItemModel(BaseModel):
+    """AI Provider 模型目录项。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    model_id: str = Field(description="模型标识")
+    display_name: str = Field(default="", description="模型展示名称")
+    source: str = Field(description="模型目录来源")
+    enabled: bool = Field(default=True, description="是否可选")
+    discovered_at: datetime | None = Field(default=None, description="最近发现时间")
+    last_seen_at: datetime | None = Field(default=None, description="最近见到时间")
+
+
+class PreviewAiProviderModelCatalogRequest(AiProviderBaseModel):
+    """使用未保存Provider草稿发现模型目录的请求。"""
+
+    api_key: str = Field(description="Provider密钥明文，仅用于本次探测")
+    platform_code: str = Field(description="Provider所属平台")
+    api_protocol: str = Field(description="Provider API调用协议")
+
+
+class ViewAiProviderSecretModel(BaseModel):
+    """查看Provider密钥前的当前用户密码校验请求。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    password: str = Field(min_length=1, description="当前登录用户密码")
+
+
+class AiProviderSecretModel(BaseModel):
+    """Provider密钥明文响应模型，仅在密码校验成功后返回。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    provider_id: int = Field(description="Provider主键")
+    api_key: str = Field(description="Provider密钥明文")

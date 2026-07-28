@@ -359,10 +359,15 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="AI Provider编码">
-                    <el-input
+                    <el-select
                       v-model="form.summaryReport.aiProviderCode"
-                      placeholder="示例：openai_default"
-                    />
+                      placeholder="请选择汇总解读 Provider"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
@@ -711,9 +716,9 @@
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="item in providerOptions"
+                        v-for="item in analysisProviderOptions"
                         :key="item.providerCode"
-                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.modelName ? '- ' + item.modelName : ''}`"
+                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? '- ' + item.defaultModel : ''}`"
                         :value="item.providerCode"
                       />
                     </el-select>
@@ -817,7 +822,7 @@
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="item in providerOptions"
+                        v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
@@ -899,7 +904,7 @@
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="item in providerOptions"
+                        v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
@@ -987,7 +992,7 @@
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
                     <el-select v-model="form.titleSummaryConfig.providerCode" placeholder="请选择标题总结 Provider" filterable clearable style="width: 100%">
-                      <el-option v-for="item in providerOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                      <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -1020,7 +1025,7 @@
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
                     <el-select v-model="form.knowledgeConfig.providerCode" placeholder="请选择知识提炼 Provider" filterable clearable style="width: 100%">
-                      <el-option v-for="item in providerOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                      <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -1145,7 +1150,7 @@
                       style="width: 100%"
                     >
                       <el-option
-                        v-for="item in providerOptions"
+                        v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
@@ -2695,7 +2700,8 @@
   } = useSyncConfig(proxy);
   const pushOptionsLoading = ref(false);
   const pushOptions = ref([]);
-  const providerOptions = ref([]);
+  const analysisProviderOptions = ref([]);
+  const lightProviderOptions = ref([]);
   const promptOptions = ref([]);
   const agentOptions = ref([]);
   const groupSendLoading = ref(false);
@@ -2791,7 +2797,7 @@
   function formatProviderOptionLabel(item = {}) {
     const code = item.providerCode || '';
     const name = item.providerName || code || '-';
-    const modelName = item.modelName || '';
+    const modelName = item.defaultModel || '';
     return `${name}${code && name !== code ? ` [${code}]` : ''}${modelName ? ` - ${modelName}` : ''}`;
   }
 
@@ -2809,12 +2815,19 @@
       .catch(() => {
         agentOptions.value = [];
       });
-    listAiProviderOptions()
+    listAiProviderOptions({ usage: 'ticket_analysis_worker', executor: 'codex' })
       .then((response) => {
-        providerOptions.value = Array.isArray(response.data) ? response.data : [];
+        analysisProviderOptions.value = Array.isArray(response.data) ? response.data : [];
       })
       .catch(() => {
-        providerOptions.value = [];
+        analysisProviderOptions.value = [];
+      });
+    listAiProviderOptions({ usage: 'ticket_light_text', executor: 'direct_http' })
+      .then((response) => {
+        lightProviderOptions.value = Array.isArray(response.data) ? response.data : [];
+      })
+      .catch(() => {
+        lightProviderOptions.value = [];
       });
     listAiPromptTemplateOptions({
       template_category: 'translate,knowledge,classification,analysis,common',

@@ -8,6 +8,14 @@ updated: 2026-07-28
 
 # 操作日志
 
+## [2026-07-28] INGEST-CODE | AI Provider 能力模型重构
+
+- 触发：用户要求 Provider 明确区分平台、协议和业务用途，模型可远端拉取，密钥查看需密码二次验证，且不保留旧数据兼容代码。
+- 架构层：系统管理 / AI Provider；工单轻量 AI；工单 AI 分析 Worker。
+- 新增文件：`module_admin/service/ai_provider_capability_service.py`（能力契约）、`module_admin/service/ai_provider_protocol_service.py`（协议调用和模型发现）、`module_admin/service/ai_provider_model_catalog_service.py` 与 `dao/ai_provider_model_dao.py`（模型目录）、`server/sql/20260728_ai_provider_capability_model.sql`（数据库重构脚本）。
+- 变更传播链：Provider 平台/协议/用途/执行器 -> `/system/aiprovider/options` 场景过滤 -> 工单配置下拉 -> 轻量直连或 Codex Worker 的服务端强校验。
+- 关键结论：`provider_type` 已不再作为兼容入口；执行 SQL 后旧 Provider 必须逐条重新确认用途、执行器与协议，未配置的 Provider 不会出现在工单候选列表。
+
 ## [2026-07-28] INGEST-CODE | 工单日志查看器文件范围与 Esc 交互
 
 - 触发：日志查看弹窗的文件范围下拉需要始终展示当前日志拉取记录全部文件；子区域全屏时按 Esc 不应关闭弹窗。

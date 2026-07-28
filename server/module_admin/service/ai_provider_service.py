@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from module_admin.dao.ai_provider_dao import AiProviderDao
+from module_admin.dao.user_dao import UserDao
 from module_admin.entity.vo.ai_provider_vo import (
     AiProviderDetailModel,
     AiProviderOptionModel,
@@ -13,8 +14,11 @@ from module_admin.entity.vo.ai_provider_vo import (
     UpdateAiProviderModel,
 )
 from module_admin.entity.vo.common_vo import CrudResponseModel
+from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
 from utils.api_key_util import ApiKeyUtil
+from utils.log_util import logger
 from utils.page_util import PageResponseModel
+from utils.pwd_util import PwdUtil
 
 
 class AiProviderService:
@@ -22,34 +26,27 @@ class AiProviderService:
     AI Provider 管理模块服务层。
     """
 
-    PROVIDER_TYPE_LABELS = {
-        "openai": "OpenAI",
-        "llm": "LLM",
-        "azure_openai": "Azure OpenAI",
-        "ollama": "Ollama",
-        "custom": "Custom",
-    }
-
     @classmethod
-    def _normalize_extra_config(cls, extra_config: Any) -> dict[str, Any] | None:
+    def _normalize_dict_config(cls, config: Any, field_name: str) -> dict[str, Any] | None:
         """
         归一化扩展配置。
-        :param extra_config: 原始扩展配置
+        :param config: 原始配置
+        :param field_name: 配置字段名称
         :return: 归一化后的字典或None
         """
-        if extra_config in (None, ""):
+        if config in (None, ""):
             return None
-        if isinstance(extra_config, dict):
-            return extra_config
-        if isinstance(extra_config, str):
-            raw_text = extra_config.strip()
+        if isinstance(config, dict):
+            return config
+        if isinstance(config, str):
+            raw_text = config.strip()
             if not raw_text:
                 return None
             parsed = json.loads(raw_text)
             if not isinstance(parsed, dict):
-                raise ValueError("extraConfig 必须是JSON对象")
+                raise ValueError(f"{field_name}必须是JSON对象")
             return parsed
-        raise ValueError("extraConfig 格式不正确")
+        raise ValueError(f"{field_name}格式不正确")
 
     @classmethod
     def build_ai_provider_model(cls, ai_provider_info) -> AiProviderDetailModel:
@@ -75,7 +72,10 @@ class AiProviderService:
         :return: 分页响应对象
         """
         query_result = AiProviderDao.get_ai_provider_list(query_db, query_object)
-        rows = [cls.build_ai_provider_model(ai_provider).model_dump(by_alias=True) for ai_provider in query_result["rows"]]
+        rows = [
+            cls.build_ai_provider_model(ai_provider).model_dump(by_alias=True)
+            for ai_provider in query_result["rows"]
+        ]
         return PageResponseModel(
             rows=rows,
             page_num=query_result["page_num"],
@@ -98,15 +98,24 @@ class AiProviderService:
         return cls.build_ai_provider_model(provider_info)
 
     @classmethod
-    def get_ai_provider_options_services(cls, query_db: Session) -> list[AiProviderOptionModel]:
+    def get_ai_provider_options_services(
+        cls,
+        query_db: Session,
+        usage: str | None = None,
+        executor: str | None = None,
+    ) -> list[AiProviderOptionModel]:
         """
         获取 AI Provider 下拉选项。
         :param query_db: orm对象
+        :param usage: 可选业务用途过滤
+        :param executor: 可选执行器过滤
         :return: Provider选项列表
         """
         providers = AiProviderDao.get_ai_provider_options(query_db, enabled_only=True)
         options = []
         for provider in providers:
+            if not AiProviderCapabilityService.is_provider_eligible(provider, usage, executor):
+                continue
             option = AiProviderOptionModel.model_validate(provider)
             options.append(option)
         return options
@@ -127,19 +136,29 @@ class AiProviderService:
         """
         provider_code = str(page_object.provider_code or "").strip()
         provider_name = str(page_object.provider_name or "").strip()
-        provider_type = str(page_object.provider_type or "").strip()
-        model_name = str(page_object.model_name or "").strip()
+        platform_code = str(page_object.platform_code or "").strip()
+        api_protocol = str(page_object.api_protocol or "").strip()
+        default_model = str(page_object.default_model or "").strip()
         api_key = str(page_object.api_key or "").strip()
         if not provider_code:
             return CrudResponseModel(is_success=False, message="Provider编码不能为空")
         if not provider_name:
             return CrudResponseModel(is_success=False, message="Provider名称不能为空")
-        if not provider_type:
-            return CrudResponseModel(is_success=False, message="Provider类型不能为空")
-        if not model_name:
+        if not platform_code or not api_protocol:
+            return CrudResponseModel(is_success=False, message="Provider平台和API协议不能为空")
+        if not default_model:
             return CrudResponseModel(is_success=False, message="默认模型名称不能为空")
         if not api_key:
             return CrudResponseModel(is_success=False, message="Provider密钥不能为空")
+        try:
+            supported_usages, supported_executors = AiProviderCapabilityService.validate_provider_contract(
+                platform_code=platform_code,
+                api_protocol=api_protocol,
+                supported_usages=page_object.supported_usages,
+                supported_executors=page_object.supported_executors,
+            )
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
         if AiProviderDao.get_ai_provider_by_code(query_db, provider_code):
             return CrudResponseModel(is_success=False, message="Provider编码已存在")
         now = datetime.now()
@@ -149,15 +168,19 @@ class AiProviderService:
                 {
                     "provider_code": provider_code,
                     "provider_name": provider_name,
-                    "provider_type": provider_type,
-                    "agent_code": str(page_object.agent_code or "").strip() or None,
-                    "model_name": model_name,
+                    "platform_code": platform_code,
+                    "api_protocol": api_protocol,
+                    "supported_usages": supported_usages,
+                    "supported_executors": supported_executors,
+                    "preferred_agent_code": str(page_object.preferred_agent_code or "").strip() or None,
+                    "default_model": default_model,
                     "provider_level": int(page_object.provider_level or 0),
                     "base_url": str(page_object.base_url or "").strip() or None,
                     "api_key_prefix": ApiKeyUtil.mask_api_key(api_key),
                     "api_key_cipher_text": ApiKeyUtil.encrypt_api_key(api_key),
                     "enabled": bool(page_object.enabled),
-                    "extra_config": cls._normalize_extra_config(page_object.extra_config),
+                    "connection_config": cls._normalize_dict_config(page_object.connection_config, "connectionConfig"),
+                    "worker_env": cls._normalize_dict_config(page_object.worker_env, "workerEnv"),
                     "create_by": current_user_name,
                     "create_time": now,
                     "update_by": current_user_name,
@@ -194,24 +217,38 @@ class AiProviderService:
             return CrudResponseModel(is_success=False, message="Provider不存在")
 
         provider_name = str(page_object.provider_name or "").strip()
-        provider_type = str(page_object.provider_type or "").strip()
-        model_name = str(page_object.model_name or "").strip()
+        platform_code = str(page_object.platform_code or "").strip()
+        api_protocol = str(page_object.api_protocol or "").strip()
+        default_model = str(page_object.default_model or "").strip()
         if not provider_name:
             return CrudResponseModel(is_success=False, message="Provider名称不能为空")
-        if not provider_type:
-            return CrudResponseModel(is_success=False, message="Provider类型不能为空")
-        if not model_name:
+        if not platform_code or not api_protocol:
+            return CrudResponseModel(is_success=False, message="Provider平台和API协议不能为空")
+        if not default_model:
             return CrudResponseModel(is_success=False, message="默认模型名称不能为空")
+        try:
+            supported_usages, supported_executors = AiProviderCapabilityService.validate_provider_contract(
+                platform_code=platform_code,
+                api_protocol=api_protocol,
+                supported_usages=page_object.supported_usages,
+                supported_executors=page_object.supported_executors,
+            )
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
 
         update_data: dict[str, Any] = {
             "provider_name": provider_name,
-            "provider_type": provider_type,
-            "agent_code": str(page_object.agent_code or "").strip() or None,
-            "model_name": model_name,
+            "platform_code": platform_code,
+            "api_protocol": api_protocol,
+            "supported_usages": supported_usages,
+            "supported_executors": supported_executors,
+            "preferred_agent_code": str(page_object.preferred_agent_code or "").strip() or None,
+            "default_model": default_model,
             "provider_level": int(page_object.provider_level or 0),
             "base_url": str(page_object.base_url or "").strip() or None,
             "enabled": bool(page_object.enabled),
-            "extra_config": cls._normalize_extra_config(page_object.extra_config),
+            "connection_config": cls._normalize_dict_config(page_object.connection_config, "connectionConfig"),
+            "worker_env": cls._normalize_dict_config(page_object.worker_env, "workerEnv"),
             "update_by": current_user_name,
             "update_time": datetime.now(),
             "remark": page_object.remark,
@@ -235,7 +272,54 @@ class AiProviderService:
             raise exc
 
     @classmethod
-    def delete_ai_provider_services(cls, query_db: Session, provider_id: int, current_user_name: str) -> CrudResponseModel:
+    def view_ai_provider_secret_services(
+        cls,
+        query_db: Session,
+        current_user,
+        provider_id: int,
+        password: str,
+    ) -> CrudResponseModel:
+        """
+        校验当前登录用户密码后返回指定Provider密钥明文。
+        :param query_db: 数据库会话
+        :param current_user: 当前登录用户
+        :param provider_id: Provider主键
+        :param password: 当前用户密码
+        :return: 查看结果，成功时携带密钥明文
+        """
+        provider = AiProviderDao.get_ai_provider_by_id(query_db, provider_id)
+        if not provider:
+            logger.warning(f"查看Provider密钥被拒绝: provider_id={provider_id}, 原因=Provider不存在")
+            return CrudResponseModel(is_success=False, message="Provider不存在")
+        user_info = UserDao.get_user_by_id(query_db, current_user.user.user_id).get("user_basic_info")
+        if not user_info or not PwdUtil.verify_password(password, user_info.password):
+            logger.warning(
+                f"查看Provider密钥被拒绝: provider_id={provider_id}, "
+                f"user_id={current_user.user.user_id}, 原因=当前账号密码校验失败"
+            )
+            return CrudResponseModel(is_success=False, message="当前账号密码不正确")
+        try:
+            secret = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
+        except Exception as exc:
+            logger.error(f"查看Provider密钥失败: provider_id={provider_id}, 原因=密钥解密异常: {exc}")
+            return CrudResponseModel(is_success=False, message="Provider密钥解密失败")
+        logger.info(
+            f"查看Provider密钥成功: provider_id={provider_id}, "
+            f"user_id={current_user.user.user_id}, user_name={current_user.user.user_name}"
+        )
+        return CrudResponseModel(
+            is_success=True,
+            message="查看成功",
+            result={"providerId": provider_id, "apiKey": secret},
+        )
+
+    @classmethod
+    def delete_ai_provider_services(
+        cls,
+        query_db: Session,
+        provider_id: int,
+        current_user_name: str,
+    ) -> CrudResponseModel:
         """
         删除 AI Provider。
         :param query_db: orm对象

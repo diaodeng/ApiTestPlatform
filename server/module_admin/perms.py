@@ -235,6 +235,14 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         4,
         remark="AI Provider删除按钮",
     ),
+    F(
+        "admin.system.aiprovider.view-secret",
+        "AI Provider查看密钥",
+        "admin.system.aiprovider",
+        "system:aiprovider:view-secret",
+        5,
+        remark="AI Provider密钥查看按钮，需二次验证当前用户密码",
+    ),
     C(
         "admin.system.aiprompt",
         "AI提示词管理",

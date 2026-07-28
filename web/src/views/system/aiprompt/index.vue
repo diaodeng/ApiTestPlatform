@@ -99,7 +99,9 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="默认Provider" prop="providerCode">
-              <el-input v-model="form.providerCode" placeholder="可选" />
+              <el-select v-model="form.providerCode" placeholder="可选，按模板分类过滤" filterable clearable style="width: 100%">
+                <el-option v-for="item in promptProviderOptions" :key="item.providerCode" :label="`${item.providerName || item.providerCode} [${item.defaultModel || '-'}]`" :value="item.providerCode" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -141,6 +143,7 @@
 
 <script setup name="AiPromptTemplate">
 import { addAiPromptTemplate, delAiPromptTemplate, getAiPromptTemplate, listAiPromptTemplate, updateAiPromptTemplate } from '@/api/system/aiprompt'
+import { listAiProviderOptions } from '@/api/system/aiprovider'
 
 const { proxy } = getCurrentInstance()
 
@@ -158,6 +161,7 @@ const showSearch = ref(true)
 const total = ref(0)
 const formOpen = ref(false)
 const dialogTitle = ref('')
+const promptProviderOptions = ref([])
 
 const data = reactive({
   queryParams: {
@@ -211,6 +215,18 @@ function resetForm() {
   proxy.resetForm('templateRef')
 }
 
+function getPromptProviderUsage(category) {
+  return ['analysis', 'common'].includes(String(category || '').trim())
+    ? { usage: 'ticket_analysis_worker', executor: 'codex' }
+    : { usage: 'ticket_light_text', executor: 'direct_http' }
+}
+
+function loadPromptProviderOptions(category) {
+  return listAiProviderOptions(getPromptProviderUsage(category)).then(response => {
+    promptProviderOptions.value = Array.isArray(response.data) ? response.data : []
+  })
+}
+
 function handleQuery() {
   queryParams.value.pageNum = 1
   getList()
@@ -223,6 +239,7 @@ function resetQuery() {
 
 function handleAdd() {
   resetForm()
+  loadPromptProviderOptions(form.value.templateCategory)
   dialogTitle.value = '新增 AI 提示词模板'
   formOpen.value = true
 }
@@ -234,6 +251,7 @@ function handleUpdate(row) {
       ...form.value,
       ...(response.data || {})
     }
+    loadPromptProviderOptions(form.value.templateCategory)
     dialogTitle.value = '编辑 AI 提示词模板'
     formOpen.value = true
   })
@@ -261,6 +279,10 @@ function handleDelete(row) {
     getList()
   }).catch(() => {})
 }
+
+watch(() => form.value.templateCategory, category => {
+  if (formOpen.value) loadPromptProviderOptions(category)
+})
 
 getList()
 </script>
