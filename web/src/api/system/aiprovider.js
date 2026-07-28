@@ -43,11 +43,12 @@ export function listAiProviderModelCatalog(providerId) {
   })
 }
 
-// 刷新已保存 Provider 的模型目录
-export function refreshAiProviderModelCatalog(providerId) {
+// 使用当前表单草稿测试 Provider 默认模型
+export function testAiProviderConnection(data) {
   return request({
-    url: `/system/aiprovider/${providerId}/model-catalog/refresh`,
-    method: 'post'
+    url: '/system/aiprovider/connection/test',
+    method: 'post',
+    data
   })
 }
 

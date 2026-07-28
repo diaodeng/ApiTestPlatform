@@ -5,6 +5,7 @@
 3. 工单轻量 AI 与工单分析 Provider 下拉改为按用途/执行器后端过滤，服务端执行前同步强校验。
 4. 新增数据库脚本：`server/sql/20260728_ai_provider_capability_model.sql`；执行后需要逐条重新配置并启用 Provider。
 5. 新增说明文档：`web/public/docs/2026-07-28-ai-provider-capability-model.md`。
+6. Provider 弹窗的“更新模型”和“测试”统一使用当前页面草稿；新增需填写密钥，编辑未改密钥时仅在服务端临时使用同一 Provider 的密文密钥，不会写库或回显密钥。
 
 ## 2026-07-28
 

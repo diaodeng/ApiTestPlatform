@@ -8,10 +8,12 @@ from module_admin.entity.vo.ai_provider_vo import (
     AiProviderPageQueryModel,
     CreateAiProviderModel,
     PreviewAiProviderModelCatalogRequest,
+    TestAiProviderConnectionRequest,
     UpdateAiProviderModel,
     ViewAiProviderSecretModel,
 )
 from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
+from module_admin.service.ai_provider_connection_service import AiProviderConnectionService
 from module_admin.service.ai_provider_model_catalog_service import AiProviderModelCatalogService
 from module_admin.service.ai_provider_service import AiProviderService
 from module_admin.service.login_service import CurrentUserModel, LoginService
@@ -94,15 +96,20 @@ async def get_ai_provider_metadata_options(request: Request):
     "/model-catalog/preview",
     dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
 )
-async def preview_ai_provider_models(request: Request, preview_object: PreviewAiProviderModelCatalogRequest):
+async def preview_ai_provider_models(
+    request: Request,
+    preview_object: PreviewAiProviderModelCatalogRequest,
+    query_db: Session = Depends(get_db),
+):
     """
     使用未保存的Provider表单草稿探测上游模型目录，不写入数据库。
     :param request: 请求对象
     :param preview_object: Provider连接草稿
+    :param query_db: 数据库会话
     :return: 上游模型目录
     """
     try:
-        models = await run_in_threadpool(AiProviderModelCatalogService.preview_models, preview_object)
+        models = await run_in_threadpool(AiProviderConnectionService.preview_models, query_db, preview_object)
         return ResponseUtil.success(data=models)
     except Exception as exc:
         return ResponseUtil.error(msg=str(exc))
@@ -128,20 +135,24 @@ async def get_ai_provider_model_catalog(request: Request, provider_id: int, quer
 
 
 @aiProviderController.post(
-    "/{provider_id}/model-catalog/refresh",
+    "/connection/test",
     dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
 )
-async def refresh_ai_provider_model_catalog(request: Request, provider_id: int, query_db: Session = Depends(get_db)):
+async def test_ai_provider_connection(
+    request: Request,
+    test_object: TestAiProviderConnectionRequest,
+    query_db: Session = Depends(get_db),
+):
     """
-    使用已保存Provider凭据刷新模型目录缓存。
+    使用当前Provider表单草稿测试默认模型是否可调用。
     :param request: 请求对象
-    :param provider_id: Provider主键
+    :param test_object: Provider连接测试草稿
     :param query_db: 数据库会话
-    :return: 刷新后的模型目录
+    :return: 模型测试结果
     """
     try:
-        models = await run_in_threadpool(AiProviderModelCatalogService.refresh_models, query_db, provider_id)
-        return ResponseUtil.success(data=models)
+        result = await run_in_threadpool(AiProviderConnectionService.test_connection, query_db, test_object)
+        return ResponseUtil.success(data=result)
     except Exception as exc:
         return ResponseUtil.error(msg=str(exc))
 

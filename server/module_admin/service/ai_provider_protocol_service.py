@@ -55,6 +55,7 @@ class AiProviderProtocolService:
         user_prompt: str,
         temperature: float = 0.2,
         timeout_sec: int | None = None,
+        api_key: str | None = None,
     ) -> str:
         """
         使用Provider声明的协议生成文本。
@@ -63,13 +64,14 @@ class AiProviderProtocolService:
         :param user_prompt: 用户提示词
         :param temperature: 生成温度
         :param timeout_sec: 超时时间秒数
+        :param api_key: 可选明文密钥，仅用于未保存草稿测试
         :return: 解析后的模型文本
         """
         protocol = cls._get_protocol(provider)
         model = str(getattr(provider, "default_model", "") or "").strip()
         if not model:
             raise ValueError("Provider默认模型不能为空")
-        headers = cls._build_headers(provider)
+        headers = cls._build_headers(provider, api_key)
         if protocol == "openai_chat_completions":
             payload = {
                 "model": model,

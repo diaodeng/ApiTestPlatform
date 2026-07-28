@@ -151,7 +151,12 @@ class AiProviderDetailModel(AiProviderBaseModel):
 class AiProviderModelCatalogItemModel(BaseModel):
     """AI Provider 模型目录项。"""
 
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        from_attributes=True,
+        populate_by_name=True,
+        protected_namespaces=(),
+    )
 
     model_id: str = Field(description="模型标识")
     display_name: str = Field(default="", description="模型展示名称")
@@ -162,11 +167,27 @@ class AiProviderModelCatalogItemModel(BaseModel):
 
 
 class PreviewAiProviderModelCatalogRequest(AiProviderBaseModel):
-    """使用未保存Provider草稿发现模型目录的请求。"""
+    """使用当前表单草稿发现模型目录的请求。"""
 
-    api_key: str = Field(description="Provider密钥明文，仅用于本次探测")
+    api_key: str | None = Field(default=None, description="Provider密钥明文，仅用于本次探测")
     platform_code: str = Field(description="Provider所属平台")
     api_protocol: str = Field(description="Provider API调用协议")
+
+    @model_validator(mode="after")
+    def validate_preview_secret_source(self):
+        """
+        校验草稿探测的密钥来源。
+        :return: 当前请求模型
+        """
+        if not self.provider_id and not self.api_key:
+            raise ValueError("新增Provider探测模型时必须填写密钥")
+        return self
+
+
+class TestAiProviderConnectionRequest(PreviewAiProviderModelCatalogRequest):
+    """使用当前表单草稿测试指定模型连通性的请求。"""
+
+    default_model: str = Field(description="待测试的默认模型")
 
 
 class ViewAiProviderSecretModel(BaseModel):

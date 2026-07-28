@@ -121,10 +121,11 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="默认模型" prop="defaultModel">
-              <el-select v-model="form.defaultModel" filterable allow-create default-first-option placeholder="可手动输入或从目录选择" style="width: calc(100% - 96px)">
+              <el-select v-model="form.defaultModel" filterable allow-create default-first-option placeholder="可手动输入或从目录选择" style="width: calc(100% - 184px)">
                 <el-option v-for="item in modelOptions" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
               </el-select>
               <el-button class="ml8" :loading="modelLoading" @click="refreshModelCatalog">更新模型</el-button>
+              <el-button class="ml8" type="primary" :loading="testLoading" @click="testProviderConnection">测试</el-button>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -242,7 +243,7 @@ import {
   listAiProvider,
   listAiProviderModelCatalog,
   previewAiProviderModelCatalog,
-  refreshAiProviderModelCatalog,
+  testAiProviderConnection,
   updateAiProvider,
   viewAiProviderSecret
 } from '@/api/system/aiprovider'
@@ -263,6 +264,7 @@ const usageOptions = ref([])
 const executorOptions = ref([])
 const modelOptions = ref([])
 const modelLoading = ref(false)
+const testLoading = ref(false)
 const connectionConfigText = ref('')
 const workerEnvText = ref('')
 
@@ -423,21 +425,50 @@ function submitForm() {
 }
 
 function refreshModelCatalog() {
-  const connectionConfig = parseJsonConfig(connectionConfigText.value, '协议配置')
-  if (connectionConfig === null) return
-  if (!form.value.platformCode || !form.value.apiProtocol || !form.value.baseUrl) {
-    proxy.$modal.msgWarning('请先填写平台、API协议和Base URL')
-    return
-  }
+  const providerDraft = buildConnectionDraft()
+  if (!providerDraft) return
   modelLoading.value = true
-  const request = form.value.providerId && !String(form.value.apiKey || '').trim()
-    ? refreshAiProviderModelCatalog(form.value.providerId)
-    : previewAiProviderModelCatalog({ ...form.value, connectionConfig, apiKey: form.value.apiKey })
-  request.then(response => {
+  previewAiProviderModelCatalog(providerDraft).then(response => {
     applyModelOptions(response.data)
     proxy.$modal.msgSuccess(`已获取 ${modelOptions.value.length} 个模型`)
   }).finally(() => {
     modelLoading.value = false
+  })
+}
+
+function buildConnectionDraft() {
+  const connectionConfig = parseJsonConfig(connectionConfigText.value, '协议配置')
+  if (connectionConfig === null) return null
+  if (!form.value.platformCode || !form.value.apiProtocol || !form.value.baseUrl) {
+    proxy.$modal.msgWarning('请先填写平台、API协议和Base URL')
+    return null
+  }
+  if (!form.value.providerId && !String(form.value.apiKey || '').trim()) {
+    proxy.$modal.msgWarning('新增 Provider 更新模型或测试连接时必须填写密钥')
+    return null
+  }
+  return {
+    ...form.value,
+    connectionConfig,
+    apiKey: form.value.apiKey
+  }
+}
+
+function testProviderConnection() {
+  const providerDraft = buildConnectionDraft()
+  if (!providerDraft) return
+  if (!String(providerDraft.defaultModel || '').trim()) {
+    proxy.$modal.msgWarning('请先填写或选择默认模型')
+    return
+  }
+  testLoading.value = true
+  testAiProviderConnection(providerDraft).then(response => {
+    const result = response.data || {}
+    proxy.$alert(result.response || result.message || '模型返回内容为空', '测试成功', {
+      confirmButtonText: '关闭'
+    })
+  }).finally(() => {
+    testLoading.value = false
   })
 }
 
