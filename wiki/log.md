@@ -3,10 +3,18 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-26
+updated: 2026-07-28
 ---
 
 # 操作日志
+
+## [2026-07-28] INGEST-CODE | 工单日志查看器文件范围与 Esc 交互
+
+- 触发：日志查看弹窗的文件范围下拉需要始终展示当前日志拉取记录全部文件；子区域全屏时按 Esc 不应关闭弹窗。
+- 架构层：工单模块 / 日志查看器前端交互。
+- 更新的页面：`web/src/components/ticket/LogViewerDialog.vue`（准备完成后调用文件列表接口并按后端顺序维护下拉项；全屏子区域优先拦截 Esc 并还原）、`web/public/docs/2026-07-04-ticket-log-viewer-file-scope-highlight.md`、`web/public/docs/2026-07-28-ticket-log-viewer-file-list-and-escape.md`、`web/public/docs/update_history.md`、`wiki/flows/ticket-log-record-isolated-view.md`。
+- 变更传播链：`GET /ticket/logs/files` -> `LogViewerDialog.availableFiles` -> 文件范围下拉；文档捕获阶段的 `Escape` 事件 -> 子区域全屏状态还原 -> `el-dialog` 默认关闭行为。
+- 关键结论：搜索结果只控制结果表，不再控制可选文件集合；任一子区域全屏时 Esc 被消费并恢复普通视图，非全屏状态下弹窗仍可由 Esc 关闭。
 
 ## 2026-07-26
 - **群推送人员邮箱解析新增 raw_payload.fields 兜底**：`ticket_sync_notify_service.py` 的 `_resolve_ticket_person_email` 邮箱解析链路新增第四级回退，从 `raw_payload.fields`（多维表格原始字段）中按姓名匹配飞书人员对象直接提取邮箱。解决 bitable_pull 场景下当 email 类字段未映射到 external_field_mapping 且系统无对应用户时，@mention 始终为空的问题。同时将 bitable_pull 场景也纳入 `TicketExternalBitableEmailService.enrich_person_emails` 的反查补齐范围。

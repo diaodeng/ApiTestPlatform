@@ -11,6 +11,8 @@
 3. 换行开关移动到“日志详细信息”标题区，因为它只控制下方详细日志块的换行显示，不再放在全局搜索控制栏。
 4. 在日志详细信息块中选中文本后，会把相同文案高亮显示；翻到上一段、下一段后，高亮关键字保持不变，直到点击“清除高亮”或关闭查看器。
 5. 修复打开某条日志拉取记录后搜索结果为空的问题：查看器现在先清理旧搜索状态，再写入当前 `recordId`，避免准备目录是 `record_{recordId}` 但搜索请求回落到工单级目录。
+6. 2026-07-28 起，日志准备完成后会调用 `GET /ticket/logs/files` 读取当前拉取记录全部文件。文件范围下拉直接使用该列表及其后端顺序，不再由搜索命中推导，因此初次打开和任意搜索后都可选择完整文件集。
+7. 日志搜索结果区或日志详情区处于全屏时，按 `Esc` 只恢复对应子区域；只有两个子区域均非全屏时，`Esc` 才关闭日志查看弹窗。
 
 ## 性能说明
 
@@ -26,5 +28,5 @@
 - `server/modules/ticket/controller/ticket_log_pull_controller.py`
 - `server/modules/ticket/service/log_pull/ticket_log_service.py`
 - `server/tests/test_ticket_log_service.py`
-- `web/src/views/ticket/hooks/useLogViewer.js`
-- `web/src/views/ticket/index.vue`
+- `web/src/components/ticket/LogViewerDialog.vue`
+- `web/src/api/ticket/ticket.js`

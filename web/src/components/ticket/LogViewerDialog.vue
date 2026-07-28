@@ -6,7 +6,7 @@
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
-    :close-on-press-escape="true"
+    :close-on-press-escape="!hasFullscreenPanel"
     class="ticket-log-viewer-dialog"
     @closed="handleClosed"
   >
@@ -242,6 +242,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   prepareTicketLogs,
+  listTicketLogFiles,
   searchTicketLogs,
   getTicketLogContext,
   getTicketLogErrors,
@@ -288,6 +289,10 @@ const errorSummary = ref(null)
 const resultViewMode = ref('normal')
 const contextViewMode = ref('normal')
 const wrapEnabled = ref(false)
+const availableFiles = ref([])
+const hasFullscreenPanel = computed(
+  () => resultViewMode.value === 'fullscreen' || contextViewMode.value === 'fullscreen'
+)
 
 // ── 搜索表单 ──
 const form = ref({
@@ -316,16 +321,7 @@ const nativeHighlightSupported = computed(() =>
 )
 
 // ── 文件选项 ──
-const fileOptions = computed(() => {
-  const files = new Set()
-  hits.value.forEach((item) => {
-    const file = String(item?.file || '').trim()
-    if (file) files.add(file)
-  })
-  const scoped = String(form.value.file || '').trim()
-  if (scoped) files.add(scoped)
-  return Array.from(files).sort()
-})
+const fileOptions = computed(() => availableFiles.value)
 
 // ── 上下文展示行 ──
 const contextDisplayLines = computed(() => {
@@ -362,8 +358,10 @@ watch(
     startPrepareProgressPolling(ticketId, recordId)
     prepareWithDownloadProgress(ticketId, recordId, () => prepareTicketLogs(ticketId, recordId))
       .then(() => {
+        if (!visible.value || props.record?.id !== recordId) return
         // 日志准备完成，重置查看器状态
         resetViewerState()
+        return loadFileOptions(ticketId, recordId)
       })
       .finally(() => {
         stopPrepareProgressPolling()
@@ -377,12 +375,42 @@ function resetViewerState() {
   hits.value = []
   context.value = null
   errorSummary.value = null
+  availableFiles.value = []
   form.value.keywords = ''
   form.value.file = ''
   clearHighlight()
   resultViewMode.value = 'normal'
   contextViewMode.value = 'normal'
   wrapEnabled.value = false
+}
+
+/**
+ * 加载当前日志拉取记录的全部可搜索文件，并保留后端返回顺序。
+ * @param {number|string} ticketId 工单ID
+ * @param {number|string} recordId 日志拉取记录ID
+ * @returns {Promise<void>} 文件列表加载完成后的 Promise
+ */
+function loadFileOptions(ticketId, recordId) {
+  return listTicketLogFiles(ticketId, recordId)
+    .then((response) => {
+      if (!visible.value || props.record?.id !== recordId) return
+      const files = []
+      const seen = new Set()
+      const responseFiles = response?.data || []
+      responseFiles.forEach((item) => {
+        const file = String(item?.file || item || '').trim()
+        if (file && !seen.has(file)) {
+          seen.add(file)
+          files.push(file)
+        }
+      })
+      availableFiles.value = files
+    })
+    .catch(() => {
+      if (visible.value && props.record?.id === recordId) {
+        availableFiles.value = []
+      }
+    })
 }
 
 /**
@@ -724,6 +752,22 @@ function toggleContextMode(mode) {
   contextViewMode.value = contextViewMode.value === mode ? 'normal' : mode
 }
 
+/**
+ * 优先处理日志子区域全屏状态，避免 Esc 直接关闭日志查看弹窗。
+ * @param {KeyboardEvent} event 键盘事件
+ */
+function handleEscapeKey(event) {
+  if (!visible.value || event.key !== 'Escape' || !hasFullscreenPanel.value) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  if (resultViewMode.value === 'fullscreen') {
+    resultViewMode.value = 'normal'
+  }
+  if (contextViewMode.value === 'fullscreen') {
+    contextViewMode.value = 'normal'
+  }
+}
+
 // ── 高亮刷新 ──
 watch(
   [context, highlightKeywords, contextViewMode],
@@ -735,10 +779,12 @@ watch(
 
 onMounted(() => {
   document.addEventListener('selectionchange', handleDocumentSelectionChange)
+  document.addEventListener('keydown', handleEscapeKey, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', handleDocumentSelectionChange)
+  document.removeEventListener('keydown', handleEscapeKey, true)
   clearNativeHighlights()
   stopPrepareProgressPolling()
 })
