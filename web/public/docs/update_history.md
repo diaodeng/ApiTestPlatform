@@ -572,3 +572,14 @@
 2. Codex Worker 输出包含 `401`、`Unauthorized` 或 `Invalid token` 时，异步调用同一 Provider 的 `GET /models` 做轻量鉴权探测，不调用模型推理、不重试原任务。
 3. 诊断结果通过 Agent 阶段事件、失败事件和失败任务结果返回，包含 HTTP 状态码及上游 request ID，便于区分 token 失效与 Responses 链路异常。
 4. 新增说明文档：`web/public/docs/2026-07-28-ticket-ai-codex-auth-diagnostic.md`。
+
+## 2026-07-29
+
+1. 新增项目版本中心和版本发布记录，工单、AI 仓库映射统一关联项目版本。
+2. 工单从手工创建、外部同步、Excel 导入和日志提取发现陌生版本时，自动创建“待确认”候选版本，不阻断原有工单链路。
+3. 工单编辑和版本批量维护改为从版本中心选择版本；AI 仓库映射改为选择版本中心版本。
+4. 新增“工单管理 > 版本管理”页面，维护版本状态、计划发布时间、默认分支和按环境/批次登记的发布历史。
+5. 发布事实不会自动关闭关联工单，验证通过后仍需按工单工作流关闭。
+6. 新增迁移脚本 `server/sql/20260729_ticket_version_center.sql` 和说明文档 `web/public/docs/2026-07-29-ticket-version-center.md`。
+7. 工单、AI 仓库映射和 AI 分析任务改为仅保存版本中心 ID；删除工单四类版本文本、AI 映射 `version_key` 和 AI 任务 `version_key` 的兼容路径。
+8. 新增迁移脚本 `server/sql/20260729_ticket_version_id_only.sql`，先回填 ID 并预检未关联数据，再执行删列。

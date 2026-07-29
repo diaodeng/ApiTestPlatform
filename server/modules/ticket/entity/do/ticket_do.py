@@ -37,7 +37,10 @@ class Ticket(Base):
         Index("idx_ticket_del_processed_time", "del_flag", "processed_at", "ticket_id"),
         Index("idx_ticket_del_resolved_time", "del_flag", "resolved_at", "ticket_id"),
         Index("idx_ticket_del_closed_time", "del_flag", "closed_at", "ticket_id"),
-        Index("idx_ticket_del_planned_fix_version", "del_flag", "planned_fix_version", "ticket_id"),
+        Index("idx_ticket_del_affected_version_id", "del_flag", "affected_version_id", "ticket_id"),
+        Index("idx_ticket_del_planned_fix_version_id", "del_flag", "planned_fix_version_id", "ticket_id"),
+        Index("idx_ticket_del_fixed_version_id", "del_flag", "fixed_version_id", "ticket_id"),
+        Index("idx_ticket_del_released_version_id", "del_flag", "released_version_id", "ticket_id"),
         Index("idx_ticket_del_issue", "del_flag", "issue_id", "ticket_id"),
     )
 
@@ -106,16 +109,10 @@ class Ticket(Base):
     issue_confirmed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, comment="问题归因是否人工确认"
     )
-    affected_version: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, default="", comment="问题发生或分析版本"
-    )
-    planned_fix_version: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, default="", comment="计划修复版本"
-    )
-    fixed_version: Mapped[str | None] = mapped_column(String(100), nullable=True, default="", comment="实际修复版本")
-    released_version: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, default="", comment="实际发版版本"
-    )
+    affected_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="发生版本中心ID")
+    planned_fix_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="计划修复版本中心ID")
+    fixed_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="实际修复版本中心ID")
+    released_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="实际发版版本中心ID")
     root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终根因")
     solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终解决方案")
     submit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="工单业务提交时间")
@@ -382,6 +379,75 @@ class TicketSnapshot(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
+class TicketVersion(Base):
+    """
+    项目版本主数据，统一承接人工维护和工单自动发现的版本。
+    """
+
+    __tablename__ = "ticket_version"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version_key", name="uk_ticket_version_project_key"),
+        Index("idx_ticket_version_project_status", "project_id", "lifecycle_status", "enabled"),
+    )
+
+    version_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="版本ID")
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="所属项目ID")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="所属项目名称")
+    version_key: Mapped[str] = mapped_column(String(100), nullable=False, comment="规范化版本标识")
+    version_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="版本展示名称")
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="discovered", comment="版本状态：discovered/confirmed/deprecated"
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual", comment="首次来源")
+    raw_version: Mapped[str] = mapped_column(String(200), nullable=True, default="", comment="首次发现原始版本文本")
+    first_ticket_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="首次发现工单ID")
+    first_detected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="首次发现时间")
+    planned_release_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="计划发布时间")
+    default_branch: Mapped[str] = mapped_column(String(200), nullable=True, default="", comment="默认代码分支")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment="是否可选")
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketVersionRelease(Base):
+    """
+    版本在各环境的发布事实记录，支持同一版本多次发布与回滚审计。
+    """
+
+    __tablename__ = "ticket_version_release"
+    __table_args__ = (
+        UniqueConstraint("version_id", "environment", "batch_no", name="uk_ticket_version_release_batch"),
+        Index("idx_ticket_version_release_version_time", "version_id", "released_at"),
+    )
+
+    release_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="发布记录ID"
+    )
+    version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="版本ID")
+    environment: Mapped[str] = mapped_column(String(64), nullable=False, default="production", comment="发布环境")
+    batch_no: Mapped[str] = mapped_column(String(64), nullable=False, default="default", comment="发布批次")
+    release_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="planned", comment="发布状态：planned/released/rolled_back"
+    )
+    planned_release_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="计划发布时间")
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="实际发布时间")
+    rollback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="回滚时间")
+    release_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="发布人")
+    ci_url: Mapped[str] = mapped_column(String(1000), nullable=True, default="", comment="CI/CD 链接")
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="发布说明")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
 class TicketAiRepoMapping(Base):
     """
     工单 AI 分析仓库映射表，用于维护项目、版本与仓库分支的对应关系。
@@ -389,14 +455,14 @@ class TicketAiRepoMapping(Base):
 
     __tablename__ = "ticket_ai_repo_mapping"
     __table_args__ = (
-        UniqueConstraint("project_id", "version_key", name="uk_ticket_ai_repo_mapping_project_version"),
+        UniqueConstraint("project_id", "version_id", name="uk_ticket_ai_repo_mapping_project_version"),
         Index("idx_ticket_ai_repo_mapping_project_enabled", "project_id", "enabled"),
     )
 
     mapping_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="映射ID")
     project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="项目ID")
     project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称")
-    version_key: Mapped[str] = mapped_column(String(100), nullable=False, comment="版本标识")
+    version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="版本中心ID")
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="仓库地址")
     branch_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="分支名称")
     local_repo_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="Worker本地仓库路径")
@@ -426,7 +492,7 @@ class TicketAiAnalysisTask(Base):
     project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="项目ID")
     mapping_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="仓库映射ID")
     project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称")
-    version_key: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="版本标识")
+    version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="版本中心ID")
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="仓库地址")
     branch_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="分支名称")
     local_repo_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="本地仓库路径")

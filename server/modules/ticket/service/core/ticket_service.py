@@ -53,12 +53,9 @@ from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimi
 from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.util.ticket_common_util import (
-    extract_ticket_version_key as _extract_ticket_version_key,
-)
-from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import (
     user_id as _user_id,
 )
@@ -169,9 +166,7 @@ def _resolve_ticket_original_description(ticket: Ticket) -> str:
     """
     extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
     origin_description = str(
-        extra_data.get("origin_description")
-        or extra_data.get("original_description")
-        or ""
+        extra_data.get("origin_description") or extra_data.get("original_description") or ""
     ).strip()
     if origin_description:
         return origin_description
@@ -322,9 +317,7 @@ def _parse_transition_extension(raw_value: Any) -> dict[str, Any]:
 
     assignee_payload = raw_value.get("assignee") if isinstance(raw_value.get("assignee"), dict) else {}
     extension["target_assignee_id"] = (
-        assignee_payload.get("userId")
-        or raw_value.get("targetAssigneeId")
-        or raw_value.get("target_assignee_id")
+        assignee_payload.get("userId") or raw_value.get("targetAssigneeId") or raw_value.get("target_assignee_id")
     )
     extension["target_assignee_name"] = str(
         assignee_payload.get("userName")
@@ -337,14 +330,10 @@ def _parse_transition_extension(raw_value: Any) -> dict[str, Any]:
     extension["notify_enabled"] = bool(
         notification_payload.get("enabled")
         if "enabled" in notification_payload
-        else raw_value.get("notifyEnabled")
-        or raw_value.get("notify_enabled")
+        else raw_value.get("notifyEnabled") or raw_value.get("notify_enabled")
     )
     extension["notify_remark"] = str(
-        notification_payload.get("remark")
-        or raw_value.get("notifyRemark")
-        or raw_value.get("notify_remark")
-        or ""
+        notification_payload.get("remark") or raw_value.get("notifyRemark") or raw_value.get("notify_remark") or ""
     ).strip()
     return extension
 
@@ -489,9 +478,7 @@ class TicketService:
             (TicketStatus.PROCESSING.value, TicketStatus.USER_MISOPERATION.value, True, False),
             (TicketStatus.PROCESSING.value, TicketStatus.DUPLICATED.value, True, False),
         ]
-        existing_transitions = {
-            (row.from_status, row.to_status) for row in query_db.query(WorkflowTransition).all()
-        }
+        existing_transitions = {(row.from_status, row.to_status) for row in query_db.query(WorkflowTransition).all()}
         for from_status, to_status, need_comment, need_resolution in default_transitions:
             if (from_status, to_status) not in existing_transitions:
                 query_db.add(
@@ -501,7 +488,7 @@ class TicketService:
                         allowed_roles=[],
                         need_comment=need_comment,
                         need_resolution=need_resolution,
-                )
+                    )
                 )
         query_db.commit()
 
@@ -517,7 +504,7 @@ class TicketService:
     @classmethod
     def _decorate_ticket_item(cls, item: dict[str, Any]) -> dict[str, Any]:
         """
-        为工单返回结果补充项目名称、版本兼容字段和详情链接兜底。
+        为工单返回结果补充项目名称和详情链接兜底。
         :param item: 工单字典
         :return: 补充后的工单字典
         """
@@ -527,17 +514,6 @@ class TicketService:
             item["merchantName"] = project_name
         extra_data = item.get("extraData")
         sync_summary = _extract_ticket_sync_summary(extra_data)
-        affected_version = (
-            normalize_ticket_version_key(item.get("affectedVersion"))
-            or _extract_ticket_version_key(extra_data)
-            or normalize_ticket_version_key(item.get("versionKey"))
-        )
-        version_key = (
-            normalize_ticket_version_key(item.get("versionKey"))
-            or affected_version
-        )
-        item["affectedVersion"] = affected_version or version_key
-        item["versionKey"] = version_key or item["affectedVersion"]
         if not str(item.get("ticketUrl") or "").strip() and isinstance(sync_summary, dict):
             item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
         if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
@@ -547,9 +523,7 @@ class TicketService:
         )
         item["processingConclusionStatus"] = "processed" if item.get("processedAt") else "unprocessed"
         origin_description = str(
-            (extra_data or {}).get("origin_description")
-            or (extra_data or {}).get("original_description")
-            or ""
+            (extra_data or {}).get("origin_description") or (extra_data or {}).get("original_description") or ""
         ).strip()
         description = str(item.get("description") or "").strip()
         if not origin_description and "【AI翻译】" in description:
@@ -1009,9 +983,8 @@ class TicketService:
             data.pop("project_name", None)
             auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
-            version_key = str(data.pop("version_key", "") or "").strip()
             original_description = str(data.get("description") or "").strip()
-            extracted_version_key = version_key or cls._extract_version_key_from_text(
+            detected_version_key = cls._extract_version_key_from_text(
                 "\n".join([str(data.get("title") or "").strip(), original_description]).strip()
             )
             extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
@@ -1022,8 +995,6 @@ class TicketService:
             )
             manual_automation["auto_translate"] = auto_translate
             extra_data["manual_automation"] = manual_automation
-            if extracted_version_key:
-                extra_data["version_key"] = extracted_version_key
             if log_pull_config:
                 extra_data["ticket_automation"] = {
                     "need_log_pull": need_log_pull or bool(log_pull_config),
@@ -1077,7 +1048,16 @@ class TicketService:
             data["update_time"] = now
             TicketProcessingMetricService.apply_create_fields(data, now=now)
             ticket = Ticket(**data)
+            TicketVersionService.validate_ticket_version_ids(query_db, ticket)
             ticket = TicketDao.add_ticket(query_db, ticket)
+            if not ticket.affected_version_id and detected_version_key:
+                TicketVersionService.assign_detected_ticket_version(
+                    query_db,
+                    ticket,
+                    version_type="affected",
+                    version_key=detected_version_key,
+                    source="manual",
+                )
             TicketDao.add_status_history(
                 query_db,
                 TicketStatusHistory(
@@ -1155,6 +1135,7 @@ class TicketService:
                     logger.exception(f"工单[{ticket.ticket_id}]创建后自动提交日志拉取异常: {exc}")
             result = CamelCaseUtil.transform_result(ticket)
             cls._decorate_ticket_item(result)
+            TicketVersionService.attach_ticket_version_labels(query_db, [result])
             return CrudResponseModel(is_success=True, message="新增成功", result=result)
         except Exception:
             query_db.rollback()
@@ -1180,6 +1161,7 @@ class TicketService:
                     cls._decorate_ticket_item(item)
                     item["latestLogPull"] = summary_map.get(item.get("ticketId"))
                     item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
+            TicketVersionService.attach_ticket_version_labels(query_db, rows)
             cls._attach_issue_summary(query_db, rows)
             return result
         ticket_ids = [item.get("ticketId") for item in result if isinstance(item, dict) and item.get("ticketId")]
@@ -1190,6 +1172,7 @@ class TicketService:
                 cls._decorate_ticket_item(item)
                 item["latestLogPull"] = summary_map.get(item.get("ticketId"))
                 item["latestAiAnalysis"] = ai_summary_map.get(item.get("ticketId"))
+        TicketVersionService.attach_ticket_version_labels(query_db, result)
         cls._attach_issue_summary(query_db, result)
         return result
 
@@ -1206,6 +1189,7 @@ class TicketService:
             return None
         result = CamelCaseUtil.transform_result(ticket)
         cls._decorate_ticket_item(result)
+        TicketVersionService.attach_ticket_version_labels(query_db, [result])
         cls._attach_issue_summary(query_db, [result])
         cls._attach_relation_codes(query_db, result)
         result["latestLogPull"] = TicketLogPullService.get_latest_summary(query_db, ticket_id)
@@ -1244,27 +1228,15 @@ class TicketService:
             data.pop("issue_title", None)
             auto_translate = _extract_ticket_manual_automation_config(data)
             need_log_pull, log_pull_config = _extract_ticket_automation_config(data)
-            version_key = str(data.pop("version_key", "") or "").strip()
             ticket_extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
             original_description = str(
                 data.get("description") or ticket_extra_data.get("origin_description") or ""
             ).strip()
-            extracted_version_key = version_key or cls._extract_version_key_from_text(
+            detected_version_key = cls._extract_version_key_from_text(
                 "\n".join([str(data.get("title") or ticket.title or "").strip(), original_description]).strip()
             )
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             form_extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
-            version_fields = (
-                "version_key",
-                "versionKey",
-                "version",
-                "deployVersion",
-                "deploy_version",
-                "appVersion",
-            )
-            for version_field in version_fields:
-                if version_field in form_extra_data and not str(form_extra_data.get(version_field) or "").strip():
-                    form_extra_data.pop(version_field, None)
             extra_data.update(form_extra_data)
             manual_automation = (
                 dict(extra_data.get("manual_automation") or {})
@@ -1273,8 +1245,6 @@ class TicketService:
             )
             manual_automation["auto_translate"] = auto_translate
             extra_data["manual_automation"] = manual_automation
-            if extracted_version_key:
-                extra_data["version_key"] = extracted_version_key
             if log_pull_config:
                 extra_data["ticket_automation"] = {
                     "need_log_pull": need_log_pull or bool(log_pull_config),
@@ -1324,6 +1294,15 @@ class TicketService:
             data["ticket_no"] = ticket_no
             TicketDao.update_ticket(query_db, ticket.ticket_id, data)
             refreshed_ticket = TicketDao.get_ticket_by_id(query_db, ticket.ticket_id) or ticket
+            TicketVersionService.validate_ticket_version_ids(query_db, refreshed_ticket)
+            if not refreshed_ticket.affected_version_id and detected_version_key:
+                TicketVersionService.assign_detected_ticket_version(
+                    query_db,
+                    refreshed_ticket,
+                    version_type="affected",
+                    version_key=detected_version_key,
+                    source="manual",
+                )
             try:
                 TicketEmbeddingService.vectorize_ticket_for_scene(query_db, refreshed_ticket, "manualUpdate")
             except Exception as exc:
@@ -1595,12 +1574,12 @@ class TicketService:
                 if status_object.problem_pattern_verified:
                     update_data["problem_pattern_verified_by"] = _user_name(current_user)
                     update_data["problem_pattern_verified_at"] = now
-            if status_object.planned_fix_version is not None:
-                update_data["planned_fix_version"] = status_object.planned_fix_version
-            if status_object.fixed_version is not None:
-                update_data["fixed_version"] = status_object.fixed_version
-            if status_object.released_version is not None:
-                update_data["released_version"] = status_object.released_version
+            if status_object.planned_fix_version_id is not None:
+                update_data["planned_fix_version_id"] = status_object.planned_fix_version_id
+            if status_object.fixed_version_id is not None:
+                update_data["fixed_version_id"] = status_object.fixed_version_id
+            if status_object.released_version_id is not None:
+                update_data["released_version_id"] = status_object.released_version_id
             if not ticket.started_at and status_object.to_status == TicketStatus.PROCESSING.value:
                 update_data["started_at"] = now
             TicketProcessingMetricService.apply_status_time_fields(
@@ -1646,9 +1625,9 @@ class TicketService:
                         "problem_pattern_code": status_object.problem_pattern_code,
                         "problem_pattern_name": status_object.problem_pattern_name,
                         "problem_pattern_verified": status_object.problem_pattern_verified,
-                        "planned_fix_version": status_object.planned_fix_version,
-                        "fixed_version": status_object.fixed_version,
-                        "released_version": status_object.released_version,
+                        "planned_fix_version_id": status_object.planned_fix_version_id,
+                        "fixed_version_id": status_object.fixed_version_id,
+                        "released_version_id": status_object.released_version_id,
                         "target_assignee_id": transition_extension.get("target_assignee_id"),
                         "target_assignee_name": transition_extension.get("target_assignee_name"),
                         "notify_enabled": transition_extension.get("notify_enabled"),
@@ -2076,16 +2055,12 @@ class TicketService:
             ai_success = False
             if message_object.run_ai:
                 try:
-                    version_key = (
-                        str(message_object.version_key or "").strip()
-                        or _extract_ticket_version_key(ticket.extra_data)
-                        or ""
-                    )
-                    if not version_key:
-                        ai_message = "当前工单缺少版本号，未发起AI追问"
+                    version_id = message_object.version_id or ticket.affected_version_id
+                    if not version_id:
+                        ai_message = "当前工单缺少发生版本，未发起AI追问"
                     else:
                         ai_request = TicketAiAnalysisRequestModel(
-                            versionKey=version_key,
+                            versionId=version_id,
                             agentCode=message_object.agent_code,
                             aiProviderCode=message_object.ai_provider_code,
                             forceRefresh=True,
@@ -2113,9 +2088,7 @@ class TicketService:
                 result={
                     "message": CamelCaseUtil.transform_result(message),
                     "aiTask": (
-                        CamelCaseUtil.transform_result(ai_result.result)
-                        if ai_result and ai_result.is_success
-                        else None
+                        CamelCaseUtil.transform_result(ai_result.result) if ai_result and ai_result.is_success else None
                     ),
                     "aiTriggered": bool(message_object.run_ai),
                     "aiMessage": ai_message,
@@ -2173,8 +2146,7 @@ class TicketService:
         except Exception as exc:
             logger.warning(f"工单[{ticket_id}]知识提炼AI执行失败，已回退规则方案: {exc}")
         investigation_lines = [
-            f"- {item.create_time:%Y-%m-%d %H:%M:%S} {item.event_type}: {item.content or ''}"
-            for item in events[-20:]
+            f"- {item.create_time:%Y-%m-%d %H:%M:%S} {item.event_type}: {item.content or ''}" for item in events[-20:]
         ]
         message_lines = [
             f"- {item.create_time:%Y-%m-%d %H:%M:%S} [{item.role}/{item.message_type}] {item.content}"
@@ -2654,9 +2626,7 @@ class TicketService:
             raise
 
     @classmethod
-    def delete_knowledge(
-        cls, query_db: Session, article_id: int, current_user: CurrentUserModel
-    ) -> CrudResponseModel:
+    def delete_knowledge(cls, query_db: Session, article_id: int, current_user: CurrentUserModel) -> CrudResponseModel:
         """
         软删除知识库文章。
         :param query_db: 数据库会话

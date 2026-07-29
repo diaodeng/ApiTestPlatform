@@ -17,6 +17,7 @@ updated: 2026-05-20
 - [架构总览](concepts/architecture-overview.md)
 - [双客户端架构](concepts/desktop-client-architecture.md)
 - [模块全景图](concepts/module-landscape.md)
+- [工单项目版本中心](concepts/ticket-version-center.md)
 
 ## 实体
 

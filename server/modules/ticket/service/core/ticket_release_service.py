@@ -2,7 +2,6 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -14,6 +13,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketVersionStatisticsQueryModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.util.ticket_common_util import user_id as _user_id
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 from utils.common_util import CamelCaseUtil
@@ -98,11 +98,7 @@ class TicketReleaseService:
         :return: 批量处理结果
         """
         now = datetime.now()
-        tickets = (
-            query_db.query(Ticket)
-            .filter(Ticket.del_flag == "0", Ticket.ticket_id.in_(payload.ticket_ids))
-            .all()
-        )
+        tickets = query_db.query(Ticket).filter(Ticket.del_flag == "0", Ticket.ticket_id.in_(payload.ticket_ids)).all()
         ticket_map = {int(ticket.ticket_id): ticket for ticket in tickets}
         missing_ticket_ids = [ticket_id for ticket_id in payload.ticket_ids if ticket_id not in ticket_map]
         released_at = payload.released_at or (now if payload.mark_released else None)
@@ -111,12 +107,12 @@ class TicketReleaseService:
             "update_by": _user_name(current_user),
             "update_time": now,
         }
-        if payload.planned_fix_version is not None:
-            update_fields["planned_fix_version"] = payload.planned_fix_version
-        if payload.fixed_version is not None:
-            update_fields["fixed_version"] = payload.fixed_version
-        if payload.released_version is not None:
-            update_fields["released_version"] = payload.released_version
+        if payload.planned_fix_version_id is not None:
+            update_fields["planned_fix_version_id"] = payload.planned_fix_version_id
+        if payload.fixed_version_id is not None:
+            update_fields["fixed_version_id"] = payload.fixed_version_id
+        if payload.released_version_id is not None:
+            update_fields["released_version_id"] = payload.released_version_id
         if released_at is not None:
             update_fields["released_at"] = released_at
         if verified_at is not None:
@@ -126,6 +122,7 @@ class TicketReleaseService:
         for ticket in tickets:
             for field_name, field_value in update_fields.items():
                 setattr(ticket, field_name, field_value)
+            TicketVersionService.validate_ticket_version_ids(query_db, ticket)
             updated_ids.append(int(ticket.ticket_id))
             cls.add_release_events(
                 query_db,
@@ -168,9 +165,9 @@ class TicketReleaseService:
         :return: 无
         """
         event_data = {
-            "planned_fix_version": payload.planned_fix_version,
-            "fixed_version": payload.fixed_version,
-            "released_version": payload.released_version,
+            "planned_fix_version_id": payload.planned_fix_version_id,
+            "fixed_version_id": payload.fixed_version_id,
+            "released_version_id": payload.released_version_id,
             "released_at": released_at.isoformat(sep=" ") if released_at else None,
             "verified_at": verified_at.isoformat(sep=" ") if verified_at else None,
             "batch": True,
@@ -213,15 +210,45 @@ class TicketReleaseService:
         :return: 发生版本和修复/发版版本统计
         """
         tickets = cls.list_statistics_tickets(query_db, query)
+        version_ids = {
+            int(version_id)
+            for ticket in tickets
+            for version_id in (
+                ticket.affected_version_id,
+                ticket.planned_fix_version_id,
+                ticket.fixed_version_id,
+                ticket.released_version_id,
+            )
+            if version_id
+        }
+        version_name_map = TicketVersionService.get_version_name_map(query_db, version_ids)
+        if query.version_keyword:
+            keyword = str(query.version_keyword).lower()
+            tickets = [
+                ticket
+                for ticket in tickets
+                if any(
+                    keyword in str(version_name_map.get(version_id, "")).lower()
+                    for version_id in (
+                        ticket.affected_version_id,
+                        ticket.planned_fix_version_id,
+                        ticket.fixed_version_id,
+                        ticket.released_version_id,
+                    )
+                    if version_id
+                )
+            ]
         affected_rows = cls.build_version_rows(
             tickets,
-            version_fields=("affected_version",),
+            version_id_fields=("affected_version_id",),
+            version_name_map=version_name_map,
             top_limit=query.top_limit,
             version_limit=query.version_limit,
         )
         fix_rows = cls.build_version_rows(
             tickets,
-            version_fields=("planned_fix_version", "fixed_version", "released_version"),
+            version_id_fields=("planned_fix_version_id", "fixed_version_id", "released_version_id"),
+            version_name_map=version_name_map,
             top_limit=query.top_limit,
             version_limit=query.version_limit,
         )
@@ -284,16 +311,6 @@ class TicketReleaseService:
             ticket_query = ticket_query.filter(Ticket.resolution_code.in_(resolution_codes))
         if problem_pattern_codes:
             ticket_query = ticket_query.filter(Ticket.problem_pattern_code.in_(problem_pattern_codes))
-        if query.version_keyword:
-            keyword = f"%{query.version_keyword}%"
-            ticket_query = ticket_query.filter(
-                or_(
-                    Ticket.affected_version.like(keyword),
-                    Ticket.planned_fix_version.like(keyword),
-                    Ticket.fixed_version.like(keyword),
-                    Ticket.released_version.like(keyword),
-                )
-            )
         return ticket_query.order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc()).all()
 
     @classmethod
@@ -301,7 +318,8 @@ class TicketReleaseService:
         cls,
         tickets: list[Ticket],
         *,
-        version_fields: tuple[str, ...],
+        version_id_fields: tuple[str, ...],
+        version_name_map: dict[int, str],
         top_limit: int,
         version_limit: int,
     ) -> list[dict[str, Any]]:
@@ -315,7 +333,10 @@ class TicketReleaseService:
         """
         grouped: dict[str, list[Ticket]] = {}
         for ticket in tickets:
-            version_values = {_blank_to_unknown(getattr(ticket, field_name, "")) for field_name in version_fields}
+            version_values = {
+                _blank_to_unknown(version_name_map.get(getattr(ticket, field_name, None), ""))
+                for field_name in version_id_fields
+            }
             for version in version_values:
                 grouped.setdefault(version, []).append(ticket)
         rows = [

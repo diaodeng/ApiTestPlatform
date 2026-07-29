@@ -393,28 +393,26 @@ class TicketSyncPayloadService:
         if is_remote_pull and resolved_assignee_name and not resolved_assignee_id:
             payload["current_assignee_id"] = None
         version_key = normalize_ticket_version_key((detected or {}).get("versionKey")) or normalize_ticket_version_key(
-            sync_object.version_key
+            sync_object.detected_version_key
         )
-        if version_key:
-            # extra_data.version_key 暂保留给历史 AI 仓库映射等链路兜底；权威字段写入 affected_version。
-            extra_data["version_key"] = version_key
         payload["submit_time"] = TicketProcessingMetricService.resolve_submit_time(
             explicit_submit_time=sync_object.submit_time or (ticket.submit_time if ticket else None),
             extra_data=extra_data,
             create_time=external_create_time,
             fallback_time=now,
         )
-        payload["affected_version"] = TicketProcessingMetricService.resolve_affected_version(
-            affected_version=sync_object.affected_version,
-            version_key=version_key,
-            extra_data=extra_data,
-            fallback=ticket.affected_version if ticket else None,
+        payload["affected_version_id"] = sync_object.affected_version_id or (
+            ticket.affected_version_id if ticket else None
         )
-        payload["planned_fix_version"] = sync_object.planned_fix_version or (
-            ticket.planned_fix_version if ticket else ""
+        payload["planned_fix_version_id"] = sync_object.planned_fix_version_id or (
+            ticket.planned_fix_version_id if ticket else None
         )
-        payload["fixed_version"] = sync_object.fixed_version or (ticket.fixed_version if ticket else "")
-        payload["released_version"] = sync_object.released_version or (ticket.released_version if ticket else "")
+        payload["fixed_version_id"] = sync_object.fixed_version_id or (ticket.fixed_version_id if ticket else None)
+        payload["released_version_id"] = sync_object.released_version_id or (
+            ticket.released_version_id if ticket else None
+        )
+        if version_key and not payload["affected_version_id"]:
+            payload["_detected_affected_version_key"] = version_key
         payload["processed_at"] = sync_object.processed_at or (ticket.processed_at if ticket else None)
         payload["released_at"] = sync_object.released_at or (ticket.released_at if ticket else None)
         payload["verified_at"] = sync_object.verified_at or (ticket.verified_at if ticket else None)

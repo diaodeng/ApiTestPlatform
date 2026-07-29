@@ -126,7 +126,7 @@
   const aiTaskTotal = ref(0);
   // detailVersionOptions 已通过 useOptions() 提供
   const aiAnalysisTaskForm = ref({
-    versionKey: '',
+    versionId: undefined,
     logPullRecordId: undefined,
     agentCode: '',
     aiProviderCode: '',
@@ -200,7 +200,7 @@
 
   const data = reactive({
     aiAnalysisRules: {
-      versionKey: [],
+      versionId: [],
     },
     projectVendorMapRules: {
       venderNo: [{ required: true, message: '商户编号不能为空', trigger: 'blur' }],
@@ -239,13 +239,13 @@
    * 优先使用工单自身版本号，其次使用当前项目版本选项中的第一个版本。
    * @returns {string} 默认版本号。
    */
-  function resolveDefaultVersionKey() {
-    return (
-      detail.value.versionKey ||
-      detail.value.extraData?.versionKey ||
-      detailVersionOptions.value[0]?.value ||
-      ''
-    );
+  function resolveDefaultVersionId() {
+    return detail.value.affectedVersionId || detailVersionOptions.value[0]?.value || undefined;
+  }
+
+  function handleAiRepoMappingProjectChange(projectId) {
+    aiRepoMappingForm.value.versionId = undefined;
+    loadDetailVersionOptions(projectId);
   }
 
   const latestSnapshotSummary = computed(
@@ -687,7 +687,7 @@
       detail.value,
       resolveDefaultAiPromptTemplateCodes()
     );
-    aiAnalysisTaskForm.value.versionKey = resolveDefaultVersionKey();
+    aiAnalysisTaskForm.value.versionId = resolveDefaultVersionId();
     aiAnalysisTaskForm.value.logPullRecordId = detail.value.latestLogPull?.id || undefined;
     aiAnalysisTaskForm.value.agentCode = aiDefaults.agentCode;
     aiAnalysisTaskForm.value.aiProviderCode = aiDefaults.aiProviderCode;
@@ -798,7 +798,7 @@
       }
       aiAnalysisSubmitting.value = true;
       const payload = {
-        versionKey: aiAnalysisTaskForm.value.versionKey || undefined,
+        versionId: aiAnalysisTaskForm.value.versionId || undefined,
         logPullRecordId: aiAnalysisTaskForm.value.logPullRecordId || undefined,
         agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
         aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
@@ -1091,8 +1091,8 @@
             <el-descriptions-item label="归因类型">{{
               formatIssueRelationType(detail.issueRelationType)
             }}</el-descriptions-item>
-            <el-descriptions-item label="版本号">{{
-              detail.versionKey || detail.extraData?.versionKey || '-'
+            <el-descriptions-item label="问题发生版本">{{
+              detail.affectedVersion || '-'
             }}</el-descriptions-item>
             <el-descriptions-item label="日志拉取状态">
               <el-tag
@@ -1258,14 +1258,12 @@
       :rules="aiAnalysisRules"
       label-width="110px"
     >
-      <el-form-item label="版本号" prop="versionKey">
+      <el-form-item label="版本" prop="versionId">
         <el-select
-          v-model="aiAnalysisTaskForm.versionKey"
-          placeholder="请选择或输入版本号，系统将按工单所属项目 + 版本号自动匹配仓库映射"
+          v-model="aiAnalysisTaskForm.versionId"
+          placeholder="请选择版本，系统将按版本中心 ID 匹配仓库映射"
           filterable
           clearable
-          allow-create
-          default-first-option
           style="width: 100%"
         >
           <el-option
@@ -1598,6 +1596,7 @@
               placeholder="请选择项目"
               filterable
               style="width: 100%"
+              @change="handleAiRepoMappingProjectChange"
             >
               <el-option
                 v-for="item in projectOptions"
@@ -1609,8 +1608,10 @@
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="版本标识" prop="versionKey">
-            <el-input v-model="aiRepoMappingForm.versionKey" placeholder="例如 release/2.1.3" />
+          <el-form-item label="关联版本" prop="versionId">
+            <el-select v-model="aiRepoMappingForm.versionId" placeholder="请选择版本" filterable style="width: 100%">
+              <el-option v-for="item in detailVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
           </el-form-item>
         </el-col>
         <el-col :span="12">

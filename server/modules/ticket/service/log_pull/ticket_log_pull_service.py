@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 import gc
@@ -56,10 +56,11 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullVendorStoreOptionsModel,
 )
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
-from modules.ticket.util.ticket_common_util import normalize_ticket_version_key, resolve_ticket_current_version_key
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -502,9 +503,7 @@ class TicketLogPullService:
         env_config["insertUrl"] = str(env_config.get("insertUrl") or defaults["insertUrl"]).strip()
         env_config["pageUrl"] = str(env_config.get("pageUrl") or defaults["pageUrl"]).strip()
         env_config["headers"] = {
-            key: str(value or "").strip()
-            for key, value in env_config["headers"].items()
-            if str(value or "").strip()
+            key: str(value or "").strip() for key, value in env_config["headers"].items() if str(value or "").strip()
         }
         env_config["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
         return env_config
@@ -614,9 +613,7 @@ class TicketLogPullService:
             if not vender_no or not vendor_name or vender_no in seen_vender_nos:
                 continue
             seen_vender_nos.add(vender_no)
-            vendors.append(
-                TicketLogPullVendorOptionModel(vender_no=vender_no, vendor_name=vendor_name)
-            )
+            vendors.append(TicketLogPullVendorOptionModel(vender_no=vender_no, vendor_name=vendor_name))
         return vendors
 
     @classmethod
@@ -635,12 +632,7 @@ class TicketLogPullService:
             seen_store_ids.add(store_id)
             store_code = str(store_config.org_no or "").strip() or None
             sap_org_no = str(store_config.sap_org_no or "").strip() or None
-            store_name = (
-                str(store_config.org_name or "").strip()
-                or store_code
-                or sap_org_no
-                or store_id
-            )
+            store_name = str(store_config.org_name or "").strip() or store_code or sap_org_no or store_id
             stores.append(
                 TicketLogPullStoreOptionModel(
                     store_id=store_id,
@@ -668,9 +660,11 @@ class TicketLogPullService:
         config_row = TicketLogPullDao.get_param_example_config_row(query_db)
         raw_examples = cls._json_loads(getattr(config_row, "config_value", None), [])
         resolved_vender_no = str(vender_no or "").strip()
-        stores = cls._build_store_options(
-            TicketLogPullDao.list_store_configs_by_vender_no(query_db, resolved_vender_no)
-        ) if resolved_vender_no else []
+        stores = (
+            cls._build_store_options(TicketLogPullDao.list_store_configs_by_vender_no(query_db, resolved_vender_no))
+            if resolved_vender_no
+            else []
+        )
         return TicketLogPullVendorStoreOptionsModel(
             environments=cls._get_environment_options(query_db),
             vendors=vendors,
@@ -696,9 +690,7 @@ class TicketLogPullService:
         return output.getvalue()
 
     @classmethod
-    def get_store_config_list_services(
-        cls, query_db: Session, query: TicketLogPullStoreConfigQueryModel
-    ):
+    def get_store_config_list_services(cls, query_db: Session, query: TicketLogPullStoreConfigQueryModel):
         """
         查询门店配置列表。
         :param query_db: 数据库会话
@@ -1052,7 +1044,7 @@ class TicketLogPullService:
                 config_name=TicketLogPullDao.VENDOR_CONFIG_NAME,
                 config_value="[]",
                 user_name="system",
-                remark="工单日志拉取商家配置，格式：[{\"venderNo\": \"商户编号\", \"vendorName\": \"商家名称\"}]",
+                remark='工单日志拉取商家配置，格式：[{"venderNo": "商户编号", "vendorName": "商家名称"}]',
             )
 
     @classmethod
@@ -1063,11 +1055,7 @@ class TicketLogPullService:
         :return: 请求头字典
         """
         headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
-        return {
-            key: str(value).strip()
-            for key, value in headers.items()
-            if str(value or "").strip()
-        }
+        return {key: str(value).strip() for key, value in headers.items() if str(value or "").strip()}
 
     @classmethod
     def get_storage_config_services(cls, query_db: Session) -> TicketLogPullStorageConfigModel:
@@ -1215,64 +1203,49 @@ class TicketLogPullService:
         return normalize_ticket_version_key(match.group(1))
 
     @staticmethod
-    def _resolve_ticket_version_key(ticket) -> str:
+    def _update_ticket_version_id(cls, query_db: Session, ticket_id: int, version_key: str) -> int | None:
         """
-        从工单扩展字段中读取已保存版本号。
-        :param ticket: 工单对象
-        :return: 版本号，未配置返回空字符串
-        """
-        return resolve_ticket_current_version_key(ticket)
-
-    @classmethod
-    def _update_ticket_version_key(cls, query_db: Session, ticket_id: int, version_key: str) -> bool:
-        """
-        回写工单版本号到扩展字段。
+        将日志中的版本文本解析为工单发生版本ID。
 
         :param query_db: 数据库会话。
         :param ticket_id: 工单ID。
         :param version_key: 版本号。
-        :return: 是否发生更新。
+        :return: 版本中心ID，失败返回空。
         """
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
-            return False
+            return None
         normalized_version_key = normalize_ticket_version_key(version_key)
         if not normalized_version_key:
-            return False
-        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        current_version_key = resolve_ticket_current_version_key(ticket)
-        if current_version_key == normalized_version_key:
-            return False
-        # extra_data.version_key 暂保留给历史 AI 仓库映射等链路兜底；权威字段写入 affected_version。
-        extra_data["version_key"] = normalized_version_key
-        TicketDao.update_ticket(
+            return None
+        if ticket.affected_version_id:
+            return ticket.affected_version_id
+        ticket.update_by = "system"
+        ticket.update_time = datetime.now()
+        version = TicketVersionService.assign_detected_ticket_version(
             query_db,
-            ticket_id,
-            {
-                "affected_version": normalized_version_key,
-                "extra_data": extra_data,
-                "update_by": "system",
-                "update_time": datetime.now(),
-            },
+            ticket,
+            version_type="affected",
+            version_key=normalized_version_key,
+            source="log_extract",
         )
         query_db.commit()
-        return True
+        return version.version_id if version else None
 
     @classmethod
-    def _ensure_ticket_version_key_from_log(cls, query_db: Session, ticket_id: int, record_id: int) -> str:
+    def ensure_ticket_version_id_from_log(cls, query_db: Session, ticket_id: int, record_id: int) -> int | None:
         """
-        日志拉取成功后确保工单具备版本号，缺失时从日志正文提取并回填。
+        日志拉取成功后确保工单具备发生版本ID，缺失时从日志正文提取并回填。
         :param query_db: 数据库会话
         :param ticket_id: 工单ID
         :param record_id: 日志拉取记录ID
-        :return: 可用版本号，未命中返回空字符串
+        :return: 可用版本中心ID，未命中返回空。
         """
         ticket = TicketDao.get_ticket_by_id(query_db, ticket_id)
         if not ticket:
-            return ""
-        version_key = resolve_ticket_current_version_key(ticket)
-        if version_key:
-            return version_key
+            return None
+        if ticket.affected_version_id:
+            return ticket.affected_version_id
 
         log_text = ""
         try:
@@ -1290,17 +1263,17 @@ class TicketLogPullService:
                 status="skipped",
                 reason="未从日志中提取到版本号",
             )
-            return ""
+            return None
         try:
-            updated = cls._update_ticket_version_key(query_db, ticket_id, version_key)
+            version_id = cls._update_ticket_version_id(query_db, ticket_id, version_key)
             cls._log_chain_step(
                 query_db,
                 ticket_id=ticket_id,
                 record_id=record_id,
                 step="version-backfill",
-                status="success" if updated else "skipped",
-                reason="已从日志提取并回填版本号" if updated else "工单版本号已是最新值",
-                detail={"versionKey": version_key},
+                status="success" if version_id else "failed",
+                reason="已从日志提取并回填版本中心ID" if version_id else "版本中心记录创建失败",
+                detail={"versionId": version_id},
             )
         except Exception as exc:
             query_db.rollback()
@@ -1313,8 +1286,8 @@ class TicketLogPullService:
                 status="failed",
                 reason=str(exc),
             )
-            return ""
-        return version_key
+            return None
+        return version_id
 
     @classmethod
     def _notify_automation(
@@ -1858,9 +1831,7 @@ class TicketLogPullService:
         return [cls._to_record_list_item(row) for row in result]
 
     @classmethod
-    def list_log_pull_management_records_services(
-        cls, query_db: Session, query: TicketLogPullQueryModel
-    ):
+    def list_log_pull_management_records_services(cls, query_db: Session, query: TicketLogPullQueryModel):
         """
         查询日志拉取管理页记录。
         :param query_db: 数据库会话
@@ -2105,9 +2076,9 @@ class TicketLogPullService:
         """
         latest_map = TicketLogPullDao.list_latest_records_by_ticket_ids(query_db, ticket_ids)
         return {
-            ticket_id: TicketLogPullSummaryModel.model_validate(
-                cls._to_record_summary(record)
-            ).model_dump(by_alias=True)
+            ticket_id: TicketLogPullSummaryModel.model_validate(cls._to_record_summary(record)).model_dump(
+                by_alias=True
+            )
             for ticket_id, record in latest_map.items()
         }
 
@@ -2523,7 +2494,7 @@ class TicketLogPullService:
                 reason="工单不存在",
             )
             return
-        version_key = cls._resolve_ticket_version_key(ticket)
+        version_id = ticket.affected_version_id
         record_notify_config = cls._extract_record_notify_config(record)
         automation = record.command_content.get("_automation")
         if isinstance(automation, dict):
@@ -2563,21 +2534,21 @@ class TicketLogPullService:
                 notify_config=record_notify_config,
             )
             return
-        if not version_key:
-            logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单缺少版本号")
+        if not version_id:
+            logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单缺少发生版本")
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="工单缺少版本号",
+                reason="工单缺少发生版本",
             )
             cls._notify_automation(
                 db,
                 ticket.ticket_id,
                 status="failed",
-                message="日志拉取成功但未从日志中提取到版本号，后续AI分析已跳过",
+                message="日志拉取成功但未从日志中解析到版本中心记录，后续AI分析已跳过",
                 detail=f"record_id={record_id}",
                 notify_config=record_notify_config,
             )
@@ -2587,18 +2558,14 @@ class TicketLogPullService:
             from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 
             request = TicketAiAnalysisRequestModel(
-                version_key=version_key,
+                version_id=version_id,
                 log_pull_record_id=record.id,
                 agent_code=agent_code,
                 ai_provider_code=provider_code,
             )
             logger.info(
-                "日志拉取记录[%s] 触发自动AI分析 | ticket_id=%s, version_key=%s, agent_code=%s, provider_code=%s",
-                record_id,
-                record.ticket_id,
-                version_key,
-                agent_code,
-                provider_code,
+                f"日志拉取记录[{record_id}] 触发自动AI分析 | ticket_id={record.ticket_id}, "
+                f"version_id={version_id}, agent_code={agent_code}, provider_code={provider_code}"
             )
             result = TicketAiAnalysisService.create_analysis_task_services(db, record.ticket_id, request, None)
             if not result.is_success:
@@ -2613,7 +2580,7 @@ class TicketLogPullService:
                     record.ticket_id,
                     status="failed",
                     message=f"日志拉取后自动AI提交失败：{result.message}",
-                    detail=f"record_id={record_id}, version_key={version_key}",
+                    detail=f"record_id={record_id}, version_id={version_id}",
                     notify_config=record_notify_config,
                 )
             else:
@@ -2625,7 +2592,7 @@ class TicketLogPullService:
                     status="submitted",
                     reason="自动AI分析已提交",
                     detail={
-                        "versionKey": version_key,
+                        "versionId": version_id,
                         "agentCode": agent_code,
                         "providerCode": provider_code,
                         "taskId": getattr(result.result, "task_id", None),
@@ -2686,8 +2653,10 @@ class TicketLogPullService:
                 reason="外部提交地址未配置",
             )
             raise ValueError("日志拉取外部接口提交地址未配置，请检查 ticket.logPull.external.insertUrl")
-        command_content = record.command_content if isinstance(record.command_content, dict) else cls._json_loads(
-            record.command_content, {}
+        command_content = (
+            record.command_content
+            if isinstance(record.command_content, dict)
+            else cls._json_loads(record.command_content, {})
         )
         command_content = cls._build_command_content(command_content)
         response = httpx.post(
@@ -2969,8 +2938,7 @@ class TicketLogPullService:
         # 连接/超时错误
         if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
             return (
-                f"下载日志压缩包失败（网络连接异常），"
-                f"已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
+                f"下载日志压缩包失败（网络连接异常），已自动重试 {cls._DOWNLOAD_MAX_RETRIES} 次仍未成功，请稍后重新拉取"
             )
         # 其他错误，截断避免过长
         truncated = error_str[:300]
@@ -3043,9 +3011,7 @@ class TicketLogPullService:
                 temp_file.unlink(missing_ok=True)
                 status_code = getattr(getattr(exc, "response", None), "status_code", 0)
                 if 400 <= status_code < 500:
-                    raise RuntimeError(
-                        f"下载日志压缩包失败（HTTP {status_code}），请检查下载地址是否有效"
-                    ) from exc
+                    raise RuntimeError(f"下载日志压缩包失败（HTTP {status_code}），请检查下载地址是否有效") from exc
                 if attempt < cls._DOWNLOAD_MAX_RETRIES - 1:
                     wait_seconds = 2 ** (attempt + 1)
                     logger.warning(
@@ -3109,9 +3075,9 @@ class TicketLogPullService:
         :param db: 数据库会话
         :return: 归档位置
         """
-        storage_mode = str(
-            record.storage_mode or cls._get_storage_config_dict(db).get("mode") or "local"
-        ).strip().lower()
+        storage_mode = (
+            str(record.storage_mode or cls._get_storage_config_dict(db).get("mode") or "local").strip().lower()
+        )
         storage_path = str(record.storage_path or "").strip()
         if storage_mode == "ftp" and storage_path:
             config = cls._get_storage_config_dict(db)
@@ -3343,6 +3309,7 @@ class TicketLogPullService:
         :param entry_names: 压缩包中的日志文件名列表
         :return: 排序后的文件名列表
         """
+
         def _entry_sort_key(entry_name: str) -> tuple[int, int, str]:
             file_name = PurePosixPath(entry_name).name
             match = re.search(r"(\d+)(?=\D*$)", file_name)
@@ -3881,8 +3848,7 @@ class TicketLogPullService:
         fields_set = getattr(payload, "model_fields_set", set()) or set()
         has_direct_range = any(field in fields_set for field in ("log_begin_time", "log_end_time"))
         has_point_range = any(
-            field in fields_set
-            for field in ("log_point_time", "range_before_minutes", "range_after_minutes")
+            field in fields_set for field in ("log_point_time", "range_before_minutes", "range_after_minutes")
         )
         return has_direct_range or has_point_range
 
@@ -3926,9 +3892,7 @@ class TicketLogPullService:
             command_content["modifyTime"] = str(modify_time)[:10]
         if str(source.get("path") or "").strip():
             command_content["path"] = str(source.get("path")).strip()
-        command_content["commandDataType"] = int(
-            source.get("commandDataType") or source.get("command_data_type") or 1
-        )
+        command_content["commandDataType"] = int(source.get("commandDataType") or source.get("command_data_type") or 1)
         command_content["storageMode"] = (
             str(source.get("storageMode") or source.get("storage_mode") or "").strip() or None
         )
@@ -3964,9 +3928,7 @@ class TicketLogPullService:
         return content
 
     @classmethod
-    def _resolve_log_time_range(
-        cls, payload: TicketLogPullCreateModel
-    ) -> tuple[datetime | None, datetime | None]:
+    def _resolve_log_time_range(cls, payload: TicketLogPullCreateModel) -> tuple[datetime | None, datetime | None]:
         """
         将日志时间范围统一解析为开始和结束时间。
         :param payload: 页面请求参数
@@ -4002,9 +3964,9 @@ class TicketLogPullService:
         )
         if not isinstance(command_content, dict):
             command_content = {}
-        time_range_mode = str(
-            cls._first_present_value(command_content, "timeRangeMode", "time_range_mode") or ""
-        ).strip().lower()
+        time_range_mode = (
+            str(cls._first_present_value(command_content, "timeRangeMode", "time_range_mode") or "").strip().lower()
+        )
         payload_data: dict[str, Any] = {
             "vendorId": record.vendor_id,
             "storeId": str(record.store_id or "").strip(),
@@ -4028,9 +3990,7 @@ class TicketLogPullService:
 
         point_time_value = cls._first_present_value(command_content, "logPointTime", "log_point_time")
         if time_range_mode == "point" and point_time_value not in (None, ""):
-            before_minutes = cls._first_present_value(
-                command_content, "rangeBeforeMinutes", "range_before_minutes"
-            )
+            before_minutes = cls._first_present_value(command_content, "rangeBeforeMinutes", "range_before_minutes")
             after_minutes = cls._first_present_value(command_content, "rangeAfterMinutes", "range_after_minutes")
             payload_data.update(
                 {
@@ -4042,22 +4002,16 @@ class TicketLogPullService:
         else:
             # 历史记录可能没有配置日志截取范围，不能把 None 显式传给模型，否则会被判定为范围缺失。
             begin_time = (
-                cls._first_present_value(command_content, "logBeginTime", "log_begin_time")
-                or record.log_begin_time
+                cls._first_present_value(command_content, "logBeginTime", "log_begin_time") or record.log_begin_time
             )
-            end_time = (
-                cls._first_present_value(command_content, "logEndTime", "log_end_time")
-                or record.log_end_time
-            )
+            end_time = cls._first_present_value(command_content, "logEndTime", "log_end_time") or record.log_end_time
             if begin_time or end_time:
                 payload_data["logBeginTime"] = begin_time
                 payload_data["logEndTime"] = end_time
         notify_config = command_content.get("notifyConfig") or command_content.get("notify_config")
         if not isinstance(notify_config, dict):
             automation = (
-                command_content.get("_automation")
-                if isinstance(command_content.get("_automation"), dict)
-                else {}
+                command_content.get("_automation") if isinstance(command_content.get("_automation"), dict) else {}
             )
             notify_config = automation.get("notifyConfig") or automation.get("notify_config")
         if isinstance(notify_config, dict):
@@ -4164,9 +4118,7 @@ class TicketLogPullService:
         db.commit()
 
     @classmethod
-    def _fail_record(
-        cls, db: Session, record_id: int, *, status: str, status_desc: str, error_message: str
-    ) -> None:
+    def _fail_record(cls, db: Session, record_id: int, *, status: str, status_desc: str, error_message: str) -> None:
         """
         将记录标记为失败状态。
         :param db: 数据库会话
@@ -4272,9 +4224,7 @@ class TicketLogPullService:
             # 指定环境不存在，回退到第一个环境
             first_key = next(iter(normalized.keys()), None)
             if first_key:
-                logger.warning(
-                    f"日志拉取环境 '{environment}' 在配置中不存在，回退到环境 '{first_key}'"
-                )
+                logger.warning(f"日志拉取环境 '{environment}' 在配置中不存在，回退到环境 '{first_key}'")
                 return normalized[first_key]
         return normalized
 

@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from config.database import Base
-from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent
+from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketVersion
 from modules.ticket.entity.vo.ticket_vo import (
     TicketReleaseBatchUpdateModel,
     TicketVersionStatisticsQueryModel,
@@ -29,14 +29,15 @@ def db_session():
             lambda left, right: (left > right) - (left < right),
         )
 
-    Base.metadata.create_all(engine, tables=[Ticket.__table__, TicketEvent.__table__])
+    tables = [Ticket.__table__, TicketEvent.__table__, TicketVersion.__table__]
+    Base.metadata.create_all(engine, tables=tables)
     session_local = sessionmaker(bind=engine)
     session = session_local()
     try:
         yield session
     finally:
         session.close()
-        Base.metadata.drop_all(engine, tables=[TicketEvent.__table__, Ticket.__table__])
+        Base.metadata.drop_all(engine, tables=list(reversed(tables)))
 
 
 def _current_user():
@@ -53,6 +54,7 @@ def _ticket(ticket_id: int, ticket_no: str, **overrides):
         "status": TicketStatus.WAIT_VERIFY.value,
         "is_problem": True,
         "project_id": 1,
+        "merchant_name": "测试项目",
         "module_id": 2,
         "module_name": "支付模块",
         "issue_type_id": "bug",
@@ -63,10 +65,6 @@ def _ticket(ticket_id: int, ticket_no: str, **overrides):
         "resolution_name": "已修复",
         "problem_pattern_code": "timeout",
         "problem_pattern_name": "接口超时",
-        "affected_version": "1.0.0",
-        "planned_fix_version": "",
-        "fixed_version": "",
-        "released_version": "",
         "create_time": datetime(2026, 7, 10, 10, 0, 0),
         "update_time": datetime(2026, 7, 10, 10, 0, 0),
         "processed_at": datetime(2026, 7, 10, 11, 0, 0),
@@ -77,17 +75,30 @@ def _ticket(ticket_id: int, ticket_no: str, **overrides):
     return Ticket(**data)
 
 
+def _version(version_id: int, version_key: str) -> TicketVersion:
+    """构造项目版本中心记录。"""
+    return TicketVersion(
+        version_id=version_id,
+        project_id=1,
+        project_name="测试项目",
+        version_key=version_key,
+        version_name=version_key,
+        lifecycle_status="confirmed",
+        source="test",
+        enabled=True,
+    )
+
+
 def test_batch_update_release_fields_writes_versions_and_events(db_session):
     """批量维护应写版本字段、发版/验证时间和对应事件。"""
-    db_session.add(_ticket(1, "T-1"))
-    db_session.add(_ticket(2, "T-2"))
+    db_session.add_all([_version(101, "1.0.1"), _ticket(1, "T-1"), _ticket(2, "T-2")])
     db_session.commit()
     released_at = datetime(2026, 7, 11, 9, 30, 0)
     payload = TicketReleaseBatchUpdateModel(
         ticketIds=[1, 2, 999],
-        plannedFixVersion="1.0.1",
-        fixedVersion="1.0.1",
-        releasedVersion="1.0.1",
+        plannedFixVersionId=101,
+        fixedVersionId=101,
+        releasedVersionId=101,
         releasedAt=released_at,
         markVerified=True,
         comment="周末发版",
@@ -99,9 +110,9 @@ def test_batch_update_release_fields_writes_versions_and_events(db_session):
     assert result.result["updatedCount"] == 2
     assert result.result["missingTicketIds"] == [999]
     ticket = db_session.query(Ticket).filter(Ticket.ticket_id == 1).first()
-    assert ticket.planned_fix_version == "1.0.1"
-    assert ticket.fixed_version == "1.0.1"
-    assert ticket.released_version == "1.0.1"
+    assert ticket.planned_fix_version_id == 101
+    assert ticket.fixed_version_id == 101
+    assert ticket.released_version_id == 101
     assert ticket.released_at == released_at
     assert ticket.verified_at is not None
     events = db_session.query(TicketEvent).filter(TicketEvent.ticket_id == 1).all()
@@ -113,31 +124,31 @@ def test_batch_update_release_fields_writes_versions_and_events(db_session):
 
 def test_version_statistics_groups_affected_and_fix_versions(db_session):
     """版本统计应分别输出发生版本和修复/发版版本聚合行。"""
-    db_session.add(
+    db_session.add_all([
+        _version(100, "1.0.0"),
+        _version(101, "1.0.1"),
+        _version(102, "1.0.2"),
         _ticket(
             1,
             "T-1",
-            affected_version="1.0.0",
-            planned_fix_version="1.0.1",
-            fixed_version="1.0.1",
-            released_version="1.0.1",
+            affected_version_id=100,
+            planned_fix_version_id=101,
+            fixed_version_id=101,
+            released_version_id=101,
             released_at=datetime(2026, 7, 11, 9, 0, 0),
             verified_at=datetime(2026, 7, 11, 10, 0, 0),
-        )
-    )
-    db_session.add(
+        ),
         _ticket(
             2,
             "T-2",
-            affected_version="1.0.0",
-            planned_fix_version="1.0.2",
-            fixed_version="1.0.2",
-            released_version="",
+            affected_version_id=100,
+            planned_fix_version_id=102,
+            fixed_version_id=102,
             processed_at=None,
             issue_id=101,
             status=TicketStatus.PROCESSING.value,
-        )
-    )
+        ),
+    ])
     db_session.commit()
     query = TicketVersionStatisticsQueryModel(projectIds="1", topLimit=3, versionLimit=20)
 

@@ -24,7 +24,7 @@ export function useAiRepoMapping(detail, proxy) {
     mappingId: undefined,
     projectId: undefined,
     projectName: '',
-    versionKey: '',
+    versionId: undefined,
     repoUrl: '',
     branchName: '',
     localRepoPath: '',
@@ -37,7 +37,7 @@ export function useAiRepoMapping(detail, proxy) {
 
   const aiRepoMappingRules = {
     projectId: [{ required: true, message: '请选择项目', trigger: 'change' }],
-    versionKey: [{ required: true, message: '版本标识不能为空', trigger: 'blur' }],
+    versionId: [{ required: true, message: '请选择版本', trigger: 'change' }],
     repoUrl: [{ required: true, message: '仓库地址不能为空', trigger: 'blur' }],
     branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }]
   }
@@ -48,7 +48,7 @@ export function useAiRepoMapping(detail, proxy) {
       mappingId: undefined,
       projectId,
       projectName: projectName || '',
-      versionKey: '',
+      versionId: undefined,
       repoUrl: '',
       branchName: '',
       localRepoPath: '',
@@ -103,7 +103,7 @@ export function useAiRepoMapping(detail, proxy) {
         mappingId: row.mappingId,
         projectId: row.projectId,
         projectName: row.projectName || detail.value.projectName || '',
-        versionKey: row.versionKey || '',
+        versionId: row.versionId,
         repoUrl: row.repoUrl || '',
         branchName: row.branchName || '',
         localRepoPath: row.localRepoPath || '',
@@ -142,7 +142,7 @@ export function useAiRepoMapping(detail, proxy) {
   /** 删除仓库映射 */
   function deleteAiRepoMapping(row) {
     if (!row?.mappingId) return
-    proxy.$modal.confirm(`是否确认删除版本映射 "${row.versionKey}"？`).then(() => {
+    proxy.$modal.confirm(`是否确认删除版本映射 "${row.versionName || row.versionKey || row.versionId}"？`).then(() => {
       aiRepoMappingLoading.value = true
       return delTicketAiRepoMapping(row.mappingId)
     }).then(() => {

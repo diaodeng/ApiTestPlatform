@@ -2,7 +2,7 @@
   <div class="app-container ticket-ai-repo-mapping-page">
     <el-form ref="queryRef" :model="queryParams" :inline="true" label-width="90px" class="mb16">
       <el-form-item label="项目" prop="projectId">
-        <el-select v-model="queryParams.projectId" placeholder="请选择项目" clearable filterable style="width: 220px">
+        <el-select v-model="queryParams.projectId" placeholder="请选择项目" clearable filterable style="width: 220px" @change="handleQueryProjectChange">
           <el-option
             v-for="item in projectOptions"
             :key="item.projectId"
@@ -11,8 +11,10 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="版本号" prop="versionKey">
-        <el-input v-model="queryParams.versionKey" placeholder="例如 release/2.1.3" clearable style="width: 220px" />
+      <el-form-item label="版本" prop="versionId">
+        <el-select v-model="queryParams.versionId" placeholder="请选择版本" clearable filterable style="width: 220px" :disabled="!queryParams.projectId">
+          <el-option v-for="item in versionOptions" :key="item.versionId" :label="item.label" :value="item.versionId" />
+        </el-select>
       </el-form-item>
       <el-form-item label="关键词" prop="keyword">
         <el-input v-model="queryParams.keyword" placeholder="项目、版本、仓库或分支" clearable style="width: 220px" />
@@ -91,8 +93,15 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="版本号" prop="versionKey">
-              <el-input v-model="form.versionKey" placeholder="例如 release/2.1.3" />
+            <el-form-item label="关联版本" prop="versionId">
+              <el-select v-model="form.versionId" placeholder="请选择版本中心版本" filterable style="width: 100%" :disabled="!form.projectId">
+                <el-option
+                  v-for="item in versionOptions"
+                  :key="item.versionId"
+                  :label="item.label"
+                  :value="item.versionId"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -153,6 +162,7 @@ import {
   listTicketProjectOptions,
   updateTicketAiRepoMapping
 } from '@/api/ticket/ticket'
+import { listTicketVersionOptions } from '@/api/ticket/version'
 
 const { proxy } = getCurrentInstance()
 
@@ -163,12 +173,13 @@ const isEdit = ref(false)
 const mappingList = ref([])
 const total = ref(0)
 const projectOptions = ref([])
+const versionOptions = ref([])
 
 const queryParams = ref({
   pageNum: 1,
   pageSize: 10,
   projectId: undefined,
-  versionKey: '',
+  versionId: undefined,
   keyword: ''
 })
 
@@ -176,7 +187,7 @@ const form = ref(createDefaultForm())
 
 const rules = {
   projectId: [{ required: true, message: '请选择项目', trigger: 'change' }],
-  versionKey: [{ required: true, message: '版本号不能为空', trigger: 'blur' }],
+  versionId: [{ required: true, message: '请选择版本中心版本', trigger: 'change' }],
   repoUrl: [{ required: true, message: '仓库地址不能为空', trigger: 'blur' }],
   branchName: [{ required: true, message: '分支名称不能为空', trigger: 'blur' }]
 }
@@ -188,7 +199,7 @@ function createDefaultForm() {
     mappingId: undefined,
     projectId: undefined,
     projectName: '',
-    versionKey: '',
+    versionId: undefined,
     repoUrl: '',
     branchName: '',
     localRepoPath: '',
@@ -204,6 +215,24 @@ function loadProjectOptions() {
   return listTicketProjectOptions().then(response => {
     projectOptions.value = response.data || []
   })
+}
+
+function loadVersionOptions(projectId) {
+  if (!projectId) {
+    versionOptions.value = []
+    return Promise.resolve()
+  }
+  return listTicketVersionOptions(projectId, true).then(response => {
+    versionOptions.value = (response.data || []).map(item => ({
+      ...item,
+      label: `${item.versionName || item.versionKey}${item.lifecycleStatus === 'discovered' ? '（待确认）' : ''}`
+    }))
+  })
+}
+
+function handleQueryProjectChange(projectId) {
+  queryParams.value.versionId = undefined
+  loadVersionOptions(projectId)
 }
 
 function getList() {
@@ -228,7 +257,7 @@ function resetQuery() {
     pageNum: 1,
     pageSize: 10,
     projectId: undefined,
-    versionKey: '',
+    versionId: undefined,
     keyword: ''
   }
   handleQuery()
@@ -250,6 +279,8 @@ function handleAdd() {
 function handleProjectChange(projectId) {
   const project = projectOptions.value.find(item => item.projectId === projectId)
   form.value.projectName = project?.projectName || ''
+  form.value.versionId = undefined
+  loadVersionOptions(projectId)
 }
 
 function handleEdit(row) {
@@ -257,7 +288,7 @@ function handleEdit(row) {
     mappingId: row.mappingId,
     projectId: row.projectId,
     projectName: row.projectName || '',
-    versionKey: row.versionKey || '',
+    versionId: row.versionId,
     repoUrl: row.repoUrl || '',
     branchName: row.branchName || '',
     localRepoPath: row.localRepoPath || '',
@@ -269,6 +300,7 @@ function handleEdit(row) {
   }
   isEdit.value = true
   open.value = true
+  loadVersionOptions(row.projectId)
 }
 
 function submitForm() {
@@ -294,7 +326,7 @@ function handleDelete(row) {
     return
   }
   proxy.$modal
-    .confirm(`是否确认删除版本映射 "${row.versionKey}"？`)
+    .confirm(`是否确认删除版本映射 "${row.versionName || row.versionKey || row.versionId}"？`)
     .then(() => {
       loading.value = true
       return delTicketAiRepoMapping(row.mappingId)

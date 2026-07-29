@@ -893,17 +893,23 @@
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="计划修复版本">
-                <el-input v-model="releaseBatchForm.plannedFixVersion" maxlength="100" clearable />
+                <el-select v-model="releaseBatchForm.plannedFixVersionId" clearable filterable placeholder="请选择统一版本" style="width: 100%">
+                  <el-option v-for="item in releaseVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="12">
               <el-form-item label="实际修复版本">
-                <el-input v-model="releaseBatchForm.fixedVersion" maxlength="100" clearable />
+                <el-select v-model="releaseBatchForm.fixedVersionId" clearable filterable placeholder="请选择统一版本" style="width: 100%">
+                  <el-option v-for="item in releaseVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="12">
               <el-form-item label="实际发版版本">
-                <el-input v-model="releaseBatchForm.releasedVersion" maxlength="100" clearable />
+                <el-select v-model="releaseBatchForm.releasedVersionId" clearable filterable placeholder="请选择统一版本" style="width: 100%">
+                  <el-option v-for="item in releaseVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -1084,8 +1090,6 @@
                 placeholder="请选择或输入模块"
                 filterable
                 clearable
-                allow-create
-                default-first-option
                 :disabled="!form.projectId"
                 @change="handleModuleChange"
               >
@@ -1099,14 +1103,12 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="发生版本" prop="versionKey">
+            <el-form-item label="发生版本" prop="affectedVersionId">
               <el-select
-                v-model="form.versionKey"
-                placeholder="请选择或输入版本号"
+                v-model="form.affectedVersionId"
+                placeholder="请选择版本"
                 filterable
                 clearable
-                allow-create
-                default-first-option
                 :disabled="!form.projectId"
                 style="width: 100%"
               >
@@ -1120,30 +1122,24 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="计划修复版本" prop="plannedFixVersion">
-              <el-input
-                v-model="form.plannedFixVersion"
-                placeholder="请输入计划修复版本"
-                maxlength="100"
-              />
+            <el-form-item label="计划修复版本" prop="plannedFixVersionId">
+              <el-select v-model="form.plannedFixVersionId" clearable filterable placeholder="请选择版本" style="width: 100%" :disabled="!form.projectId">
+                <el-option v-for="item in formVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="实际修复版本" prop="fixedVersion">
-              <el-input
-                v-model="form.fixedVersion"
-                placeholder="请输入实际修复版本"
-                maxlength="100"
-              />
+            <el-form-item label="实际修复版本" prop="fixedVersionId">
+              <el-select v-model="form.fixedVersionId" clearable filterable placeholder="请选择版本" style="width: 100%" :disabled="!form.projectId">
+                <el-option v-for="item in formVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="实际发版版本" prop="releasedVersion">
-              <el-input
-                v-model="form.releasedVersion"
-                placeholder="请输入实际发版版本"
-                maxlength="100"
-              />
+            <el-form-item label="实际发版版本" prop="releasedVersionId">
+              <el-select v-model="form.releasedVersionId" clearable filterable placeholder="请选择版本" style="width: 100%" :disabled="!form.projectId">
+                <el-option v-for="item in formVersionOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -1757,6 +1753,7 @@
   const releaseBatchOpen = ref(false);
   const releaseBatchSubmitting = ref(false);
   const releaseBatchForm = ref(createDefaultReleaseBatchForm());
+  const releaseVersionOptions = ref([]);
   const versionStatisticsOpen = ref(false);
   const versionStatisticsLoading = ref(false);
   const versionStatisticsTab = ref('affected');
@@ -1816,11 +1813,10 @@
       projectId: undefined,
       moduleId: undefined,
       moduleName: '',
-      versionKey: '',
-      affectedVersion: '',
-      plannedFixVersion: '',
-      fixedVersion: '',
-      releasedVersion: '',
+      affectedVersionId: undefined,
+      plannedFixVersionId: undefined,
+      fixedVersionId: undefined,
+      releasedVersionId: undefined,
       firstLineAssigneeId: undefined,
       firstLineAssigneeName: '',
       internalOwnerId: undefined,
@@ -1850,9 +1846,9 @@
 
   function createDefaultReleaseBatchForm() {
     return {
-      plannedFixVersion: '',
-      fixedVersion: '',
-      releasedVersion: '',
+      plannedFixVersionId: undefined,
+      fixedVersionId: undefined,
+      releasedVersionId: undefined,
       releasedAt: '',
       verifiedAt: '',
       markReleased: false,
@@ -1870,13 +1866,25 @@
       proxy.$modal.msgWarning('请先选择需要维护的工单');
       return;
     }
+    const projectIds = Array.from(
+      new Set(selectedTicketRows.value.map((item) => Number(item.projectId || item.project_id)).filter(Boolean))
+    );
+    if (projectIds.length !== 1) {
+      proxy.$modal.msgWarning('版本批量维护仅支持同一项目的工单，请重新选择');
+      return;
+    }
     releaseBatchForm.value = createDefaultReleaseBatchForm();
-    releaseBatchOpen.value = true;
+    releaseVersionOptions.value = [];
+    loadFormVersionOptions(projectIds[0]).then(() => {
+      releaseVersionOptions.value = formVersionOptions.value || [];
+      releaseBatchOpen.value = true;
+    });
   }
 
   function resetReleaseBatchForm() {
     releaseBatchForm.value = createDefaultReleaseBatchForm();
     releaseBatchSubmitting.value = false;
+    releaseVersionOptions.value = [];
   }
 
   function buildReleaseBatchPayload() {
@@ -1886,9 +1894,9 @@
       .filter((item) => Number.isFinite(item) && item > 0);
     const payload = {
       ticketIds,
-      plannedFixVersion: String(formData.plannedFixVersion || '').trim() || undefined,
-      fixedVersion: String(formData.fixedVersion || '').trim() || undefined,
-      releasedVersion: String(formData.releasedVersion || '').trim() || undefined,
+      plannedFixVersionId: formData.plannedFixVersionId || undefined,
+      fixedVersionId: formData.fixedVersionId || undefined,
+      releasedVersionId: formData.releasedVersionId || undefined,
       releasedAt: formData.releasedAt || undefined,
       verifiedAt: formData.verifiedAt || undefined,
       markReleased: Boolean(formData.markReleased),
@@ -1909,9 +1917,9 @@
       return;
     }
     const hasUpdate = [
-      payload.plannedFixVersion,
-      payload.fixedVersion,
-      payload.releasedVersion,
+      payload.plannedFixVersionId,
+      payload.fixedVersionId,
+      payload.releasedVersionId,
       payload.releasedAt,
       payload.verifiedAt,
       payload.markReleased,
@@ -2258,18 +2266,10 @@
           false;
         form.value.issueTypeId = ticketData.issueTypeId || ticketData.issue_type_id || '';
         form.value.issueTypeName = ticketData.issueTypeName || ticketData.issue_type_name || '';
-        form.value.versionKey =
-          ticketData.versionKey ||
-          ticketData.affectedVersion ||
-          ticketData.extraData?.versionKey ||
-          ticketData.extraData?.version_key ||
-          '';
-        form.value.affectedVersion = ticketData.affectedVersion || form.value.versionKey || '';
-        form.value.plannedFixVersion =
-          ticketData.plannedFixVersion || ticketData.planned_fix_version || '';
-        form.value.fixedVersion = ticketData.fixedVersion || ticketData.fixed_version || '';
-        form.value.releasedVersion =
-          ticketData.releasedVersion || ticketData.released_version || '';
+        form.value.affectedVersionId = ticketData.affectedVersionId || ticketData.affected_version_id;
+        form.value.plannedFixVersionId = ticketData.plannedFixVersionId || ticketData.planned_fix_version_id;
+        form.value.fixedVersionId = ticketData.fixedVersionId || ticketData.fixed_version_id;
+        form.value.releasedVersionId = ticketData.releasedVersionId || ticketData.released_version_id;
         form.value.isProblem = ticketData.isProblem ?? ticketData.is_problem ?? undefined;
         form.value.rootCauseType = ticketData.rootCauseType || ticketData.root_cause_type || '';
         form.value.solutionType = ticketData.solutionType || ticketData.solution_type || '';
@@ -2370,7 +2370,6 @@
       handleModuleChange(formModuleValue.value);
       payload.moduleId = form.value.moduleId;
       payload.moduleName = form.value.moduleName || '';
-      payload.affectedVersion = payload.versionKey || payload.affectedVersion || '';
       if (payload.issueTypeId) {
         payload.issueTypeName =
           payload.issueTypeName || getStatOptionLabel(issueTypeOptions.value, payload.issueTypeId);

@@ -15,6 +15,7 @@ from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketRca, T
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from utils.snowflake import snowIdWorker
 
 IMPORT_HEADERS = [
@@ -255,10 +256,9 @@ class TicketImportService:
                     continue
 
                 create_time = cls._parse_datetime(row.get("创建时间")) or now
-                submit_time = (
-                    cls._parse_datetime(row.get("工单提交时间"))
-                    or TicketProcessingMetricService.resolve_submit_time(create_time=create_time, fallback_time=now)
-                )
+                submit_time = cls._parse_datetime(
+                    row.get("工单提交时间")
+                ) or TicketProcessingMetricService.resolve_submit_time(create_time=create_time, fallback_time=now)
                 affected_version = cls._cell_text(row.get("问题发生版本"))
                 planned_fix_version = cls._cell_text(row.get("计划修复版本"))
                 fixed_version = cls._cell_text(row.get("实际修复版本"))
@@ -290,10 +290,6 @@ class TicketImportService:
                         reporter_name=cls._cell_text(row.get("提单人")) or _current_user_name(current_user),
                         current_assignee_name=cls._cell_text(row.get("当前处理人")),
                         submit_time=submit_time,
-                        affected_version=affected_version,
-                        planned_fix_version=planned_fix_version,
-                        fixed_version=fixed_version,
-                        released_version=released_version,
                         is_problem=cls._parse_bool(row.get("是否真实问题")),
                         root_cause=cls._cell_text(row.get("根因详情")),
                         solution=cls._cell_text(row.get("解决方案")),
@@ -311,6 +307,20 @@ class TicketImportService:
                         update_time=now,
                     ),
                 )
+                for version_type, version_key in (
+                    ("affected", affected_version),
+                    ("planned_fix", planned_fix_version),
+                    ("fixed", fixed_version),
+                    ("released", released_version),
+                ):
+                    if version_key:
+                        TicketVersionService.assign_detected_ticket_version(
+                            query_db,
+                            ticket,
+                            version_type=version_type,
+                            version_key=version_key,
+                            source="excel",
+                        )
                 TicketDao.add_status_history(
                     query_db,
                     TicketStatusHistory(
@@ -446,10 +456,7 @@ class TicketImportService:
         :param header_map: 表头索引映射
         :return: 标准字段字典
         """
-        return {
-            header: row[index] if index < len(row) else None
-            for header, index in header_map.items()
-        }
+        return {header: row[index] if index < len(row) else None for header, index in header_map.items()}
 
     @classmethod
     def _save_rca(

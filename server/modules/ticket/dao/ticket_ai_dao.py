@@ -25,37 +25,23 @@ class TicketAiDao:
         return db.query(TicketAiRepoMapping).filter(TicketAiRepoMapping.mapping_id == mapping_id).first()
 
     @classmethod
-    def get_repo_mapping_by_project_and_version(
-        cls, db: Session, project_id: int, version_key: str | None
+    def get_repo_mapping_by_project_and_version_id(
+        cls, db: Session, project_id: int, version_id: int | None
     ) -> TicketAiRepoMapping | None:
-        """
-        根据项目和版本查询仓库映射。
-        :param db: 数据库会话
-        :param project_id: 项目ID
-        :param version_key: 版本标识
-        :return: 仓库映射对象
-        """
-        version_text = str(version_key or "").strip()
-        if not version_text:
+        """根据项目和版本中心ID查询启用的仓库映射。"""
+        if not version_id:
             return None
         query = db.query(TicketAiRepoMapping).filter(
             TicketAiRepoMapping.project_id == project_id,
+            TicketAiRepoMapping.version_id == version_id,
             TicketAiRepoMapping.enabled.is_(True),
-            TicketAiRepoMapping.version_key == version_text,
         )
-        mapping = query.filter(TicketAiRepoMapping.is_default.is_(True)).first()
-        if mapping:
-            return mapping
-        return (
-            query
-            .order_by(TicketAiRepoMapping.is_default.desc(), TicketAiRepoMapping.update_time.desc())
-            .first()
-        )
+        return query.order_by(TicketAiRepoMapping.is_default.desc(), TicketAiRepoMapping.update_time.desc()).first()
 
     @classmethod
-    def list_repo_mappings(cls, db: Session, query: TicketAiRepoMappingQueryModel):
+    def build_repo_mapping_query(cls, db: Session, query: TicketAiRepoMappingQueryModel):
         """
-        分页查询仓库映射列表。
+        构建仓库映射查询，保持 ORM 实体供服务层完成版本中心编排。
         :param db: 数据库会话
         :param query: 查询参数
         :return: 分页结果或列表
@@ -64,13 +50,12 @@ class TicketAiDao:
             db.query(TicketAiRepoMapping)
             .filter(
                 TicketAiRepoMapping.project_id == query.project_id if query.project_id else True,
-                TicketAiRepoMapping.version_key == query.version_key if query.version_key else True,
+                TicketAiRepoMapping.version_id == query.version_id if query.version_id else True,
                 TicketAiRepoMapping.enabled == query.enabled if query.enabled is not None else True,
             )
             .filter(
                 or_(
                     TicketAiRepoMapping.project_name.like(f"%{query.keyword}%"),
-                    TicketAiRepoMapping.version_key.like(f"%{query.keyword}%"),
                     TicketAiRepoMapping.repo_url.like(f"%{query.keyword}%"),
                     TicketAiRepoMapping.branch_name.like(f"%{query.keyword}%"),
                 )
@@ -80,11 +65,11 @@ class TicketAiDao:
             .order_by(
                 TicketAiRepoMapping.is_default.desc(),
                 TicketAiRepoMapping.project_id.asc(),
-                TicketAiRepoMapping.version_key.asc(),
+                TicketAiRepoMapping.version_id.asc(),
                 TicketAiRepoMapping.update_time.desc(),
             )
         )
-        return PageUtil.paginate(mapping_query, query.page_num, query.page_size, query.is_page)
+        return mapping_query
 
     @classmethod
     def add_repo_mapping(cls, db: Session, mapping: TicketAiRepoMapping) -> TicketAiRepoMapping:
@@ -171,16 +156,14 @@ class TicketAiDao:
             .filter(
                 TicketAiAnalysisTask.ticket_id == ticket_id,
                 TicketAiAnalysisTask.status == query.status if query.status else True,
-                TicketAiAnalysisTask.version_key == query.version_key if query.version_key else True,
+                TicketAiAnalysisTask.version_id == query.version_id if query.version_id else True,
             )
             .order_by(TicketAiAnalysisTask.create_time.desc(), TicketAiAnalysisTask.task_id.desc())
         )
         return PageUtil.paginate(task_query, query.page_num, query.page_size, query.is_page)
 
     @classmethod
-    def list_latest_tasks_by_ticket_ids(
-        cls, db: Session, ticket_ids: list[int]
-    ) -> dict[int, TicketAiAnalysisTask]:
+    def list_latest_tasks_by_ticket_ids(cls, db: Session, ticket_ids: list[int]) -> dict[int, TicketAiAnalysisTask]:
         """
         查询多个工单最新一条 AI 分析任务。
         :param db: 数据库会话
@@ -222,9 +205,7 @@ class TicketAiDao:
         )
 
     @classmethod
-    def get_last_successful_task_by_ticket(
-        cls, db: Session, ticket_id: int
-    ) -> TicketAiAnalysisTask | None:
+    def get_last_successful_task_by_ticket(cls, db: Session, ticket_id: int) -> TicketAiAnalysisTask | None:
         """
         查询工单最近一次成功的 AI 分析任务。
         用于 resume 时获取上次任务会话数据。

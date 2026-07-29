@@ -14,6 +14,7 @@ from modules.ticket.enums.ticket_enums import TicketEventType
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.core.ticket_service import TicketService
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
@@ -156,9 +157,7 @@ class TicketSyncService:
         ai_version_key = str(result.get("versionKey") or "").strip()
 
         log_pull_payload = (
-            dict(sync_object.log_pull_config or {})
-            if isinstance(sync_object.log_pull_config, dict)
-            else {}
+            dict(sync_object.log_pull_config or {}) if isinstance(sync_object.log_pull_config, dict) else {}
         )
         log_pull_changed = False
         if pos_no:
@@ -177,20 +176,17 @@ class TicketSyncService:
                 log_pull_payload["modifyTime"] = log_date
                 log_pull_changed = True
 
-        # 门店和版本号写入 extra_data._ai_extract，供后续 detect_fields 和 build_upsert_payload 兜底使用
+        # 门店识别结果写入 extra_data；版本文本只作为本次同步输入，不持久化到工单扩展字段。
         extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
         ai_extract_payload = dict(extra_data.get("_ai_extract") or {})
         ai_extract_changed = False
         if ai_store and str(ai_extract_payload.get("store") or "").strip() != ai_store:
             ai_extract_payload["store"] = ai_store
             ai_extract_changed = True
-        if ai_version_key and str(ai_extract_payload.get("versionKey") or "").strip() != ai_version_key:
-            ai_extract_payload["versionKey"] = ai_version_key
-            ai_extract_changed = True
         if ai_extract_changed:
             extra_data["_ai_extract"] = ai_extract_payload
 
-        if not log_pull_changed and not ai_extract_changed:
+        if not log_pull_changed and not ai_extract_changed and not ai_version_key:
             return sync_object, {"updated": False}
 
         update_payload: dict[str, Any] = {}
@@ -198,6 +194,8 @@ class TicketSyncService:
             update_payload["log_pull_config"] = log_pull_payload
         if ai_extract_changed:
             update_payload["extra_data"] = extra_data
+        if ai_version_key:
+            update_payload["detected_version_key"] = ai_version_key
 
         updated_sync_object = sync_object.model_copy(update=update_payload)
         apply_summary: dict[str, Any] = {"updated": True}
@@ -212,7 +210,7 @@ class TicketSyncService:
         if ai_extract_changed:
             apply_summary["aiExtract"] = {
                 "store": ai_extract_payload.get("store", ""),
-                "versionKey": ai_extract_payload.get("versionKey", ""),
+                "versionKey": ai_version_key,
             }
         return updated_sync_object, apply_summary
 
@@ -398,10 +396,7 @@ class TicketSyncService:
         title_meta: dict[str, Any] = {"mode": "raw", "title": raw_title}
         # AI统一提取：三场景（外部推送/远端拉取/多维表格拉取）均执行，由场景独立开关控制
         if skip_ai_analysis_due_to_update_title:
-            logger.info(
-                f"外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, "
-                f"ticket_no={sync_object.ticket_no}"
-            )
+            logger.info(f"外部工单同步跳过统一提取与标题AI：更新场景且已携带标题, ticket_no={sync_object.ticket_no}")
         else:
             try:
                 ai_extract_result, ai_extract_meta = TicketLightAiService.extract_ticket_sync_fields(
@@ -458,8 +453,7 @@ class TicketSyncService:
                         )
                     except Exception as exc:
                         logger.warning(
-                            f"外部工单同步标题处理异常，已回退描述截断: "
-                            f"ticket_no={sync_object.ticket_no}, error={exc}"
+                            f"外部工单同步标题处理异常，已回退描述截断: ticket_no={sync_object.ticket_no}, error={exc}"
                         )
                         resolved_title = str(sync_object.description or "").strip()[:100]
                         if not resolved_title:
@@ -555,9 +549,7 @@ class TicketSyncService:
         if not defer_post_process and isinstance(ai_extract_meta, dict):
             if not bool(ai_extract_meta.get("skipped")) or str(ai_extract_meta.get("error") or "").strip():
                 extra_data = (
-                    dict(payload.get("extra_data") or {})
-                    if isinstance(payload.get("extra_data"), dict)
-                    else {}
+                    dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
                 )
                 extra_data = cls._attach_sync_ai_extract_meta(
                     extra_data,
@@ -568,6 +560,7 @@ class TicketSyncService:
                 payload["extra_data"] = extra_data
         now = datetime.now()
         try:
+            detected_version_key = str(payload.pop("_detected_affected_version_key", "") or "").strip()
             created = ticket is None
             if created:
                 ticket = Ticket(**payload)
@@ -600,14 +593,22 @@ class TicketSyncService:
                 )
             else:
                 TicketDao.update_ticket(db, ticket.ticket_id, payload)
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+            TicketVersionService.validate_ticket_version_ids(db, ticket)
+            if not ticket.affected_version_id and detected_version_key:
+                TicketVersionService.assign_detected_ticket_version(
+                    db,
+                    ticket,
+                    version_type="affected",
+                    version_key=detected_version_key,
+                    source=sync_scene,
+                )
             TicketDao.add_event(
                 db,
                 TicketEvent(
                     ticket_id=ticket.ticket_id,
                     event_type=(
-                        TicketEventType.TICKET_UPDATED.value
-                        if not created
-                        else TicketEventType.TICKET_CREATED.value
+                        TicketEventType.TICKET_UPDATED.value if not created else TicketEventType.TICKET_CREATED.value
                     ),
                     operator_id=_user_id(current_user),
                     operator_name=_user_name(current_user),
@@ -652,14 +653,12 @@ class TicketSyncService:
         except Exception as exc:
             db.rollback()
             logger.warning(
-                f"外部工单同步排查过程入库失败: ticket_no={sync_object.ticket_no}, "
-                f"scene={sync_scene}, error={exc}"
+                f"外部工单同步排查过程入库失败: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
             )
 
         if defer_post_process:
-            result = (
-                TicketService.get_ticket_detail_services(db, ticket.ticket_id)
-                or CamelCaseUtil.transform_result(ticket)
+            result = TicketService.get_ticket_detail_services(db, ticket.ticket_id) or CamelCaseUtil.transform_result(
+                ticket
             )
             result["syncSummary"] = TicketSyncDeliveryService.extract_sync_summary(result.get("extraData"))
             result["syncDeferred"] = True
@@ -709,14 +708,7 @@ class TicketSyncService:
             logger.warning(f"外部工单同步自动分类执行失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
         should_run_automation = bool(
-            (
-                automation
-                and (
-                    automation.auto_identify
-                    or automation.auto_log_pull
-                    or automation.auto_ai_analysis
-                )
-            )
+            (automation and (automation.auto_identify or automation.auto_log_pull or automation.auto_ai_analysis))
             or cls._should_run_automation_by_config(config, sync_scene)
         )
         automation_summary = None
@@ -740,13 +732,11 @@ class TicketSyncService:
             )
         except Exception as exc:
             logger.warning(
-                f"工单同步发布状态收敛失败: ticket_no={sync_object.ticket_no}, "
-                f"scene={sync_scene}, error={exc}"
+                f"工单同步发布状态收敛失败: ticket_no={sync_object.ticket_no}, scene={sync_scene}, error={exc}"
             )
 
-        result = (
-            TicketService.get_ticket_detail_services(db, ticket.ticket_id)
-            or CamelCaseUtil.transform_result(ticket)
+        result = TicketService.get_ticket_detail_services(db, ticket.ticket_id) or CamelCaseUtil.transform_result(
+            ticket
         )
         result["syncSummary"] = TicketSyncDeliveryService.extract_sync_summary(result.get("extraData"))
         if automation_summary:
@@ -762,4 +752,3 @@ class TicketSyncService:
             message="外部工单同步成功",
             result=result,
         )
-

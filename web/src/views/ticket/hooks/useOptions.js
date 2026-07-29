@@ -14,10 +14,10 @@ import {
   getTicketLogPullVendorStoreOptions,
   listTicketLogPullProjectVendorMapOptions,
   getTicketStatClassificationOptions,
-  listTicketAiRepoMappings,
   listTicketProjectOptions,
   listTicketModuleOptions,
 } from '@/api/ticket/ticket';
+import { listTicketVersionOptions } from '@/api/ticket/version';
 // 分类选项从 API 动态加载（loadStatClassificationOptions），不使用静态枚举
 
 export function useOptions() {
@@ -156,34 +156,16 @@ export function useOptions() {
       detailVersionOptions.value = [];
       return Promise.resolve();
     }
-    return listTicketAiRepoMappings({
-      pageNum: 1,
-      pageSize: 200,
-      projectId,
-      enabled: true,
-    }).then((response) => {
-      const rows = response.rows || [];
-      const optionMap = new Map();
-      rows.forEach((item) => {
-        const value = String(item.versionKey || '').trim();
-        if (!value || optionMap.has(value)) {
-          return;
-        }
-        const branchName = String(item.branchName || '').trim();
-        const repoUrl = String(item.repoUrl || '').trim();
-        const labelParts = [value];
-        if (branchName) {
-          labelParts.push(`- ${branchName}`);
-        }
-        if (repoUrl) {
-          labelParts.push(`(${repoUrl})`);
-        }
-        optionMap.set(value, {
-          value,
-          label: labelParts.join(' '),
-        });
+    return listTicketVersionOptions(projectId, true).then((response) => {
+      detailVersionOptions.value = (response.data || []).map((item) => {
+        const status = String(item.lifecycleStatus || '').trim();
+        const statusLabel = status === 'discovered' ? '待确认' : status === 'deprecated' ? '已废弃' : '';
+        return {
+          value: item.versionId,
+          label: [item.versionName || item.versionKey, statusLabel ? `(${statusLabel})` : ''].filter(Boolean).join(' '),
+          lifecycleStatus: status,
+        };
       });
-      detailVersionOptions.value = Array.from(optionMap.values());
     });
   }
 
@@ -259,34 +241,16 @@ export function useOptions() {
       formVersionOptions.value = [];
       return Promise.resolve();
     }
-    return listTicketAiRepoMappings({
-      pageNum: 1,
-      pageSize: 200,
-      projectId,
-      enabled: true,
-    }).then((response) => {
-      const rows = response.rows || [];
-      const optionMap = new Map();
-      rows.forEach((item) => {
-        const value = String(item.versionKey || '').trim();
-        if (!value || optionMap.has(value)) {
-          return;
-        }
-        const branchName = String(item.branchName || '').trim();
-        const repoUrl = String(item.repoUrl || '').trim();
-        const labelParts = [value];
-        if (branchName) {
-          labelParts.push(`- ${branchName}`);
-        }
-        if (repoUrl) {
-          labelParts.push(`(${repoUrl})`);
-        }
-        optionMap.set(value, {
-          value,
-          label: labelParts.join(' '),
-        });
+    return listTicketVersionOptions(projectId, true).then((response) => {
+      formVersionOptions.value = (response.data || []).map((item) => {
+        const status = String(item.lifecycleStatus || '').trim();
+        const statusLabel = status === 'discovered' ? '待确认' : status === 'deprecated' ? '已废弃' : '';
+        return {
+          value: item.versionId,
+          label: [item.versionName || item.versionKey, statusLabel ? `(${statusLabel})` : ''].filter(Boolean).join(' '),
+          lifecycleStatus: status,
+        };
       });
-      formVersionOptions.value = Array.from(optionMap.values());
     });
   }
 

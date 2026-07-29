@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
@@ -28,7 +28,6 @@ class TicketBaseModel(BaseModel):
     module_id: int | None = Field(default=None, description="所属模块ID")
     module_name: str | None = Field(default=None, description="所属模块名称")
     module_code: str | None = Field(default=None, description="所属模块业务码")
-    version_key: str | None = Field(default=None, description="版本号")
     need_log_pull: bool | None = Field(default=None, description="创建工单后是否自动拉取日志")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="创建工单时的日志拉取配置")
     category_id: int | None = Field(default=None, description="问题分类ID")
@@ -53,10 +52,10 @@ class TicketBaseModel(BaseModel):
     issue_title: str | None = Field(default=None, description="归属问题实例标题")
     issue_relation_type: str | None = Field(default=None, description="问题实例归属类型")
     issue_confirmed: bool | None = Field(default=False, description="问题归因是否人工确认")
-    affected_version: str | None = Field(default=None, description="问题发生或分析版本")
-    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
-    fixed_version: str | None = Field(default=None, description="实际修复版本")
-    released_version: str | None = Field(default=None, description="实际发版版本")
+    affected_version_id: int | None = Field(default=None, description="问题发生版本中心ID")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
     customer_priority: str | None = Field(default="P3", description="对方优先级")
     internal_priority: str | None = Field(default="P3", description="内部优先级")
     severity: str | None = Field(default=None, description="严重等级")
@@ -129,9 +128,7 @@ class TicketQueryModel(QueryModel):
     issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
     issue_type_name: str | None = Field(default=None, description="工单类型名称")
     is_problem: bool | None = Field(default=None, description="是否真实问题")
-    is_problems: str | None = Field(
-        default=None, description="是否真实问题多选，true/false 逗号分隔字符串"
-    )
+    is_problems: str | None = Field(default=None, description="是否真实问题多选，true/false 逗号分隔字符串")
     root_cause_type: str | None = Field(default=None, description="根因分类")
     root_cause_types: str | None = Field(default=None, description="根因分类多选，逗号分隔字符串")
     solution_type: str | None = Field(default=None, description="解决方式")
@@ -140,9 +137,7 @@ class TicketQueryModel(QueryModel):
     resolution_codes: str | None = Field(default=None, description="关闭结果编码多选，逗号分隔字符串")
     resolution_name: str | None = Field(default=None, description="关闭结果名称")
     problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
-    problem_pattern_codes: str | None = Field(
-        default=None, description="细分问题类型编码多选，逗号分隔字符串"
-    )
+    problem_pattern_codes: str | None = Field(default=None, description="细分问题类型编码多选，逗号分隔字符串")
     problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
     issue_id: int | None = Field(default=None, description="归属问题实例ID")
     issue_no: str | None = Field(default=None, description="归属问题实例编号")
@@ -154,19 +149,13 @@ class TicketQueryModel(QueryModel):
     internal_priorities: str | None = Field(default=None, description="内部优先级多选，逗号分隔字符串")
     source: str | None = Field(default=None, description="工单来源")
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
-    current_assignee_ids: str | None = Field(
-        default=None, description="当前处理人ID多选，逗号分隔字符串"
-    )
+    current_assignee_ids: str | None = Field(default=None, description="当前处理人ID多选，逗号分隔字符串")
     current_assignee_name: str | None = Field(default=None, description="当前处理人名称")
     first_line_assignee_id: int | None = Field(default=None, description="1线人员ID")
-    first_line_assignee_ids: str | None = Field(
-        default=None, description="1线人员ID多选，逗号分隔字符串"
-    )
+    first_line_assignee_ids: str | None = Field(default=None, description="1线人员ID多选，逗号分隔字符串")
     first_line_assignee_name: str | None = Field(default=None, description="1线人员名称")
     internal_owner_id: int | None = Field(default=None, description="内部工单负责人ID")
-    internal_owner_ids: str | None = Field(
-        default=None, description="内部工单负责人ID多选，逗号分隔字符串"
-    )
+    internal_owner_ids: str | None = Field(default=None, description="内部工单负责人ID多选，逗号分隔字符串")
     internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
@@ -176,10 +165,10 @@ class TicketQueryModel(QueryModel):
     processing_conclusion_status: str | None = Field(default=None, description="处理结论状态：processed/unprocessed")
     processed_begin_time: datetime | None = Field(default=None, description="处理完成时间筛选开始")
     processed_end_time: datetime | None = Field(default=None, description="处理完成时间筛选结束")
-    affected_version: str | None = Field(default=None, description="问题发生或分析版本")
-    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
-    fixed_version: str | None = Field(default=None, description="实际修复版本")
-    released_version: str | None = Field(default=None, description="实际发版版本")
+    affected_version_id: int | None = Field(default=None, description="问题发生版本中心ID")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
     sort_field: str | None = Field(default="submitTime", description="排序字段，默认按提交时间排序")
     sort_order: str | None = Field(default="desc", description="排序方向，支持 asc/desc 或 ascending/descending")
 
@@ -217,9 +206,9 @@ class TicketStatusChangeModel(BaseModel):
     problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
     problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
     problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
-    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
-    fixed_version: str | None = Field(default=None, description="实际修复版本")
-    released_version: str | None = Field(default=None, description="实际发版版本")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
 
 
 class TicketReleaseBatchUpdateModel(BaseModel):
@@ -230,9 +219,9 @@ class TicketReleaseBatchUpdateModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     ticket_ids: list[int] = Field(default_factory=list, description="待维护工单ID列表")
-    planned_fix_version: str | None = Field(default=None, description="计划修复版本")
-    fixed_version: str | None = Field(default=None, description="实际修复版本")
-    released_version: str | None = Field(default=None, description="实际发版版本")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
     released_at: datetime | None = Field(default=None, description="实际发版时间")
     verified_at: datetime | None = Field(default=None, description="验证完成时间")
     mark_released: bool = Field(default=False, description="是否标记发版完成，未传发版时间时使用当前时间")
@@ -254,16 +243,16 @@ class TicketReleaseBatchUpdateModel(BaseModel):
             if parsed_id > 0 and parsed_id not in normalized_ids:
                 normalized_ids.append(parsed_id)
         self.ticket_ids = normalized_ids
-        for field_name in ("planned_fix_version", "fixed_version", "released_version", "comment"):
+        for field_name in ("comment",):
             value = getattr(self, field_name)
             setattr(self, field_name, str(value).strip() if value is not None else None)
         if not self.ticket_ids:
             raise ValueError("请选择需要维护的工单")
         has_update = any(
             [
-                self.planned_fix_version is not None,
-                self.fixed_version is not None,
-                self.released_version is not None,
+                self.planned_fix_version_id is not None,
+                self.fixed_version_id is not None,
+                self.released_version_id is not None,
                 self.released_at is not None,
                 self.verified_at is not None,
                 self.mark_released,
@@ -338,7 +327,7 @@ class TicketMessageCreateModel(BaseModel):
     content: str = Field(description="消息内容")
     attachments: dict[str, Any] | list[dict[str, Any]] | None = Field(default=None, description="附件或引用信息")
     run_ai: bool = Field(default=False, description="提交后是否立即发起 AI 追问分析")
-    version_key: str | None = Field(default=None, description="发起 AI 追问时使用的版本号")
+    version_id: int | None = Field(default=None, description="发起 AI 追问时使用的版本中心ID")
     agent_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Agent 编码")
     ai_provider_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Provider 编码")
 
@@ -435,7 +424,7 @@ class TicketAiRepoMappingBaseModel(BaseModel):
     mapping_id: int | None = None
     project_id: int = Field(description="所属项目ID")
     project_name: str = Field(default="", description="项目名称")
-    version_key: str = Field(description="版本标识")
+    version_id: int = Field(description="版本中心ID")
     repo_url: str = Field(default="", description="仓库地址")
     branch_name: str = Field(default="", description="分支名称")
     local_repo_path: str = Field(default="", description="本地仓库路径（Agent 本地配置优先）")
@@ -458,7 +447,7 @@ class TicketAiRepoMappingQueryModel(QueryModel):
     """
 
     project_id: int | None = Field(default=None, description="所属项目ID")
-    version_key: str | None = Field(default=None, description="版本标识")
+    version_id: int | None = Field(default=None, description="版本中心ID")
     enabled: bool | None = Field(default=None, description="是否启用")
     keyword: str | None = Field(default=None, description="项目名、版本或仓库关键字")
 
@@ -469,7 +458,13 @@ class TicketAiRepoMappingCreateModel(TicketAiRepoMappingBaseModel):
     """
 
     project_id: int = Field(description="所属项目ID")
-    version_key: str = Field(description="版本标识")
+
+    @model_validator(mode="after")
+    def validate_version_reference(self):
+        """校验仓库映射必须关联版本中心。"""
+        if not self.version_id:
+            raise ValueError("请选择版本")
+        return self
 
 
 class TicketAiRepoMappingUpdateModel(TicketAiRepoMappingBaseModel):
@@ -480,6 +475,20 @@ class TicketAiRepoMappingUpdateModel(TicketAiRepoMappingBaseModel):
     mapping_id: int = Field(description="映射ID")
 
 
+class TicketAiRepoMappingResponseModel(TicketAiRepoMappingBaseModel):
+    """工单 AI 仓库映射接口响应模型。"""
+
+    version_id: str = Field(description="版本中心ID，字符串避免前端整数精度丢失")
+    version_name: str = Field(default="", description="版本展示名称")
+    version_key: str = Field(default="", description="版本标识")
+
+    @field_validator("version_id", mode="before")
+    @classmethod
+    def serialize_version_id(cls, value: int | str) -> str:
+        """将 ORM 版本ID转换为浏览器可精确传输的字符串。"""
+        return str(value)
+
+
 class TicketAiAnalysisRequestModel(BaseModel):
     """
     工单 AI 分析提交模型。
@@ -487,8 +496,8 @@ class TicketAiAnalysisRequestModel(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    mapping_id: int | None = Field(default=None, description="仓库映射ID，兼容手动指定")
-    version_key: str | None = Field(default=None, description="版本标识，用于匹配仓库映射；留空时后端会尝试从日志提取")
+    mapping_id: int | None = Field(default=None, description="仓库映射ID")
+    version_id: int | None = Field(default=None, description="版本中心ID；留空时后端会尝试从日志提取")
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
@@ -516,7 +525,6 @@ class TicketAiAnalysisRequestModel(BaseModel):
         校验 AI 分析提交参数。
         :return: 当前模型
         """
-        self.version_key = str(self.version_key or "").strip() or None
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.log_analysis_mode = str(self.log_analysis_mode or "").strip() or None
@@ -548,7 +556,7 @@ class TicketAiAnalysisTaskModel(BaseModel):
     project_id: int | None = None
     mapping_id: int | None = None
     project_name: str | None = None
-    version_key: str | None = None
+    version_id: int | None = None
     repo_url: str | None = None
     branch_name: str | None = None
     local_repo_path: str | None = None
@@ -582,7 +590,7 @@ class TicketAiAnalysisTaskQueryModel(QueryModel):
 
     status: str | None = Field(default=None, description="任务状态")
     ticket_id: int | None = Field(default=None, description="工单ID")
-    version_key: str | None = Field(default=None, description="版本标识")
+    version_id: int | None = Field(default=None, description="版本中心ID")
 
 
 class TicketSyncSourcePayloadModel(BaseModel):
@@ -647,6 +655,7 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
     sync_consumer: str | None = Field(default=None, description="同步消费者名称，用于预初始化交付状态")
     raw_payload: dict[str, Any] | None = Field(default=None, description="外部工单原始载荷")
     step_reason: str | None = Field(default=None, description="外部排查过程原始文本")
+    detected_version_key: str | None = Field(default=None, description="外部来源识别到的版本文本，仅用于解析版本中心ID")
     ticket_no: str = Field(description="工单编号")
     title: str | None = Field(default=None, description="工单标题，可为空后由服务端自动生成")
 
@@ -838,7 +847,7 @@ class TicketBatchReclassifyRequestModel(BaseModel):
     ai_prompt_code: str | None = Field(default=None, description="AI归类提示词编码，留空走系统配置")
     regex_rules: list[dict[str, Any]] | None = Field(
         default=None,
-        description="正则归类规则列表，元素示例：{\"pattern\":\"支付|扣款\",\"category\":\"支付问题\"}",
+        description='正则归类规则列表，元素示例：{"pattern":"支付|扣款","category":"支付问题"}',
     )
     force_reclassify: bool = Field(default=False, description="是否覆盖已归类工单")
 
@@ -1038,9 +1047,5 @@ class TicketStatisticsQueryModel(QueryModel):
     module_codes: str | None = Field(default=None, description="模块业务码多选，逗号分隔字符串")
     issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
     granularity: str | None = Field(default="week", description="趋势粒度：day/week/month")
-    week_bucket_mode: str | None = Field(
-        default="calendar_week", description="周趋势分桶：calendar_week/business_week"
-    )
-    problem_pattern_codes: str | None = Field(
-        default=None, description="细分问题类型编码多选，逗号分隔字符串"
-    )
+    week_bucket_mode: str | None = Field(default="calendar_week", description="周趋势分桶：calendar_week/business_week")
+    problem_pattern_codes: str | None = Field(default=None, description="细分问题类型编码多选，逗号分隔字符串")

@@ -258,7 +258,7 @@ class TicketRemoteSyncService:
             "moduleId": None,
             "moduleName": module_name,
             "moduleCode": item.get("moduleCode") or item.get("module_code") or "",
-            "versionKey": item.get("versionKey") or item.get("version_key") or "",
+            "detectedVersionKey": item.get("versionKey") or item.get("version_key") or "",
             "status": ticket_status,
             "issueTypeId": item.get("issueTypeId") or item.get("issue_type_id") or "",
             "issueTypeName": item.get("issueTypeName") or item.get("issue_type_name") or "",

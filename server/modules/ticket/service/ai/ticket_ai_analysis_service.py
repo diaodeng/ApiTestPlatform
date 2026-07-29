@@ -30,6 +30,7 @@ from module_qtr.service.agent_service import send_message as agent_send_message
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
+from modules.ticket.dao.ticket_version_dao import TicketVersionDao
 from modules.ticket.entity.do.ticket_do import (
     Ticket,
     TicketAiAnalysisTask,
@@ -38,14 +39,17 @@ from modules.ticket.entity.do.ticket_do import (
     TicketMessage,
     TicketRca,
     TicketSnapshot,
+    TicketVersion,
 )
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
+from modules.ticket.entity.model.ticket_version_model import TicketAiRepoMappingListItem
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullContentQueryModel
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAiAnalysisRequestModel,
     TicketAiAnalysisTaskQueryModel,
     TicketAiRepoMappingCreateModel,
     TicketAiRepoMappingQueryModel,
+    TicketAiRepoMappingResponseModel,
     TicketAiRepoMappingUpdateModel,
 )
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
@@ -53,10 +57,10 @@ from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingSe
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
-from modules.ticket.util.ticket_common_util import resolve_ticket_current_version_key
 from utils.api_key_util import ApiKeyUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
+from utils.page_util import PageResponseModel
 from utils.snowflake import snowIdWorker
 
 
@@ -258,8 +262,7 @@ class TicketAiAnalysisService:
 
         if not resolved_executable:
             raise FileNotFoundError(
-                "未找到可执行的 codex Worker，请检查 codex 是否已安装并加入 PATH，"
-                "或在系统参数中配置完整命令"
+                "未找到可执行的 codex Worker，请检查 codex 是否已安装并加入 PATH，或在系统参数中配置完整命令"
             )
 
         if resolved_executable.lower().endswith((".cmd", ".bat")):
@@ -518,16 +521,15 @@ class TicketAiAnalysisService:
         return getattr(project, "project_name", "") or ""
 
     @classmethod
-    def _resolve_version_key(cls, ticket: Ticket, request: TicketAiAnalysisRequestModel | None = None) -> str:
-        """
-        解析版本标识。
-        :param ticket: 工单对象
-        :param request: AI分析请求对象
-        :return: 版本标识
-        """
-        if request and str(request.version_key or "").strip():
-            return str(request.version_key).strip()
-        return resolve_ticket_current_version_key(ticket)
+    def _resolve_version_id(cls, ticket: Ticket, request: TicketAiAnalysisRequestModel | None = None) -> int | None:
+        """解析 AI 分析使用的版本中心ID。"""
+        return request.version_id if request and request.version_id else ticket.affected_version_id
+
+    @classmethod
+    def _get_version_key(cls, db: Session, version_id: int | None) -> str:
+        """按版本中心ID读取版本标识，仅用于 AI 提示词和结果展示。"""
+        version = TicketVersionDao.get_version_by_id(db, version_id) if version_id else None
+        return version.version_key if version else ""
 
     @classmethod
     def _resolve_mapping(
@@ -543,8 +545,8 @@ class TicketAiAnalysisService:
         :param request: AI分析请求对象
         :return: 仓库映射对象
         """
-        version_key = cls._resolve_version_key(ticket, request)
-        if not version_key:
+        version_id = cls._resolve_version_id(ticket, request)
+        if not version_id:
             return None
         if request and request.mapping_id:
             mapping = TicketAiDao.get_repo_mapping_by_id(db, request.mapping_id)
@@ -552,13 +554,11 @@ class TicketAiAnalysisService:
                 mapping
                 and mapping.enabled
                 and mapping.project_id == ticket.project_id
-                and mapping.version_key == version_key
+                and (mapping.version_id == version_id)
             ):
                 return mapping
         if ticket.project_id:
-            mapping = TicketAiDao.get_repo_mapping_by_project_and_version(db, ticket.project_id, version_key)
-            if mapping:
-                return mapping
+            return TicketAiDao.get_repo_mapping_by_project_and_version_id(db, ticket.project_id, version_id)
         return None
 
     @classmethod
@@ -581,27 +581,27 @@ class TicketAiAnalysisService:
         return TicketLogPullDao.get_latest_success_record_by_ticket_id(db, ticket_id)
 
     @classmethod
-    def _ensure_version_key_for_analysis(
+    def _ensure_version_id_for_analysis(
         cls,
         db: Session,
         ticket: Ticket,
         request: TicketAiAnalysisRequestModel | None = None,
-    ) -> tuple[str, TicketLogPullRecord | None]:
+    ) -> tuple[int | None, TicketLogPullRecord | None]:
         """
-        解析 AI 分析版本号，缺失时尝试从日志拉取记录提取并回填。
+        解析 AI 分析版本中心ID，缺失时尝试从日志拉取记录提取并回填。
         :param db: 数据库会话
         :param ticket: 工单对象
         :param request: AI分析请求对象
-        :return: 版本号与用于分析的日志记录
+        :return: 版本中心ID与用于分析的日志记录
         """
         selected_log_record = cls._resolve_log_pull_record(
             db,
             ticket.ticket_id,
             request.log_pull_record_id if request else None,
         )
-        version_key = cls._resolve_version_key(ticket, request)
-        if version_key:
-            return version_key, selected_log_record
+        version_id = cls._resolve_version_id(ticket, request)
+        if version_id:
+            return version_id, selected_log_record
 
         candidate_records: list[TicketLogPullRecord] = []
         if selected_log_record:
@@ -611,13 +611,13 @@ class TicketAiAnalysisService:
             candidate_records.append(latest_success_record)
 
         for record in candidate_records:
-            version_key = TicketLogPullService._ensure_ticket_version_key_from_log(db, ticket.ticket_id, record.id)
-            if version_key:
+            version_id = TicketLogPullService.ensure_ticket_version_id_from_log(db, ticket.ticket_id, record.id)
+            if version_id:
                 refreshed_ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id)
                 if refreshed_ticket:
-                    ticket.extra_data = refreshed_ticket.extra_data
-                return version_key, record
-        return "", selected_log_record or latest_success_record
+                    ticket.affected_version_id = refreshed_ticket.affected_version_id
+                return version_id, record
+        return None, selected_log_record or latest_success_record
 
     @classmethod
     def _resolve_agent_code(cls, db: Session, requested_agent_code: str | None = None) -> str:
@@ -670,9 +670,7 @@ class TicketAiAnalysisService:
         """
         normalized = str(strategy or "").strip().lower()
         return (
-            normalized
-            if normalized in cls.LOG_WINDOW_MISSING_STRATEGIES
-            else cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY
+            normalized if normalized in cls.LOG_WINDOW_MISSING_STRATEGIES else cls.DEFAULT_LOG_WINDOW_MISSING_STRATEGY
         )
 
     @classmethod
@@ -1287,6 +1285,7 @@ class TicketAiAnalysisService:
         mapping: TicketAiRepoMapping,
         ticket: Ticket,
         *,
+        version_key: str,
         prompt_layers: dict[str, Any] | None = None,
         prompt_templates: list[dict[str, Any]] | None = None,
         extra_instruction: str = "",
@@ -1342,7 +1341,7 @@ class TicketAiAnalysisService:
 
 仓库信息:
 - 项目: {mapping.project_name}
-- 版本: {mapping.version_key}
+- 版本: {version_key}
 - 仓库地址: {mapping.repo_url}
 - 分支: {mapping.branch_name}
 - 本地仓库路径: {mapping.local_repo_path}
@@ -1397,7 +1396,7 @@ class TicketAiAnalysisService:
 """
 
     @classmethod
-    def _build_result_schema(cls, ticket: Ticket, mapping: TicketAiRepoMapping) -> dict[str, Any]:
+    def _build_result_schema(cls, ticket: Ticket, mapping: TicketAiRepoMapping, version_key: str) -> dict[str, Any]:
         """
         构建 Codex 输出 JSON Schema。
         :param ticket: 工单对象
@@ -1411,7 +1410,7 @@ class TicketAiAnalysisService:
             "properties": {
                 "ticket_id": {"type": "integer", "default": ticket.ticket_id},
                 "project_id": {"type": ["integer", "null"], "default": ticket.project_id},
-                "version_key": {"type": ["string", "null"], "default": mapping.version_key},
+                "version_key": {"type": ["string", "null"], "default": version_key},
                 "repo_url": {"type": ["string", "null"], "default": mapping.repo_url},
                 "branch_name": {"type": ["string", "null"], "default": mapping.branch_name},
                 "root_cause": {"type": "string", "default": ""},
@@ -1581,9 +1580,7 @@ class TicketAiAnalysisService:
                 if window:
                     return " | ".join(window)[:4000]
         tail_lines = [
-            re.sub(r"\s+", " ", item.strip())
-            for item in lines[-20:]
-            if item.strip() not in {"{", "}", "[", "]"}
+            re.sub(r"\s+", " ", item.strip()) for item in lines[-20:] if item.strip() not in {"{", "}", "[", "]"}
         ]
         return " | ".join(tail_lines)[:4000] if tail_lines else ""
 
@@ -1632,9 +1629,7 @@ class TicketAiAnalysisService:
                     if window:
                         return " | ".join(window)[:1000]
             tail_lines = [
-                re.sub(r"\s+", " ", item.strip())
-                for item in lines[-5:]
-                if item.strip() not in {"{", "}", "[", "]"}
+                re.sub(r"\s+", " ", item.strip()) for item in lines[-5:] if item.strip() not in {"{", "}", "[", "]"}
             ]
             if tail_lines:
                 return " | ".join(tail_lines)[:1000]
@@ -1647,6 +1642,7 @@ class TicketAiAnalysisService:
         result_payload: dict[str, Any],
         ticket: Ticket,
         mapping: TicketAiRepoMapping,
+        version_key: str,
     ) -> dict[str, Any]:
         """
         将 AI 输出归一化为工单保存结构。
@@ -1658,7 +1654,7 @@ class TicketAiAnalysisService:
         normalized = dict(result_payload or {})
         normalized.setdefault("ticket_id", ticket.ticket_id)
         normalized.setdefault("project_id", ticket.project_id)
-        normalized.setdefault("version_key", mapping.version_key)
+        normalized.setdefault("version_key", version_key)
         normalized.setdefault("repo_url", mapping.repo_url)
         normalized.setdefault("branch_name", mapping.branch_name)
         normalized.setdefault("root_cause", "")
@@ -1806,7 +1802,7 @@ class TicketAiAnalysisService:
                 content="AI分析完成",
                 event_data={
                     "task_id": task.task_id,
-                    "version_key": task.version_key,
+                    "version_id": task.version_id,
                     "repo_url": task.repo_url,
                     "branch_name": task.branch_name,
                     "analysis_result": cls._json_safe_value(result_payload),
@@ -1888,17 +1884,21 @@ class TicketAiAnalysisService:
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             return CrudResponseModel(is_success=False, message="工单不存在")
-        version_key, log_record = cls._ensure_version_key_for_analysis(db, ticket, request)
+        version_id, log_record = cls._ensure_version_id_for_analysis(db, ticket, request)
         if request.log_pull_record_id and not log_record:
             return CrudResponseModel(
                 is_success=False,
                 message="选择的日志记录不存在、不属于当前工单，或尚未下载成功",
             )
-        if not version_key:
-            return CrudResponseModel(is_success=False, message="未获取到版本号，请先选择版本号或确认日志中包含版本号")
+        if not version_id:
+            return CrudResponseModel(
+                is_success=False,
+                message="未获取到版本中心记录，请先选择版本或确认日志中包含版本号",
+            )
         mapping = cls._resolve_mapping(db, ticket, request)
         if not mapping:
             return CrudResponseModel(is_success=False, message="未找到可用的项目版本仓库映射，请先维护映射配置")
+        version_key = cls._get_version_key(db, version_id)
         context_payload = cls._build_context_payload(db, ticket, mapping, log_record, request)
         prompt_layers = TicketPromptService.resolve_prompt_layers(db, ticket)
         selected_prompt_templates = AiPromptTemplateService.get_prompt_template_texts_by_codes(
@@ -1968,6 +1968,7 @@ class TicketAiAnalysisService:
             "{workspace_path}",
             mapping,
             ticket,
+            version_key=version_key,
             prompt_layers=prompt_layers,
             prompt_templates=selected_prompt_templates,
             extra_instruction=request.extra_instruction or "",
@@ -1981,8 +1982,8 @@ class TicketAiAnalysisService:
             ticket_id=ticket.ticket_id,
             project_id=ticket.project_id,
             mapping_id=mapping.mapping_id,
+            version_id=version_id,
             project_name=cls._resolve_project_name(db, ticket.project_id),
-            version_key=mapping.version_key,
             repo_url=mapping.repo_url,
             branch_name=mapping.branch_name,
             local_repo_path=mapping.local_repo_path,
@@ -2021,12 +2022,12 @@ class TicketAiAnalysisService:
                     event_data={
                         "task_id": task.task_id,
                         "mapping_id": mapping.mapping_id,
-                        "version_key": mapping.version_key,
-                    "repo_url": mapping.repo_url,
-                    "branch_name": mapping.branch_name,
-                    "agent_code": request.agent_code or None,
-                    "ai_provider_code": selected_provider.provider_code if selected_provider else None,
-                },
+                        "version_id": version_id,
+                        "repo_url": mapping.repo_url,
+                        "branch_name": mapping.branch_name,
+                        "agent_code": request.agent_code or None,
+                        "ai_provider_code": selected_provider.provider_code if selected_provider else None,
+                    },
                     create_time=now,
                 ),
             )
@@ -2095,7 +2096,7 @@ class TicketAiAnalysisService:
                     event_data={
                         "task_id": task.task_id,
                         "origin_status": task.status,
-                        "version_key": task.version_key,
+                        "version_id": task.version_id,
                         "repo_url": task.repo_url,
                         "branch_name": task.branch_name,
                     },
@@ -2136,20 +2137,62 @@ class TicketAiAnalysisService:
         )
 
     @classmethod
-    def list_repo_mapping_services(
-        cls, db: Session, query: TicketAiRepoMappingQueryModel
-    ):
+    def list_repo_mapping_services(cls, db: Session, query: TicketAiRepoMappingQueryModel):
         """
         查询工单 AI 仓库映射列表。
         :param db: 数据库会话
         :param query: 查询参数
         :return: 分页结果或列表
         """
-        result = TicketAiDao.list_repo_mappings(db, query)
+        mapping_query = TicketAiDao.build_repo_mapping_query(db, query)
+
+        def decorate(rows: list[TicketAiRepoMapping]) -> list[TicketAiRepoMappingResponseModel]:
+            version_ids = {row.version_id for row in rows if row.version_id}
+            version_map = (
+                {
+                    version.version_id: version
+                    for version in db.query(TicketVersion).filter(TicketVersion.version_id.in_(version_ids)).all()
+                }
+                if version_ids
+                else {}
+            )
+            items = [TicketAiRepoMappingListItem(mapping=row, version=version_map.get(row.version_id)) for row in rows]
+            return [
+                TicketAiRepoMappingResponseModel(
+                    mapping_id=item.mapping.mapping_id,
+                    project_id=item.mapping.project_id,
+                    project_name=item.mapping.project_name,
+                    version_id=item.mapping.version_id,
+                    repo_url=item.mapping.repo_url,
+                    branch_name=item.mapping.branch_name,
+                    local_repo_path=item.mapping.local_repo_path,
+                    workspace_root=item.mapping.workspace_root,
+                    worker_command=item.mapping.worker_command,
+                    is_default=item.mapping.is_default,
+                    enabled=item.mapping.enabled,
+                    remark=item.mapping.remark,
+                    extra_data=item.mapping.extra_data,
+                    create_by=item.mapping.create_by,
+                    update_by=item.mapping.update_by,
+                    create_time=item.mapping.create_time,
+                    update_time=item.mapping.update_time,
+                    version_name=item.version.version_name if item.version else "",
+                    version_key=item.version.version_key if item.version else "",
+                )
+                for item in items
+            ]
+
         if query.is_page:
-            result.rows = [CamelCaseUtil.transform_result(row) for row in result.rows]
-            return result
-        return [CamelCaseUtil.transform_result(row) for row in result]
+            total = mapping_query.count()
+            rows = mapping_query.offset((query.page_num - 1) * query.page_size).limit(query.page_size).all()
+            return PageResponseModel(
+                rows=decorate(rows),
+                page_num=query.page_num,
+                page_size=query.page_size,
+                total=total,
+                has_next=total > query.page_num * query.page_size,
+            )
+        return decorate(mapping_query.all())
 
     @classmethod
     def save_repo_mapping_services(
@@ -2167,9 +2210,14 @@ class TicketAiAnalysisService:
         """
         now = datetime.now()
         payload = mapping_object.model_dump(exclude_none=True, by_alias=False)
-        payload["project_name"] = (
-            payload.get("project_name") or cls._resolve_project_name(db, payload.get("project_id"))
+        version = (
+            TicketVersionDao.get_version_by_id(db, int(payload["version_id"])) if payload.get("version_id") else None
         )
+        if not version:
+            return CrudResponseModel(is_success=False, message="请选择版本中心中的有效版本")
+        payload["version_id"] = version.version_id
+        payload["project_id"] = version.project_id
+        payload["project_name"] = version.project_name
         payload["worker_command"] = payload.get("worker_command") or cls._get_config_text(
             db, cls.CONFIG_WORKER_COMMAND, cls.DEFAULT_WORKER_COMMAND
         )
@@ -2219,9 +2267,7 @@ class TicketAiAnalysisService:
             raise
 
     @classmethod
-    def get_task_list_services(
-        cls, db: Session, ticket_id: int, query: TicketAiAnalysisTaskQueryModel
-    ):
+    def get_task_list_services(cls, db: Session, ticket_id: int, query: TicketAiAnalysisTaskQueryModel):
         """
         查询工单 AI 分析任务列表。
         :param db: 数据库会话
@@ -2231,9 +2277,32 @@ class TicketAiAnalysisService:
         """
         result = TicketAiDao.list_ticket_tasks(db, ticket_id, query)
         if query.is_page:
-            result.rows = [CamelCaseUtil.transform_result(row) for row in result.rows]
+            result.rows = cls._attach_task_version_labels(
+                db, [CamelCaseUtil.transform_result(row) for row in result.rows]
+            )
             return result
-        return [CamelCaseUtil.transform_result(row) for row in result]
+        return cls._attach_task_version_labels(db, [CamelCaseUtil.transform_result(row) for row in result])
+
+    @staticmethod
+    def _attach_task_version_labels(db: Session, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """按任务版本中心ID补充展示字段，不将版本文本写回任务表。"""
+        version_ids = {int(item["versionId"]) for item in items if item.get("versionId")}
+        version_map = (
+            {
+                version.version_id: version
+                for version in db.query(TicketVersion).filter(TicketVersion.version_id.in_(version_ids)).all()
+            }
+            if version_ids
+            else {}
+        )
+        for item in items:
+            version_id = int(item["versionId"]) if item.get("versionId") else None
+            version = version_map.get(version_id)
+            if version_id:
+                item["versionId"] = str(version_id)
+            item["versionKey"] = version.version_key if version else ""
+            item["versionName"] = version.version_name if version else ""
+        return items
 
     @classmethod
     def get_latest_summary_map(cls, db: Session, ticket_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -2244,7 +2313,9 @@ class TicketAiAnalysisService:
         :return: 以工单ID为键的摘要映射
         """
         latest_map = TicketAiDao.list_latest_tasks_by_ticket_ids(db, ticket_ids)
-        return {ticket_id: cls._serialize_task_summary(task) for ticket_id, task in latest_map.items()}
+        summary_map = {ticket_id: cls._serialize_task_summary(task) for ticket_id, task in latest_map.items()}
+        cls._attach_task_version_labels(db, list(summary_map.values()))
+        return summary_map
 
     @classmethod
     def get_latest_summary(cls, db: Session, ticket_id: int) -> dict[str, Any] | None:
@@ -2257,7 +2328,7 @@ class TicketAiAnalysisService:
         task = TicketAiDao.get_latest_task_by_ticket_id(db, ticket_id)
         if not task:
             return None
-        return cls._serialize_task_summary(task)
+        return cls._attach_task_version_labels(db, [cls._serialize_task_summary(task)])[0]
 
     @classmethod
     def _serialize_task_summary(cls, task: TicketAiAnalysisTask) -> dict[str, Any]:
@@ -2381,16 +2452,15 @@ class TicketAiAnalysisService:
         if getattr(task, "source_log_pull_record_id", None):
             source_log_pull_record = TicketLogPullDao.get_record_by_id(db, int(task.source_log_pull_record_id))
         if source_log_pull_record and isinstance(source_log_pull_record.command_content, dict):
-            notify_config = (
-                source_log_pull_record.command_content.get("notifyConfig")
-                or source_log_pull_record.command_content.get("notify_config")
-            )
+            notify_config = source_log_pull_record.command_content.get(
+                "notifyConfig"
+            ) or source_log_pull_record.command_content.get("notify_config")
         cls._log_task_step(
             task_id,
             "RESOLVE",
             "解析仓库映射",
             project_id=ticket.project_id,
-            version_key=task.version_key,
+            version_id=task.version_id,
         )
         mapping = TicketAiDao.get_repo_mapping_by_id(db, getattr(task, "mapping_id", None) or 0)
         if not mapping:
@@ -2401,7 +2471,7 @@ class TicketAiAnalysisService:
                 "FAIL",
                 "未找到仓库映射",
                 project_id=ticket.project_id,
-                version_key=task.version_key,
+                version_id=task.version_id,
             )
             cls._mark_task_status(
                 db,
@@ -2439,14 +2509,16 @@ class TicketAiAnalysisService:
         fallback_log_mode = "digest"
         if isinstance(task.analysis_context, dict):
             fallback_log_mode = str(task.analysis_context.get("logAnalysisMode") or "digest")
+        version_key = cls._get_version_key(db, task.version_id)
         prompt_template = task.prompt_text or cls._build_prompt(
             "{workspace_path}",
             mapping,
             ticket,
+            version_key=version_key,
             log_analysis_mode=fallback_log_mode,
             source_logs_path="{source_logs_path}",
         )
-        schema_payload = cls._build_result_schema(ticket, mapping)
+        schema_payload = cls._build_result_schema(ticket, mapping, version_key)
         timeout_sec = cls._get_config_int(db, cls.CONFIG_WORKER_TIMEOUT, cls.DEFAULT_WORKER_TIMEOUT)
         context_payload = cls._load_workspace_context_payload(db, task, ticket, mapping, workspace_dir)
         requested_provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip()
@@ -2606,7 +2678,12 @@ class TicketAiAnalysisService:
                     or "AI Agent 未返回可解析的分析结果"
                 )
                 raise ValueError(failure_message)
-            normalized = cls._normalize_analysis_result(result_payload=parsed_result, ticket=ticket, mapping=mapping)
+            normalized = cls._normalize_analysis_result(
+                result_payload=parsed_result,
+                ticket=ticket,
+                mapping=mapping,
+                version_key=version_key,
+            )
             cls._log_task_step(task_id, "PERSIST", "写回工单与 RCA 结果")
             cls._persist_success_result(db, task, ticket, normalized, result_text or raw_stdout, None)
             finished_at = datetime.now()
@@ -2632,7 +2709,7 @@ class TicketAiAnalysisService:
                 title="工单AI分析结果通知",
                 status="success",
                 message="AI分析已完成",
-                detail=f"task_id={task_id}, version_key={task.version_key}",
+                detail=f"task_id={task_id}, version_id={task.version_id}",
                 notify_config=notify_config,
             )
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")

@@ -1,5 +1,5 @@
-
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -20,6 +20,7 @@ from utils.response_util import ResponseUtil
 
 ticketAiController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
 
+
 @ticketAiController.get(
     "/ai/repo-mappings",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:mapping:list"))],
@@ -37,7 +38,7 @@ async def get_ticket_ai_repo_mappings(
     :return: AI 仓库映射分页列表
     """
     try:
-        result = TicketAiAnalysisService.list_repo_mapping_services(query_db, query)
+        result = await run_in_threadpool(TicketAiAnalysisService.list_repo_mapping_services, query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=result)
         return ResponseUtil.success(data=result)

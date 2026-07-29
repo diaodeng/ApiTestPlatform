@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
-from modules.ticket.util.ticket_common_util import normalize_ticket_version_key, resolve_ticket_current_version_key
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
+from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
 from utils.log_util import logger
 
@@ -124,9 +125,10 @@ class TicketLogPostProcessService:
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             return ""
-        extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
-        current_version_key = resolve_ticket_current_version_key(ticket)
-        if current_version_key:
+        if ticket.affected_version_id:
+            current_version_key = TicketVersionService.get_version_name_map(db, {ticket.affected_version_id}).get(
+                ticket.affected_version_id, ""
+            )
             logger.info(
                 f"日志下载完成后版本提取跳过，ticket_id={ticket_id}，record_id={record_id}，"
                 f"reason=工单已有发生版本，version_key={current_version_key}"
@@ -137,19 +139,18 @@ class TicketLogPostProcessService:
         if not version_key:
             logger.info(f"日志下载完成后版本提取未命中，ticket_id={ticket_id}，record_id={record_id}")
             return ""
-        # extra_data.version_key 暂保留给 AI 仓库映射等历史链路兜底；权威字段写入 affected_version。
-        extra_data["version_key"] = version_key
-        TicketDao.update_ticket(
+        ticket.update_by = "system"
+        ticket.update_time = datetime.now()
+        TicketVersionService.assign_detected_ticket_version(
             db,
-            ticket_id,
-            {
-                "affected_version": version_key,
-                "extra_data": extra_data,
-                "update_by": "system",
-                "update_time": datetime.now(),
-            },
+            ticket,
+            version_type="affected",
+            version_key=version_key,
+            source="log_extract",
         )
-        logger.info(f"日志下载完成后版本提取成功，ticket_id={ticket_id}，record_id={record_id}，version_key={version_key}")
+        logger.info(
+            f"日志下载完成后版本提取成功，ticket_id={ticket_id}，record_id={record_id}，version_key={version_key}"
+        )
         return version_key
 
     @classmethod

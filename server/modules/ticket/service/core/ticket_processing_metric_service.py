@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from modules.ticket.enums.ticket_enums import TicketEventType, TicketStatus
-from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 
 if TYPE_CHECKING:
     from modules.ticket.entity.do.ticket_do import Ticket
@@ -108,30 +107,6 @@ class TicketProcessingMetricService:
         return cls.parse_datetime_value(create_time) or cls.parse_datetime_value(fallback_time)
 
     @classmethod
-    def resolve_affected_version(
-        cls,
-        *,
-        affected_version: Any = None,
-        version_key: Any = None,
-        extra_data: dict[str, Any] | None = None,
-        fallback: Any = None,
-    ) -> str:
-        """
-        解析问题发生/分析版本，兼容历史 extra_data.version_key。
-        :param affected_version: 显式发生版本。
-        :param version_key: 历史版本号字段。
-        :param extra_data: 工单扩展字段。
-        :param fallback: 旧工单字段兜底。
-        :return: 版本文本。
-        """
-        extra = extra_data if isinstance(extra_data, dict) else {}
-        for candidate in (affected_version, version_key, extra.get("version_key"), extra.get("versionKey"), fallback):
-            text = normalize_ticket_version_key(candidate)
-            if text:
-                return text
-        return ""
-
-    @classmethod
     def has_processing_conclusion(cls, payload: dict[str, Any] | None) -> bool:
         """
         判断更新载荷是否包含有效处理结论。
@@ -152,7 +127,7 @@ class TicketProcessingMetricService:
     @classmethod
     def apply_create_fields(cls, data: dict[str, Any], *, now: datetime) -> None:
         """
-        为新增工单补齐提交时间和发生版本。
+        为新增工单补齐提交时间。
         :param data: 待入库字段字典。
         :param now: 当前时间。
         :return: 无，直接修改 data。
@@ -164,28 +139,16 @@ class TicketProcessingMetricService:
             create_time=data.get("create_time") or now,
             fallback_time=now,
         )
-        data["affected_version"] = cls.resolve_affected_version(
-            affected_version=data.get("affected_version"),
-            version_key=data.get("version_key"),
-            extra_data=extra_data,
-        )
 
     @classmethod
     def apply_update_version_fields(cls, ticket: "Ticket", data: dict[str, Any]) -> None:
         """
-        编辑工单时保持 affected_version 与历史 version_key 兼容。
+        编辑工单时补齐提交时间。
         :param ticket: 当前工单。
         :param data: 待更新字段字典。
         :return: 无，直接修改 data。
         """
         extra_data = data.get("extra_data") if isinstance(data.get("extra_data"), dict) else {}
-        if "affected_version" in data or "extra_data" in data:
-            data["affected_version"] = cls.resolve_affected_version(
-                affected_version=data.get("affected_version"),
-                version_key=extra_data.get("version_key"),
-                extra_data=extra_data,
-                fallback=getattr(ticket, "affected_version", None),
-            )
         submit_time = cls.resolve_submit_time(
             explicit_submit_time=data.get("submit_time"),
             extra_data=extra_data,
@@ -255,9 +218,9 @@ class TicketProcessingMetricService:
             update_data["processed_at"] = now
         if event_type == TicketEventType.DEPLOYED.value:
             update_data.setdefault("released_at", getattr(ticket, "released_at", None) or now)
-            version = str(data.get("releasedVersion") or data.get("released_version") or "").strip()
-            if version:
-                update_data["released_version"] = version
+            version_id = data.get("releasedVersionId") or data.get("released_version_id")
+            if version_id:
+                update_data["released_version_id"] = version_id
         if event_type == TicketEventType.VERIFIED.value:
             update_data.setdefault("verified_at", getattr(ticket, "verified_at", None) or now)
         if event_type == TicketEventType.RESOLVED.value:

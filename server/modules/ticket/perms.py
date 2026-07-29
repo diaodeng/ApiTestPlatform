@@ -161,6 +161,17 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         remark="工单AI仓库映射管理菜单",
     ),
     C(
+        "ticket.version",
+        "版本管理",
+        "ticket.root",
+        "version",
+        "ticket/version/index",
+        "ticket:version:list",
+        "calendar",
+        5,
+        remark="统一维护项目版本、候选版本和发布记录",
+    ),
+    C(
         "ticket.sync.automation",
         "工单同步配置",
         "ticket.root",
@@ -209,6 +220,10 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("ticket.ai.mapping.add", "AI映射新增", "ticket.ticket", "ticket:ai:mapping:add", 19),
     F("ticket.ai.mapping.edit", "AI映射编辑", "ticket.ticket", "ticket:ai:mapping:edit", 20),
     F("ticket.ai.mapping.remove", "AI映射删除", "ticket.ticket", "ticket:ai:mapping:remove", 21),
+    F("ticket.version.list", "查看版本管理", "ticket.version", "ticket:version:list", 1),
+    F("ticket.version.add", "新增项目版本", "ticket.version", "ticket:version:add", 2),
+    F("ticket.version.edit", "编辑项目版本", "ticket.version", "ticket:version:edit", 3),
+    F("ticket.version.release", "维护版本发布", "ticket.version", "ticket:version:release", 4),
     F("ticket.ai.analysis.list", "AI分析查询", "ticket.ticket", "ticket:ai:analysis:list", 22),
     F("ticket.ai.analysis.run", "AI分析执行", "ticket.ticket", "ticket:ai:analysis:run", 23),
     C(

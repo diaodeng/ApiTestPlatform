@@ -27,7 +27,6 @@ from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncCon
 from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
-from modules.ticket.util.ticket_common_util import extract_ticket_version_key as _extract_ticket_version_key
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 from utils.log_util import logger
@@ -343,21 +342,9 @@ class TicketSyncAutomationService:
             internal_owner_id = SyncUtil.safe_int(getattr(sync_object, "internal_owner_id", None))
         if not internal_owner_name:
             internal_owner_name = str(getattr(sync_object, "internal_owner_name", "") or "").strip()
-        # 版本号优先级：sync_object > extra_data > AI提取 > 正则
-        ai_extract_payload = (
-            (sync_object.extra_data or {}).get("_ai_extract")
-            if isinstance(sync_object.extra_data, dict)
-            else {}
-        )
-        ai_version_key = (
-            normalize_ticket_version_key(ai_extract_payload.get("versionKey"))
-            if isinstance(ai_extract_payload, dict)
-            else ""
-        )
+        # 版本文本仅在同步输入边界用于解析版本中心ID，不写入工单扩展字段。
         version_key = (
-            normalize_ticket_version_key(sync_object.version_key)
-            or _extract_ticket_version_key(sync_object.extra_data)
-            or ai_version_key
+            normalize_ticket_version_key(sync_object.detected_version_key)
             or normalize_ticket_version_key(cls.extract_pattern(text, config.get("versionPatterns")))
         )
         return {
@@ -643,13 +630,11 @@ class TicketSyncAutomationService:
                         summary["logPullError"] = str(exc)
                         cls.mark_automation_step(meta, step="log_pull", status="failed", error=str(exc))
             elif auto_ai_analysis:
-                version_key = str(detected.get("versionKey") or "").strip() or _extract_ticket_version_key(
-                    ticket.extra_data
-                )
+                version_id = ticket.affected_version_id
                 latest_log = TicketLogPullService.get_latest_summary(db, ticket_id)
-                if version_key and latest_log and latest_log.get("id"):
+                if version_id and latest_log and latest_log.get("id"):
                     ai_request = TicketAiAnalysisRequestModel(
-                        version_key=version_key,
+                        version_id=version_id,
                         log_pull_record_id=int(latest_log["id"]),
                         agent_code=ai_agent_code,
                         ai_provider_code=ai_provider_code,
@@ -669,7 +654,7 @@ class TicketSyncAutomationService:
                         summary["aiAnalysisError"] = ai_result.message
                         cls.mark_automation_step(meta, step="ai_analysis", status="failed", error=ai_result.message)
                 else:
-                    reason = "缺少版本号或可用日志记录，跳过自动 AI"
+                    reason = "缺少版本中心记录或可用日志记录，跳过自动 AI"
                     summary["aiAnalysisSkipReason"] = reason
                     cls.mark_automation_step(meta, step="ai_analysis", status="skipped", detail={"reason": reason})
         except Exception as exc:

@@ -85,7 +85,7 @@
       messageType: 'question',
       content: '',
       runAi: true,
-      versionKey: '',
+      versionId: undefined,
       agentCode: '',
       aiProviderCode: '',
     };
@@ -102,7 +102,7 @@
     );
     messageForm.value = {
       ...createDefaultMessageForm(),
-      versionKey: resolveDefaultMessageKey(),
+      versionId: resolveDefaultMessageId(),
       agentCode: aiDefaults.agentCode,
       aiProviderCode: aiDefaults.aiProviderCode,
     };
@@ -117,13 +117,8 @@
    * 优先使用工单自身版本号，其次使用当前项目已加载的第一个版本选项。
    * @returns {string} 默认版本号。
    */
-  function resolveDefaultMessageKey() {
-    return (
-      detail.value.versionKey ||
-      detail.value.extraData?.versionKey ||
-      detailVersionOptions.value[0]?.value ||
-      ''
-    );
+  function resolveDefaultMessageId() {
+    return detail.value.affectedVersionId || detailVersionOptions.value[0]?.value || undefined;
   }
 
   /**
@@ -246,11 +241,7 @@
       proxy.$modal.msgWarning('请填写消息内容');
       return;
     }
-    messageForm.value.versionKey =
-      detail.value.versionKey ||
-      detail.value.extraData?.versionKey ||
-      messageForm.value.versionKey ||
-      '';
+    messageForm.value.versionId = detail.value.affectedVersionId || messageForm.value.versionId;
     const attachments = parseMessageAttachments();
     if (attachments === null) return;
     addTicketMessage(resolvedTicketId.value, {
@@ -483,7 +474,7 @@
             </el-col>
             <el-col :span="24">
               <el-alert
-                :title="`协同消息默认沿用工单版本号：${detail.versionKey || detail.extraData?.versionKey || '-'}。`"
+                :title="`协同消息默认沿用工单发生版本：${detail.affectedVersion || '-'}。`"
                 type="info"
                 show-icon
                 :closable="false"
@@ -491,14 +482,12 @@
               />
             </el-col>
             <el-col :span="24">
-              <el-form-item label="版本号">
+              <el-form-item label="版本">
                 <el-select
-                  v-model="messageForm.versionKey"
-                  placeholder="请选择或输入版本号"
+                  v-model="messageForm.versionId"
+                  placeholder="请选择版本"
                   filterable
                   clearable
-                  allow-create
-                  default-first-option
                   style="width: 100%"
                 >
                   <el-option

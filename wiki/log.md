@@ -1627,3 +1627,27 @@ updated: 2026-07-28
 - 更新的页面：`flows/ticket-automation-flow.md`、`entities/services/ticket-domain.md`、`web/public/docs/update_history.md`。
 - 变更传播链：任务级 `.codex_home/auth.json` 与 `config.toml` -> Worker 失败诊断 -> 命中 401 时 `GET /models` 探测 -> `ai_analysis_step` / `ai_analysis_error` 事件 -> 服务端系统日志。
 - 关键约束：只记录密钥长度与 SHA-256 前 16 位；探测不调用模型、不重试原任务；`/models` 返回 200 时仍需结合 Worker request ID 排查 Provider 的 Responses 链路。
+
+## [2026-07-29] INGEST-CODE | 工单项目版本中心与发布事实
+
+- 触发：用户确认版本必须统一维护，工单自动发现版本时不能阻断业务，并要求开始实施。
+- 架构层：工单域 / 版本主数据 / 发布管理 / AI 仓库映射。
+- 创建的页面：`concepts/ticket-version-center.md`、`web/public/docs/2026-07-29-ticket-version-center.md`。
+- 更新的页面：`index.md`、`entities/data-models/ticket-core-models.md`、`entities/services/ticket-domain.md`、`web/public/docs/update_history.md`。
+- 变更传播链：工单手工创建、同步、导入、日志提取和批量版本维护 -> `TicketVersionService.assign_detected_ticket_version` / `validate_ticket_version_ids` -> `ticket_version` 候选/确认版本 -> `ticket.*_version_id`；版本中心 -> `ticket_version_release` 发布事实；版本中心 -> `ticket_ai_repo_mapping.version_id`。
+- 关键约束：发布事实不自动关闭工单；验证通过后才由既有工作流处理关闭。未知版本创建 `discovered` 候选版本，不自动创建 AI 仓库映射。
+- 总共涉及页面：5。
+
+## [2026-07-29] INGEST-CODE | 工单版本中心仅 ID 关联
+
+- 触发：用户明确不保留旧版本文本和旧数据兼容，要求工单、AI 映射和 AI 任务统一只关联版本中心 ID。
+- 架构层：工单域 / 版本中心 / 外部同步 / Excel 导入 / 日志提取 / AI 分析 / Web 控制台。
+- 创建的页面：`web/public/docs/2026-07-29-ticket-version-id-only.md`。
+- 更新的页面：`concepts/ticket-version-center.md`、`entities/data-models/ticket-core-models.md`、`entities/services/ticket-domain.md`、`web/public/docs/update_history.md`。
+- 变更传播链：外部版本文本 -> `TicketVersionService.assign_detected_ticket_version` -> `ticket_version` 候选记录 -> 工单或 AI 链路 `version_id`；版本展示 -> 版本中心反查。
+- 关键约束：`ticket`、`ticket_ai_repo_mapping` 和 `ticket_ai_analysis_task` 删除版本文本列；迁移必须先回填 ID 并通过预检，再删列。
+- 2026-07-29 补充：历史版本文本回填比较显式统一为 `utf8mb4_unicode_ci`，兼容既有 `utf8mb4_0900_ai_ci` 与 `utf8mb4_unicode_ci` 列的排序规则差异。
+- 2026-07-29 修复：版本 DAO 不再通过通用分页工具提前转为字典，服务层以 `TicketVersion` ORM 实体和 `TicketVersionListItem` dataclass 完成发布摘要编排；版本选项接口改为 Pydantic 查询模型，统一接收 `projectId`。
+- 2026-07-29 修复：AI 仓库映射列表同样移除通用分页字典转换，服务层以 `TicketAiRepoMapping` ORM 实体和 `TicketAiRepoMappingListItem` dataclass 反查版本中心并输出 Pydantic 响应模型。
+- 2026-07-29 修复：`TicketVersionOptionResponseModel` 启用 `populate_by_name`，服务层以 snake_case 构造版本选项时不再触发 camelCase 别名字段缺失校验；工单详情、编辑和仓库映射共用该接口。
+- 2026-07-29 修复：迁移生成的版本 ID 超过 JavaScript 安全整数范围时，版本列表、选项、发布记录、AI 映射、AI 任务和工单版本关联响应统一转为字符串；后端请求模型继续按整数校验。

@@ -90,6 +90,7 @@ graph TD
 - 工单列表、状态流转、时间线、评论、RCA。
 - 知识库、工作流、统计、日志拉取、导入与向量化。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
+- 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
 
 ## 2026-06-16 分类统计维度
 
@@ -124,8 +125,9 @@ graph TD
 - 2026-07-17 起，工单管理页内的详情全屏弹窗由 `TicketDetailWithList.vue` 自闭环承接，父页只传 `ticketId/open` 并监听 `changed/closed`；详情组件内部自行加载详情、描述翻译、AI 任务、仓库映射、商家映射和问题绑定。下方 tabs 已拆为概览、日志拉取、协同、评论、历史 5 个子组件，父页不再持有 `ticketDetailContext` 或详情弹窗状态；tab 组件也不再接收详情上下文对象。概览、日志拉取、协同支持 `ticketId/detail/active` 双入口以复用父详情已加载的详情数据，未传详情时按 `ticketId` 自行拉取；评论和历史继续只按 `ticketId` 调用独立接口。
 - 2026-07-08 第一阶段已落地：`Ticket.submit_time` 作为统计主时间，`Ticket.processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，前端 `processStatus` 文案已改为“日志/AI进度”，业务处理结论通过 `processingConclusionStatus/processedAt` 展示。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)，实现记录见 [工单提交时间、处理结论和版本治理第一阶段实现记录](../../../../web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md)。
 - 同一方案确认保留当前 `resolved_at` 终态写入逻辑，但语义明确为“工单处置完成时间”，不是只代表真实 Bug 修复完成；真实 Bug 修复统计应结合 `is_problem`、`solution_type`、`resolution_code`、`fixed_version`、`released_at` 和 `verified_at`。
-- 版本治理字段已从 `extra_data.version_key` 拆出：`affected_version` 表示问题发生/分析版本，也是 bug 首发版本/提单版本的权威字段；`planned_fix_version` 表示计划修复版本，`fixed_version` 表示实际修复版本，`released_version/released_at/verified_at` 表示发布与验证闭环；`versionKey/extra_data.version_key` 仅作为历史接口、旧数据和 AI 仓库映射兜底兼容。
-- 2026-07-17 起，版本号读取和提取统一经过 `ticket_common_util.normalize_ticket_version_key`，会过滤 `version`、`版本号`、`appVersion` 等字段名误识别结果；详情返回会由有效发生版本派生 `affectedVersion/versionKey`。日志下载完成后自动提取版本号前先检查 `affected_version` 和兼容字段，已有有效版本时不再扫描日志，提取成功后写入 `affected_version` 并暂时同步 `extra_data.version_key` 兼容历史链路。
+- 2026-07-29 起，版本管理菜单提供项目版本与发布记录统一入口。版本发布只登记发布事实，不自动关闭工单；关联工单应在验证通过后按工作流关闭。工单自动发现版本时沉淀为待确认候选版本，AI 仓库映射必须从版本中心选择版本。
+- 工单的发生、计划修复、实际修复和实际发版均只保存版本中心 ID；AI 仓库映射和 AI 分析任务同样只保存 `version_id`。版本名称和版本标识由版本中心查询展示，不能再把版本文本写入 `extra_data`。
+- 版本号读取和提取统一经过 `ticket_common_util.normalize_ticket_version_key`，会过滤 `version`、`版本号`、`appVersion` 等字段名误识别结果；详情返回由发生版本 ID 派生展示文案。日志下载完成后若已有发生版本 ID 不再扫描日志，提取成功后创建或关联候选版本并写入 `affected_version_id`。
 - 2026-07-20 起，工单列表新增“影响版本”列，直接展示 `affected_version/affectedVersion` 并允许在列设置中按用户控制显隐；列表装饰层不再把 `affectedVersion` 强制覆盖成历史 `versionKey`，避免主表发现问题版本和兼容字段混用。
 - 2026-07-11 版本治理剩余能力已落地：`TicketReleaseService` 承接 `POST /ticket/release/batch` 和 `GET /ticket/release/statistics`，批量维护只更新版本治理字段并写 `DEPLOYED/VERIFIED` 事件；版本统计读取 `ticket` 当前态，按发生版本和修复/发版版本实时聚合。本轮不新增版本维度快照表，正式周报场景后续再新增 `ticket_version_statistics_daily`。
 - 处理统计已下沉到 `service/stats/TicketProcessingStatsService`，控制器 `/ticket/statistics/overview` 和 `/ticket/statistics/trend` 直接调用该服务；DAO 层仅通过 `TicketProcessingStatsDao` 提供范围查询，不在 `TicketService` 中继续增加统计门面。
@@ -146,7 +148,7 @@ graph TD
 - 工单新增/编辑时项目和模块联动，模块必须属于当前项目；工单号作为外部系统唯一编号手动录入，不再自动生成。
 - 工单责任人拆分为三类：`current_assignee` 表示当前处理人，`first_line_assignee` 表示一线接单人员，`internal_owner` 表示内部模块/工单负责人；其中当前处理人继续承接指派、流转和时间线语义，另外两类用于真实业务分工展示和后续路由扩展。
 - 工单列表页同步提供上述三类责任人的筛选和展示列，查询层按 `id` 与名称双通道过滤，便于在运维和业务排查时快速定位工单归属。
-- 工单 `extra_data.version_key` 作为版本号来源，AI 分析按“项目 + 版本号”匹配仓库映射。
+- AI 分析按“项目 + version_id”匹配仓库映射；版本文本只存在于外部输入和 AI 结果展示中，不作为持久化关联字段。
 - 工单 AI 仓库映射中的本地仓库路径和工作区根目录已下沉为 Agent 本地配置优先；服务端仍保留兼容字段用于历史审计和兜底。
 - 工单同步新增独立外部入口与内网拉取链路：`POST /ticket/sync/external` 负责入站创建/更新工单，`GET /ticket/sync/pending` 负责按 `consumer` 拉取未交付 revision，`POST /ticket/sync/ack` 用于可选回执处理结果。
 - 公网外部推单更新已有工单时，若新 `ticketModle` 有文本但未命中有效 HRM 模块 ID，会清空旧 `module_id` 并用新模块文本覆盖 `module_name`，避免外部模块变化后仍展示旧模块；远端拉取入库也会兼容 `moduleName/module_name` 与外部字段 `ticketModle/ticketModel/ticket_model`。
@@ -196,8 +198,8 @@ graph TD
 - 日志拉取管理页和新增弹窗中的商家/门店字段已改为联动下拉：必须先选商家才能选门店，门店候选只保留当前商家下的门店；日志拉取请求仍提交 `vendorId/storeId`，不改变后端记录结构和外部接口入参。
 - 日志拉取记录的 `command_content` 保存前端原始入参，实际提交给三方平台时再按既有过滤逻辑生成请求参数；重试同样基于原始入参重新过滤，避免丢失可恢复字段。
 - 日志拉取管理页的列表现在会回显 `modifyTime` 作为拉取日期，便于直接区分相同工单下的不同拉取批次。
-- 日志拉取成功后会优先从日志正文直接提取版本号，命中后回写到 `ticket.extra_data.version_key`，未提取到则发送通知并终止后续自动 AI。
-- 工单手动编辑或后续同步未携带版本号时不会清空已有 `extra_data.version_key`；手动发起 AI 分析可选择版本号，未选择时后端会先使用工单已有版本号，再尝试从指定日志记录或最近成功日志记录中提取版本号并回写后提交分析。
+- 日志拉取成功后会优先从日志正文直接提取版本号，命中后创建或关联版本中心记录并写入工单发生版本 ID；未提取到则发送通知并终止后续自动 AI。
+- 手动发起 AI 分析可选择版本中心 ID；未选择时后端使用工单发生版本 ID，再尝试从指定日志记录或最近成功日志记录中提取版本并关联后提交分析。
 - 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。
@@ -270,10 +272,10 @@ graph TD
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - AI 分析任务提交前会校验解析到的 Agent 是否已连接服务端；指定 Agent 离线时接口直接返回明确失败原因，不再创建必然失败的后台任务。提交或重试后若后台快速失败，前端会短轮询任务终态并弹出任务 `error_message`。
-- AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本号匹配映射，未命中时拒绝提交。
+- AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本中心 ID 匹配映射，未命中时拒绝提交。
 - 发起 AI 分析和协同/AI 表单的前端选择默认值采用“手动记忆 > 工单自动化配置 > 最近一次 AI 分析”优先级；Agent、Provider、追加提示词的手动选择保存在浏览器本地偏好中，Provider 绑定 Agent 时会在未手动指定 Agent 的情况下自动带入。
 - Agent 侧解析仓库映射时会先校验 `localRepoPath` 当前分支；如果历史映射指向普通 clone 且分支不匹配，会优先从该本地仓库创建 AI 工作区内按分支隔离的 Git worktree，复用原项目 Git 配置和凭据，避免在原项目目录中分析错误分支。
-- 版本号现在也可由日志正文自动提取，减少人工手动补录 `extra_data.version_key` 的次数。
+- 版本号可由日志正文自动提取并自动关联版本中心，减少人工维护版本关联的次数。
 - AI 分析任务列表新增“重试”入口，基于原任务 ID 重新提交；Agent 会先检查工作区 `result.json`，存在可用历史结果时直接返回，任务仍在运行则返回“正在分析中”的提示。
 - AI 分析任务入库时只保留轻量上下文快照，完整工单/时间线/日志内容由执行端工作区生成 `context.json` 和 `logs.txt`，执行阶段优先从工作区读取，避免任务表被超大日志正文撑爆。
 - 服务端容器不再把 AI 分析工作区当持久化存储，任务状态只记录路径字符串和轻量快照；日志内容按“数据库压缩内容 -> 本地归档 -> FTP 归档 -> 外部下载地址”逐级回退获取，避免重启后本地文件丢失。
@@ -312,6 +314,7 @@ graph TD
 - [工单AI分析最终方案落地记录](../../../../docs/2026-05-22-ticket-ai-analysis-final-solution.md)
 - [工单表单与 AI 流程更新记录](../../../../docs/2026-05-22-ticket-form-and-ai-flow-update.md)
 - [工单自动化链路流程](../../flows/ticket-automation-flow.md)
+- [工单项目版本中心](../../concepts/ticket-version-center.md)
 
 ## 被引用
 
