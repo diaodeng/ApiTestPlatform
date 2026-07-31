@@ -117,6 +117,9 @@
       <el-form-item label="统计口径">
         <el-segmented v-model="statisticsMode" :options="statisticsModeOptions" />
       </el-form-item>
+      <el-form-item label="数据范围">
+        <el-segmented v-model="automationScopeOnly" :options="automationScopeOptions" />
+      </el-form-item>
       <el-form-item v-if="metricDefinitions.metrics?.length" label="自定义趋势">
         <el-select v-model="selectedMetricCodes" multiple clearable collapse-tags placeholder="选择要查询的指标" style="width: 280px">
           <el-option v-for="item in metricDefinitions.metrics" :key="item.metricCode" :label="item.label" :value="item.metricCode" />
@@ -359,6 +362,7 @@
   const trendGranularity = ref('week');
   const weekBucketMode = ref('calendar_week');
   const statisticsMode = ref('realtime');
+  const automationScopeOnly = ref(true);
   const timeConfigPayload = ref(null);
   const timeConfigRangeLabel = ref('');
   const issueTypeOptions = ref([]);
@@ -393,6 +397,10 @@
   const statisticsModeOptions = [
     { label: '实时口径', value: 'realtime' },
     { label: '快照口径', value: 'snapshot' },
+  ];
+  const automationScopeOptions = [
+    { label: '关注范围', value: true },
+    { label: '全部数据', value: false },
   ];
   const trendBlockOptions = [
     { key: 'overallTrend', title: '整体趋势曲线' },
@@ -564,7 +572,8 @@
       isTrendBlockVisible('issueTypeTrend') ||
       isTrendBlockVisible('processingTrend') ||
       isTrendBlockVisible('moduleTrend') ||
-      isTrendBlockVisible('problemPatternTrend')
+      isTrendBlockVisible('problemPatternTrend') ||
+      selectedCustomMetrics.value.length > 0
   );
 
   function getStatistics() {
@@ -621,6 +630,7 @@
       ...queryParams.value,
       granularity: trendGranularity.value,
       statisticsMode: statisticsMode.value,
+      automationScopeOnly: automationScopeOnly.value,
       weekBucketMode: trendGranularity.value === 'week' ? weekBucketMode.value : undefined,
       projectIds: selectedProjectIds.value.length ? selectedProjectIds.value.join(',') : undefined,
       moduleIds: selectedModuleIds.value.length ? selectedModuleIds.value.join(',') : undefined,
@@ -824,6 +834,7 @@
       timeConfigPayload.value?.config?.trendWeekBucketMode || 'business_week'
     );
     statisticsMode.value = 'realtime';
+    automationScopeOnly.value = true;
     loadModuleOptions([]);
     getStatistics();
   }
@@ -1206,7 +1217,11 @@
   function loadMetricDefinitions() {
     return getTicketStatisticMetricDefinitions().then((response) => {
       metricDefinitions.value = response.data || { metrics: [] };
-      selectedMetricCodes.value = [];
+      const enabledMetricCodes = (metricDefinitions.value.metrics || [])
+        .map((item) => item.metricCode)
+        .filter(Boolean);
+      const retainedMetricCodes = selectedMetricCodes.value.filter((code) => enabledMetricCodes.includes(code));
+      selectedMetricCodes.value = retainedMetricCodes.length ? retainedMetricCodes : enabledMetricCodes;
     });
   }
 

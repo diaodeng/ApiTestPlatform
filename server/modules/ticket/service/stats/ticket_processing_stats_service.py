@@ -15,9 +15,10 @@ from modules.ticket.dao.ticket_dao import (
 )
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
 from modules.ticket.dao.ticket_statistics_daily_dao import TicketStatisticsDailyDao
-from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
 from modules.ticket.dao.ticket_statistics_metric_snapshot_dao import TicketStatisticsMetricSnapshotDao
+from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
 from modules.ticket.service.stats.ticket_custom_metric_service import TicketCustomMetricService
+from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.common_util import CamelCaseUtil
@@ -81,6 +82,45 @@ class TicketProcessingStatsService:
     """
 
     @classmethod
+    def resolve_automation_statistics_scope(
+        cls,
+        db: Session,
+        automation_scope_only: bool,
+    ):
+        """读取统计默认关注范围；关闭开关时不访问配置。"""
+        if not automation_scope_only:
+            return None
+        config = TicketSyncConfigService.load_sync_config(db)
+        return TicketAutomationScopeService.resolve_statistics_scope(db, config)
+
+    @classmethod
+    def merge_automation_scope_module_ids(
+        cls,
+        db: Session,
+        requested_module_ids: list[int],
+        automation_scope_only: bool,
+    ) -> list[int]:
+        """
+        将统计请求模块范围与自动化关注范围取交集。
+
+        :param db: 数据库会话。
+        :param requested_module_ids: 请求显式选择的模块 ID。
+        :param automation_scope_only: 是否应用默认关注范围。
+        :return: 最终参与统计的模块 ID；[-1] 表示已启用范围但没有可统计模块。
+        """
+        if not automation_scope_only:
+            return requested_module_ids
+        config = TicketSyncConfigService.load_sync_config(db)
+        scope_module_ids = TicketAutomationScopeService.resolve_statistics_scope_module_ids(db, config)
+        if scope_module_ids is None:
+            return requested_module_ids
+        if not scope_module_ids:
+            return [-1]
+        if not requested_module_ids:
+            return scope_module_ids
+        return sorted(set(requested_module_ids).intersection(scope_module_ids)) or [-1]
+
+    @classmethod
     def get_statistics(
         cls,
         query_db: Session,
@@ -92,6 +132,7 @@ class TicketProcessingStatsService:
         issue_type_ids: Any = None,
         statistics_mode: str | None = "realtime",
         week_bucket_mode: str | None = "calendar_week",
+        automation_scope_only: bool = True,
     ) -> dict:
         """
         获取处理口径 overview 统计。
@@ -103,6 +144,7 @@ class TicketProcessingStatsService:
         :param module_codes: 模块业务码多选。
         :param issue_type_ids: 工单类型编码多选。
         :param week_bucket_mode: 周趋势分桶模式，快照 overview 在业务周下读取周期快照。
+        :param automation_scope_only: 是否仅统计自动化关注范围内的模块。
         :return: 小驼峰统计结果。
         """
         start = _date_start(begin_time)
@@ -111,6 +153,9 @@ class TicketProcessingStatsService:
         module_id_values = _normalize_int_list(module_ids)
         module_code_values = _normalize_text_list(module_codes)
         issue_type_id_values = _normalize_text_list(issue_type_ids)
+        automation_scope = cls.resolve_automation_statistics_scope(query_db, automation_scope_only)
+        automation_scope_module_ids = automation_scope.module_ids if automation_scope else None
+        automation_scope_module_name_includes = automation_scope.module_name_includes if automation_scope else None
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
         normalized_week_bucket_mode = cls.normalize_week_bucket_mode(week_bucket_mode)
         if normalized_mode == "snapshot":
@@ -123,6 +168,8 @@ class TicketProcessingStatsService:
                     module_id_values,
                     module_code_values,
                     issue_type_id_values,
+                    automation_scope_module_ids,
+                    automation_scope_module_name_includes,
                 )
                 return _camelize(snapshot)
             snapshot = cls.get_snapshot_statistics(
@@ -133,6 +180,8 @@ class TicketProcessingStatsService:
                 module_id_values,
                 module_code_values,
                 issue_type_id_values,
+                automation_scope_module_ids,
+                automation_scope_module_name_includes,
             )
             return _camelize(snapshot)
         base_statistics = _camelize(
@@ -143,6 +192,8 @@ class TicketProcessingStatsService:
                 project_ids=project_id_values,
                 module_ids=module_id_values,
                 module_codes=module_code_values,
+                automation_scope_module_ids=automation_scope_module_ids,
+                automation_scope_module_name_includes=automation_scope_module_name_includes,
                 issue_type_ids=issue_type_id_values,
             )
         )
@@ -155,6 +206,8 @@ class TicketProcessingStatsService:
             project_ids=project_id_values,
             module_ids=module_id_values,
             module_codes=module_code_values,
+            automation_scope_module_ids=automation_scope_module_ids,
+            automation_scope_module_name_includes=automation_scope_module_name_includes,
             issue_type_ids=issue_type_id_values,
         )
         metrics = cls.build_overview_metrics(rows, start, finish)
@@ -384,6 +437,7 @@ class TicketProcessingStatsService:
         statistics_mode: str | None = "realtime",
         week_bucket_mode: str | None = "calendar_week",
         metric_codes: Any = None,
+        automation_scope_only: bool = True,
     ) -> dict:
         """
         获取处理口径趋势统计。
@@ -397,6 +451,7 @@ class TicketProcessingStatsService:
         :param issue_type_ids: 工单类型编码多选。
         :param problem_pattern_codes: 细分问题编码多选。
         :param week_bucket_mode: 周趋势分桶模式。
+        :param automation_scope_only: 是否仅统计自动化关注范围内的模块。
         :return: 小驼峰趋势结果。
         """
         start = _date_start(begin_time)
@@ -409,6 +464,9 @@ class TicketProcessingStatsService:
         issue_type_id_values = _normalize_text_list(issue_type_ids)
         problem_pattern_code_values = _normalize_text_list(problem_pattern_codes)
         metric_code_values = _normalize_text_list(metric_codes)
+        automation_scope = cls.resolve_automation_statistics_scope(query_db, automation_scope_only)
+        automation_scope_module_ids = automation_scope.module_ids if automation_scope else None
+        automation_scope_module_name_includes = automation_scope.module_name_includes if automation_scope else None
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
         time_config = TicketStatisticsTimeUtil.get_config(query_db)
         if normalized_mode == "snapshot":
@@ -423,6 +481,8 @@ class TicketProcessingStatsService:
                         module_code_values,
                         issue_type_id_values,
                         metric_code_values,
+                        automation_scope_module_ids,
+                        automation_scope_module_name_includes,
                     )
                 )
             snapshot_trend = cls.get_snapshot_trend(
@@ -435,6 +495,8 @@ class TicketProcessingStatsService:
                 module_code_values,
                 issue_type_id_values,
                 metric_code_values,
+                automation_scope_module_ids,
+                automation_scope_module_name_includes,
             )
             return _camelize(snapshot_trend)
         base_trend = _camelize(
@@ -445,6 +507,8 @@ class TicketProcessingStatsService:
                 project_ids=project_id_values,
                 module_ids=module_id_values,
                 module_codes=module_code_values,
+                automation_scope_module_ids=automation_scope_module_ids,
+                automation_scope_module_name_includes=automation_scope_module_name_includes,
                 granularity=normalized_granularity,
                 problem_pattern_codes=problem_pattern_code_values,
                 issue_type_ids=issue_type_id_values,
@@ -458,6 +522,8 @@ class TicketProcessingStatsService:
             project_ids=project_id_values,
             module_ids=module_id_values,
             module_codes=module_code_values,
+            automation_scope_module_ids=automation_scope_module_ids,
+            automation_scope_module_name_includes=automation_scope_module_name_includes,
             issue_type_ids=issue_type_id_values,
             problem_pattern_codes=problem_pattern_code_values,
         )
@@ -511,6 +577,8 @@ class TicketProcessingStatsService:
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
     ) -> dict:
         """
         获取每日快照口径的 overview 统计。
@@ -521,11 +589,20 @@ class TicketProcessingStatsService:
         :param module_ids: 模块ID过滤。
         :param module_codes: 模块业务码过滤。
         :param issue_type_ids: 工单类型编码过滤。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :return: snake_case 统计结果。
         """
         begin_date = begin_time.date() if isinstance(begin_time, datetime) else None
         end_date = end_time.date() if isinstance(end_time, datetime) else None
-        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        use_leaf_scope = bool(
+            project_ids
+            or module_ids
+            or module_codes
+            or issue_type_ids
+            or automation_scope_module_ids is not None
+            or automation_scope_module_name_includes is not None
+        )
         rows = TicketStatisticsDailyDao.list_between(
             query_db,
             begin_date,
@@ -535,6 +612,8 @@ class TicketProcessingStatsService:
             module_ids=module_ids if use_leaf_scope else None,
             module_codes=module_codes if use_leaf_scope else None,
             issue_type_ids=issue_type_ids if use_leaf_scope else None,
+            automation_scope_module_ids=automation_scope_module_ids if use_leaf_scope else None,
+            automation_scope_module_name_includes=automation_scope_module_name_includes if use_leaf_scope else None,
         )
         leaf_rows = rows if use_leaf_scope else TicketStatisticsDailyDao.list_between(
             query_db,
@@ -607,6 +686,8 @@ class TicketProcessingStatsService:
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         metric_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
     ) -> dict:
         """
         获取每日快照口径的趋势统计。
@@ -618,11 +699,20 @@ class TicketProcessingStatsService:
         :param module_ids: 模块ID过滤。
         :param module_codes: 模块业务码过滤。
         :param issue_type_ids: 工单类型编码过滤。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :return: snake_case 趋势结果。
         """
         begin_date = begin_time.date() if isinstance(begin_time, datetime) else None
         end_date = end_time.date() if isinstance(end_time, datetime) else None
-        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        use_leaf_scope = bool(
+            project_ids
+            or module_ids
+            or module_codes
+            or issue_type_ids
+            or automation_scope_module_ids is not None
+            or automation_scope_module_name_includes is not None
+        )
         rows = TicketStatisticsDailyDao.list_between(
             query_db,
             begin_date,
@@ -632,6 +722,8 @@ class TicketProcessingStatsService:
             module_ids=module_ids if use_leaf_scope else None,
             module_codes=module_codes if use_leaf_scope else None,
             issue_type_ids=issue_type_ids if use_leaf_scope else None,
+            automation_scope_module_ids=automation_scope_module_ids if use_leaf_scope else None,
+            automation_scope_module_name_includes=automation_scope_module_name_includes if use_leaf_scope else None,
         )
         leaf_rows = rows if use_leaf_scope else TicketStatisticsDailyDao.list_between(
             query_db,
@@ -710,6 +802,8 @@ class TicketProcessingStatsService:
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
     ) -> dict:
         """
         获取业务周周期快照口径的 overview 统计。
@@ -720,9 +814,18 @@ class TicketProcessingStatsService:
         :param module_ids: 模块ID过滤。
         :param module_codes: 模块业务码过滤。
         :param issue_type_ids: 工单类型编码过滤。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :return: snake_case 统计结果。
         """
-        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        use_leaf_scope = bool(
+            project_ids
+            or module_ids
+            or module_codes
+            or issue_type_ids
+            or automation_scope_module_ids is not None
+            or automation_scope_module_name_includes is not None
+        )
         rows = TicketStatisticsPeriodSnapshotDao.list_between(
             query_db,
             begin_time,
@@ -733,6 +836,8 @@ class TicketProcessingStatsService:
             module_ids=module_ids if use_leaf_scope else None,
             module_codes=module_codes if use_leaf_scope else None,
             issue_type_ids=issue_type_ids if use_leaf_scope else None,
+            automation_scope_module_ids=automation_scope_module_ids if use_leaf_scope else None,
+            automation_scope_module_name_includes=automation_scope_module_name_includes if use_leaf_scope else None,
         )
         leaf_rows = rows if use_leaf_scope else TicketStatisticsPeriodSnapshotDao.list_between(
             query_db,
@@ -807,6 +912,8 @@ class TicketProcessingStatsService:
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         metric_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
     ) -> dict:
         """
         获取业务周周期快照口径的趋势统计。
@@ -817,9 +924,18 @@ class TicketProcessingStatsService:
         :param module_ids: 模块ID过滤。
         :param module_codes: 模块业务码过滤。
         :param issue_type_ids: 工单类型编码过滤。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :return: snake_case 趋势结果。
         """
-        use_leaf_scope = bool(project_ids or module_ids or module_codes or issue_type_ids)
+        use_leaf_scope = bool(
+            project_ids
+            or module_ids
+            or module_codes
+            or issue_type_ids
+            or automation_scope_module_ids is not None
+            or automation_scope_module_name_includes is not None
+        )
         rows = TicketStatisticsPeriodSnapshotDao.list_between(
             query_db,
             begin_time,
@@ -830,6 +946,8 @@ class TicketProcessingStatsService:
             module_ids=module_ids if use_leaf_scope else None,
             module_codes=module_codes if use_leaf_scope else None,
             issue_type_ids=issue_type_ids if use_leaf_scope else None,
+            automation_scope_module_ids=automation_scope_module_ids if use_leaf_scope else None,
+            automation_scope_module_name_includes=automation_scope_module_name_includes if use_leaf_scope else None,
         )
         leaf_rows = rows if use_leaf_scope else TicketStatisticsPeriodSnapshotDao.list_between(
             query_db,

@@ -22,6 +22,7 @@ related_files:
   - server/modules/ticket/service/sync/ticket_sync_payload_service.py
   - server/modules/ticket/service/sync/ticket_sync_post_process_service.py
   - server/modules/ticket/service/sync/ticket_sync_automation_service.py
+  - server/modules/ticket/service/sync/ticket_automation_scope_service.py
   - server/modules/ticket/service/sync/ticket_sync_delivery_service.py
   - server/modules/ticket/service/sync/ticket_batch_reclassification_service.py
   - server/modules/ticket/service/sync/ticket_external_sync_request_service.py
@@ -90,6 +91,7 @@ graph TD
 - 工单列表、状态流转、时间线、评论、RCA。
 - 知识库、工作流、统计、日志拉取、导入与向量化。
 - 外部字段分类映射：`TicketExternalClassificationMappingService` 按外部接口字段匹配工单类型，支持等于、包含、属于和正则；人工类型优先于外部映射，外部映射优先于 AI。同步自动化页的批量重归类已明确提供 AI、正则、映射三种策略；映射策略只重跑已保存的 `external_field_mapping/raw_payload`，不调用 AI，正则空规则也不会隐式降级到映射。
+- 自动化关注范围：`TicketAutomationScopeService` 在外部字段映射得到当前系统模块后，以模块 ID 精确匹配或模块名称关键字包含判定是否允许自动化。结果写入 `ticket.extra_data.automation_scope`；范围外工单仍执行同步、普通映射和外部规则分类，跳过标题/翻译/提取/分类 AI、自动日志与 AI 分析、向量刷新和自动群推送。统计默认范围和自动群推送复用同一配置，群推送原有条件表达式保持不变。
 - 可配置趋势：固定问题性质趋势已删除，工单类型趋势按 `issue_type_id/issue_type_name` 聚合；`TicketCustomMetricService` 仅按白名单字段计算管理员定义的指标，并可读取日/业务周通用快照。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
@@ -216,6 +218,7 @@ graph TD
 - 日志查看中文编码兼容优先覆盖 UTF-8、UTF-8 BOM、GB18030、GBK 和 Big5；非 ASCII 关键字搜索走 Python 编码兼容路径，ASCII 关键字仍优先使用 `rg` 提升速度。
 - 工单外部推送、内网 pending 拉取、ack、日志内容读取、日志列表、日志拉取提交、重新拉取、重新下载、重新截取和删除等 `async def` 接口内的同步服务调用已显式使用 `run_in_threadpool`；这样保留异步请求体/后台任务编排能力，同时避免同步数据库、`requests`、文件和 FTP 操作直接阻塞事件循环。
 - 工单同步配置页的 `GET /ticket/sync/auto-category/stats` 只统计未归类数量，不执行自动归类；批量处理必须调用 `POST /ticket/sync/auto-category/reclassify`。这两个手动管理入口由 `TicketBatchReclassificationService` 承接，不再进入 `TicketSyncService`；自动归类链路已经补充入口、筛选、逐条处理、跳过原因、AI 配置、模型执行和字段回填日志，便于从服务日志判断为什么未执行。
+- 自动化关注范围由 `TicketAutomationScopeService` 统一判定，支持模块 ID、模块 Code 和模块名称关键字；启用但未配置任何条件时不限制范围。统计查询会同时使用已解析模块 ID与原始模块名称关键字，兼容历史工单 `module_id` 为空的情况；范围判定审计写入 `ticket.extra_data.automation_scope`。
 - 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 按根消息中的“主题”文本归类促销、券、会员和印花；`主题:` 与 `主题：` 都可识别，英文专题关键词按词边界匹配，详情、回复和飞书富文本元数据不再参与专题分类，避免非券类工单被隐藏字段、人员 ID 或单词内部片段误判。
 - 该任务支持通过定时任务参数补充分类和状态关键词：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，传入后会与代码内置默认关键词合并，不传则继续使用默认关键词口径。
 - 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。

@@ -591,3 +591,11 @@
 6. 新增迁移脚本 `server/sql/20260729_ticket_version_center.sql` 和说明文档 `web/public/docs/2026-07-29-ticket-version-center.md`。
 7. 工单、AI 仓库映射和 AI 分析任务改为仅保存版本中心 ID；删除工单四类版本文本、AI 映射 `version_key` 和 AI 任务 `version_key` 的兼容路径。
 8. 新增迁移脚本 `server/sql/20260729_ticket_version_id_only.sql`，先回填 ID 并预检未关联数据，再执行删列。
+
+## 2026-07-31
+
+1. 新增 `ticket.sync.automation.automationScope` 自动化关注范围：支持系统模块 ID、模块 Code 精确匹配和模块名称关键字包含匹配，默认关闭以保持历史自动化行为；启用后未配置条件时不限制模块。
+2. 外部同步会在当前模块映射后写入 `ticket.extra_data.automation_scope`；范围外工单继续同步、映射和外部规则分类，但不再调用 AI、自动拉日志/AI 分析或向量刷新。
+3. 自动群推送及 AI 完成后的补发均新增关注范围前置门禁；既有 `groupPush.autoPushCondition` 配置和判断逻辑未修改，只对范围内工单继续生效。
+4. 工单统计接口和页面新增默认“关注范围 / 全部数据”选择；名称关键字同时直接匹配原始模块名称，兼容未绑定 `module_id` 的历史数据。
+5. 新增说明文档：`web/public/docs/2026-07-31-ticket-automation-scope.md`。

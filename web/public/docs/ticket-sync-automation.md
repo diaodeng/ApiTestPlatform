@@ -250,6 +250,14 @@
 
 ## 说明
 
+### 自动化关注范围
+
+- `ticket.sync.automation.automationScope` 可按系统模块 ID、模块 Code、模块名称关键字控制同步后的自动化范围；三类条件都未配置时不限制模块。
+- 范围判断发生在外部字段映射得到当前系统模块之后；每次同步会重新写入 `extra_data.automation_scope` 审计结果，因此外部模块修正后会在下次同步生效。
+- 范围外工单仍入库并更新原始快照、模块、状态、人员和外部工单类型映射；不执行标题 AI、翻译、AI 提取、AI 分类、自动拉日志/AI 分析、向量刷新和自动群推送。
+- 自动群推送会先通过关注范围门禁，再执行原有 `groupPush.autoPushCondition`，原条件配置和表达式语义不变；手动发送不受此自动门禁限制。
+- 工单统计页默认选择“关注范围”，可切换“全部数据”；默认开关由 `automationScope.applyToStatisticsDefault` 控制。名称关键字会直接匹配历史 `ticket.module_name`，不要求历史记录已绑定系统模块 ID。详细配置、权限和历史补数说明见 [工单自动化关注范围实施说明](2026-07-31-ticket-automation-scope.md)。
+
 - `remoteSync.enabled` 不是“手动启动定时任务”的开关，而是任务执行前的放行条件。
 - 手动新增工单和外部同步是两条独立链路，配置不要混用。
 - 如果你只想关闭“内网拉取链路”的自动翻译，优先改 `remoteSync.autoTranslateOnPull`，不要去动第三方直推的 `autoTranslateOnSync`。

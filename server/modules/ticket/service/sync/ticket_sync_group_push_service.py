@@ -12,6 +12,7 @@ from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
+from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_condition_evaluator import evaluate_ticket_condition
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
@@ -693,6 +694,18 @@ class TicketSyncGroupPushService:
             update_by=update_by,
         )
         config = TicketSyncConfigService.load_sync_config(db)
+        scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
+        if not scope_decision.eligible:
+            logger.info(
+                f"自动群推送跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, "
+                f"reason={scope_decision.reason}, module_id={scope_decision.module_id}, "
+                f"module_name={scope_decision.module_name!r}"
+            )
+            return ticket, meta, {
+                "skipped": True,
+                "skipReason": scope_decision.reason,
+                "scene": sync_scene,
+            }
         group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
         if not cls._should_send_group_push_for_scene(group_config, sync_scene):
             logger.info(
@@ -763,6 +776,14 @@ class TicketSyncGroupPushService:
             )
             ticket = cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
             config = TicketSyncConfigService.load_sync_config(db)
+            scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
+            if not scope_decision.eligible:
+                logger.info(
+                    f"AI任务完成后自动群推送跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, "
+                    f"reason={scope_decision.reason}, module_id={scope_decision.module_id}, "
+                    f"module_name={scope_decision.module_name!r}"
+                )
+                return
             group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
             cls.send_auto_group_message_once(
                 db,

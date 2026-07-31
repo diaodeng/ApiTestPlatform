@@ -3,10 +3,29 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-28
+updated: 2026-07-31
 ---
 
 # 操作日志
+
+## [2026-07-31] INGEST-CODE | 自动化关注范围模块 Code 与历史统计匹配
+
+- 触发：开发环境配置模块名称关键字 `POS` 后，统计 2026-07-23 至 2026-07-30 无数据；同时需要模块 Code 配置和空条件放行语义。
+- 关键结论：开发库历史 POS 工单的 `module_id` 全部为空，原实现只按 HRM 模块 ID 统计导致 0 条；现在实时/快照统计均可直接按工单或快照 `module_name` 关键字匹配，模块 Code 先解析为系统模块 ID。
+- 变更传播链：`TicketAutomationScopeService` -> `TicketDao`/统计 DAO -> 处理统计服务 -> 统计页面；同步配置前端新增 `moduleCodes`，范围开启但三类条件均为空时不限制。
+- 权限结论：自动化关注范围不单独限制 admin，页面共用 `ticket:sync:config:list/edit`；开发库当前仅 `manager` 角色拥有对应菜单权限。
+
+## [2026-07-31] INGEST-CODE | 工单统计自定义趋势图默认展示
+
+- 触发：已配置且启用的自定义趋势指标在工单统计页面没有显示。
+- 关键结论：后端 `/ticket/statistics/trend` 已正常返回 `customMetrics`，但前端加载定义后清空选中项，且趋势容器没有将自定义图纳入可见条件。
+- 变更传播链：已启用指标定义 -> 默认选中 `metricCodes` -> 趋势接口 -> 自定义图表容器与 ECharts 渲染。
+
+## [2026-07-31] INGEST-CODE | 自定义趋势空值条件与工单类型候选
+
+- 触发：自定义趋势的工单类型条件需要统计空字符串或 `null`，并希望直接选择系统工单类型。
+- 关键结论：新增 `is_empty`/`is_not_empty` 条件，不复用文本 `null`；配置归一化允许这两个运算符没有匹配值，运行时统一处理 `None`、空字符串和空白。
+- 变更传播链：趋势指标编辑器 -> 同步配置规范化 -> 条件匹配工具 -> 实时统计和快照指标计算；`issueTypeId` 匹配值候选来自当前 `statClassification.issueTypes`。
 
 ## [2026-07-28] INGEST-CODE | AI Provider 能力模型重构
 
@@ -1669,3 +1688,12 @@ updated: 2026-07-28
 - 创建的双向链接：0 对（沿用工单域与同步自动化既有链接）。
 - 变更传播链：同步自动化策略选择 -> `POST /ticket/sync/auto-category/reclassify` 的 `strategy=external_mapping` -> `TicketBatchReclassificationService` -> `TicketExternalClassificationMappingService` -> 工单类型与分类来源审计字段。
 - 总共涉及页面：5。
+## [2026-07-31] INGEST-CODE | 工单自动化关注范围
+
+- 触发：放开飞书模块过滤后仍需避免范围外模块消耗 AI Token 或发送自动群消息。
+- 架构层：工单同步业务层、统计服务层、同步配置与前端统计展示层。
+- 创建的页面：无。
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`log.md`。
+- 创建的双向链接：0 对（沿用工单域与自动化流程既有双向关联）。
+- 变更传播链：外部字段映射 -> 自动化范围判定 -> AI/日志/向量/自动群推送门禁 -> 默认统计模块过滤。
+- 总共涉及页面：3。

@@ -19,8 +19,8 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_service import TicketService
-from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService
 from modules.ticket.service.stats.ticket_custom_metric_service import TicketCustomMetricService
+from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
@@ -321,6 +321,7 @@ async def get_ticket_statistics(
             query.issue_type_ids,
             query.statistics_mode,
             query.week_bucket_mode,
+            query.automation_scope_only,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:
@@ -359,6 +360,7 @@ async def get_ticket_statistics_trend(
             query.statistics_mode,
             query.week_bucket_mode,
             query.metric_codes,
+            query.automation_scope_only,
         )
         return ResponseUtil.success(data=statistics)
     except Exception as e:

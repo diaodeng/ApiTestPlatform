@@ -29,6 +29,21 @@ from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTime
 from utils.page_util import PageUtil
 
 
+def _build_automation_scope_filter(
+    module_ids: list[int] | None,
+    module_name_includes: list[str] | None,
+):
+    """构建自动化关注范围的模块 ID 或模块名称包含过滤条件。"""
+    conditions = []
+    if module_ids:
+        conditions.append(Ticket.module_id.in_(module_ids))
+    for keyword in module_name_includes or []:
+        text = str(keyword or "").strip()
+        if text:
+            conditions.append(func.lower(Ticket.module_name).like(f"%{text.casefold()}%"))
+    return or_(*conditions) if conditions else Ticket.ticket_id == -1
+
+
 def _date_start(value: date | datetime | str | None) -> datetime | None:
     """
     将日期查询参数转换为开始时间。
@@ -540,6 +555,67 @@ def _resolve_module_ids_by_codes(
 
 
 class TicketDao:
+    @classmethod
+    def get_module_code_by_id(cls, db: Session, module_id: int | None) -> str:
+        """根据系统模块 ID 查询模块 Code，供已入库工单的关注范围判定使用。"""
+        if not module_id:
+            return ""
+        value = (
+            db.query(HrmModule.module_code)
+            .filter(HrmModule.module_id == int(module_id), HrmModule.status == QtrDataStatusEnum.normal.value)
+            .scalar()
+        )
+        return str(value or "").strip()
+
+    @classmethod
+    def resolve_module_ids_by_scope(
+        cls,
+        db: Session,
+        *,
+        module_ids: list[int] | None,
+        module_codes: list[str] | None,
+        module_name_includes: list[str] | None,
+    ) -> list[int]:
+        """
+        按精确模块 ID、模块 Code 与模块名称关键字解析统计可用的模块 ID。
+
+        :param db: 数据库会话。
+        :param module_ids: 已配置的精确模块 ID。
+        :param module_codes: 已配置的精确模块 Code。
+        :param module_name_includes: 模块名称包含关键字。
+        :return: 去重后的模块 ID 列表；没有匹配项时返回空列表。
+        """
+        resolved_ids: set[int] = set()
+        for item in module_ids or []:
+            try:
+                module_id = int(item)
+            except (TypeError, ValueError):
+                continue
+            if module_id > 0:
+                resolved_ids.add(module_id)
+        module_codes = {
+            str(item or "").strip().casefold()
+            for item in (module_codes or [])
+            if str(item or "").strip()
+        }
+        keywords = [
+            str(item or "").strip().casefold()
+            for item in (module_name_includes or [])
+            if str(item or "").strip()
+        ]
+        if not module_codes and not keywords:
+            return sorted(resolved_ids)
+        module_rows = (
+            db.query(HrmModule.module_id, HrmModule.module_name, HrmModule.module_code)
+            .filter(HrmModule.status == QtrDataStatusEnum.normal.value)
+            .all()
+        )
+        for module_id, module_name, module_code in module_rows:
+            normalized_name = str(module_name or "").strip().casefold()
+            normalized_code = str(module_code or "").strip().casefold()
+            if normalized_code in module_codes or (normalized_name and any(keyword in normalized_name for keyword in keywords)):
+                resolved_ids.add(int(module_id))
+        return sorted(resolved_ids)
     """
     工单模块数据库访问层。
     """
@@ -1417,6 +1493,8 @@ class TicketDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
     ) -> dict:
         """
@@ -1427,6 +1505,8 @@ class TicketDao:
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :param issue_type_ids: 工单类型编码多选过滤
         :return: 统计结果
         """
@@ -1450,6 +1530,13 @@ class TicketDao:
                 filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
             else:
                 filters.append(Ticket.ticket_id == -1)
+        if automation_scope_module_ids is not None or automation_scope_module_name_includes is not None:
+            filters.append(
+                _build_automation_scope_filter(
+                    automation_scope_module_ids,
+                    automation_scope_module_name_includes,
+                )
+            )
         if issue_type_ids:
             filters.append(Ticket.issue_type_id.in_(issue_type_ids))
 
@@ -1615,6 +1702,8 @@ class TicketDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
         granularity: str | None = "week",
         problem_pattern_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
@@ -1629,6 +1718,8 @@ class TicketDao:
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :param granularity: 趋势粒度，day/week/month
         :param problem_pattern_codes: 细分问题类型编码过滤
         :param issue_type_ids: 工单类型编码过滤
@@ -1659,6 +1750,13 @@ class TicketDao:
                 filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
             else:
                 filters.append(Ticket.ticket_id == -1)
+        if automation_scope_module_ids is not None or automation_scope_module_name_includes is not None:
+            filters.append(
+                _build_automation_scope_filter(
+                    automation_scope_module_ids,
+                    automation_scope_module_name_includes,
+                )
+            )
         if issue_type_ids:
             filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         if problem_pattern_codes:

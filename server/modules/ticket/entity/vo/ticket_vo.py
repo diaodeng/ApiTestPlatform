@@ -1050,3 +1050,7 @@ class TicketStatisticsQueryModel(QueryModel):
     week_bucket_mode: str | None = Field(default="calendar_week", description="周趋势分桶：calendar_week/business_week")
     problem_pattern_codes: str | None = Field(default=None, description="细分问题类型编码多选，逗号分隔字符串")
     metric_codes: str | None = Field(default=None, description="自定义趋势指标编码多选，逗号分隔字符串")
+    automation_scope_only: bool = Field(
+        default=True,
+        description="是否默认仅统计自动化关注范围内的模块；false 时统计全部模块",
+    )

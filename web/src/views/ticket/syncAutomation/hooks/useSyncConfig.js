@@ -362,6 +362,13 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnBitablePull: false,
         autoAiAnalysisOnManualCreate: false,
       },
+      automationScope: {
+        enabled: false,
+        moduleIds: [],
+        moduleCodes: [],
+        moduleNameIncludes: [],
+        applyToStatisticsDefault: true,
+      },
       statClassification: normalizeStatClassificationConfig(),
       externalClassificationMappings: [],
       statisticFieldKeys: ['issueTypeId', 'isProblem', 'status', 'rootCauseType', 'resolutionCode'],
@@ -779,6 +786,21 @@ export function useSyncConfig(proxy) {
       autoAiAnalysisOnManualCreate: Boolean(automationConfig.autoAiAnalysisOnManualCreate),
     }
 
+    const automationScope = payload.automationScope || {}
+    form.automationScope = {
+      enabled: Boolean(automationScope.enabled),
+      moduleIds: Array.isArray(automationScope.moduleIds)
+        ? Array.from(new Set(automationScope.moduleIds.map((item) => String(item || '').trim()).filter(Boolean)))
+        : [],
+      moduleCodes: Array.isArray(automationScope.moduleCodes)
+        ? Array.from(new Set(automationScope.moduleCodes.map((item) => String(item || '').trim()).filter(Boolean)))
+        : [],
+      moduleNameIncludes: Array.isArray(automationScope.moduleNameIncludes)
+        ? Array.from(new Set(automationScope.moduleNameIncludes.map((item) => String(item || '').trim()).filter(Boolean)))
+        : [],
+      applyToStatisticsDefault: automationScope.applyToStatisticsDefault !== false,
+    }
+
     form.projectMappings = normalizeArray(payload.projectMappings)
     form.moduleMappings = normalizeArray(payload.moduleMappings)
     form.vendorMappings = normalizeArray(payload.vendorMappings)
@@ -1061,6 +1083,33 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnRemotePull: Boolean(payload.automationConfig?.autoAiAnalysisOnRemotePull),
         autoAiAnalysisOnBitablePull: Boolean(payload.automationConfig?.autoAiAnalysisOnBitablePull),
         autoAiAnalysisOnManualCreate: Boolean(payload.automationConfig?.autoAiAnalysisOnManualCreate),
+      }
+      payload.automationScope = {
+        enabled: Boolean(payload.automationScope?.enabled),
+        moduleIds: Array.from(
+          new Set(
+            (Array.isArray(payload.automationScope?.moduleIds) ? payload.automationScope.moduleIds : [])
+              .map((item) => String(item || '').trim())
+              .filter((item) => /^\d+$/.test(item) && Number(item) > 0)
+          )
+        ),
+        moduleCodes: Array.from(
+          new Set(
+            (Array.isArray(payload.automationScope?.moduleCodes) ? payload.automationScope.moduleCodes : [])
+              .map((item) => String(item || '').trim())
+              .filter(Boolean)
+          )
+        ),
+        moduleNameIncludes: Array.from(
+          new Set(
+            (Array.isArray(payload.automationScope?.moduleNameIncludes)
+              ? payload.automationScope.moduleNameIncludes
+              : [])
+              .map((item) => String(item || '').trim())
+              .filter(Boolean)
+          )
+        ),
+        applyToStatisticsDefault: payload.automationScope?.applyToStatisticsDefault !== false,
       }
       payload.externalSyncRequiredFields = Array.isArray(payload.externalSyncRequiredFields)
         ? Array.from(new Set(payload.externalSyncRequiredFields.map((item) => String(item || '').trim()).filter(Boolean)))

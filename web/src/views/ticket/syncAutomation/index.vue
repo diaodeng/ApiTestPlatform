@@ -1180,6 +1180,80 @@
             </el-form>
           </el-card>
 
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>自动化关注范围</span>
+                <el-tag type="warning" effect="plain">范围外只同步与映射，不调用 AI 或自动群推送</el-tag>
+              </div>
+            </template>
+            <el-form :model="form.automationScope" label-width="180px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="启用关注范围">
+                    <el-switch v-model="form.automationScope.enabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="统计默认仅关注范围">
+                    <el-switch
+                      v-model="form.automationScope.applyToStatisticsDefault"
+                      :disabled="!form.automationScope.enabled"
+                      inline-prompt
+                      active-text="是"
+                      inactive-text="否"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="精确模块 ID">
+                    <el-select
+                      v-model="form.automationScope.moduleIds"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="可选；输入系统模块 ID 后按 Enter 添加"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="精确模块 Code">
+                    <el-select
+                      v-model="form.automationScope.moduleCodes"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="可选；输入系统模块 Code 后按 Enter 添加"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="模块名称包含关键字">
+                    <el-select
+                      v-model="form.automationScope.moduleNameIncludes"
+                      multiple
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="例如 POS、收银；模块名称命中任一关键字即进入关注范围"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-alert
+                    type="info"
+                    show-icon
+                    :closable="false"
+                    title="判定顺序"
+                    description="模块 ID、模块 Code、模块名称关键字任一命中即进入范围；启用后未填写任何模块条件时不限制。范围外仍会同步原始数据、字段映射、模块/状态更新和外部规则分类；翻译、AI 提取、AI 分类、自动拉日志/AI 分析、向量刷新和自动群推送都会跳过。现有群推送条件保持原样，仅对范围内工单继续判断。"
+                  />
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
           <!-- 4. 自动识别与自动化（代码第四步） -->
           <el-card shadow="never" class="config-card mt16">
             <template #header>
@@ -2423,7 +2497,7 @@
               <div class="stat-config-section__head"><span>自定义趋势指标</span><el-button link type="primary" icon="Plus" @click="addCustomTrendMetric">新增</el-button></div>
               <el-card v-for="(metric, metricIndex) in form.customTrendMetrics" :key="metricIndex" shadow="never" class="mb16">
                 <el-row :gutter="12"><el-col :span="6"><el-input v-model="metric.metricCode" placeholder="指标编码" /></el-col><el-col :span="6"><el-input v-model="metric.label" placeholder="指标名称" /></el-col><el-col :span="5"><el-select v-model="metric.overlapMode"><el-option label="允许重叠" value="allow" /><el-option label="互斥" value="exclusive" /></el-select></el-col><el-col :span="3"><el-switch v-model="metric.enabled" /></el-col><el-col :span="4"><el-button link type="primary" @click="addCustomTrendMetricGroup(metric)">新增分组</el-button><el-button link type="danger" @click="removeCustomTrendMetric(metricIndex)">删除</el-button></el-col></el-row>
-                <el-card v-for="(group, groupIndex) in metric.groups" :key="groupIndex" shadow="never" class="mt16"><el-row :gutter="8"><el-col :span="5"><el-input v-model="group.groupCode" placeholder="分组编码" /></el-col><el-col :span="5"><el-input v-model="group.label" placeholder="分组名称" /></el-col><el-col :span="4"><el-select v-model="group.conditionMode"><el-option label="全部满足" value="all" /><el-option label="任一满足" value="any" /></el-select></el-col><el-col :span="5"><el-button link type="primary" @click="addCustomTrendMetricCondition(group)">新增条件</el-button></el-col></el-row><el-row v-for="(condition, conditionIndex) in group.conditions" :key="conditionIndex" :gutter="8" class="mt16"><el-col :span="6"><el-select v-model="condition.sourceField"><el-option v-for="field in statisticFieldOptions" :key="field.value" :label="field.label" :value="field.value" /></el-select></el-col><el-col :span="5"><el-select v-model="condition.operator"><el-option label="等于" value="equals" /><el-option label="包含" value="contains" /><el-option label="属于" value="in" /><el-option label="正则" value="regex" /></el-select></el-col><el-col :span="10"><el-select v-model="condition.matchValues" multiple filterable allow-create default-first-option placeholder="输入后回车" style="width:100%" /></el-col><el-col :span="3"><el-button link type="danger" @click="group.conditions.splice(conditionIndex, 1)">删除</el-button></el-col></el-row></el-card>
+                <el-card v-for="(group, groupIndex) in metric.groups" :key="groupIndex" shadow="never" class="mt16"><el-row :gutter="8"><el-col :span="5"><el-input v-model="group.groupCode" placeholder="分组编码" /></el-col><el-col :span="5"><el-input v-model="group.label" placeholder="分组名称" /></el-col><el-col :span="4"><el-select v-model="group.conditionMode"><el-option label="全部满足" value="all" /><el-option label="任一满足" value="any" /></el-select></el-col><el-col :span="5"><el-button link type="primary" @click="addCustomTrendMetricCondition(group)">新增条件</el-button></el-col></el-row><el-row v-for="(condition, conditionIndex) in group.conditions" :key="conditionIndex" :gutter="8" class="mt16"><el-col :span="6"><el-select v-model="condition.sourceField"><el-option v-for="field in statisticFieldOptions" :key="field.value" :label="field.label" :value="field.value" /></el-select></el-col><el-col :span="5"><el-select v-model="condition.operator"><el-option label="等于" value="equals" /><el-option label="包含" value="contains" /><el-option label="属于" value="in" /><el-option label="正则" value="regex" /><el-option label="为空" value="is_empty" /><el-option label="不为空" value="is_not_empty" /></el-select></el-col><el-col :span="10"><el-select v-if="!isCustomTrendEmptyOperator(condition.operator)" v-model="condition.matchValues" multiple filterable allow-create default-first-option placeholder="输入后回车" style="width:100%"><el-option v-for="item in getCustomTrendConditionValueOptions(condition.sourceField)" :key="item.value" :label="item.label" :value="item.value" /></el-select><span v-else class="text-muted">无需填写匹配值</span></el-col><el-col :span="3"><el-button link type="danger" @click="group.conditions.splice(conditionIndex, 1)">删除</el-button></el-col></el-row></el-card>
               </el-card>
             </section>
           </el-card>
@@ -2738,6 +2812,16 @@
     { value: 'projectId', label: '项目' }, { value: 'moduleId', label: '模块' },
   ];
   const statisticFieldOptions = computed(() => allStatisticFieldOptions.filter((item) => form.statisticFieldKeys.includes(item.value)));
+  function isCustomTrendEmptyOperator(operator) {
+    return ['is_empty', 'is_not_empty'].includes(operator);
+  }
+  function getCustomTrendConditionValueOptions(sourceField) {
+    if (sourceField !== 'issueTypeId') return [];
+    return (form.statClassification.issueTypes || []).map((item) => ({
+      value: item.value,
+      label: item.label ? `${item.label} (${item.value})` : item.value,
+    }));
+  }
   const pushOptionsLoading = ref(false);
   const pushOptions = ref([]);
   const analysisProviderOptions = ref([]);

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.do.config_do import SysConfig
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 from modules.ticket.util.sync_util import SyncUtil
@@ -151,6 +152,7 @@ class TicketSyncConfigService:
             "titleSummaryConfig": cls.default_title_summary_config(),
             "knowledgeConfig": cls.default_knowledge_config(),
             "automationConfig": cls.default_automation_config(),
+            "automationScope": TicketAutomationScopeService.default_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
             "moduleMappings": [],
@@ -662,8 +664,17 @@ class TicketSyncConfigService:
                     operator = str(condition.get("operator") or "equals").strip().lower()
                     values = condition.get("matchValues") if isinstance(condition.get("matchValues"), list) else [condition.get("matchValue")]
                     values = [str(row).strip() for row in values if str(row or "").strip()]
-                    if field in allowed_fields and operator in {"equals", "contains", "in", "regex"} and values:
-                        conditions.append({"sourceField": field, "operator": operator, "matchValues": values})
+                    supported_operators = {"equals", "contains", "in", "regex", "is_empty", "is_not_empty"}
+                    if field in allowed_fields and operator in supported_operators and (
+                        values or operator in {"is_empty", "is_not_empty"}
+                    ):
+                        conditions.append(
+                            {
+                                "sourceField": field,
+                                "operator": operator,
+                                "matchValues": [] if operator in {"is_empty", "is_not_empty"} else values,
+                            }
+                        )
                 if conditions:
                     groups.append({"groupCode": group_code, "label": str(group.get("label") or group_code).strip(), "priority": int(group.get("priority") or 0), "conditionMode": "any" if str(group.get("conditionMode") or "all").lower() == "any" else "all", "conditions": conditions})
                     seen_groups.add(group_code)
@@ -1547,6 +1558,9 @@ class TicketSyncConfigService:
         ):
             automation_config[key] = bool(automation_config.get(key))
         merged["automationConfig"] = automation_config
+        merged["automationScope"] = TicketAutomationScopeService.normalize_config(
+            merged.get("automationScope")
+        )
         if not isinstance(merged.get("projectMappings"), list):
             merged["projectMappings"] = []
         if not isinstance(merged.get("moduleMappings"), list):

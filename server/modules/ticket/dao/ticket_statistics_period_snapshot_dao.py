@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from module_hrm.entity.do.module_do import HrmModule
@@ -127,6 +128,8 @@ class TicketStatisticsPeriodSnapshotDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
     ) -> list[TicketStatisticsPeriodSnapshot]:
         """
@@ -139,6 +142,8 @@ class TicketStatisticsPeriodSnapshotDao:
         :param project_ids: 项目ID过滤。
         :param module_ids: 模块ID过滤。
         :param module_codes: 模块业务码过滤。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :param issue_type_ids: 工单类型编码过滤。
         :return: 周期快照列表。
         """
@@ -159,6 +164,19 @@ class TicketStatisticsPeriodSnapshotDao:
             normalized_codes = [str(item or "").strip() for item in module_codes if str(item or "").strip()]
             if normalized_codes:
                 query = query.filter(TicketStatisticsPeriodSnapshot.module_code.in_(normalized_codes))
+        if automation_scope_module_ids is not None or automation_scope_module_name_includes is not None:
+            scope_conditions = []
+            if automation_scope_module_ids:
+                scope_conditions.append(TicketStatisticsPeriodSnapshot.module_id.in_(automation_scope_module_ids))
+            for keyword in automation_scope_module_name_includes or []:
+                text = str(keyword or "").strip()
+                if text:
+                    scope_conditions.append(
+                        func.lower(TicketStatisticsPeriodSnapshot.module_name).like(f"%{text.casefold()}%")
+                    )
+            query = query.filter(
+                or_(*scope_conditions) if scope_conditions else TicketStatisticsPeriodSnapshot.id == -1
+            )
         if issue_type_ids:
             normalized_issue_type_ids = [str(item or "").strip() for item in issue_type_ids if str(item or "").strip()]
             if normalized_issue_type_ids:

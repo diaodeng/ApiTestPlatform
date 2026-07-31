@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import (
@@ -28,6 +28,8 @@ class TicketProcessingStatsDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
     ) -> list[Any]:
@@ -37,6 +39,8 @@ class TicketProcessingStatsDao:
         :param project_ids: 项目ID列表。
         :param module_ids: 模块ID列表。
         :param module_codes: 模块业务码列表。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
         :return: SQLAlchemy 过滤条件列表。
@@ -49,6 +53,15 @@ class TicketProcessingStatsDao:
         if module_codes:
             matched_module_ids = _resolve_module_ids_by_codes(db, module_codes, project_ids or None)
             filters.append(Ticket.module_id.in_(matched_module_ids) if matched_module_ids else Ticket.ticket_id == -1)
+        if automation_scope_module_ids is not None or automation_scope_module_name_includes is not None:
+            scope_conditions = []
+            if automation_scope_module_ids:
+                scope_conditions.append(Ticket.module_id.in_(automation_scope_module_ids))
+            for keyword in automation_scope_module_name_includes or []:
+                text = str(keyword or "").strip()
+                if text:
+                    scope_conditions.append(func.lower(Ticket.module_name).like(f"%{text.casefold()}%"))
+            filters.append(or_(*scope_conditions) if scope_conditions else Ticket.ticket_id == -1)
         if issue_type_ids:
             filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         if problem_pattern_codes:
@@ -65,6 +78,8 @@ class TicketProcessingStatsDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
     ) -> Iterable[Any]:
@@ -76,6 +91,8 @@ class TicketProcessingStatsDao:
         :param project_ids: 项目ID列表。
         :param module_ids: 模块ID列表。
         :param module_codes: 模块业务码列表。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
         :return: 轻量字段行迭代器。
@@ -86,6 +103,8 @@ class TicketProcessingStatsDao:
             project_ids=project_ids,
             module_ids=module_ids,
             module_codes=module_codes,
+            automation_scope_module_ids=automation_scope_module_ids,
+            automation_scope_module_name_includes=automation_scope_module_name_includes,
             issue_type_ids=issue_type_ids,
             problem_pattern_codes=problem_pattern_codes,
         )
@@ -141,6 +160,8 @@ class TicketProcessingStatsDao:
         project_ids: list[int] | None = None,
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
+        automation_scope_module_ids: list[int] | None = None,
+        automation_scope_module_name_includes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
         problem_pattern_codes: list[str] | None = None,
     ) -> list[Any]:
@@ -151,6 +172,8 @@ class TicketProcessingStatsDao:
         :param project_ids: 项目ID列表。
         :param module_ids: 模块ID列表。
         :param module_codes: 模块业务码列表。
+        :param automation_scope_module_ids: 自动化关注范围已解析的模块 ID。
+        :param automation_scope_module_name_includes: 自动化关注范围模块名称关键字。
         :param issue_type_ids: 工单类型编码列表。
         :param problem_pattern_codes: 细分问题编码列表。
         :return: 轻量字段行列表。
@@ -161,6 +184,8 @@ class TicketProcessingStatsDao:
             project_ids=project_ids,
             module_ids=module_ids,
             module_codes=module_codes,
+            automation_scope_module_ids=automation_scope_module_ids,
+            automation_scope_module_name_includes=automation_scope_module_name_includes,
             issue_type_ids=issue_type_ids,
             problem_pattern_codes=problem_pattern_codes,
         )

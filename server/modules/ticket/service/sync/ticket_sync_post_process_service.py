@@ -18,6 +18,7 @@ from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
+from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
@@ -208,6 +209,21 @@ class TicketSyncPostProcessService:
         existing_title = str(ticket.title or "").strip()
         incoming_title = str(sync_object.title or "").strip()
         meta = TicketSyncPayloadService.build_meta(extra_data)
+        scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
+        scope_allowed = scope_decision.eligible
+        extra_data = TicketAutomationScopeService.attach_audit_data(extra_data, scope_decision)
+        detected = TicketSyncAutomationService.detect_fields(
+            db,
+            sync_object,
+            config,
+            apply_external_mappings=sync_scene != "remote_pull",
+        )
+        logger.info(
+            f"外部工单同步延后处理自动化范围判定: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "
+            f"eligible={scope_allowed}, module_id={scope_decision.module_id}, "
+            f"module_name={scope_decision.module_name!r}, matched_by={scope_decision.matched_by}, "
+            f"matched_value={scope_decision.matched_value!r}, reason={scope_decision.reason}"
+        )
         skip_ai_analysis_due_to_update_title = cls.should_skip_ai_analysis_for_update_with_title(
             ticket=ticket,
             incoming_title=incoming_title,
@@ -217,7 +233,12 @@ class TicketSyncPostProcessService:
         ai_extract_meta: dict[str, Any] = {"skipped": True}
         ai_extract_apply_meta: dict[str, Any] = {"updated": False}
 
-        if skip_ai_analysis_due_to_update_title:
+        if not scope_allowed:
+            logger.info(
+                f"外部工单同步延后处理跳过统一提取与标题AI: ticket_no={sync_object.ticket_no}, "
+                f"reason={scope_decision.reason}"
+            )
+        elif skip_ai_analysis_due_to_update_title:
             logger.info(
                 f"外部工单同步延后处理跳过统一提取与分类AI：更新场景且已携带标题, "
                 f"ticket_no={sync_object.ticket_no}"
@@ -250,7 +271,14 @@ class TicketSyncPostProcessService:
                 ai_extract_apply_meta = {"updated": False}
 
         try:
-            if not incoming_title and not existing_title and "title" not in update_data:
+            if not scope_allowed and not incoming_title and not existing_title and "title" not in update_data:
+                update_data["title"] = str(sync_object.description or "").strip()[:100] or sync_object.ticket_no
+                extra_data["title_summary"] = {
+                    "mode": "fallback",
+                    "fallback_title": update_data["title"],
+                    "reason": scope_decision.reason,
+                }
+            elif not incoming_title and not existing_title and "title" not in update_data:
                 resolved_title, title_meta = cls.resolve_sync_title(
                     db,
                     sync_object=sync_object,
@@ -277,7 +305,9 @@ class TicketSyncPostProcessService:
                 ticket,
                 source_description=sync_object.description,
             )
-            should_translate = translation_enabled and sync_translate_enabled and not translation_already_succeeded
+            should_translate = (
+                scope_allowed and translation_enabled and sync_translate_enabled and not translation_already_succeeded
+            )
             if translation_already_succeeded:
                 logger.info(f"外部工单同步延后翻译跳过：已有历史翻译结果, ticket_no={sync_object.ticket_no}")
             translated_description, translation_meta, origin_description = cls.translate_sync_description(
@@ -339,7 +369,12 @@ class TicketSyncPostProcessService:
                     current_status=str(ticket.status or "").strip(),
                 )
             )
-            if skip_ai_analysis_due_to_update_title and not classify_reason.startswith("status_changed:"):
+            if not scope_allowed:
+                logger.info(
+                    f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
+                    f"reason={scope_decision.reason}"
+                )
+            elif skip_ai_analysis_due_to_update_title and not classify_reason.startswith("status_changed:"):
                 logger.info(
                     f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
                     f"reason=更新场景且已携带标题，未命中状态变更分类"
@@ -369,20 +404,12 @@ class TicketSyncPostProcessService:
         except Exception as exc:
             logger.warning(f"外部工单同步延后自动分类失败: ticket_no={sync_object.ticket_no}, error={exc}")
 
-        apply_external_mappings = sync_scene != "remote_pull"
-        detected = TicketSyncAutomationService.detect_fields(
-            db,
-            sync_object,
-            config,
-            apply_external_mappings=apply_external_mappings,
-        )
-
         should_run_automation = cls._resolve_automation_enabled_for_scene(
             sync_scene=sync_scene,
             automation=automation,
             config=config,
         )
-        if should_run_automation:
+        if should_run_automation and scope_allowed:
             try:
                 TicketSyncAutomationService.run_sync_automation(
                     db,
@@ -394,23 +421,33 @@ class TicketSyncPostProcessService:
                 )
             except Exception as exc:
                 logger.warning(f"外部工单同步延后自动化失败: ticket_no={sync_object.ticket_no}, error={exc}")
-        ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
-        try:
-            vector_scene_map = {
-                "remote_pull": "remotePull",
-                "bitable_pull": "bitablePull",
-                "external_sync": "externalSync",
-            }
-            vector_scene = vector_scene_map.get(sync_scene, "externalSync")
-            TicketEmbeddingService.vectorize_ticket_for_scene(db, ticket, vector_scene)
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            logger.warning(
-                f"外部工单同步延后向量刷新失败: ticket_no={sync_object.ticket_no}, "
-                f"scene={sync_scene}, error={exc}"
+        elif should_run_automation:
+            logger.info(
+                f"外部工单同步延后自动化跳过: ticket_no={sync_object.ticket_no}, reason={scope_decision.reason}"
             )
-            ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
+        if not scope_allowed:
+            logger.info(
+                f"外部工单同步延后向量刷新跳过: ticket_no={sync_object.ticket_no}, "
+                f"reason={scope_decision.reason}"
+            )
+        else:
+            try:
+                vector_scene_map = {
+                    "remote_pull": "remotePull",
+                    "bitable_pull": "bitablePull",
+                    "external_sync": "externalSync",
+                }
+                vector_scene = vector_scene_map.get(sync_scene, "externalSync")
+                TicketEmbeddingService.vectorize_ticket_for_scene(db, ticket, vector_scene)
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    f"外部工单同步延后向量刷新失败: ticket_no={sync_object.ticket_no}, "
+                    f"scene={sync_scene}, error={exc}"
+                )
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
         try:
             TicketSyncGroupPushService.finalize_publish_state_after_post_process(
                 db,

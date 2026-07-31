@@ -25,13 +25,17 @@ def read_field_value(source: Any, field_name: str) -> Any:
 
 
 def match_value(actual: Any, operator: str, expected_values: Any) -> bool:
-    """执行 equals、contains、in、regex 四种安全匹配规则。"""
-    values = normalize_match_values(expected_values)
-    if not values:
-        return False
+    """执行 equals、contains、in、regex、is_empty、is_not_empty 安全匹配规则。"""
     normalized_operator = str(operator or "equals").strip().lower()
     actual_values = actual if isinstance(actual, (list, tuple, set)) else [actual]
     text_values = [str(item if item is not None else "").strip() for item in actual_values]
+    if normalized_operator == "is_empty":
+        return any(not text for text in text_values)
+    if normalized_operator == "is_not_empty":
+        return any(bool(text) for text in text_values)
+    values = normalize_match_values(expected_values)
+    if not values:
+        return False
     if normalized_operator == "equals":
         return any(text == expected for text in text_values for expected in values)
     if normalized_operator == "contains":
