@@ -1659,3 +1659,13 @@ updated: 2026-07-28
 - 既有批量重归类接口新增 `external_mapping` 策略，可依据已保存外部元数据重跑映射。
 - 增加受字段白名单保护的自定义趋势指标及日/业务周通用快照表；统计页仅按用户选择的指标查询数据。
 - 对应迁移脚本：`server/sql/20260731_ticket_configurable_classification_metrics.sql`；详细操作文档：`web/public/docs/2026-07-31-ticket-configurable-classification-metrics.md`。
+
+## [2026-07-31] INGEST-CODE | 工单批量映射归类前端入口
+
+- 触发：用户确认采用明确的“映射归类”选项，不以正则规则为空作为映射或 AI 的隐式兜底。
+- 架构层：工单域 / 同步自动化 Web 控制台 / 批量重归类接口。
+- 创建的页面：`web/public/docs/2026-07-31-ticket-external-mapping-reclassification-ui.md`。
+- 更新的页面：`entities/services/ticket-domain.md`、`web/public/docs/ticket-sync-automation.md`、`web/public/docs/update_history.md`。
+- 创建的双向链接：0 对（沿用工单域与同步自动化既有链接）。
+- 变更传播链：同步自动化策略选择 -> `POST /ticket/sync/auto-category/reclassify` 的 `strategy=external_mapping` -> `TicketBatchReclassificationService` -> `TicketExternalClassificationMappingService` -> 工单类型与分类来源审计字段。
+- 总共涉及页面：5。

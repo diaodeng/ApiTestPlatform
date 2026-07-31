@@ -171,15 +171,17 @@
   - 该接口只统计，不执行自动归类；需要处理未归类工单时调用批量重归类接口。
   - 后端入口由 `TicketBatchReclassificationService.get_uncategorized_ticket_statistics_services` 承接，不经过外部同步入库主服务。
 - 批量重归类：`POST /ticket/sync/auto-category/reclassify`
-  - `ticketIds`：指定要重归类的工单 ID 列表，填写后优先按指定工单执行
-  - `strategy`：`ai` / `regex`
+  - `ticketNos`：指定要重归类的工单号列表，填写后优先按指定工单执行
+  - `strategy`：`ai` / `regex` / `external_mapping`
   - `aiPromptCode`：AI 归类提示词编码（可选，空则走当前分类统计配置）
   - `regexRules`：正则规则数组（元素含 `pattern/category/flags`）
+  - `external_mapping`：基于工单已保存的 `extra_data.external_field_mapping` 与 `raw_payload` 重跑“系统字段”中配置的工单类型映射，不调用 AI；未命中时返回跳过原因，不自动切换为 AI。
   - `onlyUncategorized`：仅处理未归类
   - `allTickets`：全量扫描（否则按分页）
-  - `forceReclassify`：强制覆盖已有分类
-  - 后端入口由 `TicketBatchReclassificationService.batch_reclassify_ticket_categories_services` 承接；AI 策略继续调用 `TicketAutoClassificationService`，正则策略在重归类服务内完成。
-  - 服务日志会记录筛选条件、每条工单处理状态、跳过原因、AI/正则执行结果和最终汇总。
+  - `forceReclassify`：强制覆盖已有分类；映射归类默认不覆盖人工确认的工单类型，只有此参数为 `true` 时才允许覆盖。
+  - 后端入口由 `TicketBatchReclassificationService.batch_reclassify_ticket_categories_services` 承接；AI 策略继续调用 `TicketAutoClassificationService`，正则策略在重归类服务内完成，映射策略调用 `TicketExternalClassificationMappingService`。
+  - 同步自动化页的“自动分类管理”已提供 AI、正则、映射三种明确选项；正则规则为空时仍提示未配置规则，不隐式降级为映射。已配置正则规则但没有命中时，保持既有 AI 兜底行为。
+  - 服务日志会记录筛选条件、每条工单处理状态、跳过原因、AI/正则/映射执行结果和最终汇总。
 
 ## 逻辑梳理
 

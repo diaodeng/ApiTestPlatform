@@ -2533,6 +2533,7 @@
                     <el-select v-model="autoCategoryForm.strategy" style="width: 100%">
                       <el-option label="AI归类" value="ai" />
                       <el-option label="正则归类" value="regex" />
+                      <el-option label="映射归类" value="external_mapping" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -2621,6 +2622,14 @@
                       placeholder='示例：[{"pattern":"支付|扣款","category":"支付问题","flags":"i"}]'
                     />
                   </el-form-item>
+                </el-col>
+                <el-col v-if="autoCategoryForm.strategy === 'external_mapping'" :span="24">
+                  <el-alert
+                    title="映射归类会根据工单已保存的原始外部字段与“系统字段”中的工单类型映射规则重新匹配；不会调用 AI。人工确认的工单类型默认不会被覆盖。"
+                    type="info"
+                    show-icon
+                    :closable="false"
+                  />
                 </el-col>
               </el-row>
             </el-form>
@@ -3073,8 +3082,9 @@
       ticketNos,
       strategy: autoCategoryForm.strategy,
       aiPromptCode:
-        String(autoCategoryForm.aiPromptCode || form.aiClassification.promptCode || '').trim() ||
-        null,
+        autoCategoryForm.strategy === 'ai'
+          ? String(autoCategoryForm.aiPromptCode || form.aiClassification.promptCode || '').trim() || null
+          : null,
       onlyUncategorized: Boolean(autoCategoryForm.onlyUncategorized),
       allTickets: Boolean(autoCategoryForm.allTickets),
       forceReclassify: Boolean(autoCategoryForm.forceReclassify),

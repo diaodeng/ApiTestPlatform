@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-27
+freshness: 2026-07-31
 created: 2026-05-20
-updated: 2026-07-28
+updated: 2026-07-31
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -89,7 +89,7 @@ graph TD
 
 - 工单列表、状态流转、时间线、评论、RCA。
 - 知识库、工作流、统计、日志拉取、导入与向量化。
-- 外部字段分类映射：`TicketExternalClassificationMappingService` 按外部接口字段匹配工单类型，支持等于、包含、属于和正则；人工类型优先于外部映射，外部映射优先于 AI。
+- 外部字段分类映射：`TicketExternalClassificationMappingService` 按外部接口字段匹配工单类型，支持等于、包含、属于和正则；人工类型优先于外部映射，外部映射优先于 AI。同步自动化页的批量重归类已明确提供 AI、正则、映射三种策略；映射策略只重跑已保存的 `external_field_mapping/raw_payload`，不调用 AI，正则空规则也不会隐式降级到映射。
 - 可配置趋势：固定问题性质趋势已删除，工单类型趋势按 `issue_type_id/issue_type_name` 聚合；`TicketCustomMetricService` 仅按白名单字段计算管理员定义的指标，并可读取日/业务周通用快照。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
