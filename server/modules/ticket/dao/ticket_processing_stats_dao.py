@@ -114,6 +114,18 @@ class TicketProcessingStatsDao:
                 Ticket.processed_at.label("processed_at"),
                 Ticket.resolved_at.label("resolved_at"),
                 Ticket.closed_at.label("closed_at"),
+                Ticket.project_id.label("project_id"),
+                Ticket.module_id.label("module_id"),
+                Ticket.module_name.label("module_name"),
+                Ticket.issue_type_id.label("issue_type_id"),
+                Ticket.issue_type_name.label("issue_type_name"),
+                Ticket.is_problem.label("is_problem"),
+                Ticket.status.label("status"),
+                Ticket.source.label("source"),
+                Ticket.root_cause_type.label("root_cause_type"),
+                Ticket.solution_type.label("solution_type"),
+                Ticket.resolution_code.label("resolution_code"),
+                Ticket.internal_priority.label("internal_priority"),
             )
             .filter(and_(*filters))
             .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())
@@ -163,6 +175,18 @@ class TicketProcessingStatsDao:
                 Ticket.processed_at.label("processed_at"),
                 Ticket.resolved_at.label("resolved_at"),
                 Ticket.closed_at.label("closed_at"),
+                Ticket.project_id.label("project_id"),
+                Ticket.module_id.label("module_id"),
+                Ticket.module_name.label("module_name"),
+                Ticket.issue_type_id.label("issue_type_id"),
+                Ticket.issue_type_name.label("issue_type_name"),
+                Ticket.is_problem.label("is_problem"),
+                Ticket.status.label("status"),
+                Ticket.source.label("source"),
+                Ticket.root_cause_type.label("root_cause_type"),
+                Ticket.solution_type.label("solution_type"),
+                Ticket.resolution_code.label("resolution_code"),
+                Ticket.internal_priority.label("internal_priority"),
             )
             .filter(and_(*filters))
             .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())

@@ -2197,12 +2197,7 @@
                   </el-table-column>
                   <el-table-column label="是否问题" width="140">
                     <template #default="scope">
-                      <el-select
-                        v-model="scope.row.isProblem"
-                        placeholder="可选"
-                        clearable
-                        style="width: 100%"
-                      >
+                      <el-select v-model="scope.row.isProblem" placeholder="可选" clearable style="width: 100%">
                         <el-option label="真实问题" :value="true" />
                         <el-option label="非问题" :value="false" />
                       </el-select>
@@ -2317,12 +2312,7 @@
                   </el-table-column>
                   <el-table-column label="是否问题" width="140">
                     <template #default="scope">
-                      <el-select
-                        v-model="scope.row.isProblem"
-                        placeholder="可选"
-                        clearable
-                        style="width: 100%"
-                      >
+                      <el-select v-model="scope.row.isProblem" placeholder="可选" clearable style="width: 100%">
                         <el-option label="真实问题" :value="true" />
                         <el-option label="非问题" :value="false" />
                       </el-select>
@@ -2409,6 +2399,33 @@
                 </el-table>
               </section>
             </div>
+            <el-divider />
+            <section class="stat-config-section stat-config-section--wide">
+              <div class="stat-config-section__head"><span>允许用于自定义统计的字段</span></div>
+              <el-checkbox-group v-model="form.statisticFieldKeys">
+                <el-checkbox v-for="field in allStatisticFieldOptions" :key="field.value" :label="field.value">{{ field.label }}</el-checkbox>
+              </el-checkbox-group>
+            </section>
+            <el-divider />
+            <section class="stat-config-section stat-config-section--wide">
+              <div class="stat-config-section__head"><span>外部字段工单类型映射</span><el-button link type="primary" icon="Plus" @click="addExternalClassificationMapping">新增</el-button></div>
+              <el-table :data="form.externalClassificationMappings" border size="small">
+                <el-table-column label="接口字段" min-width="160"><template #default="scope"><el-select v-model="scope.row.sourceField" filterable allow-create default-first-option placeholder="如 externalCategory"><el-option v-for="field in form.externalFieldModel.fields" :key="field.fieldName" :label="`${field.fieldName} - ${field.label}`" :value="field.fieldName" /></el-select></template></el-table-column>
+                <el-table-column label="规则" width="120"><template #default="scope"><el-select v-model="scope.row.operator"><el-option label="等于" value="equals" /><el-option label="包含" value="contains" /><el-option label="属于" value="in" /><el-option label="正则" value="regex" /></el-select></template></el-table-column>
+                <el-table-column label="匹配值" min-width="200"><template #default="scope"><el-select v-model="scope.row.matchValues" multiple filterable allow-create default-first-option placeholder="输入后回车" style="width:100%" /></template></el-table-column>
+                <el-table-column label="工单类型" min-width="170"><template #default="scope"><el-select v-model="scope.row.issueTypeId" filterable><el-option v-for="item in form.statClassification.issueTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></template></el-table-column>
+                <el-table-column label="优先级" width="100"><template #default="scope"><el-input-number v-model="scope.row.priority" :min="0" controls-position="right" style="width:100%" /></template></el-table-column>
+                <el-table-column label="启用" width="70"><template #default="scope"><el-switch v-model="scope.row.enabled" /></template></el-table-column>
+                <el-table-column label="操作" width="70"><template #default="scope"><el-button link type="danger" icon="Delete" @click="removeExternalClassificationMapping(scope.$index)" /></template></el-table-column>
+              </el-table>
+            </section>
+            <section class="stat-config-section stat-config-section--wide mt16">
+              <div class="stat-config-section__head"><span>自定义趋势指标</span><el-button link type="primary" icon="Plus" @click="addCustomTrendMetric">新增</el-button></div>
+              <el-card v-for="(metric, metricIndex) in form.customTrendMetrics" :key="metricIndex" shadow="never" class="mb16">
+                <el-row :gutter="12"><el-col :span="6"><el-input v-model="metric.metricCode" placeholder="指标编码" /></el-col><el-col :span="6"><el-input v-model="metric.label" placeholder="指标名称" /></el-col><el-col :span="5"><el-select v-model="metric.overlapMode"><el-option label="允许重叠" value="allow" /><el-option label="互斥" value="exclusive" /></el-select></el-col><el-col :span="3"><el-switch v-model="metric.enabled" /></el-col><el-col :span="4"><el-button link type="primary" @click="addCustomTrendMetricGroup(metric)">新增分组</el-button><el-button link type="danger" @click="removeCustomTrendMetric(metricIndex)">删除</el-button></el-col></el-row>
+                <el-card v-for="(group, groupIndex) in metric.groups" :key="groupIndex" shadow="never" class="mt16"><el-row :gutter="8"><el-col :span="5"><el-input v-model="group.groupCode" placeholder="分组编码" /></el-col><el-col :span="5"><el-input v-model="group.label" placeholder="分组名称" /></el-col><el-col :span="4"><el-select v-model="group.conditionMode"><el-option label="全部满足" value="all" /><el-option label="任一满足" value="any" /></el-select></el-col><el-col :span="5"><el-button link type="primary" @click="addCustomTrendMetricCondition(group)">新增条件</el-button></el-col></el-row><el-row v-for="(condition, conditionIndex) in group.conditions" :key="conditionIndex" :gutter="8" class="mt16"><el-col :span="6"><el-select v-model="condition.sourceField"><el-option v-for="field in statisticFieldOptions" :key="field.value" :label="field.label" :value="field.value" /></el-select></el-col><el-col :span="5"><el-select v-model="condition.operator"><el-option label="等于" value="equals" /><el-option label="包含" value="contains" /><el-option label="属于" value="in" /><el-option label="正则" value="regex" /></el-select></el-col><el-col :span="10"><el-select v-model="condition.matchValues" multiple filterable allow-create default-first-option placeholder="输入后回车" style="width:100%" /></el-col><el-col :span="3"><el-button link type="danger" @click="group.conditions.splice(conditionIndex, 1)">删除</el-button></el-col></el-row></el-card>
+              </el-card>
+            </section>
           </el-card>
         </el-tab-pane>
         <el-tab-pane label="操作">
@@ -2697,7 +2714,21 @@
     removeExternalFieldModel,
     addBitablePullFieldMapping,
     removeBitablePullFieldMapping,
+    addExternalClassificationMapping,
+    removeExternalClassificationMapping,
+    addCustomTrendMetric,
+    removeCustomTrendMetric,
+    addCustomTrendMetricGroup,
+    addCustomTrendMetricCondition,
   } = useSyncConfig(proxy);
+  const allStatisticFieldOptions = [
+    { value: 'issueTypeId', label: '工单类型' }, { value: 'isProblem', label: '是否问题' },
+    { value: 'status', label: '工单状态' }, { value: 'source', label: '来源' },
+    { value: 'rootCauseType', label: '根因分类' }, { value: 'solutionType', label: '解决方式' },
+    { value: 'resolutionCode', label: '关闭结果' }, { value: 'internalPriority', label: '内部优先级' },
+    { value: 'projectId', label: '项目' }, { value: 'moduleId', label: '模块' },
+  ];
+  const statisticFieldOptions = computed(() => allStatisticFieldOptions.filter((item) => form.statisticFieldKeys.includes(item.value)));
   const pushOptionsLoading = ref(false);
   const pushOptions = ref([]);
   const analysisProviderOptions = ref([]);

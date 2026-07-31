@@ -1651,3 +1651,11 @@ updated: 2026-07-28
 - 2026-07-29 修复：AI 仓库映射列表同样移除通用分页字典转换，服务层以 `TicketAiRepoMapping` ORM 实体和 `TicketAiRepoMappingListItem` dataclass 反查版本中心并输出 Pydantic 响应模型。
 - 2026-07-29 修复：`TicketVersionOptionResponseModel` 启用 `populate_by_name`，服务层以 snake_case 构造版本选项时不再触发 camelCase 别名字段缺失校验；工单详情、编辑和仓库映射共用该接口。
 - 2026-07-29 修复：迁移生成的版本 ID 超过 JavaScript 安全整数范围时，版本列表、选项、发布记录、AI 映射、AI 任务和工单版本关联响应统一转为字符串；后端请求模型继续按整数校验。
+# 2026-07-31 工单可配置分类与趋势指标
+
+- 移除硬编码的 Bug、非Bug、支持类和问题性质趋势；固定趋势改为按工单类型字段聚合。
+- `is_problem` 保持既有 AI、工单类型和关闭结果回退入库逻辑；仅从固定趋势统计中移除。
+- 增加外部接口字段映射工单类型、人工/外部/AI 分类来源审计和映射规则 ID。
+- 既有批量重归类接口新增 `external_mapping` 策略，可依据已保存外部元数据重跑映射。
+- 增加受字段白名单保护的自定义趋势指标及日/业务周通用快照表；统计页仅按用户选择的指标查询数据。
+- 对应迁移脚本：`server/sql/20260731_ticket_configurable_classification_metrics.sql`；详细操作文档：`web/public/docs/2026-07-31-ticket-configurable-classification-metrics.md`。

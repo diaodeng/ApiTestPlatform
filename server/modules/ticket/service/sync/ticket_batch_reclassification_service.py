@@ -4,6 +4,7 @@
 负责手动批量重跑工单分类统计和未归类统计，不参与外部同步入库主事务。
 """
 import re
+from types import SimpleNamespace
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +18,7 @@ from modules.ticket.entity.vo.ticket_vo import TicketBatchReclassifyRequestModel
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_external_classification_mapping_service import TicketExternalClassificationMappingService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 from utils.log_util import logger
@@ -247,8 +249,9 @@ class TicketBatchReclassificationService:
         """
         current_user_name = _user_name(current_user) or "system"
         strategy = str(getattr(request, "strategy", "ai") or "ai").strip().lower()
-        if strategy not in {"ai", "regex"}:
+        if strategy not in {"ai", "regex", "external_mapping"}:
             strategy = "ai"
+        sync_config = TicketSyncConfigService.load_sync_config(db) if strategy == "external_mapping" else {}
         ai_prompt_code = str(getattr(request, "ai_prompt_code", "") or "").strip() or None
         regex_rules = getattr(request, "regex_rules", None)
         only_uncategorized = bool(getattr(request, "only_uncategorized", False))
@@ -326,7 +329,33 @@ class TicketBatchReclassificationService:
                     f"description_len={len(str(ticket.description or '').strip())}, "
                     f"strategy={strategy}, force_reclassify={bool(getattr(request, 'force_reclassify', False))}"
                 )
-                if strategy == "regex":
+                if strategy == "external_mapping":
+                    if str(ticket.classification_source or "") == "manual" and not getattr(request, "force_reclassify", False):
+                        category_result = {"skipped": True, "skipReason": "工单类型已由人工锁定"}
+                    else:
+                        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+                        match = TicketExternalClassificationMappingService.match(
+                            sync_config,
+                            SimpleNamespace(extra_data=extra_data, raw_payload=extra_data.get("raw_payload") or {}),
+                        )
+                        if not match:
+                            category_result = {"skipped": True, "skipReason": "未命中外部字段映射规则"}
+                        else:
+                            audit = dict(extra_data)
+                            audit["external_classification"] = {
+                                "ruleId": match.rule_id, "sourceField": match.source_field,
+                                "sourceValue": match.source_value, "operator": match.operator,
+                                "matchedAt": SyncUtil.now_iso(),
+                            }
+                            TicketDao.update_ticket(db, ticket.ticket_id, {
+                                "issue_type_id": match.issue_type_id, "issue_type_name": match.issue_type_name,
+                                "classification_source": "external_mapping", "classification_rule_id": match.rule_id,
+                                "classification_updated_at": datetime.now(), "extra_data": audit,
+                                "update_by": current_user_name, "update_time": datetime.now(),
+                            })
+                            db.commit()
+                            category_result = {"skipped": False, "issueTypeId": match.issue_type_id, "issueTypeName": match.issue_type_name, "ruleId": match.rule_id}
+                elif strategy == "regex":
                     _, category_result = cls.run_auto_ticket_category_classification(
                         db,
                         ticket=ticket,

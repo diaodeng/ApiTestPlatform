@@ -363,6 +363,9 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnManualCreate: false,
       },
       statClassification: normalizeStatClassificationConfig(),
+      externalClassificationMappings: [],
+      statisticFieldKeys: ['issueTypeId', 'isProblem', 'status', 'rootCauseType', 'resolutionCode'],
+      customTrendMetrics: [],
       externalSyncRequiredFields: [
         'ticketNo', 'description', 'internalPriority', 'ticketVender',
         'ticketModle', 'createTime', 'reporterName',
@@ -493,6 +496,9 @@ export function useSyncConfig(proxy) {
   function applyConfig(payload) {
     form.defaultPullLimit = Number(payload.defaultPullLimit || 50)
     form.statClassification = normalizeStatClassificationConfig(payload.statClassification)
+    form.externalClassificationMappings = Array.isArray(payload.externalClassificationMappings) ? payload.externalClassificationMappings : []
+    form.statisticFieldKeys = Array.isArray(payload.statisticFieldKeys) ? payload.statisticFieldKeys : []
+    form.customTrendMetrics = Array.isArray(payload.customTrendMetrics) ? payload.customTrendMetrics : []
 
     const feishuAuth = payload.feishuAuth || {}
     form.feishuAuth = {
@@ -1102,6 +1108,30 @@ export function useSyncConfig(proxy) {
     form.statClassification[groupKey].splice(index, 1)
   }
 
+  function addExternalClassificationMapping() {
+    form.externalClassificationMappings.push({ ruleId: '', enabled: true, priority: 100, sourceField: '', operator: 'equals', matchValues: [], issueTypeId: '' })
+  }
+
+  function removeExternalClassificationMapping(index) {
+    form.externalClassificationMappings.splice(index, 1)
+  }
+
+  function addCustomTrendMetric() {
+    form.customTrendMetrics.push({ metricCode: '', label: '', enabled: true, overlapMode: 'allow', groups: [] })
+  }
+
+  function removeCustomTrendMetric(index) {
+    form.customTrendMetrics.splice(index, 1)
+  }
+
+  function addCustomTrendMetricGroup(metric) {
+    metric.groups.push({ groupCode: '', label: '', priority: 100, conditionMode: 'all', conditions: [] })
+  }
+
+  function addCustomTrendMetricCondition(group) {
+    group.conditions.push({ sourceField: 'issueTypeId', operator: 'in', matchValues: [] })
+  }
+
   function addExternalFieldModel() {
     if (!Array.isArray(form.externalFieldModel.fields)) {
       form.externalFieldModel.fields = []
@@ -1148,6 +1178,8 @@ export function useSyncConfig(proxy) {
     applyConfig, loadConfig, loadWorkflowStatuses,
     validateElForm, handleSave,
     addStatOption, removeStatOption, addExternalFieldModel,
+    addExternalClassificationMapping, removeExternalClassificationMapping,
+    addCustomTrendMetric, removeCustomTrendMetric, addCustomTrendMetricGroup, addCustomTrendMetricCondition,
     removeExternalFieldModel, addBitablePullFieldMapping, removeBitablePullFieldMapping,
   }
 }

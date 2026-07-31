@@ -843,7 +843,7 @@ class TicketBatchReclassifyRequestModel(BaseModel):
     only_uncategorized: bool = Field(default=False, description="是否仅处理未归类工单")
     page_num: int = Field(default=1, description="分页页码，ticketNos 为空时生效")
     page_size: int = Field(default=100, description="分页大小，ticketNos 为空时生效")
-    strategy: str = Field(default="ai", description="归类策略：ai/regex")
+    strategy: str = Field(default="ai", description="归类策略：ai/regex/external_mapping")
     ai_prompt_code: str | None = Field(default=None, description="AI归类提示词编码，留空走系统配置")
     regex_rules: list[dict[str, Any]] | None = Field(
         default=None,
@@ -868,7 +868,7 @@ class TicketBatchReclassifyRequestModel(BaseModel):
         self.page_num = max(int(self.page_num or 1), 1)
         self.page_size = min(max(int(self.page_size or 100), 1), 500)
         strategy_value = str(self.strategy or "ai").strip().lower()
-        self.strategy = strategy_value if strategy_value in {"ai", "regex"} else "ai"
+        self.strategy = strategy_value if strategy_value in {"ai", "regex", "external_mapping"} else "ai"
         self.ai_prompt_code = str(self.ai_prompt_code or "").strip() or None
         normalized_rules: list[dict[str, Any]] = []
         for item in self.regex_rules or []:
@@ -1049,3 +1049,4 @@ class TicketStatisticsQueryModel(QueryModel):
     granularity: str | None = Field(default="week", description="趋势粒度：day/week/month")
     week_bucket_mode: str | None = Field(default="calendar_week", description="周趋势分桶：calendar_week/business_week")
     problem_pattern_codes: str | None = Field(default=None, description="细分问题类型编码多选，逗号分隔字符串")
+    metric_codes: str | None = Field(default=None, description="自定义趋势指标编码多选，逗号分隔字符串")

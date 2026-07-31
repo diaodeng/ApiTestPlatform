@@ -16,6 +16,8 @@ from modules.ticket.dao.ticket_dao import (
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
 from modules.ticket.dao.ticket_statistics_daily_dao import TicketStatisticsDailyDao
 from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
+from modules.ticket.dao.ticket_statistics_metric_snapshot_dao import TicketStatisticsMetricSnapshotDao
+from modules.ticket.service.stats.ticket_custom_metric_service import TicketCustomMetricService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.common_util import CamelCaseUtil
@@ -180,7 +182,6 @@ class TicketProcessingStatsService:
         result["priorityCounts"] = cls.merge_label_count_rows(result.get("priorityCounts"), "priority", "未填写")
         result["rootCauseCounts"] = cls.merge_label_count_rows(result.get("rootCauseCounts"), "rootCause", "未填写")
         result["assigneeCounts"] = cls.merge_assignee_count_rows(result.get("assigneeCounts"))
-        result["problemCounts"] = cls.merge_problem_count_rows(result.get("problemCounts"))
         result["transitionCounts"] = cls.merge_transition_count_rows(result.get("transitionCounts"))
         result["issueTypeCounts"] = cls.merge_code_name_count_rows(
             result.get("issueTypeCounts"),
@@ -331,30 +332,6 @@ class TicketProcessingStatsService:
         return list(row_map.values())
 
     @classmethod
-    def merge_problem_count_rows(cls, rows: Any) -> list[dict[str, Any]]:
-        """
-        按真实问题布尔值合并统计行。
-        :param rows: 原始问题性质统计行数组。
-        :return: 合并后的统计行数组。
-        """
-        row_map: dict[str, dict[str, Any]] = {}
-        for row in rows if isinstance(rows, list) else []:
-            if not isinstance(row, dict):
-                continue
-            value = row.get("isProblem")
-            key = "true" if value is True else ("false" if value is False else "unknown")
-            label = "真实问题" if value is True else ("非问题" if value is False else "未填写")
-            if key not in row_map:
-                row_map[key] = {
-                    **row,
-                    "isProblem": value if isinstance(value, bool) else None,
-                    "label": label,
-                    "count": 0,
-                }
-            row_map[key]["count"] = int(row_map[key].get("count") or 0) + int(row.get("count") or 0)
-        return list(row_map.values())
-
-    @classmethod
     def merge_assignee_count_rows(cls, rows: Any) -> list[dict[str, Any]]:
         """
         按处理人 ID 优先合并人员处理量统计行，未分配人员按展示名合并。
@@ -406,6 +383,7 @@ class TicketProcessingStatsService:
         problem_pattern_codes: Any = None,
         statistics_mode: str | None = "realtime",
         week_bucket_mode: str | None = "calendar_week",
+        metric_codes: Any = None,
     ) -> dict:
         """
         获取处理口径趋势统计。
@@ -430,6 +408,7 @@ class TicketProcessingStatsService:
         module_code_values = _normalize_text_list(module_codes)
         issue_type_id_values = _normalize_text_list(issue_type_ids)
         problem_pattern_code_values = _normalize_text_list(problem_pattern_codes)
+        metric_code_values = _normalize_text_list(metric_codes)
         normalized_mode = str(statistics_mode or "realtime").strip().lower()
         time_config = TicketStatisticsTimeUtil.get_config(query_db)
         if normalized_mode == "snapshot":
@@ -443,6 +422,7 @@ class TicketProcessingStatsService:
                         module_id_values,
                         module_code_values,
                         issue_type_id_values,
+                        metric_code_values,
                     )
                 )
             snapshot_trend = cls.get_snapshot_trend(
@@ -454,6 +434,7 @@ class TicketProcessingStatsService:
                 module_id_values,
                 module_code_values,
                 issue_type_id_values,
+                metric_code_values,
             )
             return _camelize(snapshot_trend)
         base_trend = _camelize(
@@ -490,9 +471,25 @@ class TicketProcessingStatsService:
                 week_bucket_config=time_config,
             )
         )
+        custom_metrics = TicketCustomMetricService.build_realtime_series(
+            query_db,
+            rows,
+            lambda ticket: (
+                cls.bucket_label(
+                    cls.bucket_start(TicketProcessingStatsDao.resolve_submit_time(ticket), normalized_granularity, normalized_week_bucket_mode, time_config),
+                    normalized_granularity,
+                    normalized_week_bucket_mode,
+                )
+                if cls.time_in_range(TicketProcessingStatsDao.resolve_submit_time(ticket), start, finish)
+                else None
+            ),
+            metric_code_values,
+        )
         rows.clear()
         gc.collect()
-        return cls.merge_trend_series(base_trend, processing_trend, normalized_granularity)
+        result = cls.merge_trend_series(base_trend, processing_trend, normalized_granularity)
+        result["customMetrics"] = custom_metrics
+        return result
 
     @staticmethod
     def normalize_week_bucket_mode(value: str | None) -> str:
@@ -609,6 +606,7 @@ class TicketProcessingStatsService:
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
+        metric_codes: list[str] | None = None,
     ) -> dict:
         """
         获取每日快照口径的趋势统计。
@@ -663,9 +661,6 @@ class TicketProcessingStatsService:
                     "open_backlog": 0,
                     "avg_first_response_seconds": 0,
                     "avg_first_process_seconds": 0,
-                    "problem_count": 0,
-                    "non_problem_count": 0,
-                    "support_count": 0,
                     "module_counts": [],
                     "issue_type_counts": [],
                     "problem_pattern_counts": [],
@@ -703,7 +698,7 @@ class TicketProcessingStatsService:
                 round(bucket["processed_in_new_count"] / bucket["new_count"], 4) if bucket["new_count"] else 0
             )
             bucket["net_increase"] = bucket["new_count"] - bucket["closed_count"]
-        return {"granularity": granularity, "series": series}
+        return {"granularity": granularity, "series": series, "custom_metrics": cls.get_snapshot_custom_metrics(query_db, "daily", begin_date.isoformat() if begin_date else None, end_date.isoformat() if end_date else None, metric_codes, project_ids, module_ids, issue_type_ids, series)}
 
     @classmethod
     def get_business_week_snapshot_statistics(
@@ -811,6 +806,7 @@ class TicketProcessingStatsService:
         module_ids: list[int] | None = None,
         module_codes: list[str] | None = None,
         issue_type_ids: list[str] | None = None,
+        metric_codes: list[str] | None = None,
     ) -> dict:
         """
         获取业务周周期快照口径的趋势统计。
@@ -870,15 +866,29 @@ class TicketProcessingStatsService:
                     "open_backlog": int(row.open_backlog or 0),
                     "avg_first_response_seconds": int(row.avg_first_response_seconds or 0),
                     "avg_first_process_seconds": int(row.avg_first_process_seconds or 0),
-                    "problem_count": 0,
-                    "non_problem_count": 0,
-                    "support_count": 0,
                     "module_counts": cls._snapshot_count_rows(leaf_rows_in_bucket, "module_name", "name"),
                     "issue_type_counts": cls._snapshot_count_rows(leaf_rows_in_bucket, "issue_type_name", "name"),
                     "problem_pattern_counts": [],
                 }
             )
-        return {"granularity": "week", "series": series}
+        return {"granularity": "week", "series": series, "custom_metrics": cls.get_snapshot_custom_metrics(query_db, "business_week", begin_time.date().isoformat() if begin_time else None, end_time.date().isoformat() if end_time else None, metric_codes, project_ids, module_ids, issue_type_ids, series)}
+
+    @classmethod
+    def get_snapshot_custom_metrics(cls, query_db: Session, snapshot_type: str, begin_key: str | None, end_key: str | None, metric_codes: list[str] | None, project_ids: list[int] | None, module_ids: list[int] | None, issue_type_ids: list[str] | None, series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """按已返回的时间桶将通用指标快照转换为前端趋势结构。"""
+        if metric_codes == []:
+            return []
+        use_leaf = bool(project_ids or module_ids or issue_type_ids)
+        rows = TicketStatisticsMetricSnapshotDao.list_between(query_db, snapshot_type, begin_key, end_key, metric_codes, project_ids if use_leaf else None, module_ids if use_leaf else None, issue_type_ids if use_leaf else None, "leaf" if use_leaf else "all")
+        definitions = {item["metricCode"]: item for item in TicketCustomMetricService.selected_metrics(query_db, metric_codes)}
+        bucket_maps: dict[tuple[str, str], dict[str, int]] = {}
+        labels: dict[tuple[str, str], str] = {}
+        for row in rows:
+            bucket = next((item.get("bucket") for item in series if str(item.get("bucketStart") or item.get("bucket_start") or "") == row.snapshot_key or str(item.get("bucket") or "").startswith(row.snapshot_key)), row.snapshot_key)
+            key = (row.metric_code, row.group_code)
+            bucket_maps.setdefault(key, {})[str(bucket)] = bucket_maps.setdefault(key, {}).get(str(bucket), 0) + int(row.count or 0)
+            labels[key] = row.group_label
+        return [{"metricCode": code, "label": definition.get("label") or code, "groups": [{"groupCode": group.get("groupCode"), "groupLabel": labels.get((code, str(group.get("groupCode"))), group.get("label") or group.get("groupCode")), "countsByBucket": bucket_maps.get((code, str(group.get("groupCode"))), {})} for group in definition.get("groups", [])]} for code, definition in definitions.items()]
 
     @staticmethod
     def _weighted_snapshot_seconds(rows: list[Any], field_name: str, weight_field_name: str) -> int:

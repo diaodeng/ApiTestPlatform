@@ -1286,6 +1286,13 @@ class TicketService:
             data.update(relation_fields)
             data["update_by"] = _user_name(current_user)
             data["update_time"] = datetime.now()
+            if (
+                ("issue_type_id" in data and str(data.get("issue_type_id") or "").strip() != str(ticket.issue_type_id or "").strip())
+                or ("issue_type_name" in data and str(data.get("issue_type_name") or "").strip() != str(ticket.issue_type_name or "").strip())
+            ):
+                data["classification_source"] = "manual"
+                data["classification_rule_id"] = ""
+                data["classification_updated_at"] = data["update_time"]
             TicketProcessingMetricService.apply_update_version_fields(ticket, data)
             if data.get("problem_pattern_verified") is True:
                 data["problem_pattern_source"] = data.get("problem_pattern_source") or "manual"

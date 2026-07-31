@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -141,6 +142,9 @@ class TicketSyncConfigService:
             "personReminder": cls.default_person_reminder_config(),
             "summaryReport": cls.default_summary_report_config(),
             "statClassification": cls.default_stat_classification_config(),
+            "externalClassificationMappings": [],
+            "statisticFieldKeys": ["issueTypeId", "isProblem", "status", "rootCauseType", "resolutionCode"],
+            "customTrendMetrics": [],
             "aiClassification": cls.default_ai_classification_config(),
             "aiSyncExtract": cls.default_ai_sync_extract_config(),
             "translateConfig": cls.default_translate_config(),
@@ -609,6 +613,64 @@ class TicketSyncConfigService:
                 defaults["problemPatterns"],
             ),
         }
+
+    @classmethod
+    def normalize_external_classification_mappings(cls, value: Any, issue_types: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """校验外部接口字段到工单类型的映射规则，并为规则生成稳定 ID。"""
+        valid_issue_type_ids = {str(item.get("value") or "").strip() for item in issue_types if isinstance(item, dict)}
+        result: list[dict[str, Any]] = []
+        for index, item in enumerate(value if isinstance(value, list) else []):
+            if not isinstance(item, dict):
+                continue
+            source_field = str(item.get("sourceField") or "").strip()
+            issue_type_id = str(item.get("issueTypeId") or "").strip()
+            operator = str(item.get("operator") or "equals").strip().lower()
+            match_values = item.get("matchValues") if isinstance(item.get("matchValues"), list) else [item.get("matchValue")]
+            match_values = [str(row).strip() for row in match_values if str(row or "").strip()]
+            if not source_field or issue_type_id not in valid_issue_type_ids or operator not in {"equals", "contains", "in", "regex"} or not match_values:
+                continue
+            result.append({
+                "ruleId": str(item.get("ruleId") or f"ecm_{uuid4().hex}").strip(),
+                "enabled": bool(item.get("enabled", True)), "priority": int(item.get("priority") or (len(value) - index) * 10),
+                "sourceField": source_field, "operator": operator, "matchValues": match_values, "issueTypeId": issue_type_id,
+            })
+        return result
+
+    @classmethod
+    def normalize_custom_trend_metrics(cls, value: Any) -> list[dict[str, Any]]:
+        """归一化可配置趋势指标，拒绝未注册字段和无效分组。"""
+        allowed_fields = {"issueTypeId", "isProblem", "status", "source", "rootCauseType", "solutionType", "resolutionCode", "internalPriority", "projectId", "moduleId"}
+        metrics: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        for item in value if isinstance(value, list) else []:
+            if not isinstance(item, dict):
+                continue
+            metric_code = str(item.get("metricCode") or "").strip()
+            if not metric_code or metric_code in seen_codes:
+                continue
+            groups: list[dict[str, Any]] = []
+            seen_groups: set[str] = set()
+            for group in item.get("groups") if isinstance(item.get("groups"), list) else []:
+                if not isinstance(group, dict):
+                    continue
+                group_code = str(group.get("groupCode") or "").strip()
+                if not group_code or group_code in seen_groups:
+                    continue
+                conditions = []
+                for condition in group.get("conditions") if isinstance(group.get("conditions"), list) else []:
+                    field = str(condition.get("sourceField") or "").strip()
+                    operator = str(condition.get("operator") or "equals").strip().lower()
+                    values = condition.get("matchValues") if isinstance(condition.get("matchValues"), list) else [condition.get("matchValue")]
+                    values = [str(row).strip() for row in values if str(row or "").strip()]
+                    if field in allowed_fields and operator in {"equals", "contains", "in", "regex"} and values:
+                        conditions.append({"sourceField": field, "operator": operator, "matchValues": values})
+                if conditions:
+                    groups.append({"groupCode": group_code, "label": str(group.get("label") or group_code).strip(), "priority": int(group.get("priority") or 0), "conditionMode": "any" if str(group.get("conditionMode") or "all").lower() == "any" else "all", "conditions": conditions})
+                    seen_groups.add(group_code)
+            if groups:
+                metrics.append({"metricCode": metric_code, "label": str(item.get("label") or metric_code).strip(), "enabled": bool(item.get("enabled", True)), "overlapMode": "exclusive" if str(item.get("overlapMode") or "allow").lower() == "exclusive" else "allow", "groups": groups})
+                seen_codes.add(metric_code)
+        return metrics
 
     # --- migrated from TicketSyncService._normalize_ai_classification_config ---
 
@@ -1447,6 +1509,17 @@ class TicketSyncConfigService:
         summary_report["includeClosed"] = bool(summary_report.get("includeClosed", True))
         summary_report["messageTemplate"] = str(summary_report.get("messageTemplate") or "").strip()
         merged["summaryReport"] = summary_report
+
+        stat_classification = cls.normalize_stat_classification_config(merged.get("statClassification"))
+        merged["statClassification"] = stat_classification
+        merged["externalClassificationMappings"] = cls.normalize_external_classification_mappings(
+            merged.get("externalClassificationMappings"), stat_classification["issueTypes"]
+        )
+        merged["statisticFieldKeys"] = [
+            item for item in (merged.get("statisticFieldKeys") if isinstance(merged.get("statisticFieldKeys"), list) else [])
+            if item in {"issueTypeId", "isProblem", "status", "source", "rootCauseType", "solutionType", "resolutionCode", "internalPriority", "projectId", "moduleId"}
+        ]
+        merged["customTrendMetrics"] = cls.normalize_custom_trend_metrics(merged.get("customTrendMetrics"))
 
         merged["aiSyncExtract"] = TicketSyncAiConfigService.normalize_section(
             "aiSyncExtract", merged.get("aiSyncExtract")

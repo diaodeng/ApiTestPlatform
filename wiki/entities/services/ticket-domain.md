@@ -89,6 +89,8 @@ graph TD
 
 - 工单列表、状态流转、时间线、评论、RCA。
 - 知识库、工作流、统计、日志拉取、导入与向量化。
+- 外部字段分类映射：`TicketExternalClassificationMappingService` 按外部接口字段匹配工单类型，支持等于、包含、属于和正则；人工类型优先于外部映射，外部映射优先于 AI。
+- 可配置趋势：固定问题性质趋势已删除，工单类型趋势按 `issue_type_id/issue_type_name` 聚合；`TicketCustomMetricService` 仅按白名单字段计算管理员定义的指标，并可读取日/业务周通用快照。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
 
@@ -104,7 +106,7 @@ graph TD
 - 工单列表展示工单类型时只读取 `issue_type_name` 或命中配置的 `issue_type_id`，不再回退 `category_name`，避免历史分类/模块文案误显示为新工单类型。
 - 工单列表已接入根因分类、解决方式和关闭结果筛选及显示列；列表列显示配置通过当前用户配置 `ticket/ticket_list_columns` 保存。
 - 工单统计页的统计块显示配置通过当前用户配置 `ticket/ticket_statistics_blocks` 保存，用户可按关注维度隐藏不需要的统计块。
-- 工单统计页新增趋势统计，接口 `GET /ticket/statistics/trend` 按 `day/week/month` 返回新增、关闭、净增、周期末未关闭存量、Bug、非 Bug、支持类、Top 模块和 Top 细分问题。当前趋势按事件时间实时计算当前分类，正式周报如需历史口径冻结，后续应增加统计快照。
+- `GET /ticket/statistics/trend` 按 `day/week/month` 返回新增、关闭、净增、周期末未关闭存量、工单类型、Top 模块和 Top 细分问题；自定义指标只在请求显式传入 `metricCodes` 时计算或读取快照。
 - 用户级偏好采用通用表 `sys_user_config`，以 `user_id + config_type + config_key` 唯一定位，`config_value` 保存少量 JSON 配置；后续用户级 AI prompt/provider 等零散配置优先复用该模型。
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
 - 工单列表页支持服务端表头排序，默认 `submitTime desc`；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。

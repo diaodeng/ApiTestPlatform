@@ -1470,12 +1470,6 @@ class TicketDao:
             .group_by(Ticket.issue_type_id, Ticket.issue_type_name)
             .all()
         )
-        problem_rows = (
-            db.query(Ticket.is_problem, func.count(Ticket.ticket_id))
-            .filter(base_filter)
-            .group_by(Ticket.is_problem)
-            .all()
-        )
         root_cause_type_rows = (
             db.query(Ticket.root_cause_type, func.count(Ticket.ticket_id))
             .filter(base_filter)
@@ -1577,14 +1571,6 @@ class TicketDao:
                     "count": row[2],
                 }
                 for row in issue_type_rows
-            ],
-            "problem_counts": [
-                {
-                    "is_problem": row[0],
-                    "label": "真实问题" if row[0] is True else ("非问题" if row[0] is False else "未填写"),
-                    "count": row[1],
-                }
-                for row in problem_rows
             ],
             "module_counts": [{"module": row[0] or "未填写", "count": row[1]} for row in module_rows],
             "source_counts": [{"source": row[0] or "未填写", "count": row[1]} for row in source_rows],
@@ -1713,10 +1699,6 @@ class TicketDao:
                 "new_count": 0,
                 "closed_count": 0,
                 "resolved_count": 0,
-                "problem_count": 0,
-                "non_problem_count": 0,
-                "unknown_problem_count": 0,
-                "support_count": 0,
                 "module_counts": {},
                 "issue_type_counts": {},
                 "root_cause_type_counts": {},
@@ -1747,14 +1729,6 @@ class TicketDao:
             create_bucket = get_bucket_for_time(submit_time_map.get(ticket.ticket_id))
             if create_bucket:
                 create_bucket["new_count"] += 1
-                if ticket.is_problem is True:
-                    create_bucket["problem_count"] += 1
-                elif ticket.is_problem is False:
-                    create_bucket["non_problem_count"] += 1
-                else:
-                    create_bucket["unknown_problem_count"] += 1
-                if str(ticket.issue_type_id or "").strip() == "support_consulting":
-                    create_bucket["support_count"] += 1
                 cls._increase_counter(
                     create_bucket["module_counts"],
                     str(ticket.module_name or "未填写").strip() or "未填写",

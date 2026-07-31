@@ -20,6 +20,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.stats.ticket_processing_stats_service import TicketProcessingStatsService
+from modules.ticket.service.stats.ticket_custom_metric_service import TicketCustomMetricService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
@@ -357,8 +358,23 @@ async def get_ticket_statistics_trend(
             query.problem_pattern_codes,
             query.statistics_mode,
             query.week_bucket_mode,
+            query.metric_codes,
         )
         return ResponseUtil.success(data=statistics)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketConfigController.get(
+    "/statistics/metric-definitions",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:statistics:list"))],
+)
+async def get_ticket_statistics_metric_definitions(request: Request, query_db: Session = Depends(get_db)):
+    """获取可配置趋势指标定义和允许使用的字段。"""
+    try:
+        data = await run_in_threadpool(TicketCustomMetricService.get_definitions, query_db)
+        return ResponseUtil.success(data=data)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

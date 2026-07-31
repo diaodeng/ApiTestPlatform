@@ -117,6 +117,11 @@
       <el-form-item label="统计口径">
         <el-segmented v-model="statisticsMode" :options="statisticsModeOptions" />
       </el-form-item>
+      <el-form-item v-if="metricDefinitions.metrics?.length" label="自定义趋势">
+        <el-select v-model="selectedMetricCodes" multiple clearable collapse-tags placeholder="选择要查询的指标" style="width: 280px">
+          <el-option v-for="item in metricDefinitions.metrics" :key="item.metricCode" :label="item.label" :value="item.metricCode" />
+        </el-select>
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" icon="Search" @click="handleQuery">查询</el-button>
         <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -211,14 +216,14 @@
         </el-card>
       </el-col>
       <el-col
-        v-show="isTrendBlockVisible('problemTrend')"
+        v-show="isTrendBlockVisible('issueTypeTrend')"
         :xs="24"
         :lg="12"
         class="trend-chart-col"
       >
         <el-card shadow="never">
-          <template #header>问题性质趋势</template>
-          <div ref="problemTrendChartRef" class="trend-chart" />
+          <template #header>工单类型趋势</template>
+          <div ref="issueTypeTrendChartRef" class="trend-chart" />
         </el-card>
       </el-col>
       <el-col
@@ -230,6 +235,12 @@
         <el-card shadow="never">
           <template #header>处理率与存量趋势</template>
           <div ref="processingTrendChartRef" class="trend-chart" />
+        </el-card>
+      </el-col>
+      <el-col v-for="metric in selectedCustomMetrics" :key="metric.metricCode" :xs="24" :lg="12" class="trend-chart-col">
+        <el-card shadow="never">
+          <template #header>{{ metric.label }}</template>
+          <div :ref="(element) => setCustomMetricChartRef(metric.metricCode, element)" class="trend-chart" />
         </el-card>
       </el-col>
       <el-col v-show="isTrendBlockVisible('moduleTrend')" :xs="24" :lg="12" class="trend-chart-col">
@@ -267,9 +278,6 @@
         <el-table-column v-if="isTrendDetailColumnVisible('netIncrease')" label="净增" prop="netIncrease" width="90" align="center" />
         <el-table-column v-if="isTrendDetailColumnVisible('unprocessedBacklog')" label="未处理存量" prop="unprocessedBacklog" width="110" align="center" />
         <el-table-column v-if="isTrendDetailColumnVisible('openBacklog')" label="未关闭存量" prop="openBacklog" width="110" align="center" />
-        <el-table-column v-if="isTrendDetailColumnVisible('problemCount')" label="Bug" prop="problemCount" width="90" align="center" />
-        <el-table-column v-if="isTrendDetailColumnVisible('nonProblemCount')" label="非Bug" prop="nonProblemCount" width="90" align="center" />
-        <el-table-column v-if="isTrendDetailColumnVisible('supportCount')" label="支持类" prop="supportCount" width="90" align="center" />
         <el-table-column v-if="isTrendDetailColumnVisible('avgFirstResponseSeconds')" label="平均响应耗时" width="130" align="center">
           <template #default="scope">{{ formatSeconds(scope.row.avgFirstResponseSeconds) }}</template>
         </el-table-column>
@@ -323,6 +331,7 @@
   import {
     getTicketStatClassificationOptions,
     getTicketStatistics,
+    getTicketStatisticMetricDefinitions,
     getTicketStatisticsTimeConfig,
     getTicketStatisticsTrend,
     getTicketWorkflow,
@@ -360,7 +369,10 @@
   const problemPatternOptions = ref([]);
   const blockConfigOpen = ref(false);
   const overallTrendChartRef = ref(null);
-  const problemTrendChartRef = ref(null);
+  const issueTypeTrendChartRef = ref(null);
+  const metricDefinitions = ref({ metrics: [] });
+  const selectedMetricCodes = ref([]);
+  const customMetricChartRefs = {};
   const processingTrendChartRef = ref(null);
   const moduleTrendChartRef = ref(null);
   const problemPatternTrendChartRef = ref(null);
@@ -384,7 +396,7 @@
   ];
   const trendBlockOptions = [
     { key: 'overallTrend', title: '整体趋势曲线' },
-    { key: 'problemTrend', title: '问题性质趋势曲线' },
+    { key: 'issueTypeTrend', title: '工单类型趋势曲线' },
     { key: 'processingTrend', title: '处理率与存量趋势曲线' },
     { key: 'moduleTrend', title: 'Top模块趋势曲线' },
     { key: 'problemPatternTrend', title: 'Top细分问题趋势曲线' },
@@ -476,15 +488,6 @@
       format: (row) => formatIssueType(row),
     },
     {
-      key: 'problem',
-      title: '是否真实问题',
-      dataKey: 'problemCounts',
-      label: '问题性质',
-      countLabel: '数量',
-      span: 8,
-      format: (row) => formatProblemFlag(row.isProblem),
-    },
-    {
       key: 'rootCauseType',
       title: '根因分类',
       dataKey: 'rootCauseTypeCounts',
@@ -535,9 +538,6 @@
     { key: 'netIncrease', title: '净增' },
     { key: 'unprocessedBacklog', title: '未处理存量' },
     { key: 'openBacklog', title: '未关闭存量' },
-    { key: 'problemCount', title: 'Bug' },
-    { key: 'nonProblemCount', title: '非Bug' },
-    { key: 'supportCount', title: '支持类' },
     { key: 'avgFirstResponseSeconds', title: '平均响应耗时' },
     { key: 'avgFirstProcessSeconds', title: '平均处理耗时' },
     { key: 'problemPatternCounts', title: 'Top细分问题' },
@@ -561,7 +561,7 @@
   const hasVisibleTrendCharts = computed(
     () =>
       isTrendBlockVisible('overallTrend') ||
-      isTrendBlockVisible('problemTrend') ||
+      isTrendBlockVisible('issueTypeTrend') ||
       isTrendBlockVisible('processingTrend') ||
       isTrendBlockVisible('moduleTrend') ||
       isTrendBlockVisible('problemPatternTrend')
@@ -633,6 +633,7 @@
       problemPatternCodes: selectedProblemPatternCodes.value.length
         ? selectedProblemPatternCodes.value.join(',')
         : undefined,
+      metricCodes: selectedMetricCodes.value.length ? selectedMetricCodes.value.join(',') : undefined,
     };
   }
 
@@ -907,12 +908,6 @@
     return getStatOptionLabel(issueTypeOptions, row.issueTypeId);
   }
 
-  function formatProblemFlag(value) {
-    if (value === true) return '真实问题';
-    if (value === false) return '非问题';
-    return '未填写';
-  }
-
   function formatResolution(row) {
     if (row.resolutionName) {
       return row.resolutionName;
@@ -1091,13 +1086,14 @@
 
   function renderTrendCharts() {
     const overallChart = getTrendChart('overall', overallTrendChartRef);
-    const problemChart = getTrendChart('problem', problemTrendChartRef);
+    const issueTypeChart = getTrendChart('issueType', issueTypeTrendChartRef);
     const processingChart = getTrendChart('processing', processingTrendChartRef);
     const moduleChart = getTrendChart('module', moduleTrendChartRef);
     const problemPatternChart = getTrendChart('problemPattern', problemPatternTrendChartRef);
     const seriesRows = getTrendSeries();
     const moduleNames = getTopCounterNames('moduleCounts');
     const problemPatternNames = getTopCounterNames('problemPatternCounts');
+    const issueTypeNames = getTopCounterNames('issueTypeCounts');
 
     overallChart?.setOption(
       buildLineChartOption([
@@ -1139,39 +1135,7 @@
       ]),
       true
     );
-    problemChart?.setOption(
-      buildLineChartOption([
-        {
-          name: 'Bug',
-          type: 'line',
-          smooth: true,
-          symbolSize: 6,
-          data: seriesRows.map((item) => Number(item.problemCount || 0)),
-        },
-        {
-          name: '非Bug',
-          type: 'line',
-          smooth: true,
-          symbolSize: 6,
-          data: seriesRows.map((item) => Number(item.nonProblemCount || 0)),
-        },
-        {
-          name: '未判断',
-          type: 'line',
-          smooth: true,
-          symbolSize: 6,
-          data: seriesRows.map((item) => Number(item.unknownProblemCount || 0)),
-        },
-        {
-          name: '支持类',
-          type: 'line',
-          smooth: true,
-          symbolSize: 6,
-          data: seriesRows.map((item) => Number(item.supportCount || 0)),
-        },
-      ]),
-      true
-    );
+    issueTypeChart?.setOption(buildLineChartOption(buildCounterTrendSeries('issueTypeCounts', issueTypeNames)), true);
     processingChart?.setOption(
       buildLineChartOption(
         [
@@ -1221,6 +1185,29 @@
       buildLineChartOption(buildCounterTrendSeries('problemPatternCounts', problemPatternNames)),
       true
     );
+    selectedCustomMetrics.value.forEach((metric) => {
+      const chart = getTrendChart(`metric:${metric.metricCode}`, customMetricChartRefs[metric.metricCode]);
+      const resultMetric = (trend.value.customMetrics || []).find((item) => item.metricCode === metric.metricCode);
+      const metricSeries = (resultMetric?.groups || []).map((group) => ({
+        name: group.groupLabel,
+        type: 'line', smooth: true, symbolSize: 6,
+        data: seriesRows.map((bucket) => Number(group.countsByBucket?.[bucket.bucket] || 0)),
+      }));
+      chart?.setOption(buildLineChartOption(metricSeries), true);
+    });
+  }
+
+  const selectedCustomMetrics = computed(() => (metricDefinitions.value.metrics || []).filter((item) => selectedMetricCodes.value.includes(item.metricCode)));
+
+  function setCustomMetricChartRef(metricCode, element) {
+    if (element) customMetricChartRefs[metricCode] = { value: element };
+  }
+
+  function loadMetricDefinitions() {
+    return getTicketStatisticMetricDefinitions().then((response) => {
+      metricDefinitions.value = response.data || { metrics: [] };
+      selectedMetricCodes.value = [];
+    });
   }
 
   function resizeTrendCharts() {
@@ -1233,9 +1220,7 @@
 
   loadProjectOptions().then(() => loadModuleOptions([]));
   loadStatClassificationOptions();
-  Promise.all([loadStatisticsBlockConfig(), loadTrendDetailColumnConfig(), loadTimeConfig()]).finally(() => {
-    getStatistics();
-  });
+  Promise.all([loadStatisticsBlockConfig(), loadTrendDetailColumnConfig(), loadTimeConfig(), loadMetricDefinitions()]);
 
   watch(
     visibleTrendBlockKeys,

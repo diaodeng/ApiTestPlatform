@@ -16,6 +16,7 @@ from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiServi
 from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
+from modules.ticket.service.sync.ticket_external_classification_mapping_service import TicketExternalClassificationMappingService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
@@ -468,6 +469,27 @@ class TicketSyncService:
             config,
             apply_external_mappings=apply_external_mappings,
         )
+        external_classification_match = None
+        if str(getattr(ticket, "classification_source", "") or "").strip() != "manual":
+            external_classification_match = TicketExternalClassificationMappingService.match(config, sync_object)
+            if external_classification_match:
+                extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
+                extra_data["external_classification"] = {
+                    "ruleId": external_classification_match.rule_id,
+                    "sourceField": external_classification_match.source_field,
+                    "sourceValue": external_classification_match.source_value,
+                    "operator": external_classification_match.operator,
+                    "matchedAt": SyncUtil.now_iso(),
+                }
+                sync_object = sync_object.model_copy(update={
+                    "issue_type_id": external_classification_match.issue_type_id,
+                    "issue_type_name": external_classification_match.issue_type_name,
+                    "extra_data": extra_data,
+                })
+                logger.info(
+                    f"外部字段工单类型映射命中: ticket_no={sync_object.ticket_no}, "
+                    f"rule_id={external_classification_match.rule_id}, issue_type={external_classification_match.issue_type_id}"
+                )
         should_translate = False
         translated_description = str(sync_object.description or "").strip()
         translation_meta: dict[str, Any] = {"translated_text": "", "skipped": True}
@@ -520,6 +542,10 @@ class TicketSyncService:
             current_user,
             sync_scene=sync_scene,
         )
+        if external_classification_match:
+            payload["classification_source"] = "external_mapping"
+            payload["classification_rule_id"] = external_classification_match.rule_id
+            payload["classification_updated_at"] = datetime.now()
         if defer_post_process:
             meta["sourceStatusBefore"] = previous_status
             meta = TicketSyncGroupPushService.set_publish_state(

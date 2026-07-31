@@ -865,6 +865,11 @@ export function getTicketStatisticsTrend(query) {
   });
 }
 
+// 获取可配置趋势指标定义，趋势数据仅在查询时按选择项请求。
+export function getTicketStatisticMetricDefinitions() {
+  return request({ url: '/ticket/statistics/metric-definitions', method: 'get' });
+}
+
 // 查询知识库列表
 export function listKnowledge(query) {
   return request({

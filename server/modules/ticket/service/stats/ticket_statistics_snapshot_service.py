@@ -9,7 +9,9 @@ from modules.ticket.dao.ticket_dao import _date_end
 from modules.ticket.dao.ticket_processing_stats_dao import TicketProcessingStatsDao
 from modules.ticket.dao.ticket_statistics_daily_dao import TicketStatisticsDailyDao
 from modules.ticket.dao.ticket_statistics_period_snapshot_dao import TicketStatisticsPeriodSnapshotDao
+from modules.ticket.dao.ticket_statistics_metric_snapshot_dao import TicketStatisticsMetricSnapshotDao
 from modules.ticket.entity.do.ticket_do import Ticket
+from modules.ticket.service.stats.ticket_custom_metric_service import TicketCustomMetricService
 from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
 
@@ -93,6 +95,16 @@ class TicketStatisticsSnapshotService:
                 issue_type_id=issue_type_id,
             )
             leaf_count += 1
+        submitted_rows = [
+            ticket for ticket in rows
+            if cls._in_range(TicketProcessingStatsDao.resolve_submit_time(ticket), begin_time, end_time)
+        ]
+        revision = TicketCustomMetricService.definition_revision(
+            TicketCustomMetricService.get_definitions(db).get("metrics")
+        )
+        metric_rows = TicketCustomMetricService.build_snapshot_rows(db, submitted_rows, cls.SCOPE_ALL, revision)
+        metric_rows.extend(TicketCustomMetricService.build_snapshot_rows(db, submitted_rows, cls.SCOPE_LEAF, revision))
+        TicketStatisticsMetricSnapshotDao.replace_snapshot_rows(db, "daily", target_date.isoformat(), metric_rows)
         db.commit()
         logger.info(
             f"工单每日快照已生成 | statistics_date={target_date}, "
@@ -189,6 +201,16 @@ class TicketStatisticsSnapshotService:
                 issue_type_id=issue_type_id,
             )
             leaf_count += 1
+        submitted_rows = [
+            ticket for ticket in rows
+            if cls._in_range(TicketProcessingStatsDao.resolve_submit_time(ticket), start_time, period_end_time)
+        ]
+        revision = TicketCustomMetricService.definition_revision(
+            TicketCustomMetricService.get_definitions(db).get("metrics")
+        )
+        metric_rows = TicketCustomMetricService.build_snapshot_rows(db, submitted_rows, cls.SCOPE_ALL, revision)
+        metric_rows.extend(TicketCustomMetricService.build_snapshot_rows(db, submitted_rows, cls.SCOPE_LEAF, revision))
+        TicketStatisticsMetricSnapshotDao.replace_snapshot_rows(db, "business_week", start_time.date().isoformat(), metric_rows)
         db.commit()
         logger.info(
             f"工单业务周快照已生成 | period_start={start_time}, period_end={period_end_time}, "

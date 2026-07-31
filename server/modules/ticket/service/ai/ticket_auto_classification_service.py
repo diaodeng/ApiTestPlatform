@@ -179,12 +179,19 @@ class TicketAutoClassificationService:
             "rootCause": "root_cause",
             "solution": "solution",
         }
+        if str(getattr(ticket, "classification_source", "") or "").strip() == "external_mapping" and not force_reclassify:
+            field_map.pop("issueTypeId")
+            field_map.pop("issueTypeName")
         for result_key, db_field in field_map.items():
             if db_field.startswith("problem_pattern_") and getattr(ticket, "problem_pattern_verified", None) is True:
                 continue
             value = result_payload.get(result_key)
             if value not in (None, ""):
                 update_data[db_field] = value
+        if "issue_type_id" in update_data:
+            update_data["classification_source"] = "ai"
+            update_data["classification_rule_id"] = ""
+            update_data["classification_updated_at"] = datetime.now()
         if result_payload.get("isProblem") is not None:
             update_data["is_problem"] = bool(result_payload.get("isProblem"))
         if (

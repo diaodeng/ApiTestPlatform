@@ -59,6 +59,13 @@ class Ticket(Base):
     category_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="问题分类名称")
     issue_type_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="工单类型编码")
     issue_type_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="工单类型名称")
+    classification_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="", comment="工单类型分类来源：manual/external_mapping/ai"
+    )
+    classification_rule_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="外部字段分类规则ID"
+    )
+    classification_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="工单类型分类更新时间")
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=TicketStatus.PENDING.value, comment="当前状态"
     )
@@ -731,6 +738,36 @@ class TicketStatisticsPeriodSnapshot(Base):
         BigInteger, nullable=False, default=0, comment="平均处理秒数（旧字段，兼容保留）"
     )
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+
+class TicketStatisticsMetricSnapshot(Base):
+    """工单可配置趋势指标快照，按日或业务周覆盖写入。"""
+
+    __tablename__ = "ticket_statistics_metric_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_type", "snapshot_key", "snapshot_scope", "project_id", "module_id",
+            "issue_type_id", "metric_code", "group_code", name="uk_ticket_metric_snapshot_scope"
+        ),
+        Index("idx_ticket_metric_snapshot_time", "snapshot_type", "snapshot_key"),
+        Index("idx_ticket_metric_snapshot_metric", "metric_code", "snapshot_type", "snapshot_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="指标快照ID")
+    snapshot_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="快照类型：daily/business_week")
+    snapshot_key: Mapped[str] = mapped_column(String(64), nullable=False, comment="快照日期或业务周开始日期")
+    snapshot_scope: Mapped[str] = mapped_column(String(20), nullable=False, default="all", comment="快照范围：all/leaf")
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID")
+    issue_type_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="工单类型编码")
+    metric_code: Mapped[str] = mapped_column(String(64), nullable=False, comment="自定义指标编码")
+    metric_label: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="自定义指标名称")
+    group_code: Mapped[str] = mapped_column(String(64), nullable=False, comment="指标分组编码")
+    group_label: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="指标分组名称")
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="命中数量")
+    definition_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="指标定义版本")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间")
 
 
 class UserStatisticsDaily(Base):

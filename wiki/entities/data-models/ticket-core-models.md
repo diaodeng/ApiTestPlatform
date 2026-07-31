@@ -58,6 +58,8 @@ related_files:
 
 `period_type=business_week` 的记录由 `ticket_business_week_statistics_snapshot` 任务生成，默认统计上一完整业务周；`statisticsMode=snapshot&granularity=week&weekBucketMode=business_week` 会读取该表，不再用自然日快照模拟业务周。
 
+2026-07-31 新增 `TicketStatisticsMetricSnapshot`，用于冻结完全配置驱动的趋势指标。记录按 `daily/business_week`、时间键、全局或项目/模块/工单类型叶子范围、指标编码和分组编码唯一；修改指标定义后需要用既有快照任务覆盖补跑相应历史范围。
+
 ```mermaid
 erDiagram
   Ticket ||--o{ TicketStatusHistory : has
@@ -103,6 +105,7 @@ erDiagram
 - 2026-07-08 第二阶段已新增 `TicketIssue`、`Ticket.issue_id/issue_relation_type/issue_confirmed` 和 `TicketRelation`：`Ticket.issue_id` 是主归因字段，`TicketRelation` 只保存补充关系，不替代主归因。
 - `TicketIssue.affected_ticket_count` 由 `TicketIssueService.refresh_affected_ticket_count` 按有效工单实时刷新，软删除工单不计入；解绑工单只清空主归因，不删除 Issue。
 - `Ticket.issue_type_id/issue_type_name`、`Ticket.is_problem`、`Ticket.root_cause_type`、`Ticket.solution_type`、`Ticket.resolution_code/resolution_name` 是工单统计与后续 AI 分析的结构化维度，不能塞进 `extra_data` 替代；`Ticket.module_id/module_name` 继续承担业务域维度。
+- `Ticket.classification_source/classification_rule_id/classification_updated_at` 记录工单类型来源。人工编辑优先级最高，其次是外部字段规则映射，最后是 AI；规则命中详情写入 `extra_data.external_classification` 以便审计。
 - `Ticket.problem_pattern_code/problem_pattern_name` 是长期治理用的细分问题类型字段，承载“内存泄露”“280开头券为纸质券规则说明”等固定问题模式；`problem_pattern_confidence/source/verified/verified_by/verified_at` 记录 AI 置信度、来源和人工确认状态。人工确认后的细分问题默认不被 AI 自动分类覆盖。
 - `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。
 - `Ticket.extra_data.ticket_automation.notifyConfig` 可记录自动化链路使用的推送配置，便于日志拉取失败、版本号缺失和 AI 结束时直接发送消息。
