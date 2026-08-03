@@ -3,10 +3,17 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-31
+updated: 2026-08-03
 ---
 
 # 操作日志
+
+## [2026-08-03] INGEST-CODE | 帮助文档用户说明与更新记录分层
+
+- 触发：用户希望 `web/public/docs` 主要承载面向最终用户的详细使用说明，同时把变更记录单独放入独立目录并保持自动发现展示。
+- 关键结论：帮助中心仍通过 `docs-index.json` 自动发现文档，但索引和菜单规则已按“用户说明 / 更新记录”分层，更新记录统一走 `web/public/docs/updates/`。
+- 变更传播链：`web/vite/plugins/docs-index.js` -> `web/src/views/about/about.vue` -> `web/public/docs` 用户说明文档和 `web/public/docs/updates/` 更新记录。
+- 文档结论：用户说明需要补齐功能用途、入口、配置项、参数示例、注意事项和常见问题；修改业务逻辑时若无对应说明文档，必须先补齐再交付。
 
 ## [2026-07-31] INGEST-CODE | 自动化关注范围模块 Code 与历史统计匹配
 

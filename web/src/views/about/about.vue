@@ -144,7 +144,7 @@ onMounted(() => {
         <aside class="help-sidebar">
             <div class="help-sidebar__header">
                 <div class="help-sidebar__title">帮助文档</div>
-                <div class="help-sidebar__meta">自动收录 public/docs</div>
+                <div class="help-sidebar__meta">自动收录 public/docs，按用户说明与更新记录分组</div>
             </div>
             <el-input
                 v-model="searchKeyword"

@@ -17,4 +17,4 @@
 - `web/src/views/ticket/syncAutomation/index.vue`
 - `server/modules/ticket/service/ticket_sync_notify_service.py`
 - `web/public/docs/2026-06-13-ticket-external-sync-required-fields-config.md`
-- `web/public/docs/update_history.md`
+- `web/public/docs/updates/history.md`

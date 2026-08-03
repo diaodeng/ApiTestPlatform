@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-21
 created: 2026-05-20
-updated: 2026-07-21
+updated: 2026-08-03
 related_files:
   - web/src/views/system/user/index.vue
   - web/src/views/system/role/index.vue
@@ -55,7 +55,7 @@ graph TD
 - 面向管理端用户提供业务操作界面。
 - 通过页面、组件和 API 封装连接后端服务。
 - 与后端模块一一对应，方便按域维护。
-- 帮助中心读取 `web/public/docs/docs-index.json` 自动展示 Markdown 文档，业务说明和配置说明只要写入 `web/public/docs` 并重新启动或构建前端即可出现在页面中。
+- 帮助中心读取 `web/public/docs/docs-index.json` 自动展示 Markdown 文档，业务说明和配置说明只要写入 `web/public/docs` 并重新启动或构建前端即可出现在页面中；`web/public/docs/updates/` 用于独立展示更新记录，避免与用户说明混排。
 - 工单日志拉取列表的参数展示、归档/原始压缩包链接解析和 AI 表单前端偏好由工单前端 hook/shared 维护；用户手动选择的 Agent、Provider、追加提示词优先于配置项，下次打开表单自动沿用。
 - 工单日志查看器支持“全局关键字搜索 -> 命中文件范围搜索”的收敛流程；搜索关键字使用文本框输入，支持英文逗号或换行分隔多个关键字，并可选择“任一/全部”匹配模式。
 - AI Provider 已按平台、API协议、业务用途与执行器能力分离。工单轻量 AI 只使用 `ticket_light_text + direct_http` Provider，工单 AI 分析只使用 `ticket_analysis_worker + codex` Provider；候选过滤与运行时校验均由后端能力契约统一执行。

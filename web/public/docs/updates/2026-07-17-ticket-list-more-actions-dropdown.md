@@ -11,7 +11,7 @@
 
 - `web/src/views/ticket/index.vue`
 - `web/src/views/ticket/hooks/useLogViewer.js`
-- `web/public/docs/update_history.md`
+- `web/public/docs/updates/history.md`
 
 ## 说明
 
