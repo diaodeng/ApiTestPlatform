@@ -346,9 +346,9 @@ const resultTableHeight = computed(() =>
       : 320
 )
 
-function renderHitTextCell(className, value) {
+function renderHitTextCell(className, value, style) {
   const text = String(value ?? '')
-  return h('span', { class: className, title: text }, text)
+  return h('span', { class: className, style, title: text }, text)
 }
 
 const resultTableColumns = [
@@ -356,8 +356,8 @@ const resultTableColumns = [
     key: 'file',
     dataKey: 'file',
     title: '文件',
-    width: 220,
-    minWidth: 160,
+    width: 100,
+    minWidth: 100,
     flexGrow: 1,
     cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-file', rowData.file),
   },
@@ -379,7 +379,15 @@ const resultTableColumns = [
     cellRenderer: ({ rowData }) =>
       renderHitTextCell(
         'log-hit-cell log-hit-cell-content',
-        `${String(rowData.content ?? '')}${rowData.contentTruncated ? '...' : ''}`
+        `${String(rowData.content ?? '')}${rowData.contentTruncated ? '...' : ''}`,
+        {
+          display: 'inline-block',
+          maxWidth: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          verticalAlign: 'top',
+        }
       ),
   },
   {
@@ -390,7 +398,7 @@ const resultTableColumns = [
     align: 'center',
     cellRenderer: ({ rowData }) =>
       h(
-        'button',
+        'el-button',
         {
           type: 'button',
           class: 'log-hit-action-btn',

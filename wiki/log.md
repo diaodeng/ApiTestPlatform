@@ -8,6 +8,13 @@ updated: 2026-08-03
 
 # 操作日志
 
+## [2026-08-03] INGEST-CODE | 工单日志查看器搜索结果内容列不换行
+
+- 触发：用户反馈 `web/src/components/ticket/LogViewerDialog.vue` 中虚拟表格的日志内容列会换行，期望保持单行显示。
+- 关键结论：`el-table-v2` 的内容单元格需要显式维持单行省略样式，避免长文本在虚拟表格里自动折行并抬高行高。
+- 变更传播链：`LogViewerDialog.vue` 搜索结果内容列 `cellRenderer` -> 单行省略样式 -> 更新说明文档和更新历史。
+- 文档结论：`web/public/docs/updates/2026-08-03-ticket-log-viewer-search-result-virtual-table.md` 与 `web/public/docs/updates/history.md` 已同步补充这次样式修复。
+
 ## [2026-08-03] INGEST-CODE | 帮助文档用户说明与更新记录分层
 
 - 触发：用户希望 `web/public/docs` 主要承载面向最终用户的详细使用说明，同时把变更记录单独放入独立目录并保持自动发现展示。
