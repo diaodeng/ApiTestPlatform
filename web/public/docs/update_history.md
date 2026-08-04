@@ -599,3 +599,7 @@
 3. 自动群推送及 AI 完成后的补发均新增关注范围前置门禁；既有 `groupPush.autoPushCondition` 配置和判断逻辑未修改，只对范围内工单继续生效。
 4. 工单统计接口和页面新增默认“关注范围 / 全部数据”选择；名称关键字同时直接匹配原始模块名称，兼容未绑定 `module_id` 的历史数据。
 5. 新增说明文档：`web/public/docs/2026-07-31-ticket-automation-scope.md`。
+
+## 2026-08-03
+
+1. 修复日志查询结果详情弹窗（LogViewerDialog.vue）高亮文本输入框回车换行失效问题：根因是 @input 回调 updateHighlightKeywords 会调用 normalizeKeywords 拆分去空后重新 join 回写 highlightText，导致尾部换行被吞、光标跳转；修复方式为用户输入触发时只更新 highlightKeywords 数组，不回写 highlightText，保留固定高度 32px + overflow 滚动防止撑大布局的既有功能。

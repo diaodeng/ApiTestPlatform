@@ -568,6 +568,8 @@ function syncHighlightKeywords(value) {
 }
 
 function updateHighlightKeywords(value) {
+  // 用户输入触发：只更新高亮关键词数组，不回写 highlightText
+  // 避免 normalizeKeywords 去掉尾部换行导致光标跳转，使回车换行失效
   const keywords = normalizeKeywords(value)
   const selectedKw = selectionHighlightKeyword.value
   if (selectedKw && !keywords.includes(selectedKw)) {
@@ -575,7 +577,7 @@ function updateHighlightKeywords(value) {
     syncHighlightKeywords(keywords)
     return
   }
-  syncHighlightKeywords(Array.isArray(value) ? keywords.join('\n') : String(value || ''))
+  highlightKeywords.value = keywords
 }
 
 function clearHighlight() {
