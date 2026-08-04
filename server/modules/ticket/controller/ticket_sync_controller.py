@@ -12,6 +12,7 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.ticket.entity.vo.ticket_vo import (
     TicketBatchReclassifyRequestModel,
+    TicketCustomStatisticsRunModel,
     TicketExternalSyncUpsertModel,
     TicketSyncAckRequestModel,
     TicketSyncGroupPushSendModel,
@@ -20,6 +21,10 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketSyncPullQueryModel,
     TicketSyncSummaryRunModel,
 )
+from modules.ticket.service.stats.ticket_custom_statistics_definition_service import (
+    TicketCustomStatisticsDefinitionService,
+)
+from modules.ticket.service.stats.ticket_custom_statistics_service import TicketCustomStatisticsService
 from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_external_sync_request_service import TicketExternalSyncRequestService
@@ -330,6 +335,41 @@ async def run_sync_summary_report(
         return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketSyncController.get(
+    "/sync/custom-statistics/definitions",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:list"))],
+)
+async def get_custom_statistics_definitions(request: Request):
+    """获取自定义统计方案支持的字段、时间口径和运算符。"""
+    return ResponseUtil.success(data=TicketCustomStatisticsDefinitionService.get_definitions())
+
+
+@ticketSyncController.post(
+    "/sync/custom-statistics/run",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def run_custom_statistics(
+    request: Request,
+    query_object: TicketCustomStatisticsRunModel,
+    query_db: Session = Depends(get_db),
+):
+    """手动执行配置化实时统计，可选择仅预览不发送。"""
+    try:
+        result = await run_in_threadpool(
+            TicketCustomStatisticsService.run_profiles,
+            query_db,
+            trigger_source="manual",
+            profile_codes=query_object.profile_codes,
+            start_time=query_object.start_time,
+            end_time=query_object.end_time,
+            send=query_object.send,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(f"手动执行自定义工单统计失败: error={e}")
         return ResponseUtil.error(msg=str(e))
 
 

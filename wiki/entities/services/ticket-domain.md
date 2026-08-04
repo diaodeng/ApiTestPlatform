@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-07-31
+freshness: 2026-08-04
 created: 2026-05-20
-updated: 2026-07-31
+updated: 2026-08-04
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_service.py
@@ -44,7 +44,11 @@ related_files:
   - server/modules/ticket/service/collaboration/ticket_message_sync_service.py
   - server/modules/ticket/service/notification/ticket_notify_service.py
   - server/modules/ticket/service/stats/ticket_topic_stats_service.py
+  - server/modules/ticket/service/stats/ticket_custom_statistics_definition_service.py
+  - server/modules/ticket/service/stats/ticket_custom_statistics_service.py
+  - server/modules/ticket/service/stats/ticket_statistics_notification_service.py
   - server/modules/ticket/dao/ticket_processing_stats_dao.py
+  - server/modules/ticket/dao/ticket_custom_statistics_dao.py
   - server/modules/ticket/dao/ticket_issue_dao.py
   - server/modules/ticket/dao/ticket_dao.py
   - server/modules/ticket/dao/ticket_log_pull_dao.py
@@ -93,6 +97,7 @@ graph TD
 - 外部字段分类映射：`TicketExternalClassificationMappingService` 按外部接口字段匹配工单类型，支持等于、包含、属于和正则；人工类型优先于外部映射，外部映射优先于 AI。同步自动化页的批量重归类已明确提供 AI、正则、映射三种策略；映射策略只重跑已保存的 `external_field_mapping/raw_payload`，不调用 AI，正则空规则也不会隐式降级到映射。
 - 自动化关注范围：`TicketAutomationScopeService` 在外部字段映射得到当前系统模块后，以模块 ID 精确匹配或模块名称关键字包含判定是否允许自动化。结果写入 `ticket.extra_data.automation_scope`；范围外工单仍执行同步、普通映射和外部规则分类，跳过标题/翻译/提取/分类 AI、自动日志与 AI 分析、向量刷新和自动群推送。统计默认范围和自动群推送复用同一配置，群推送原有条件表达式保持不变。
 - 可配置趋势：固定问题性质趋势已删除，工单类型趋势按 `issue_type_id/issue_type_name` 聚合；`TicketCustomMetricService` 仅按白名单字段计算管理员定义的指标，并可读取日/业务周通用快照。
+- 当前系统自定义统计：`TicketCustomStatisticsService` 按 `ticket.sync.automation.customStatisticsProfiles` 的白名单字段、单一时间口径和范围过滤实时查询工单，再按字段或规则分组聚合。结果只用于本次接口响应或通知，不写入 `ticket_statistics_*`；规则中的 `hasConclusion` 由 `processed_at` 是否为空派生。方案可使用系统推送、飞书应用文本或飞书卡片通知。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
 
@@ -319,6 +324,8 @@ graph TD
 - [工单AI分析最终方案落地记录](../../../../docs/2026-05-22-ticket-ai-analysis-final-solution.md)
 - [工单表单与 AI 流程更新记录](../../../../docs/2026-05-22-ticket-form-and-ai-flow-update.md)
 - [工单自动化链路流程](../../flows/ticket-automation-flow.md)
+- [工单自定义统计通知流程](../../flows/ticket-custom-statistics-notification.md)
+- [工单自定义统计接口与配置契约](../../contracts/ticket-custom-statistics.md)
 - [工单项目版本中心](../../concepts/ticket-version-center.md)
 
 ## 被引用
@@ -327,3 +334,4 @@ graph TD
 - [模块全景图](../../concepts/module-landscape.md)
 - [工单流转路由流程](../../flows/ticket-workflow-routing.md)
 - [工单外部同步与内网拉取流程](../../flows/ticket-external-sync-flow.md)
+- [工单自定义实时统计服务](ticket-custom-statistics.md)

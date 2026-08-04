@@ -11,6 +11,9 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.do.config_do import SysConfig
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from modules.ticket.service.stats.ticket_custom_statistics_definition_service import (
+    TicketCustomStatisticsDefinitionService,
+)
 from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
@@ -146,6 +149,7 @@ class TicketSyncConfigService:
             "externalClassificationMappings": [],
             "statisticFieldKeys": ["issueTypeId", "isProblem", "status", "rootCauseType", "resolutionCode"],
             "customTrendMetrics": [],
+            "customStatisticsProfiles": [],
             "aiClassification": cls.default_ai_classification_config(),
             "aiSyncExtract": cls.default_ai_sync_extract_config(),
             "translateConfig": cls.default_translate_config(),
@@ -1531,6 +1535,9 @@ class TicketSyncConfigService:
             if item in {"issueTypeId", "isProblem", "status", "source", "rootCauseType", "solutionType", "resolutionCode", "internalPriority", "projectId", "moduleId"}
         ]
         merged["customTrendMetrics"] = cls.normalize_custom_trend_metrics(merged.get("customTrendMetrics"))
+        merged["customStatisticsProfiles"] = TicketCustomStatisticsDefinitionService.normalize_profiles(
+            merged.get("customStatisticsProfiles")
+        )
 
         merged["aiSyncExtract"] = TicketSyncAiConfigService.normalize_section(
             "aiSyncExtract", merged.get("aiSyncExtract")

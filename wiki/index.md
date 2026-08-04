@@ -28,6 +28,7 @@ updated: 2026-05-20
 - [QTR 执行域](entities/services/qtr-domain.md)
 - [任务调度域](entities/services/task-scheduler-domain.md)
 - [工单域](entities/services/ticket-domain.md)
+- [工单自定义实时统计服务](entities/services/ticket-custom-statistics.md)
 - [系统管理核心数据模型](entities/data-models/admin-core-models.md)
 - [HRM 核心数据模型](entities/data-models/hrm-core-models.md)
 - [任务调度核心数据模型](entities/data-models/task-core-models.md)
@@ -53,4 +54,9 @@ updated: 2026-05-20
 - [HTTP API 入口流程](flows/http-api-entrypoint.md)
 - [工单流转路由流程](flows/ticket-workflow-routing.md)
 - [工单自动化链路流程](flows/ticket-automation-flow.md)
+- [工单自定义统计通知流程](flows/ticket-custom-statistics-notification.md)
+
+## 契约
+
+- [工单自定义统计接口与配置契约](contracts/ticket-custom-statistics.md)
 - [工单外部同步与内网拉取流程](flows/ticket-external-sync-flow.md)

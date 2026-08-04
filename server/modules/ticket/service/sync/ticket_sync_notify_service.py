@@ -400,6 +400,100 @@ class TicketSyncNotifyService:
         return cls._get_tenant_access_token(app_id, app_secret)
 
     @classmethod
+    def send_configured_notification(
+        cls,
+        db: Session,
+        *,
+        config: dict[str, Any],
+        content: str,
+        feishu_card: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        按通用渠道配置发送文本或飞书卡片通知。
+
+        :param db: 数据库会话。
+        :param config: 包含 sendMode、pushIds、appChatIds、appId、appSecret 的通知配置。
+        :param content: 推送配置和飞书文本消息使用的正文。
+        :param feishu_card: 可选飞书交互卡片，传入后飞书应用渠道发送卡片。
+        :return: 各渠道发送结果摘要。
+        """
+        send_mode = cls._normalize_send_mode(config.get("sendMode"))
+        push_ids = cls._normalize_push_ids(config.get("pushIds"))
+        chat_ids = cls._normalize_chat_ids(config.get("appChatIds"))
+        app_id, app_secret = cls._resolve_feishu_auth(config)
+        enable_push = send_mode in {cls.SEND_MODE_PUSH_CONFIG, cls.SEND_MODE_HYBRID} and bool(push_ids)
+        enable_feishu = (
+            send_mode in {cls.SEND_MODE_FEISHU_APP, cls.SEND_MODE_HYBRID}
+            and bool(chat_ids and app_id and app_secret)
+        )
+        if not enable_push and not enable_feishu:
+            reason = "未配置可用通知渠道"
+            logger.info(f"通用通知跳过: send_mode={send_mode}, reason={reason}")
+            return {"skipped": True, "skipReason": reason, "sendMode": send_mode}
+
+        push_success_count = cls._send_push_messages(db, push_ids=push_ids, content=content) if enable_push else 0
+        if enable_feishu:
+            chat_success_count = (
+                cls.send_feishu_card_messages(
+                    app_id=app_id,
+                    app_secret=app_secret,
+                    chat_ids=chat_ids,
+                    card=feishu_card,
+                )
+                if isinstance(feishu_card, dict)
+                else cls._send_feishu_text_messages(
+                    app_id=app_id,
+                    app_secret=app_secret,
+                    receive_id_type="chat_id",
+                    receive_ids=chat_ids,
+                    content=content,
+                )
+            )
+        else:
+            chat_success_count = 0
+        return {
+            "skipped": False,
+            "sendMode": send_mode,
+            "pushCount": len(push_ids),
+            "pushSuccessCount": push_success_count,
+            "chatCount": len(chat_ids),
+            "chatSuccessCount": chat_success_count,
+        }
+
+    @classmethod
+    def send_feishu_card_messages(
+        cls,
+        *,
+        app_id: str,
+        app_secret: str,
+        chat_ids: list[str],
+        card: dict[str, Any],
+    ) -> int:
+        """以飞书应用身份向多个群发送交互卡片。"""
+        normalized_ids = cls._normalize_chat_ids(chat_ids)
+        if not normalized_ids:
+            return 0
+        token = cls._get_tenant_access_token(app_id, app_secret)
+        success_count = 0
+        for chat_id in normalized_ids:
+            try:
+                cls._request_feishu_json(
+                    method="POST",
+                    url=f"{cls.FEISHU_BASE_URL}/im/v1/messages",
+                    tenant_access_token=token,
+                    params={"receive_id_type": "chat_id"},
+                    json_body={
+                        "receive_id": chat_id,
+                        "msg_type": "interactive",
+                        "content": json.dumps(card, ensure_ascii=False),
+                    },
+                )
+                success_count += 1
+            except Exception as exc:
+                logger.warning(f"飞书应用卡片发送失败: chat_id={chat_id}, error={exc}")
+        return success_count
+
+    @classmethod
     def _send_feishu_text_messages(
         cls,
         *,
