@@ -373,6 +373,7 @@ export function useSyncConfig(proxy) {
       externalClassificationMappings: [],
       statisticFieldKeys: ['issueTypeId', 'isProblem', 'status', 'rootCauseType', 'resolutionCode'],
       customTrendMetrics: [],
+      customStatisticsProfiles: [],
       externalSyncRequiredFields: [
         'ticketNo', 'description', 'internalPriority', 'ticketVender',
         'ticketModle', 'createTime', 'reporterName',
@@ -506,6 +507,46 @@ export function useSyncConfig(proxy) {
     form.externalClassificationMappings = Array.isArray(payload.externalClassificationMappings) ? payload.externalClassificationMappings : []
     form.statisticFieldKeys = Array.isArray(payload.statisticFieldKeys) ? payload.statisticFieldKeys : []
     form.customTrendMetrics = Array.isArray(payload.customTrendMetrics) ? payload.customTrendMetrics : []
+    form.customStatisticsProfiles = Array.isArray(payload.customStatisticsProfiles)
+      ? payload.customStatisticsProfiles.map((profile) => ({
+          profileCode: String(profile?.profileCode || ''),
+          label: String(profile?.label || ''),
+          enabled: profile?.enabled !== false,
+          timeField: profile?.timeField || 'submitTime',
+          timeRange: {
+            mode: profile?.timeRange?.mode || 'today',
+            rollingDays: Number(profile?.timeRange?.rollingDays || 1),
+            startTime: profile?.timeRange?.startTime || '',
+            endTime: profile?.timeRange?.endTime || '',
+          },
+          scope: {
+            projectIds: Array.isArray(profile?.scope?.projectIds) ? profile.scope.projectIds.map(String) : [],
+            moduleIds: Array.isArray(profile?.scope?.moduleIds) ? profile.scope.moduleIds.map(String) : [],
+            moduleCodes: Array.isArray(profile?.scope?.moduleCodes) ? profile.scope.moduleCodes : [],
+            issueTypeIds: Array.isArray(profile?.scope?.issueTypeIds) ? profile.scope.issueTypeIds : [],
+            problemPatternCodes: Array.isArray(profile?.scope?.problemPatternCodes) ? profile.scope.problemPatternCodes : [],
+          },
+          grouping: {
+            mode: profile?.grouping?.mode === 'rules' ? 'rules' : 'field',
+            sourceField: profile?.grouping?.sourceField || 'status',
+            overlapMode: profile?.grouping?.overlapMode || 'allow',
+            includeUnmatched: profile?.grouping?.includeUnmatched !== false,
+            groups: Array.isArray(profile?.grouping?.groups) ? profile.grouping.groups : [],
+          },
+          notification: {
+            enabled: Boolean(profile?.notification?.enabled),
+            sendMode: profile?.notification?.sendMode || 'push_config',
+            pushIds: Array.isArray(profile?.notification?.pushIds) ? profile.notification.pushIds.map(Number) : [],
+            appChatIds: Array.isArray(profile?.notification?.appChatIds) ? profile.notification.appChatIds : [],
+            appId: profile?.notification?.appId || '',
+            appSecret: profile?.notification?.appSecret || '',
+            messageFormat: profile?.notification?.messageFormat || 'text',
+            messageTemplate: profile?.notification?.messageTemplate || '',
+            includeTopTickets: Boolean(profile?.notification?.includeTopTickets),
+            topTicketLimit: Number(profile?.notification?.topTicketLimit || 10),
+          },
+        }))
+      : []
 
     const feishuAuth = payload.feishuAuth || {}
     form.feishuAuth = {
@@ -1181,6 +1222,31 @@ export function useSyncConfig(proxy) {
     group.conditions.push({ sourceField: 'issueTypeId', operator: 'in', matchValues: [] })
   }
 
+  function addCustomStatisticsProfile() {
+    form.customStatisticsProfiles.push({
+      profileCode: '', label: '', enabled: true, timeField: 'submitTime',
+      timeRange: { mode: 'today', rollingDays: 1, startTime: '', endTime: '' },
+      scope: { projectIds: [], moduleIds: [], moduleCodes: [], issueTypeIds: [], problemPatternCodes: [] },
+      grouping: { mode: 'field', sourceField: 'status', overlapMode: 'allow', includeUnmatched: true, groups: [] },
+      notification: {
+        enabled: false, sendMode: 'push_config', pushIds: [], appChatIds: [], appId: '', appSecret: '',
+        messageFormat: 'text', messageTemplate: '', includeTopTickets: false, topTicketLimit: 10,
+      },
+    })
+  }
+
+  function removeCustomStatisticsProfile(index) {
+    form.customStatisticsProfiles.splice(index, 1)
+  }
+
+  function addCustomStatisticsGroup(profile) {
+    profile.grouping.groups.push({ groupCode: '', label: '', priority: 100, conditionMode: 'all', conditions: [] })
+  }
+
+  function addCustomStatisticsCondition(group) {
+    group.conditions.push({ sourceField: 'status', operator: 'in', matchValues: [] })
+  }
+
   function addExternalFieldModel() {
     if (!Array.isArray(form.externalFieldModel.fields)) {
       form.externalFieldModel.fields = []
@@ -1229,6 +1295,7 @@ export function useSyncConfig(proxy) {
     addStatOption, removeStatOption, addExternalFieldModel,
     addExternalClassificationMapping, removeExternalClassificationMapping,
     addCustomTrendMetric, removeCustomTrendMetric, addCustomTrendMetricGroup, addCustomTrendMetricCondition,
+    addCustomStatisticsProfile, removeCustomStatisticsProfile, addCustomStatisticsGroup, addCustomStatisticsCondition,
     removeExternalFieldModel, addBitablePullFieldMapping, removeBitablePullFieldMapping,
   }
 }

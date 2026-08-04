@@ -10,6 +10,7 @@ from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
 from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
+from modules.ticket.service.stats.ticket_custom_statistics_service import TicketCustomStatisticsService
 from modules.ticket.service.stats.ticket_statistics_snapshot_service import TicketStatisticsSnapshotService
 from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicStatsService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
@@ -412,6 +413,61 @@ def ticket_summary_report(
         result.get("skipped"),
     )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_custom_statistics_report")
+def ticket_custom_statistics_report(
+    *args,
+    profile_codes: list[str] | str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    **kwargs,
+):
+    """
+    执行当前系统工单自定义统计并按方案通知。
+
+    :param profile_codes: 统计方案编码列表或逗号分隔字符串；留空执行全部启用方案。
+    :param start_time: 可选统一开始时间，必须与 end_time 成对传入。
+    :param end_time: 可选统一结束时间，必须与 start_time 成对传入。
+    :return: 不包含分组明细的执行摘要，避免统计结果写入任务日志。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    raw_codes = profile_codes if profile_codes is not None else kwargs.pop("profileCodes", None)
+    resolved_codes = (
+        [item.strip() for item in raw_codes.split(",") if item.strip()]
+        if isinstance(raw_codes, str)
+        else [str(item).strip() for item in raw_codes or [] if str(item).strip()]
+    )
+    resolved_start_time = start_time if start_time is not None else kwargs.pop("startTime", None)
+    resolved_end_time = end_time if end_time is not None else kwargs.pop("endTime", None)
+    with SessionLocal() as db:
+        results = TicketCustomStatisticsService.run_profiles(
+            db,
+            trigger_source="scheduler",
+            profile_codes=resolved_codes or None,
+            start_time=TicketCustomStatisticsService.parse_config_datetime(resolved_start_time),
+            end_time=TicketCustomStatisticsService.parse_config_datetime(resolved_end_time),
+            send=True,
+        )
+    summary = {
+        "profileCount": len(results),
+        "profiles": [
+            {
+                "profileCode": item.get("profileCode"),
+                "totalCount": item.get("totalCount"),
+                "notification": item.get("notification"),
+            }
+            for item in results
+        ],
+    }
+    logger.info(
+        f"自定义工单统计任务执行完成: profiles={len(results)}, "
+        f"profile_codes={resolved_codes or 'all'}, start_time={resolved_start_time or '-'}, "
+        f"end_time={resolved_end_time or '-'}"
+    )
+    return summary
 
 
 @register_job("module_task.scheduler_maintenance.ticket_daily_statistics_snapshot")

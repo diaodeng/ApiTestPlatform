@@ -94,27 +94,19 @@
             </el-button>
           </div>
         </div>
-        <el-table
+        <el-table-v2
           v-show="resultViewMode !== 'minimized'"
+          :columns="resultTableColumns"
           :data="hits"
           row-key="hitKey"
-          size="small"
-          :max-height="resultTableHeight"
-          @row-click="selectHit"
-        >
-          <el-table-column label="文件" prop="file" min-width="100" show-overflow-tooltip />
-          <el-table-column label="行号" prop="line" width="90" />
-          <el-table-column label="内容" prop="content" min-width="360" show-overflow-tooltip>
-            <template #default="scope">
-              {{ scope.row.content }}<span v-if="scope.row.contentTruncated">...</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="130" fixed="right">
-            <template #default="scope">
-              <el-button link type="primary" @click.stop="searchInFile(scope.row.file)">在此文件搜索</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+          :width="resultTableWidth"
+          :height="resultTableHeight"
+          :header-height="44"
+          :estimated-row-height="42"
+          :row-height="42"
+          :row-event-handlers="resultTableRowEventHandlers"
+          row-class="log-hit-row"
+        />
       </div>
 
       <!-- 上下文面板 -->
@@ -239,7 +231,8 @@
  * 供工单详情页和日志拉取管理页复用，提供关键字搜索、上下文查看、异常提取、高亮等功能。
  * 时间截取逻辑与此组件无关，仅用于拉取任务创建时的配置。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useWindowSize } from '@vueuse/core'
 import {
   prepareTicketLogs,
   listTicketLogFiles,
@@ -294,6 +287,8 @@ const hasFullscreenPanel = computed(
   () => resultViewMode.value === 'fullscreen' || contextViewMode.value === 'fullscreen'
 )
 
+const { width: windowWidth, height: windowHeight } = useWindowSize()
+
 // ── 搜索表单 ──
 const form = ref({
   keywords: '',
@@ -337,13 +332,92 @@ const contextDisplayLines = computed(() => {
   }))
 })
 
+/**
+ * 搜索结果区改为虚拟表格，避免大结果集在普通表格下卡顿。
+ * 宽高继续沿用原先布局逻辑，只是改成虚拟表格可直接使用的数值。
+ */
+const resultTableWidth = computed(() => Math.max((windowWidth.value || 0) - 64, 720))
+
 const resultTableHeight = computed(() =>
   resultViewMode.value === 'fullscreen'
-    ? 'calc(100vh - 170px)'
+    ? Math.max((windowHeight.value || 0) - 170, 240)
     : !context.value || contextViewMode.value === 'minimized'
-      ? 'calc(100vh - 250px)'
+      ? Math.max((windowHeight.value || 0) - 250, 240)
       : 320
 )
+
+function renderHitTextCell(className, value, style) {
+  const text = String(value ?? '')
+  return h('span', { class: className, style, title: text }, text)
+}
+
+const resultTableColumns = [
+  {
+    key: 'file',
+    dataKey: 'file',
+    title: '文件',
+    width: 100,
+    minWidth: 100,
+    flexGrow: 1,
+    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-file', rowData.file),
+  },
+  {
+    key: 'line',
+    dataKey: 'line',
+    title: '行号',
+    width: 90,
+    align: 'center',
+    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-line', rowData.line),
+  },
+  {
+    key: 'content',
+    dataKey: 'content',
+    title: '内容',
+    width: 360,
+    minWidth: 260,
+    flexGrow: 2,
+    cellRenderer: ({ rowData }) =>
+      renderHitTextCell(
+        'log-hit-cell log-hit-cell-content',
+        `${String(rowData.content ?? '')}${rowData.contentTruncated ? '...' : ''}`,
+        {
+          display: 'inline-block',
+          maxWidth: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          verticalAlign: 'top',
+        }
+      ),
+  },
+  {
+    key: 'actions',
+    title: '操作',
+    width: 130,
+    fixed: 'right',
+    align: 'center',
+    cellRenderer: ({ rowData }) =>
+      h(
+        'el-button',
+        {
+          type: 'button',
+          class: 'log-hit-action-btn',
+          title: '在此文件搜索',
+          onClick: (event) => {
+            event.stopPropagation()
+            searchInFile(rowData.file)
+          },
+        },
+        '在此文件搜索'
+      ),
+  },
+]
+
+const resultTableRowEventHandlers = {
+  onClick: ({ rowData }) => {
+    selectHit(rowData)
+  },
+}
 
 // ── 打开弹窗时准备日志 ──
 watch(
@@ -872,7 +946,35 @@ onBeforeUnmount(() => {
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 }
 
-.log-view-panel-fullscreen :deep(.el-table) { flex: 1; }
+.log-hit-row {
+  cursor: pointer;
+}
+
+.log-hit-cell {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-hit-cell-line {
+  text-align: center;
+}
+
+.log-hit-action-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #409eff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.log-hit-action-btn:hover {
+  text-decoration: underline;
+}
+
 .log-view-panel-fullscreen .log-content-block { flex: 1; max-height: none; }
 
 .log-view-panel-minimized {
@@ -881,11 +983,6 @@ onBeforeUnmount(() => {
 }
 
 .log-view-panel-fill {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.log-view-panel-fill :deep(.el-table) {
   flex: 1 1 auto;
   min-height: 0;
 }

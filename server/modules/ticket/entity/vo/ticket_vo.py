@@ -831,6 +831,33 @@ class TicketSyncSummaryRunModel(BaseModel):
         return self
 
 
+class TicketCustomStatisticsRunModel(BaseModel):
+    """自定义工单统计手动执行请求模型。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    profile_codes: list[str] | None = Field(default=None, description="统计方案编码列表，留空执行全部启用方案")
+    start_time: datetime | None = Field(default=None, description="可选统一统计开始时间")
+    end_time: datetime | None = Field(default=None, description="可选统一统计结束时间")
+    send: bool = Field(default=True, description="是否按方案配置发送通知")
+
+    @model_validator(mode="after")
+    def validate_custom_statistics_run_request(self):
+        """校验方案编码和可选时间覆盖范围。"""
+        normalized_codes: list[str] = []
+        for item in self.profile_codes or []:
+            code = str(item or "").strip()
+            if code and code not in normalized_codes:
+                normalized_codes.append(code)
+        self.profile_codes = normalized_codes or None
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("startTime 和 endTime 必须同时传入")
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValueError("startTime 必须早于 endTime")
+        self.send = bool(self.send)
+        return self
+
+
 class TicketBatchReclassifyRequestModel(BaseModel):
     """
     工单批量重归类请求模型。

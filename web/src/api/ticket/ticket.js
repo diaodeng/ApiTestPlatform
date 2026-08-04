@@ -266,6 +266,23 @@ export function runTicketSyncSummaryReport(data) {
   });
 }
 
+// 查询自定义工单统计支持的字段和时间口径
+export function getTicketCustomStatisticsDefinitions() {
+  return request({
+    url: '/ticket/sync/custom-statistics/definitions',
+    method: 'get',
+  });
+}
+
+// 手动执行当前系统工单自定义统计
+export function runTicketCustomStatistics(data) {
+  return request({
+    url: '/ticket/sync/custom-statistics/run',
+    method: 'post',
+    data,
+  });
+}
+
 // 按工单号手动发送群消息
 export function sendTicketSyncGroupPushByTicket(data) {
   return request({

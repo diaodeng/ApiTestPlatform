@@ -15,7 +15,6 @@ const PINNED_DOCS = [
     'about_forward.md',
     'web_case_use.md',
     'ticket-sync-automation.md',
-    'update_history.md',
     'develop.md'
 ]
 
@@ -28,7 +27,20 @@ const CATEGORY_RULES = [
     { category: '通知提醒与消息', keywords: ['notify', 'reminder', 'message', 'mention', 'group', '通知', '提醒', '消息'] },
     { category: '业务说明', keywords: ['ticket', 'workflow', 'status', 'topic', 'statistics', 'module', 'store', '工单', '流程', '统计'] },
     { category: '配置说明', keywords: ['config', 'apikey', 'setup', 'env', '配置'] },
-    { category: '变更记录', keywords: ['update_history'] }
+    { category: '更新记录', keywords: ['update_history', 'updates'] }
+]
+
+const CATEGORY_ORDER = [
+    '首页与入门',
+    '接口测试基础',
+    '工单同步与多维表格',
+    '工单日志与分析',
+    'AI 与智能配置',
+    '通知提醒与消息',
+    '业务说明',
+    '配置说明',
+    '更新记录',
+    '其他文档'
 ]
 
 function readMarkdownFiles(dir, baseDir = dir) {
@@ -63,6 +75,10 @@ function readDocTitle(content, filePath) {
 }
 
 function pickCategory(filePath, title) {
+    if (filePath.startsWith('updates/')) {
+        return '更新记录'
+    }
+
     const searchText = `${filePath} ${title}`.toLowerCase()
     const matchedRule = CATEGORY_RULES.find((rule) => rule.keywords.some((keyword) => searchText.includes(keyword.toLowerCase())))
     return matchedRule?.category || '其他文档'
@@ -72,6 +88,25 @@ function getDocDate(filePath, stat) {
     const fileDate = path.basename(filePath).match(/^(\d{4})-?(\d{2})-?(\d{2})/)
     if (fileDate) {
         return `${fileDate[1]}-${fileDate[2]}-${fileDate[3]}`
+    }
+    if (filePath.startsWith('updates/')) {
+        return ''
+    }
+    return stat.mtime.toISOString().slice(0, 10)
+}
+
+function getCategoryOrder(category) {
+    const order = CATEGORY_ORDER.indexOf(category)
+    return order === -1 ? CATEGORY_ORDER.length : order
+}
+
+function getSortDateKey(filePath, stat) {
+    const fileDate = path.basename(filePath).match(/^(\d{4})-?(\d{2})-?(\d{2})/)
+    if (fileDate) {
+        return `${fileDate[1]}-${fileDate[2]}-${fileDate[3]}`
+    }
+    if (filePath.startsWith('updates/')) {
+        return ''
     }
     return stat.mtime.toISOString().slice(0, 10)
 }
@@ -89,12 +124,20 @@ function buildDocsIndex() {
                 category: pickCategory(filePath, title),
                 date: getDocDate(filePath, stat),
                 updatedAt: stat.mtime.toISOString(),
+                sortDateKey: getSortDateKey(filePath, stat),
                 pinned: PINNED_DOCS.includes(filePath)
             }
         })
         .sort((left, right) => {
             if (left.pinned !== right.pinned) {
                 return left.pinned ? -1 : 1
+            }
+            const categoryDiff = getCategoryOrder(left.category) - getCategoryOrder(right.category)
+            if (categoryDiff !== 0) {
+                return categoryDiff
+            }
+            if (left.sortDateKey !== right.sortDateKey) {
+                return right.sortDateKey.localeCompare(left.sortDateKey)
             }
             return right.updatedAt.localeCompare(left.updatedAt)
         })

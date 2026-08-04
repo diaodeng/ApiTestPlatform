@@ -3,10 +3,24 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-07-31
+updated: 2026-08-03
 ---
 
 # 操作日志
+
+## [2026-08-03] INGEST-CODE | 工单日志查看器搜索结果内容列不换行
+
+- 触发：用户反馈 `web/src/components/ticket/LogViewerDialog.vue` 中虚拟表格的日志内容列会换行，期望保持单行显示。
+- 关键结论：`el-table-v2` 的内容单元格需要显式维持单行省略样式，避免长文本在虚拟表格里自动折行并抬高行高。
+- 变更传播链：`LogViewerDialog.vue` 搜索结果内容列 `cellRenderer` -> 单行省略样式 -> 更新说明文档和更新历史。
+- 文档结论：`web/public/docs/updates/2026-08-03-ticket-log-viewer-search-result-virtual-table.md` 与 `web/public/docs/updates/history.md` 已同步补充这次样式修复。
+
+## [2026-08-03] INGEST-CODE | 帮助文档用户说明与更新记录分层
+
+- 触发：用户希望 `web/public/docs` 主要承载面向最终用户的详细使用说明，同时把变更记录单独放入独立目录并保持自动发现展示。
+- 关键结论：帮助中心仍通过 `docs-index.json` 自动发现文档，但索引和菜单规则已按“用户说明 / 更新记录”分层，更新记录统一走 `web/public/docs/updates/`。
+- 变更传播链：`web/vite/plugins/docs-index.js` -> `web/src/views/about/about.vue` -> `web/public/docs` 用户说明文档和 `web/public/docs/updates/` 更新记录。
+- 文档结论：用户说明需要补齐功能用途、入口、配置项、参数示例、注意事项和常见问题；修改业务逻辑时若无对应说明文档，必须先补齐再交付。
 
 ## [2026-07-31] INGEST-CODE | 自动化关注范围模块 Code 与历史统计匹配
 
@@ -1697,3 +1711,13 @@ updated: 2026-07-31
 - 创建的双向链接：0 对（沿用工单域与自动化流程既有双向关联）。
 - 变更传播链：外部字段映射 -> 自动化范围判定 -> AI/日志/向量/自动群推送门禁 -> 默认统计模块过滤。
 - 总共涉及页面：3。
+
+## [2026-08-04] INGEST-CODE | 当前系统工单自定义实时统计通知
+
+- 触发：用户要求将专题统计能力扩展为当前系统内可配置的定时统计，结果不落统计快照，并支持配置范围、规则、通知渠道和消息格式。
+- 架构层：工单域 / 实时统计服务 / 通知投递 / 调度任务 / Web 配置页。
+- 创建的页面：`entities/services/ticket-custom-statistics.md`、`flows/ticket-custom-statistics-notification.md`、`contracts/ticket-custom-statistics.md`、`web/public/docs/updates/2026-08-04-ticket-custom-statistics-notification.md`。
+- 更新的页面：`index.md`、`entities/services/ticket-domain.md`、`entities/services/task-scheduler-domain.md`、`web/public/docs/ticket-sync-automation.md`。
+- 创建的双向链接：6 对（统计服务、流程、契约、工单域和任务调度域）。
+- 变更传播链：`ticket.sync.automation.customStatisticsProfiles` -> `TicketCustomStatisticsDefinitionService` -> `TicketCustomStatisticsDao` -> `TicketCustomStatisticsService` -> `TicketStatisticsNotificationService` -> `TicketSyncNotifyService`；手动入口 `POST /ticket/sync/custom-statistics/run` 与定时任务 `ticket_custom_statistics_report` 复用同一编排服务。
+- 总共涉及页面：8。

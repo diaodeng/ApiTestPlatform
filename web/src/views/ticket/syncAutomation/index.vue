@@ -2502,6 +2502,67 @@
             </section>
           </el-card>
         </el-tab-pane>
+        <el-tab-pane label="自定义统计">
+          <el-alert
+            title="统计结果不写入快照表。任务运行时按当前工单数据聚合；同一历史区间在工单后续状态变化后可能得到不同结果。"
+            type="warning"
+            show-icon
+            :closable="false"
+          />
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>当前系统工单统计方案</span>
+                <el-button link type="primary" icon="Plus" @click="addCustomStatisticsProfile">新增方案</el-button>
+              </div>
+            </template>
+            <el-card v-for="(profile, profileIndex) in form.customStatisticsProfiles" :key="profileIndex" shadow="never" class="mb16">
+              <template #header>
+                <div class="card-header">
+                  <span>{{ profile.label || profile.profileCode || `方案 ${profileIndex + 1}` }}</span>
+                  <el-space>
+                    <el-switch v-model="profile.enabled" active-text="启用" inactive-text="停用" />
+                    <el-button link type="danger" @click="removeCustomStatisticsProfile(profileIndex)">删除</el-button>
+                  </el-space>
+                </div>
+              </template>
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="8"><el-form-item label="方案编码"><el-input v-model="profile.profileCode" placeholder="如 daily_coupon_conclusion" /></el-form-item></el-col>
+                <el-col :xs="24" :md="8"><el-form-item label="方案名称"><el-input v-model="profile.label" placeholder="如 券模块今日结论统计" /></el-form-item></el-col>
+                <el-col :xs="24" :md="8"><el-form-item label="统计时间字段"><el-select v-model="profile.timeField" style="width:100%"><el-option v-for="field in customStatisticsTimeFields" :key="field.value" :label="field.label" :value="field.value" /></el-select></el-form-item></el-col>
+                <el-col :xs="24" :md="8"><el-form-item label="时间范围"><el-select v-model="profile.timeRange.mode" style="width:100%"><el-option label="今天（截至执行时刻）" value="today" /><el-option label="昨天（完整自然日）" value="yesterday" /><el-option label="最近 N 天" value="rolling_days" /><el-option label="本周（周一开始）" value="current_week" /><el-option label="上周（完整自然周）" value="previous_week" /><el-option label="自定义固定范围" value="custom" /></el-select></el-form-item></el-col>
+                <el-col v-if="profile.timeRange.mode === 'rolling_days'" :xs="24" :md="8"><el-form-item label="最近天数"><el-input-number v-model="profile.timeRange.rollingDays" :min="1" :max="90" style="width:100%" /></el-form-item></el-col>
+                <el-col v-if="profile.timeRange.mode === 'custom'" :xs="24" :md="8"><el-form-item label="开始时间"><el-date-picker v-model="profile.timeRange.startTime" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%" /></el-form-item></el-col>
+                <el-col v-if="profile.timeRange.mode === 'custom'" :xs="24" :md="8"><el-form-item label="结束时间"><el-date-picker v-model="profile.timeRange.endTime" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%" /></el-form-item></el-col>
+              </el-row>
+              <el-divider content-position="left">统计范围</el-divider>
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12"><el-form-item label="项目 ID"><el-select v-model="profile.scope.projectIds" multiple filterable allow-create default-first-option placeholder="输入 ID 后回车" style="width:100%" /></el-form-item></el-col>
+                <el-col :xs="24" :md="12"><el-form-item label="模块 ID"><el-select v-model="profile.scope.moduleIds" multiple filterable allow-create default-first-option placeholder="输入 ID 后回车" style="width:100%" /></el-form-item></el-col>
+                <el-col :xs="24" :md="12"><el-form-item label="模块编码"><el-select v-model="profile.scope.moduleCodes" multiple filterable allow-create default-first-option placeholder="如 coupon，输入后回车" style="width:100%" /></el-form-item></el-col>
+                <el-col :xs="24" :md="12"><el-form-item label="工单类型"><el-select v-model="profile.scope.issueTypeIds" multiple filterable allow-create default-first-option style="width:100%"><el-option v-for="item in form.statClassification.issueTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
+              </el-row>
+              <el-divider content-position="left">分组规则</el-divider>
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="8"><el-form-item label="分组方式"><el-select v-model="profile.grouping.mode" style="width:100%"><el-option label="按字段原值分组" value="field" /><el-option label="按条件规则归类" value="rules" /></el-select></el-form-item></el-col>
+                <el-col v-if="profile.grouping.mode === 'field'" :xs="24" :md="8"><el-form-item label="分组字段"><el-select v-model="profile.grouping.sourceField" style="width:100%"><el-option v-for="field in customStatisticsFields" :key="field.value" :label="field.label" :value="field.value" /></el-select></el-form-item></el-col>
+                <el-col v-if="profile.grouping.mode === 'rules'" :xs="24" :md="8"><el-form-item label="重叠规则"><el-select v-model="profile.grouping.overlapMode" style="width:100%"><el-option label="允许同时归入多个分组" value="allow" /><el-option label="仅命中最高优先级分组" value="exclusive" /></el-select></el-form-item></el-col>
+                <el-col v-if="profile.grouping.mode === 'rules'" :xs="24" :md="8"><el-form-item label="未命中"><el-switch v-model="profile.grouping.includeUnmatched" active-text="归入未归类" inactive-text="不计入分组" /></el-form-item></el-col>
+              </el-row>
+              <template v-if="profile.grouping.mode === 'rules'">
+                <el-button link type="primary" icon="Plus" @click="addCustomStatisticsGroup(profile)">新增规则分组</el-button>
+                <el-card v-for="(group, groupIndex) in profile.grouping.groups" :key="groupIndex" shadow="never" class="mt16">
+                  <el-row :gutter="12"><el-col :xs="24" :md="5"><el-input v-model="group.groupCode" placeholder="分组编码" /></el-col><el-col :xs="24" :md="5"><el-input v-model="group.label" placeholder="分组名称" /></el-col><el-col :xs="24" :md="4"><el-input-number v-model="group.priority" :min="0" style="width:100%" /></el-col><el-col :xs="24" :md="4"><el-select v-model="group.conditionMode" style="width:100%"><el-option label="全部满足" value="all" /><el-option label="任一满足" value="any" /></el-select></el-col><el-col :xs="24" :md="6"><el-button link type="primary" @click="addCustomStatisticsCondition(group)">新增条件</el-button><el-button link type="danger" @click="profile.grouping.groups.splice(groupIndex, 1)">删除分组</el-button></el-col></el-row>
+                  <el-row v-for="(condition, conditionIndex) in group.conditions" :key="conditionIndex" :gutter="12" class="mt16"><el-col :xs="24" :md="6"><el-select v-model="condition.sourceField" style="width:100%"><el-option v-for="field in customStatisticsFields" :key="field.value" :label="field.label" :value="field.value" /></el-select></el-col><el-col :xs="24" :md="5"><el-select v-model="condition.operator" style="width:100%"><el-option label="等于" value="equals" /><el-option label="包含" value="contains" /><el-option label="属于" value="in" /><el-option label="正则" value="regex" /><el-option label="为空" value="is_empty" /><el-option label="不为空" value="is_not_empty" /></el-select></el-col><el-col :xs="24" :md="10"><el-select v-if="!isCustomTrendEmptyOperator(condition.operator)" v-model="condition.matchValues" multiple filterable allow-create default-first-option placeholder="输入后回车" style="width:100%" /><span v-else class="text-muted">无需填写匹配值</span></el-col><el-col :xs="24" :md="3"><el-button link type="danger" @click="group.conditions.splice(conditionIndex, 1)">删除</el-button></el-col></el-row>
+                </el-card>
+              </template>
+              <el-divider content-position="left">通知</el-divider>
+              <el-row :gutter="16"><el-col :xs="24" :md="8"><el-form-item label="发送通知"><el-switch v-model="profile.notification.enabled" /></el-form-item></el-col><el-col v-if="profile.notification.enabled" :xs="24" :md="8"><el-form-item label="发送渠道"><el-select v-model="profile.notification.sendMode" style="width:100%"><el-option v-for="item in notifySendModes" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col><el-col v-if="profile.notification.enabled" :xs="24" :md="8"><el-form-item label="通知格式"><el-select v-model="profile.notification.messageFormat" style="width:100%"><el-option label="文本模板" value="text" /><el-option label="飞书卡片（飞书渠道）" value="feishu_card" /></el-select></el-form-item></el-col></el-row>
+              <el-row v-if="profile.notification.enabled" :gutter="16"><el-col v-if="profile.notification.sendMode !== 'feishu_app'" :xs="24" :md="12"><el-form-item label="推送配置"><el-select v-model="profile.notification.pushIds" multiple filterable style="width:100%"><el-option v-for="item in pushOptions" :key="item.pushId || item.value" :label="item.pushName || item.label || item.name" :value="item.pushId || item.value" /></el-select></el-form-item></el-col><el-col v-if="profile.notification.sendMode !== 'push_config'" :xs="24" :md="12"><el-form-item label="飞书群 chat_id"><el-select v-model="profile.notification.appChatIds" multiple filterable allow-create default-first-option style="width:100%" /></el-form-item></el-col><el-col v-if="profile.notification.sendMode !== 'push_config'" :xs="24" :md="12"><el-form-item label="飞书 appId"><el-input v-model="profile.notification.appId" /></el-form-item></el-col><el-col v-if="profile.notification.sendMode !== 'push_config'" :xs="24" :md="12"><el-form-item label="飞书 appSecret"><el-input v-model="profile.notification.appSecret" type="password" show-password /></el-form-item></el-col><el-col :span="24"><el-form-item label="消息模板"><el-input v-model="profile.notification.messageTemplate" type="textarea" :rows="5" placeholder="可用变量：${profile_label} ${start_time} ${end_time} ${time_field_label} ${total_count} ${group_summary} ${top_tickets} ${now_time}" /></el-form-item></el-col><el-col :xs="24" :md="8"><el-form-item label="附带工单明细"><el-switch v-model="profile.notification.includeTopTickets" /></el-form-item></el-col><el-col v-if="profile.notification.includeTopTickets" :xs="24" :md="8"><el-form-item label="明细数量"><el-input-number v-model="profile.notification.topTicketLimit" :min="1" :max="20" style="width:100%" /></el-form-item></el-col></el-row>
+            </el-card>
+            <el-empty v-if="!form.customStatisticsProfiles.length" description="暂无统计方案，请新增后保存配置" />
+          </el-card>
+        </el-tab-pane>
         <el-tab-pane label="操作">
           <el-card shadow="never" class="config-card mt16">
             <template #header>
@@ -2580,6 +2641,18 @@
                       发送汇总统计
                     </el-button>
                   </el-form-item>
+                  <el-divider content-position="left">自定义统计手动执行</el-divider>
+                  <el-form-item label="统计方案">
+                    <el-select v-model="customStatisticsRunForm.profileCodes" multiple clearable placeholder="留空执行全部启用方案" style="width: 100%">
+                      <el-option v-for="profile in form.customStatisticsProfiles" :key="profile.profileCode" :label="profile.label || profile.profileCode" :value="profile.profileCode" :disabled="!profile.enabled || !profile.profileCode" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="发送通知">
+                    <el-switch v-model="customStatisticsRunForm.send" active-text="按方案发送" inactive-text="仅预览" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" :loading="customStatisticsRunLoading" @click="handleRunCustomStatistics">执行自定义统计</el-button>
+                  </el-form-item>
                 </el-form>
               </el-col>
             </el-row>
@@ -2590,6 +2663,15 @@
               show-icon
               :closable="false"
               :title="`统计结果：命中 ${personPreviewResult.personCount || 0} 人，超时记录 ${personPreviewResult.overdueRecordCount || 0} 条`"
+            />
+            <el-alert
+              v-for="item in customStatisticsRunResult"
+              :key="item.profileCode"
+              class="mt16"
+              type="info"
+              show-icon
+              :closable="false"
+              :title="`${item.profileLabel}：工单 ${item.totalCount || 0} 条，${(item.groups || []).map((group) => `${group.label} ${group.count}`).join('；') || '无分组数据'}`"
             />
           </el-card>
 
@@ -2760,6 +2842,7 @@
     previewTicketSyncPersonReminder,
     runTicketSyncPersonReminder,
     runTicketSyncSummaryReport,
+    runTicketCustomStatistics,
     sendTicketSyncGroupPushByTicket,
   } from '@/api/ticket/ticket';
   import { listAiProviderOptions } from '@/api/system/aiprovider';
@@ -2803,6 +2886,10 @@
     removeCustomTrendMetric,
     addCustomTrendMetricGroup,
     addCustomTrendMetricCondition,
+    addCustomStatisticsProfile,
+    removeCustomStatisticsProfile,
+    addCustomStatisticsGroup,
+    addCustomStatisticsCondition,
   } = useSyncConfig(proxy);
   const allStatisticFieldOptions = [
     { value: 'issueTypeId', label: '工单类型' }, { value: 'isProblem', label: '是否问题' },
@@ -2810,6 +2897,18 @@
     { value: 'rootCauseType', label: '根因分类' }, { value: 'solutionType', label: '解决方式' },
     { value: 'resolutionCode', label: '关闭结果' }, { value: 'internalPriority', label: '内部优先级' },
     { value: 'projectId', label: '项目' }, { value: 'moduleId', label: '模块' },
+  ];
+  const customStatisticsFields = [
+    ...allStatisticFieldOptions,
+    { value: 'moduleName', label: '模块名称' },
+    { value: 'problemPatternCode', label: '细分问题' },
+    { value: 'processedAt', label: '形成结论时间' },
+    { value: 'hasConclusion', label: '是否有结论（processedAt 不为空）' },
+  ];
+  const customStatisticsTimeFields = [
+    { value: 'submitTime', label: '提交时间' }, { value: 'createTime', label: '创建时间' },
+    { value: 'firstResponseAt', label: '首次响应时间' }, { value: 'processedAt', label: '形成结论时间' },
+    { value: 'resolvedAt', label: '处置完成时间' }, { value: 'closedAt', label: '关闭时间' },
   ];
   const statisticFieldOptions = computed(() => allStatisticFieldOptions.filter((item) => form.statisticFieldKeys.includes(item.value)));
   function isCustomTrendEmptyOperator(operator) {
@@ -2832,6 +2931,7 @@
   const personPreviewLoading = ref(false);
   const personRunLoading = ref(false);
   const summaryRunLoading = ref(false);
+  const customStatisticsRunLoading = ref(false);
   const autoCategoryStatsLoading = ref(false);
   const autoCategoryRunLoading = ref(false);
   const bitablePullFieldsLoading = ref(false);
@@ -2852,6 +2952,11 @@
     startTime: '',
     endTime: '',
   });
+  const customStatisticsRunForm = reactive({
+    profileCodes: [],
+    send: true,
+  });
+  const customStatisticsRunResult = ref([]);
   const autoCategoryForm = reactive({
     strategy: 'ai',
     aiPromptCode: '',
@@ -3056,6 +3161,25 @@
       })
       .finally(() => {
         summaryRunLoading.value = false;
+      });
+  }
+
+  function handleRunCustomStatistics() {
+    customStatisticsRunLoading.value = true;
+    runTicketCustomStatistics({
+      profileCodes: customStatisticsRunForm.profileCodes.length ? customStatisticsRunForm.profileCodes : null,
+      send: customStatisticsRunForm.send,
+    })
+      .then((response) => {
+        customStatisticsRunResult.value = Array.isArray(response.data) ? response.data : [];
+        proxy.$modal.msgSuccess(`自定义统计执行完成，共 ${customStatisticsRunResult.value.length} 个方案`);
+      })
+      .catch((error) => {
+        customStatisticsRunResult.value = [];
+        proxy.$modal.msgError(error?.message || '自定义统计执行失败');
+      })
+      .finally(() => {
+        customStatisticsRunLoading.value = false;
       });
   }
 

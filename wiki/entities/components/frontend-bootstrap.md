@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-05-20
 created: 2026-05-20
-updated: 2026-06-28
+updated: 2026-08-03
 related_files:
   - web/src/main.js
   - web/src/App.vue
@@ -36,7 +36,7 @@ graph TD
 - 注册通用组件、权限指令和工具方法。
 - 挂载路由、状态管理、国际化和 UI 库。
 - 在根组件中恢复主题样式。
-- 在 Vite 启动和构建时通过 `web/vite/plugins/docs-index.js` 扫描 `web/public/docs`，生成 `docs-index.json` 供帮助中心自动展示文档。
+- 在 Vite 启动和构建时通过 `web/vite/plugins/docs-index.js` 扫描 `web/public/docs`，生成 `docs-index.json` 供帮助中心自动展示文档；其中 `web/public/docs/updates/` 作为独立更新记录目录，会在帮助中心单独分组展示。
 
 ## 依赖关系
 
