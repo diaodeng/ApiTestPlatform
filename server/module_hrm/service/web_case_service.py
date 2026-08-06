@@ -28,9 +28,6 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from module_hrm.entity.vo.web_case_vo import (
     AddWebCaseModel,
     WebAssertionModel,
-    WebBrowserSessionModel,
-    WebBrowserSessionPageQueryModel,
-    WebBrowserSessionSaveModel,
     WebCaseDetailModel,
     WebCaseModel,
     WebCasePageQueryModel,
@@ -42,9 +39,6 @@ from module_hrm.entity.vo.web_case_vo import (
     WebCaseRunStopRequestModel,
     WebCaseRunRequestModel,
     WebLocatorModel,
-    WebRuntimeProfileModel,
-    WebRuntimeProfilePageQueryModel,
-    WebRuntimeProfileSaveModel,
     WebRecordingApplyRequestModel,
     WebRecordingCancelRequestModel,
     WebRecordingContinueRequestModel,
@@ -1066,7 +1060,10 @@ class WebCaseService:
         user_name: str | None,
         scene_label: str,
     ) -> None:
-        """将客户端上报的最终浏览器状态同步回 Browser Session 或 Cookie 配置。"""
+        """旧 Session/Profile 回写入口已废弃，统一凭证仅允许显式创建。"""
+        logger.info(f"[{scene_label}] 跳过旧 Browser Session/Profile 自动回写，凭证状态仅支持显式保存")
+        return
+
         runtime_debug = cls._extract_runtime_debug_payload(payload)
         auto_sync_flag = cls._pick_runtime_option_value(
             runtime_debug,
@@ -1441,6 +1438,17 @@ class WebCaseService:
         if session_model.storage_state:
             runtime_overrides["persistContextSeedState"] = cls._normalize_storage_state_payload(session_model.storage_state)
         return runtime_overrides
+
+    @classmethod
+    def _resolve_credential_runtime_overrides(cls, query_db: Session, binding_id: str | None) -> dict[str, Any]:
+        """将统一凭证的 Playwright storageState 转为本次只读浏览器初始化状态。"""
+        binding_id_value = str(binding_id or "").strip()
+        if not binding_id_value:
+            return {}
+        from modules.credential.service.credential_resolve_service import CredentialResolveService
+
+        storage_state = CredentialResolveService.resolve_playwright_storage_state(query_db, binding_id_value)
+        return {"persistContextSeedState": cls._normalize_storage_state_payload(storage_state)}
 
     @classmethod
     def _build_case_model(cls, web_case: HrmWebCase) -> WebCaseModel:
@@ -2959,6 +2967,28 @@ class WebCaseService:
         )
 
     @classmethod
+    def create_credential_from_recording_services(cls, query_db: Session, recording_id: int, credential_name: str, binding_name: str, target_url: str, sharing_mode: str, current_user) -> CrudResponseModel:
+        """将录制完成后 Agent 上报的 storageState 保存为新的统一浏览器凭证和绑定。"""
+        session = WebCaseDao.get_recording_session(query_db, recording_id)
+        if not session:
+            return CrudResponseModel(is_success=False, message="录制记录不存在")
+        summary = cls._loads(session.result_summary_json, {})
+        options = cls._loads(session.options_json, {}).get("runtimeOptions", {})
+        final_state = cls._extract_persist_final_state(summary, options)
+        if not final_state:
+            return CrudResponseModel(is_success=False, message="录制未上报最终浏览器状态，请先完成录制并停止浏览器")
+        from modules.credential.entity.vo.credential_vo import CredentialBindingSaveModel, CredentialSaveModel
+        from modules.credential.service.credential_binding_service import CredentialBindingService
+        from modules.credential.service.credential_service import CredentialService
+        credential_result = CredentialService.create_credential(query_db, CredentialSaveModel(credentialName=credential_name, credentialType="browser_storage", authMode="manual", secret={"storageState": final_state}, sharingMode=sharing_mode), current_user)
+        if not credential_result.is_success:
+            return credential_result
+        binding_result = CredentialBindingService.create_binding(query_db, CredentialBindingSaveModel(bindingName=binding_name or credential_name, credentialId=str(credential_result.result["credentialId"]), businessType="web_case", projectionType="playwright_storage", targetUrl=target_url or session.start_url, sharingMode=sharing_mode), current_user)
+        if not binding_result.is_success:
+            return binding_result
+        return CrudResponseModel(is_success=True, message="已从录制状态创建统一凭证和 Web 绑定", result={"credentialId": credential_result.result["credentialId"], "bindingId": binding_result.result["bindingId"]})
+
+    @classmethod
     async def start_recording_services(
         cls,
         query_db: Session,
@@ -2972,26 +3002,11 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
-        state_source_type = cls._normalize_state_source_type(request_model.state_source_type)
-        browser_session_id = (
-            str(request_model.browser_session_id or "").strip()
-            if state_source_type == "session"
-            else ""
-        )
-        runtime_profile_id = (
-            str(request_model.runtime_profile_id or "").strip()
-            if state_source_type == "cookie"
-            else ""
-        )
+        credential_binding_id = str(request_model.credential_binding_id or "").strip()
+        state_source_type = "credential" if credential_binding_id else "none"
         try:
-            profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
-                query_db,
-                runtime_profile_id,
-            )
-            browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
-                query_db,
-                browser_session_id,
-            )
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
         merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, browser_session_runtime_overrides)
@@ -3000,22 +3015,16 @@ class WebCaseService:
         if merged_runtime_overrides:
             runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
         runtime_options_payload["stateSourceType"] = state_source_type
-        runtime_options_payload["browserSessionId"] = browser_session_id
-        runtime_options_payload["runtimeProfileId"] = runtime_profile_id
+        runtime_options_payload["credentialBindingId"] = credential_binding_id
         manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
-        persist_context_enabled = bool(
-            state_source_type in {"session", "cookie"}
-            and request_model.persist_context_enabled
-        )
+        persist_context_enabled = bool(credential_binding_id and request_model.persist_context_enabled)
         persist_context_auto_sync_session = bool(
             persist_context_enabled and request_model.persist_context_auto_sync_session
         )
         persist_context_key = str(
-            request_model.persist_context_key
-            or browser_session_runtime_overrides.get("persistContextKey")
-            or ""
+            request_model.persist_context_key or ""
         ).strip()
         runtime_options_payload["manualLoginEnabled"] = manual_login_enabled
         runtime_options_payload["manualLoginWaitSec"] = manual_login_wait_sec
@@ -3410,26 +3419,11 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
-        state_source_type = cls._normalize_state_source_type(request_model.state_source_type)
-        browser_session_id = (
-            str(request_model.browser_session_id or "").strip()
-            if state_source_type == "session"
-            else ""
-        )
-        runtime_profile_id = (
-            str(request_model.runtime_profile_id or "").strip()
-            if state_source_type == "cookie"
-            else ""
-        )
+        credential_binding_id = str(request_model.credential_binding_id or "").strip()
+        state_source_type = "credential" if credential_binding_id else "none"
         try:
-            profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
-                query_db,
-                runtime_profile_id,
-            )
-            browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
-                query_db,
-                browser_session_id,
-            )
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
         merged_runtime_overrides = cls._merge_runtime_overrides(
@@ -3448,32 +3442,25 @@ class WebCaseService:
                 "recording_id",
                 "agent_id",
                 "agent_code",
-                "state_source_type",
                 "persist_context_enabled",
                 "persist_context_auto_sync_session",
                 "persist_context_key",
-                "browser_session_id",
-                "runtime_profile_id",
+                "credential_binding_id",
                 "runtime_overrides",
             },
         )
-        persist_context_enabled = bool(
-            state_source_type in {"session", "cookie"}
-            and request_model.persist_context_enabled
-        )
+        persist_context_enabled = bool(credential_binding_id and request_model.persist_context_enabled)
         persist_context_auto_sync_session = bool(
             persist_context_enabled and request_model.persist_context_auto_sync_session
         )
         persist_context_key = str(
             request_model.persist_context_key
-            or browser_session_runtime_overrides.get("persistContextKey")
             or ""
         ).strip()
-        runtime_options["stateSourceType"] = state_source_type
+        runtime_options["stateSourceType"] = "credential" if credential_binding_id else "none"
         runtime_options["persistContextEnabled"] = persist_context_enabled
         runtime_options["persistContextAutoSyncSession"] = persist_context_auto_sync_session
-        runtime_options["browserSessionId"] = browser_session_id
-        runtime_options["runtimeProfileId"] = runtime_profile_id
+        runtime_options["credentialBindingId"] = credential_binding_id
         if persist_context_key:
             runtime_options["persistContextKey"] = persist_context_key
         if persist_context_enabled:
@@ -3562,26 +3549,11 @@ class WebCaseService:
         if agent is None or not agent.agent_code:
             return CrudResponseModel(is_success=False, message="未找到可用的Agent")
 
-        state_source_type = cls._normalize_state_source_type(request_model.state_source_type)
-        browser_session_id = (
-            str(request_model.browser_session_id or "").strip()
-            if state_source_type == "session"
-            else ""
-        )
-        runtime_profile_id = (
-            str(request_model.runtime_profile_id or "").strip()
-            if state_source_type == "cookie"
-            else ""
-        )
+        state_source_type = "credential" if str(request_model.credential_binding_id or "").strip() else "none"
+        credential_binding_id = str(request_model.credential_binding_id or "").strip()
         try:
-            profile_runtime_overrides = cls._resolve_runtime_profile_runtime_overrides(
-                query_db,
-                runtime_profile_id,
-            )
-            browser_session_runtime_overrides = cls._resolve_browser_session_runtime_overrides(
-                query_db,
-                browser_session_id,
-            )
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
         merged_runtime_overrides = cls._merge_runtime_overrides(profile_runtime_overrides, browser_session_runtime_overrides)
@@ -3607,21 +3579,17 @@ class WebCaseService:
         runtime_options = request_model.model_dump(
             mode="json",
             by_alias=True,
-            exclude={"web_case_id", "agent_id", "agent_code", "runtime_profile_id", "runtime_overrides", "browser_session_id"},
+            exclude={"web_case_id", "agent_id", "agent_code", "credential_binding_id", "runtime_overrides"},
         )
         manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
-        persist_context_enabled = bool(
-            state_source_type in {"session", "cookie"}
-            and request_model.persist_context_enabled
-        )
+        persist_context_enabled = bool(credential_binding_id and request_model.persist_context_enabled)
         persist_context_auto_sync_session = bool(
             persist_context_enabled and request_model.persist_context_auto_sync_session
         )
         persist_context_key = str(
             request_model.persist_context_key
-            or browser_session_runtime_overrides.get("persistContextKey")
             or ""
         ).strip()
         runtime_options["manualLoginEnabled"] = manual_login_enabled
@@ -3630,8 +3598,7 @@ class WebCaseService:
         runtime_options["stateSourceType"] = state_source_type
         runtime_options["persistContextEnabled"] = persist_context_enabled
         runtime_options["persistContextAutoSyncSession"] = persist_context_auto_sync_session
-        runtime_options["browserSessionId"] = browser_session_id
-        runtime_options["runtimeProfileId"] = runtime_profile_id
+        runtime_options["credentialBindingId"] = credential_binding_id
         if persist_context_key:
             runtime_options["persistContextKey"] = persist_context_key
         if persist_context_enabled:

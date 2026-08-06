@@ -262,111 +262,14 @@ class WebCaseRunRequestModel(WebJsonModel):
     persist_context_enabled: bool = False
     persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None
-    browser_session_id: str | None = None
+    credential_binding_id: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
-    runtime_profile_id: str | None = None
     manual_login_enabled: bool = False
     manual_login_wait_sec: int = 120
     manual_login_require_confirm: bool = False
     save_screenshot_on_failure: bool = True
     continue_on_failure: bool = False
     trigger_type: str = "manual"
-
-
-class WebRuntimeProfileModel(WebJsonModel):
-    profile_id: str | None = None
-    profile_name: str = ""
-    profile_type: str = "runtime"
-    targets: list[str] = Field(default_factory=lambda: ["web"])
-    enabled: bool = True
-    project_id: int | None = None
-    module_id: int | None = None
-    sort: int = 0
-    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
-    variables: dict[str, Any] = Field(default_factory=dict)
-    cookie_rules: list[dict[str, Any]] = Field(default_factory=list)
-    persist_context_scopes: list[WebPersistContextScopeModel] = Field(default_factory=list)
-    remark: str | None = None
-    create_by: str | None = None
-    update_by: str | None = None
-    create_time: datetime | None = None
-    update_time: datetime | None = None
-
-
-class WebRuntimeProfileSaveModel(WebJsonModel):
-    profile_id: str | None = None
-    profile_name: str = ""
-    profile_type: str = "runtime"
-    targets: list[str] = Field(default_factory=lambda: ["web"])
-    enabled: bool = True
-    project_id: int | None = None
-    module_id: int | None = None
-    sort: int = 0
-    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
-    variables: dict[str, Any] = Field(default_factory=dict)
-    cookie_rules: list[dict[str, Any]] = Field(default_factory=list)
-    persist_context_scopes: list[WebPersistContextScopeModel] = Field(default_factory=list)
-    remark: str | None = None
-
-
-class WebRuntimeProfileQueryModel(QueryModel):
-    profile_id: str | None = None
-    profile_name: str | None = None
-    project_id: int | None = None
-    module_id: int | None = None
-    enabled: bool | None = None
-    target: str | None = None
-
-
-@as_query
-class WebRuntimeProfilePageQueryModel(WebRuntimeProfileQueryModel):
-    is_page: bool = False
-
-
-class WebBrowserSessionModel(WebJsonModel):
-    session_id: str | None = None
-    session_name: str = ""
-    scope_key: str = ""
-    enabled: bool = True
-    project_id: int | None = None
-    module_id: int | None = None
-    browser_name: str | None = None
-    sort: int = 0
-    host_patterns: list[str] = Field(default_factory=list)
-    storage_state: dict[str, Any] = Field(default_factory=dict)
-    remark: str | None = None
-    create_by: str | None = None
-    update_by: str | None = None
-    create_time: datetime | None = None
-    update_time: datetime | None = None
-
-
-class WebBrowserSessionSaveModel(WebJsonModel):
-    session_id: str | None = None
-    session_name: str = ""
-    scope_key: str | None = None
-    enabled: bool = True
-    project_id: int | None = None
-    module_id: int | None = None
-    browser_name: str | None = None
-    sort: int = 0
-    host_patterns: list[str] = Field(default_factory=list)
-    storage_state: dict[str, Any] = Field(default_factory=dict)
-    remark: str | None = None
-
-
-class WebBrowserSessionQueryModel(QueryModel):
-    session_id: str | None = None
-    session_name: str | None = None
-    enabled: bool | None = None
-    project_id: int | None = None
-    module_id: int | None = None
-    browser_name: str | None = None
-
-
-@as_query
-class WebBrowserSessionPageQueryModel(WebBrowserSessionQueryModel):
-    is_page: bool = False
 
 
 class WebRecordingStartRequestModel(WebJsonModel):
@@ -381,9 +284,8 @@ class WebRecordingStartRequestModel(WebJsonModel):
     persist_context_enabled: bool = False
     persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None
-    browser_session_id: str | None = None
+    credential_binding_id: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
-    runtime_profile_id: str | None = None
     manual_login_enabled: bool = False
     manual_login_wait_sec: int = 120
     manual_login_require_confirm: bool = False
@@ -412,6 +314,15 @@ class WebRecordingStopRequestModel(WebJsonModel):
     agent_id: int | None = None
     agent_code: str | None = None
     close_browser_on_stop: bool | None = None
+
+
+class WebRecordingCreateCredentialRequestModel(WebJsonModel):
+    """将录制过程最终浏览器状态保存为统一凭证。"""
+
+    credential_name: str
+    binding_name: str | None = None
+    target_url: str | None = None
+    sharing_mode: str = "shared_read"
 
 
 class WebRecordingContinueRequestModel(WebJsonModel):
@@ -453,12 +364,10 @@ class WebRecordingReplayRequestModel(WebJsonModel):
     browser_name: str | None = None
     headless: bool | None = None
     close_browser_on_finish: bool | None = None
-    state_source_type: str | None = None
     persist_context_enabled: bool = False
     persist_context_auto_sync_session: bool = True
     persist_context_key: str | None = None
-    browser_session_id: str | None = None
-    runtime_profile_id: str | None = None
+    credential_binding_id: str | None = None
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     save_screenshot_on_failure: bool = True
     continue_on_failure: bool = False

@@ -33,6 +33,7 @@ updated: 2026-05-20
 - [HRM 核心数据模型](entities/data-models/hrm-core-models.md)
 - [任务调度核心数据模型](entities/data-models/task-core-models.md)
 - [工单核心数据模型](entities/data-models/ticket-core-models.md)
+- [统一凭证数据模型](entities/data-models/credential-management.md)
 - [HRM 枚举集](entities/enums/hrm-enums.md)
 - [工单枚举集](entities/enums/ticket-enums.md)
 - [前端启动骨架](entities/components/frontend-bootstrap.md)
@@ -55,8 +56,10 @@ updated: 2026-05-20
 - [工单流转路由流程](flows/ticket-workflow-routing.md)
 - [工单自动化链路流程](flows/ticket-automation-flow.md)
 - [工单自定义统计通知流程](flows/ticket-custom-statistics-notification.md)
+- [统一凭证刷新流程](flows/credential-refresh.md)
 
 ## 契约
 
 - [工单自定义统计接口与配置契约](contracts/ticket-custom-statistics.md)
 - [工单外部同步与内网拉取流程](flows/ticket-external-sync-flow.md)
+- [统一凭证接口契约](contracts/credential-api.md)

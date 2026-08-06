@@ -13,19 +13,16 @@ from module_admin.service.login_service import LoginService
 from module_hrm.entity.do.web_case_do import HrmWebCase
 from module_hrm.entity.vo.web_case_vo import (
     AddWebCaseModel,
-    WebBrowserSessionPageQueryModel,
-    WebBrowserSessionSaveModel,
     WebCaseDetailModel,
     WebCasePageQueryModel,
     WebCaseRunCancelRequestModel,
     WebCaseRunStopRequestModel,
-    WebRuntimeProfilePageQueryModel,
-    WebRuntimeProfileSaveModel,
     WebCaseRunRecordPageQueryModel,
     WebCaseRunContinueRequestModel,
     WebCaseRunRequestModel,
     WebRecordingApplyRequestModel,
     WebRecordingCancelRequestModel,
+    WebRecordingCreateCredentialRequestModel,
     WebRecordingContinueRequestModel,
     WebRecordingReplayRequestModel,
     WebRecordingStepDeleteRequestModel,
@@ -165,10 +162,8 @@ async def delete_web_case(
         return ResponseUtil.error(msg=str(exc))
 
 
-@webCaseController.get(
-    "/runtime-profile/list",
-    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:list"))],
-)
+'''旧 Runtime Profile 与 Browser Session CRUD 路由已移除，认证状态统一通过 /system/credentials 管理。'''
+"""
 async def list_runtime_profile(
     request: Request,
     page_query: WebRuntimeProfilePageQueryModel = Depends(WebRuntimeProfilePageQueryModel.as_query),
@@ -343,6 +338,8 @@ async def delete_browser_session(
         return ResponseUtil.error(msg=str(exc))
 
 
+"""
+
 @webCaseController.post(
     "/run",
     dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:run"))],
@@ -355,7 +352,7 @@ async def run_web_case(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
-        if (run_request.persist_context_enabled or run_request.browser_session_id) and not _has_persist_context_permission(current_user):
+        if run_request.persist_context_enabled and not _has_persist_context_permission(current_user):
             return ResponseUtil.failure(msg="当前账号无权使用“保留浏览器状态”功能")
         result = await WebCaseService.run_web_case_services(
             query_db,
@@ -501,7 +498,7 @@ async def start_recording(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     try:
-        if (start_request.persist_context_enabled or start_request.browser_session_id) and not _has_persist_context_permission(current_user):
+        if start_request.persist_context_enabled and not _has_persist_context_permission(current_user):
             return ResponseUtil.failure(msg="当前账号无权使用“保留浏览器状态”功能")
         result = await WebCaseService.start_recording_services(
             query_db,
@@ -576,6 +573,14 @@ async def stop_recording(
     except Exception as exc:
         logger.exception(exc)
         return ResponseUtil.error(msg=str(exc))
+
+
+@webCaseController.post("/recording/{recording_id}/credential", dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:record"))])
+@log_decorator(title="录制状态保存统一凭证", business_type=1)
+async def create_credential_from_recording(request: Request, recording_id: int, data: WebRecordingCreateCredentialRequestModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """将手工登录后的录制最终状态保存为统一浏览器凭证。"""
+    result = await run_in_threadpool(WebCaseService.create_credential_from_recording_services, query_db, recording_id, data.credential_name, data.binding_name or data.credential_name, data.target_url or "", data.sharing_mode, current_user)
+    return ResponseUtil.success(msg=result.message, data=result.result) if result.is_success else ResponseUtil.failure(msg=result.message)
 
 
 @webCaseController.delete(

@@ -699,44 +699,17 @@ def _resolve_runtime_settings(
     return _apply_state_source_runtime_policy(merged, runtime_options)
 
 
-_SESSION_ID_KEYS = (
+_LEGACY_STATE_ID_KEYS = (
     "browserSessionId",
     "browser_session_id",
     "persistContextSessionId",
     "persist_context_session_id",
     "sessionProfileId",
     "session_profile_id",
-)
-_PROFILE_ID_KEYS = (
     "runtimeProfileId",
     "runtime_profile_id",
     "cookieProfileId",
     "cookie_profile_id",
-)
-_SESSION_SEED_KEYS = (
-    "persistContextSeedState",
-    "persist_context_seed_state",
-    "persistContextSeedStorageState",
-    "persist_context_seed_storage_state",
-)
-_SESSION_SCOPE_KEYS = (
-    "persistContextKey",
-    "persist_context_key",
-    "preserveContextKey",
-    "preserve_context_key",
-    "persistContextHosts",
-    "persist_context_hosts",
-    "persistContextHostPatterns",
-    "persist_context_host_patterns",
-)
-_COOKIE_RULE_KEYS = (
-    "cookieRules",
-    "cookie_rules",
-    "cookieScopes",
-    "cookie_scopes",
-    "cookieProfiles",
-    "cookie_profiles",
-    "cookies",
 )
 
 
@@ -747,22 +720,11 @@ def _drop_runtime_keys(runtime_settings: dict[str, Any], keys: tuple[str, ...]) 
 
 
 def _normalize_state_source_type(value: Any) -> str:
-    """标准化状态来源类型，仅保留 session/cookie/none。"""
+    """标准化状态来源类型，仅保留 credential/none。"""
     normalized = str(value or "").strip().lower()
-    if normalized in {"session", "cookie"}:
+    if normalized == "credential":
         return normalized
-    if normalized == "none":
-        return "none"
-    return ""
-
-
-def _resolve_runtime_profile_id(runtime_options: dict[str, Any]) -> str:
-    """解析 Cookie 配置 ID。"""
-    for key in _PROFILE_ID_KEYS:
-        profile_id = str(runtime_options.get(key) or "").strip()
-        if profile_id:
-            return profile_id
-    return ""
+    return "none"
 
 
 def _resolve_state_source_type(
@@ -770,23 +732,15 @@ def _resolve_state_source_type(
     *,
     fallback_runtime: dict[str, Any] | None = None,
 ) -> str:
-    """解析状态来源类型；未显式设置时根据 ID 推断。"""
+    """解析状态来源类型，仅接受统一凭证绑定。"""
     for source in (runtime_options, fallback_runtime or {}):
         normalized = _normalize_state_source_type(
             source.get("stateSourceType") or source.get("state_source_type")
         )
-        if normalized:
+        if normalized == "credential":
             return normalized
-
-    if _resolve_browser_session_id(runtime_options):
-        return "session"
-    if _resolve_runtime_profile_id(runtime_options):
-        return "cookie"
-    if fallback_runtime:
-        if _resolve_browser_session_id(fallback_runtime):
-            return "session"
-        if _resolve_runtime_profile_id(fallback_runtime):
-            return "cookie"
+        if str(source.get("credentialBindingId") or source.get("credential_binding_id") or "").strip():
+            return "credential"
     return "none"
 
 
@@ -794,55 +748,13 @@ def _apply_state_source_runtime_policy(
     merged_runtime: dict[str, Any],
     runtime_options: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    按状态来源策略清理运行时配置，确保“使用来源”和“是否保留状态”解耦。
-
-    规则：
-    - none: 不使用 session/cookie，并禁用状态保留。
-    - session: 仅使用 session（可不选具体项）；不应用 cookie 配置。
-    - cookie: 仅使用 cookie 配置（可不选具体项）；不应用 session 配置。
-    """
+    """移除旧 Session/Profile 字段，保留统一凭证和独立本地缓存配置。"""
     runtime_settings = dict(merged_runtime or {})
     state_source_type = _resolve_state_source_type(
         runtime_options, fallback_runtime=runtime_settings
     )
-    selected_session_id = _resolve_browser_session_id(runtime_options)
-    selected_profile_id = _resolve_runtime_profile_id(runtime_options)
-
+    _drop_runtime_keys(runtime_settings, _LEGACY_STATE_ID_KEYS)
     runtime_settings["stateSourceType"] = state_source_type
-
-    if state_source_type == "none":
-        _drop_runtime_keys(
-            runtime_settings,
-            _SESSION_ID_KEYS
-            + _PROFILE_ID_KEYS
-            + _SESSION_SEED_KEYS
-            + _SESSION_SCOPE_KEYS
-            + _COOKIE_RULE_KEYS,
-        )
-        runtime_settings["persistContextEnabled"] = False
-        runtime_settings["persistContextAutoSyncSession"] = False
-        runtime_settings["persistContextSyncToSession"] = False
-        return runtime_settings
-
-    if state_source_type == "session":
-        _drop_runtime_keys(runtime_settings, _PROFILE_ID_KEYS + _COOKIE_RULE_KEYS)
-        if selected_session_id:
-            runtime_settings["browserSessionId"] = selected_session_id
-        else:
-            _drop_runtime_keys(
-                runtime_settings,
-                _SESSION_ID_KEYS + _SESSION_SEED_KEYS + _SESSION_SCOPE_KEYS,
-            )
-        return runtime_settings
-
-    _drop_runtime_keys(
-        runtime_settings, _SESSION_ID_KEYS + _SESSION_SEED_KEYS + _SESSION_SCOPE_KEYS
-    )
-    if selected_profile_id:
-        runtime_settings["runtimeProfileId"] = selected_profile_id
-    else:
-        _drop_runtime_keys(runtime_settings, _PROFILE_ID_KEYS + _COOKIE_RULE_KEYS)
     return runtime_settings
 
 
@@ -879,33 +791,6 @@ def _resolve_persist_context_settings(
     return enabled, scope_key
 
 
-def _resolve_browser_session_id(runtime_options: dict[str, Any]) -> str:
-    """解析浏览器 Session ID。"""
-    for key in _SESSION_ID_KEYS:
-        session_id = str(runtime_options.get(key) or "").strip()
-        if session_id:
-            return session_id
-    return ""
-
-
-def _resolve_persist_context_auto_sync_session(
-    runtime_options: dict[str, Any], *, persist_enabled: bool
-) -> bool:
-    """解析是否启用“运行结束自动同步到 Browser Session”。"""
-    if not persist_enabled:
-        return False
-    candidates = [
-        runtime_options.get("persistContextAutoSyncSession"),
-        runtime_options.get("persist_context_auto_sync_session"),
-        runtime_options.get("persistContextSyncToSession"),
-        runtime_options.get("persist_context_sync_to_session"),
-    ]
-    for candidate in candidates:
-        if candidate not in (None, ""):
-            return _as_bool(candidate, True)
-    return True
-
-
 def _attach_runtime_persist_debug(
     runtime_debug: dict[str, Any],
     runtime_options: dict[str, Any],
@@ -916,17 +801,10 @@ def _attach_runtime_persist_debug(
 ) -> None:
     """补齐 runtimeDebug 中与浏览器状态同步相关的字段。"""
     runtime_debug["stateSourceType"] = _resolve_state_source_type(runtime_options)
-    runtime_debug["runtimeProfileId"] = _resolve_runtime_profile_id(runtime_options)
     _, persist_context_key = _resolve_persist_context_settings(runtime_options)
-    runtime_debug["browserSessionId"] = _resolve_browser_session_id(runtime_options)
+    runtime_debug["credentialBindingId"] = str(runtime_options.get("credentialBindingId") or runtime_options.get("credential_binding_id") or "").strip()
     runtime_debug["persistContextKey"] = persist_context_key
     runtime_debug["persistContextEnabled"] = bool(persist_enabled)
-    runtime_debug["persistContextAutoSyncSession"] = (
-        _resolve_persist_context_auto_sync_session(
-            runtime_options,
-            persist_enabled=persist_enabled,
-        )
-    )
     runtime_debug["persistContextHosts"] = _resolve_persist_context_hosts(
         runtime_options
     )
@@ -944,13 +822,8 @@ async def _append_persist_final_state_for_sync(
     *,
     persist_enabled: bool,
 ) -> None:
-    """在结束事件前附加最终 storage_state（按作用域过滤后）用于后端回写 Session。"""
-    auto_sync_session = _resolve_persist_context_auto_sync_session(
-        runtime_options,
-        persist_enabled=persist_enabled,
-    )
-    runtime_debug["persistContextAutoSyncSession"] = auto_sync_session
-    if not auto_sync_session or context is None:
+    """在结束事件前附加最终 storage_state，供显式创建统一凭证使用。"""
+    if context is None:
         return
     try:
         storage_state = await _capture_storage_state_payload(context)
@@ -1148,10 +1021,10 @@ def _build_context_state_path(
     if not persist_enabled:
         return None
 
-    runtime_profile_id = _resolve_runtime_profile_id(runtime_options)
+    credential_binding_id = str(runtime_options.get("credentialBindingId") or runtime_options.get("credential_binding_id") or "").strip()
     target_host = _host_from_url(start_url)
     raw_scope = (
-        scope_key or runtime_profile_id or default_scope or target_host or "default"
+        scope_key or credential_binding_id or default_scope or target_host or "default"
     )
     safe_scope = re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw_scope).strip("._-")
     if not safe_scope:
@@ -2921,7 +2794,7 @@ class WebTestService:
             prepared.cookie_rules = _normalize_cookie_rules(effective_runtime)
             prepared.runtime_debug = {
                 "stateSourceType": _resolve_state_source_type(effective_runtime),
-                "runtimeProfileId": _resolve_runtime_profile_id(effective_runtime),
+                "credentialBindingId": str(effective_runtime.get("credentialBindingId") or "").strip(),
                 "cookieRuleCount": len(prepared.cookie_rules),
                 "cookieVariableKeys": sorted(prepared.cookie_variables.keys()),
                 "runtimeVariableKeys": sorted(prepared.cookie_variables.keys()),
@@ -3627,7 +3500,7 @@ class WebTestService:
             runtime_debug = {
                 **runtime_debug,
                 "stateSourceType": _resolve_state_source_type(effective_runtime),
-                "runtimeProfileId": _resolve_runtime_profile_id(effective_runtime),
+                "credentialBindingId": str(effective_runtime.get("credentialBindingId") or "").strip(),
                 "cookieRuleCount": len(cookie_rules),
                 "cookieVariableKeys": sorted(cookie_variables.keys()),
                 "runtimeVariableKeys": sorted(cookie_variables.keys()),

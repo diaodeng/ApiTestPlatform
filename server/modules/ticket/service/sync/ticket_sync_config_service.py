@@ -482,11 +482,8 @@ class TicketSyncConfigService:
             "limit": 50,
             "includeClosed": True,
             "timeoutSec": 30,
-            "headers": {
-                "cookie": "",
-                "authorization": "",
-                "origin": "",
-            },
+            "credentialBindingId": "",
+            "origin": "",
         }
 
     # --- migrated from TicketSyncService._default_stat_classification_config ---
@@ -1345,8 +1342,9 @@ class TicketSyncConfigService:
         else:
             remote_sync = dict(cls.default_remote_sync_config())
             remote_sync.update(merged.get("remoteSync") or {})
-            remote_headers = remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}
-            remote_sync["headers"] = {**cls.default_remote_sync_config()["headers"], **remote_headers}
+            remote_sync.pop("headers", None)
+            remote_sync["credentialBindingId"] = str(remote_sync.get("credentialBindingId") or "").strip()
+            remote_sync["origin"] = str(remote_sync.get("origin") or "").strip()
             remote_sync["enabled"] = bool(remote_sync.get("enabled"))
             remote_sync["limit"] = min(max(int(remote_sync.get("limit") or 50), 1), 200)
             remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))

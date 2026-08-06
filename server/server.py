@@ -15,6 +15,7 @@ from module_admin.controller.ai_prompt_template_controller import aiPromptTempla
 from module_admin.controller.ai_provider_controller import aiProviderController
 from module_admin.controller.ai_task_execution_controller import aiTaskExecutionController
 from module_admin.controller.api_key_controller import apiKeyController
+from modules.credential.controller.credential_controller import credentialController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
@@ -155,6 +156,7 @@ controller_list = [
     {"router": aiTaskExecutionController, "tags": ["系统管理-AI执行审计管理"]},
     {"router": aiPromptTemplateController, "tags": ["系统管理-AI提示词管理"]},
     {"router": apiKeyController, "tags": ["系统管理-API Key管理"]},
+    {"router": credentialController, "tags": ["系统管理-统一凭证管理"]},
     {"router": noticeController, "tags": ["系统管理-通知公告管理"]},
     {"router": logController, "tags": ["系统管理-日志管理"]},
     {"router": onlineController, "tags": ["系统监控-在线用户"]},

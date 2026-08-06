@@ -18,6 +18,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPrepareRequestModel,
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
+    TicketLogPullExternalConfigModel,
     TicketLogPullPostProcessConfigModel,
     TicketLogPullProjectVendorMapQueryModel,
     TicketLogPullProjectVendorMapUpsertModel,
@@ -35,6 +36,19 @@ from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
 ticketLogPullController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
+
+
+@ticketLogPullController.get("/log-pull/external-config", dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))])
+async def get_ticket_log_pull_external_config(request: Request, query_db: Session = Depends(get_db)):
+    """获取日志拉取外部环境配置，不包含任何凭证明文。"""
+    return ResponseUtil.success(data=await run_in_threadpool(TicketLogPullService.get_external_config_services, query_db))
+
+
+@ticketLogPullController.put("/log-pull/external-config", dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))])
+async def save_ticket_log_pull_external_config(request: Request, config: TicketLogPullExternalConfigModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """保存日志拉取外部环境配置。"""
+    result = await run_in_threadpool(TicketLogPullService.save_external_config_services, query_db, config.model_dump(by_alias=True), current_user)
+    return ResponseUtil.success(msg=result.message) if result.is_success else ResponseUtil.failure(msg=result.message)
 
 
 def _report_ticket_log_prepare_download_progress(

@@ -14,11 +14,13 @@ import {
   getTicketLogPullPostProcessConfig,
   saveTicketLogPullPostProcessConfig,
 } from '@/api/ticket/logPull'
+import { listCredentialBindingOptions } from '@/api/system/credential'
 
 export function useSyncConfig(proxy) {
   const loading = ref(false)
   const saving = ref(false)
   const workflowStatusOptions = ref([])
+  const remoteCredentialOptions = ref([])
 
   const mappingTexts = reactive({
     projectMappings: '[]', moduleMappings: '[]', vendorMappings: '[]',
@@ -236,7 +238,7 @@ export function useSyncConfig(proxy) {
         enabled: false, pullUrl: '', ackUrl: '', consumer: '',
         sourceSystem: 'public', limit: 50, includeClosed: true,
         timeoutSec: 30,
-        headers: { cookie: '', authorization: '', origin: '' },
+        credentialBindingId: '', origin: '',
       },
       groupPush: {
         enabled: false, sendMode: 'push_config', pushIds: [], appChatIds: [],
@@ -588,11 +590,8 @@ export function useSyncConfig(proxy) {
       limit: Number(remoteSync.limit || 50),
       includeClosed: remoteSync.includeClosed !== false,
       timeoutSec: Number(remoteSync.timeoutSec || 30),
-      headers: {
-        cookie: remoteSync.headers?.cookie || '',
-        authorization: remoteSync.headers?.authorization || '',
-        origin: remoteSync.headers?.origin || '',
-      },
+      credentialBindingId: String(remoteSync.credentialBindingId || ''),
+      origin: remoteSync.origin || '',
     }
 
     const externalSyncBitable = payload.externalSyncBitable || {}
@@ -1222,6 +1221,10 @@ export function useSyncConfig(proxy) {
     group.conditions.push({ sourceField: 'issueTypeId', operator: 'in', matchValues: [] })
   }
 
+  function loadRemoteCredentialOptions() {
+    return listCredentialBindingOptions('ticket_remote_sync').then((res) => { remoteCredentialOptions.value = res.data || [] }).catch(() => { remoteCredentialOptions.value = [] })
+  }
+
   function addCustomStatisticsProfile() {
     form.customStatisticsProfiles.push({
       profileCode: '', label: '', enabled: true, timeField: 'submitTime',
@@ -1280,7 +1283,7 @@ export function useSyncConfig(proxy) {
   }
 
   return {
-    loading, saving, workflowStatusOptions,
+    loading, saving, workflowStatusOptions, remoteCredentialOptions,
     mappingTexts, posPatternsText, scoPatternsText, versionPatternsText,
     mappingSections, notifySendModes,
     externalSyncRequiredFieldOptions, personDataSourceOptions,
@@ -1290,7 +1293,7 @@ export function useSyncConfig(proxy) {
     form, createDefaultForm,
     normalizeArray, normalizeStatOptionRows, normalizeStatClassificationConfig,
     normalizeDateTimeText, normalizeWorkflowStatusOptions, parseJsonArray,
-    applyConfig, loadConfig, loadWorkflowStatuses,
+    applyConfig, loadConfig, loadWorkflowStatuses, loadRemoteCredentialOptions,
     validateElForm, handleSave,
     addStatOption, removeStatOption, addExternalFieldModel,
     addExternalClassificationMapping, removeExternalClassificationMapping,

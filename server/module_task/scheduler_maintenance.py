@@ -16,6 +16,7 @@ from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicS
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
 from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
+from modules.credential.service.credential_refresh_service import CredentialRefreshService
 from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
 
@@ -30,7 +31,8 @@ def _build_remote_sync_override(
     pull_url: str | None = None,
     ack_url: str | None = None,
     source_system: str | None = None,
-    headers: dict[str, Any] | None = None,
+    credential_binding_id: str | None = None,
+    origin: str | None = None,
 ) -> dict[str, Any]:
     """
     组装远端工单同步覆盖配置。
@@ -41,7 +43,8 @@ def _build_remote_sync_override(
     :param pull_url: 拉取地址。
     :param ack_url: 回写地址。
     :param source_system: 远端系统标识。
-    :param headers: 额外请求头。
+    :param credential_binding_id: 远端同步凭证绑定 ID。
+    :param origin: 可选的非敏感 Origin 请求头。
     :return: 覆盖配置字典。
     """
     override: dict[str, Any] = {}
@@ -58,8 +61,10 @@ def _build_remote_sync_override(
         remote_sync["ackUrl"] = ack_url
     if source_system is not None:
         remote_sync["sourceSystem"] = source_system
-    if headers:
-        remote_sync["headers"] = headers
+    if credential_binding_id is not None:
+        remote_sync["credentialBindingId"] = credential_binding_id
+    if origin is not None:
+        remote_sync["origin"] = origin
     if remote_sync:
         override["remoteSync"] = remote_sync
     return override
@@ -216,7 +221,8 @@ def pull_public_ticket_sync(
     pull_url: str | None = None,
     ack_url: str | None = None,
     source_system: str | None = None,
-    headers: dict[str, Any] | None = None,
+    credential_binding_id: str | None = None,
+    origin: str | None = None,
     **kwargs,
 ):
     """
@@ -228,7 +234,8 @@ def pull_public_ticket_sync(
     :param pull_url: 拉取地址覆盖值。
     :param ack_url: 回写地址覆盖值。
     :param source_system: 远端系统标识覆盖值。
-    :param headers: 请求头覆盖值。
+    :param credential_binding_id: 凭证绑定覆盖值。
+    :param origin: 非敏感 Origin 覆盖值。
     :return: 同步结果摘要。
     """
     task_id = int(kwargs.pop("_task_id", 0) or 0)
@@ -241,7 +248,8 @@ def pull_public_ticket_sync(
         pull_url=pull_url if pull_url is not None else kwargs.pop("pullUrl", None),
         ack_url=ack_url if ack_url is not None else kwargs.pop("ackUrl", None),
         source_system=source_system if source_system is not None else kwargs.pop("sourceSystem", None),
-        headers=headers if headers is not None else kwargs.pop("headers", None),
+        credential_binding_id=credential_binding_id if credential_binding_id is not None else kwargs.pop("credentialBindingId", None),
+        origin=origin if origin is not None else kwargs.pop("origin", None),
     )
     with SessionLocal() as db:
         result = TicketRemoteSyncService.sync_remote_pending_tickets(
@@ -411,6 +419,21 @@ def ticket_summary_report(
         result.get("pushSuccessCount"),
         result.get("chatSuccessCount"),
         result.get("skipped"),
+    )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.refresh_credentials")
+def refresh_credentials(*args, **kwargs):
+    """统一凭证定时刷新任务，仅刷新已开启自动刷新的 HTTP 凭证。"""
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    with SessionLocal() as db:
+        result = CredentialRefreshService.refresh_due_credentials(db)
+    logger.info(
+        f"统一凭证刷新任务执行完成 | checked={result['checked']} refreshed={result['refreshed']} "
+        f"skipped={result['skipped']} failed={result['failed']}"
     )
     return result
 

@@ -73,6 +73,22 @@ class TicketLogPullPostProcessConfigModel(TicketLogPullBaseModel):
     post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
 
 
+class TicketLogPullExternalEnvironmentConfigModel(TicketLogPullBaseModel):
+    """单个日志拉取外部环境配置，认证信息只允许通过凭证绑定提供。"""
+
+    insert_url: str = ""
+    page_url: str = ""
+    credential_binding_id: str = ""
+    origin: str = ""
+    vendors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class TicketLogPullExternalConfigModel(TicketLogPullBaseModel):
+    """日志拉取多环境外部接口配置。"""
+
+    environments: dict[str, TicketLogPullExternalEnvironmentConfigModel] = Field(default_factory=dict)
+
+
 class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
     """
     日志拉取门店选项模型。

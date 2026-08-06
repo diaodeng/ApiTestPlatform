@@ -1,0 +1,16 @@
+import request from '@/utils/request'
+
+export const listCredentials = (params) => request({ url: '/system/credentials', method: 'get', params })
+export const getCredential = (id) => request({ url: `/system/credentials/${id}`, method: 'get' })
+export const addCredential = (data) => request({ url: '/system/credentials', method: 'post', data })
+export const updateCredential = (id, data) => request({ url: `/system/credentials/${id}`, method: 'put', data })
+export const delCredential = (id) => request({ url: `/system/credentials/${id}`, method: 'delete' })
+export const refreshCredential = (id, data) => request({ url: `/system/credentials/${id}/refresh`, method: 'post', data })
+export const listCredentialBindings = (params) => request({ url: '/system/credentials/bindings', method: 'get', params })
+export const listCredentialBindingOptions = (businessType) => request({ url: '/system/credentials/binding-options', method: 'get', params: { businessType } })
+export const addCredentialBinding = (data) => request({ url: '/system/credentials/bindings', method: 'post', data })
+export const updateCredentialBinding = (id, data) => request({ url: `/system/credentials/bindings/${id}`, method: 'put', data })
+export const delCredentialBinding = (id) => request({ url: `/system/credentials/bindings/${id}`, method: 'delete' })
+export const writebackCredentialStorage = (id, data) => request({ url: `/system/credentials/bindings/${id}/writeback`, method: 'post', data })
+export const listCredentialOperationLogs = (params) => request({ url: '/system/credentials/operation-logs', method: 'get', params })
+export const listActiveCredentialLeases = (params) => request({ url: '/system/credentials/leases', method: 'get', params })

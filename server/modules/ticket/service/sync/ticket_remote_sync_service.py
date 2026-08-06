@@ -11,6 +11,7 @@ from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncCon
 from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
+from modules.credential.service.credential_resolve_service import CredentialResolveService
 from utils.log_util import logger
 
 
@@ -84,22 +85,21 @@ class TicketRemoteSyncService:
         return True, "remote_time_newer_or_unknown"
 
     @classmethod
-    def build_request_headers(cls, remote_sync: dict[str, Any]) -> dict[str, str]:
+    def build_request_headers(cls, db: Session, remote_sync: dict[str, Any], target_url: str) -> dict[str, str]:
         """
         构建远端工单同步请求头。
 
         :param remote_sync: 远端同步配置。
         :return: 请求头字典。
         """
-        headers = dict(remote_sync.get("headers") or {})
-        normalized = {str(key).strip().lower(): str(value or "").strip() for key, value in headers.items()}
         result = {"Content-Type": "application/json", "Accept": "application/json"}
-        if normalized.get("cookie"):
-            result["Cookie"] = normalized["cookie"]
-        if normalized.get("authorization"):
-            result["Authorization"] = normalized["authorization"]
-        if normalized.get("origin"):
-            result["Origin"] = normalized["origin"]
+        binding_id = str(remote_sync.get("credentialBindingId") or "").strip()
+        if not binding_id:
+            raise ValueError("远端工单同步未绑定凭证，请配置 remoteSync.credentialBindingId")
+        result.update(CredentialResolveService.resolve_http_headers(db, binding_id, target_url))
+        origin = str(remote_sync.get("origin") or "").strip()
+        if origin:
+            result["Origin"] = origin
         return result
 
     @classmethod
@@ -328,10 +328,8 @@ class TicketRemoteSyncService:
         remote_sync["limit"] = min(max(int(remote_sync.get("limit") or config.get("defaultPullLimit") or 50), 1), 200)
         remote_sync["includeClosed"] = bool(remote_sync.get("includeClosed", True))
         remote_sync["timeoutSec"] = max(int(remote_sync.get("timeoutSec") or 30), 10)
-        remote_sync["headers"] = {
-            **TicketSyncConfigService.default_remote_sync_config()["headers"],
-            **(remote_sync.get("headers") if isinstance(remote_sync.get("headers"), dict) else {}),
-        }
+        remote_sync["credentialBindingId"] = str(remote_sync.get("credentialBindingId") or "").strip()
+        remote_sync["origin"] = str(remote_sync.get("origin") or "").strip()
 
         if not remote_sync.get("enabled"):
             logger.info(
@@ -355,6 +353,8 @@ class TicketRemoteSyncService:
             raise ValueError("远端工单回写地址未配置，请检查 ticket.sync.automation.remoteSync.ackUrl")
         if not remote_sync.get("consumer"):
             raise ValueError("远端工单同步消费者未配置，请检查 ticket.sync.automation.remoteSync.consumer")
+        if not remote_sync.get("credentialBindingId"):
+            raise ValueError("远端工单同步凭证绑定未配置，请检查 ticket.sync.automation.remoteSync.credentialBindingId")
 
         logger.info(
             f"开始拉取远端工单同步数据 | pull_url={remote_sync['pullUrl']} ack_url={remote_sync['ackUrl']} "
@@ -369,7 +369,7 @@ class TicketRemoteSyncService:
                 "includeClosed": remote_sync["includeClosed"],
             },
             timeout=httpx.Timeout(10.0, read=remote_sync["timeoutSec"]),
-            headers=cls.build_request_headers(remote_sync),
+            headers=cls.build_request_headers(db, remote_sync, remote_sync["pullUrl"]),
         )
         response.raise_for_status()
         payload = response.json()
@@ -507,7 +507,7 @@ class TicketRemoteSyncService:
                 remote_sync["ackUrl"],
                 json={"consumer": remote_sync["consumer"], "items": ack_items},
                 timeout=httpx.Timeout(10.0, read=remote_sync["timeoutSec"]),
-                headers=cls.build_request_headers(remote_sync),
+                headers=cls.build_request_headers(db, remote_sync, remote_sync["ackUrl"]),
             )
             ack_response.raise_for_status()
             ack_payload = ack_response.json()

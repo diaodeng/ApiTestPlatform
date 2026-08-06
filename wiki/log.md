@@ -1721,9 +1721,46 @@ updated: 2026-08-03
 - 创建的双向链接：6 对（统计服务、流程、契约、工单域和任务调度域）。
 - 变更传播链：`ticket.sync.automation.customStatisticsProfiles` -> `TicketCustomStatisticsDefinitionService` -> `TicketCustomStatisticsDao` -> `TicketCustomStatisticsService` -> `TicketStatisticsNotificationService` -> `TicketSyncNotifyService`；手动入口 `POST /ticket/sync/custom-statistics/run` 与定时任务 `ticket_custom_statistics_report` 复用同一编排服务。
 - 总共涉及页面：8。
+
 ## [2026-08-05] INGEST-CODE | 工单日志搜索结果时间排序修复
 
 - 触发：用户反馈工单日志查看器搜索结果的“日志时间”表头点击无响应。
 - 架构层：Web 前端 / 工单日志查看器 / 虚拟结果表格。
 - 更新的页面：`web/src/components/ticket/LogViewerDialog.vue`、`web/public/docs/updates/2026-08-03-ticket-log-viewer-search-result-virtual-table.md`、`web/public/docs/updates/history.md`、`wiki/flows/ticket-log-record-isolated-view.md`。
 - 变更传播链：日志时间表头点击 -> `toggleLogTimeSort` 切换升降序 -> 替换 `hits` 数组引用 -> `el-table-v2` 重渲染排序结果。
+
+## [2026-08-05] 实施 | 统一凭证管理模块
+- 触发：将 Web Session、日志拉取 Header 和远端同步 API Key 集中管理。
+- 架构层：数据模型、服务、接口、定时任务、工单同步。
+- 创建的页面：credential-management、credential-refresh、credential-api。
+- 更新的页面：log.md。
+- 创建的双向链接：3 对（新增）。
+- 变更传播链：凭证绑定 → HTTP/浏览器投影 → 工单与 Web 业务。
+- 总共涉及页面：4
+
+## [2026-08-05] INGEST-CODE | 统一凭证管理旧状态链路清理
+
+- 触发：凭证管理改造后继续移除 Web 用例和新版客户端遗留的 Browser Session / Runtime Profile 选择、缓存和自动回写。
+- 架构层：Web 用例控制台、Web 用例服务、PySide6 Agent 浏览器运行时、统一凭证绑定。
+- 更新的页面：`entities/data-models/credential-management.md`、`flows/credential-refresh.md`、`web/public/docs/credential_management.md`、`web/public/docs/updates/2026-08-05-credential-management.md`。
+- 变更传播链：Web 用例执行/录制/回放 -> `credentialBindingId` -> `CredentialResolveService` 生成 Playwright storageState -> Agent 浏览器上下文；录制完成 -> 显式创建浏览器凭证与 Web 绑定。
+- 关键约束：旧 Session/Profile 不再作为状态来源、缓存键或自动写回目标；普通运行只读凭证快照。
+
+## [2026-08-06] 修复 | 凭证绑定选项查询参数契约
+
+- `/system/credentials/binding-options` 改用 Pydantic 查询模型接收 `businessType`，修复统一凭证管理和 Web 测试页面进入时的 `business_type` 缺失校验错误。
+
+## [2026-08-06] INGEST-CODE | 凭证与绑定 Tab 及浏览器状态回写边界
+
+- 触发：统一凭证页面上下堆叠凭证、绑定和日志环境配置，用户要求改为两个 Tab，并保留日志外部环境的系统参数配置方式。
+- 架构层：统一凭证 Web 控制台、凭证绑定服务、浏览器状态回写、日志拉取系统参数。
+- 更新的页面：`contracts/credential-api.md`、`entities/data-models/credential-management.md`、`flows/credential-refresh.md`、`index.md`、`web/public/docs/credential_management.md`。
+- 变更传播链：凭证绑定 `writebackEnabled` -> storageState 回写接口 -> 版本乐观锁与操作审计；日志环境配置 -> `ticket.logPull.external` 系统参数 -> `credentialBindingId` -> HTTP 投影。
+- 关键约束：统一凭证页面仅保留“凭证 / 业务绑定”两个 Tab；普通 Web 执行只读；回写必须显式开启、本地缓存已启用且版本一致。
+
+## [2026-08-06] 修复 | 凭证接口鉴权日志数据库会话
+
+- 现象：凭证新增、更新、删除接口返回 500，日志装饰器在鉴权查询时收到 `query_db=None`。
+- 根因：凭证控制器使用 `db` 参数名，而系统日志装饰器按约定读取 `query_db`。
+- 修复：统一凭证控制器各接口数据库依赖参数为 `query_db`，保证鉴权和操作日志写入使用同一会话。
+

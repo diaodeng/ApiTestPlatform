@@ -79,173 +79,25 @@
                             />
                         </el-form-item>
                     </el-col>
+                    <el-col :span="12"><el-form-item label="停止后保存凭证"><el-switch v-model="recordingForm.saveCredentialAfterRecording" /></el-form-item></el-col>
+                    <el-col v-if="recordingForm.saveCredentialAfterRecording" :span="24"><el-form-item label="新凭证名称"><el-input v-model="recordingForm.credentialName" placeholder="手工登录后的浏览器状态将保存为此凭证" /></el-form-item></el-col>
 
                     <el-col :span="24">
                         <el-collapse v-model="recordingAdvancedPanels">
                             <el-collapse-item title="高级设置" name="advanced">
                                 <el-row :gutter="16">
                                     <el-col :span="24">
-                                        <el-form-item label="状态来源">
-                                            <el-radio-group
-                                                v-model="
-                                                    recordingForm.stateSourceType
-                                                "
-                                            >
-                                                <el-radio-button value="none"
-                                                    >不使用</el-radio-button
-                                                >
-                                                <el-radio-button
-                                                    value="session"
-                                                    v-hasPermi="[
-                                                        'hrm:webCase:persistContext',
-                                                    ]"
-                                                    >浏览器Session</el-radio-button
-                                                >
-                                                <el-radio-button value="cookie"
-                                                    >Cookie配置</el-radio-button
-                                                >
-                                            </el-radio-group>
+                                        <el-form-item label="凭证绑定">
+                                            <el-select v-model="recordingForm.credentialBindingId" clearable filterable style="width: 100%" placeholder="可选：选择 Web 浏览器凭证绑定">
+                                                <el-option v-for="item in webCredentialBindingOptions" :key="item.bindingId" :label="`${item.bindingName} / ${item.credentialName}`" :value="item.bindingId" />
+                                            </el-select>
                                         </el-form-item>
                                     </el-col>
-                                    <el-col
-                                        v-if="
-                                            recordingForm.stateSourceType ===
-                                            'session'
-                                        "
-                                        :span="24"
-                                        v-hasPermi="[
-                                            'hrm:webCase:persistContext',
-                                        ]"
-                                    >
-                                        <el-form-item label="浏览器Session">
-                                            <el-row
-                                                :gutter="10"
-                                                style="width: 100%"
-                                            >
-                                                <el-col :span="18">
-                                                    <el-select
-                                                        v-model="
-                                                            recordingForm.browserSessionId
-                                                        "
-                                                        clearable
-                                                        filterable
-                                                        style="width: 100%"
-                                                        placeholder="可选：选择浏览器Session"
-                                                    >
-                                                        <el-option
-                                                            v-for="item in availableBrowserSessionsForRecording"
-                                                            :key="
-                                                                item.sessionId
-                                                            "
-                                                            :label="
-                                                                formatBrowserSessionLabel(
-                                                                    item,
-                                                                )
-                                                            "
-                                                            :value="
-                                                                item.sessionId
-                                                            "
-                                                        />
-                                                    </el-select>
-                                                </el-col>
-                                                <el-col :span="6">
-                                                    <el-button
-                                                        style="width: 100%"
-                                                        @click="
-                                                            openBrowserSessionDialog
-                                                        "
-                                                        >管理Session</el-button
-                                                    >
-                                                </el-col>
-                                            </el-row>
-                                        </el-form-item>
-                                    </el-col>
-                                    <el-col
-                                        v-if="
-                                            recordingForm.stateSourceType ===
-                                            'cookie'
-                                        "
-                                        :span="24"
-                                    >
-                                        <el-form-item label="Cookie配置">
-                                            <el-row
-                                                :gutter="10"
-                                                style="width: 100%"
-                                            >
-                                                <el-col :span="18">
-                                                    <el-select
-                                                        v-model="
-                                                            recordingForm.runtimeProfileId
-                                                        "
-                                                        clearable
-                                                        filterable
-                                                        style="width: 100%"
-                                                        placeholder="可选：选择Cookie配置"
-                                                    >
-                                                        <el-option
-                                                            v-for="item in availableRuntimeProfilesForRecording"
-                                                            :key="
-                                                                item.profileId
-                                                            "
-                                                            :label="
-                                                                formatRuntimeProfileLabel(
-                                                                    item,
-                                                                )
-                                                            "
-                                                            :value="
-                                                                item.profileId
-                                                            "
-                                                        />
-                                                    </el-select>
-                                                </el-col>
-                                                <el-col :span="6">
-                                                    <el-button
-                                                        style="width: 100%"
-                                                        @click="
-                                                            openRuntimeProfileDialog
-                                                        "
-                                                        >管理Cookie</el-button
-                                                    >
-                                                </el-col>
-                                            </el-row>
-                                        </el-form-item>
-                                    </el-col>
-
-                                    <el-col
-                                        :span="12"
-                                        v-hasPermi="[
-                                            'hrm:webCase:persistContext',
-                                        ]"
-                                        v-if="
-                                            recordingForm.stateSourceType !==
-                                            'none'
-                                        "
-                                    >
-                                        <el-form-item label="保留浏览器状态">
+                                    <el-col v-if="recordingForm.credentialBindingId" :span="12" v-hasPermi="['hrm:webCase:persistContext']">
+                                            <el-form-item label="本地浏览器缓存">
                                             <el-switch
                                                 v-model="
                                                     recordingForm.persistContextEnabled
-                                                "
-                                            />
-                                        </el-form-item>
-                                    </el-col>
-                                    <el-col
-                                        :span="12"
-                                        v-hasPermi="[
-                                            'hrm:webCase:persistContext',
-                                        ]"
-                                        v-if="
-                                            recordingForm.stateSourceType !==
-                                            'none'
-                                        "
-                                    >
-                                        <el-form-item label="自动同步状态">
-                                            <el-switch
-                                                v-model="
-                                                    recordingForm.persistContextAutoSyncSession
-                                                "
-                                                :disabled="
-                                                    !recordingForm.persistContextEnabled
                                                 "
                                             />
                                         </el-form-item>
@@ -787,12 +639,7 @@ const {
     agentOptions,
     browserOptions,
     recordingAdvancedPanels,
-    availableBrowserSessionsForRecording,
-    formatBrowserSessionLabel,
-    openBrowserSessionDialog,
-    availableRuntimeProfilesForRecording,
-    formatRuntimeProfileLabel,
-    openRuntimeProfileDialog,
+    webCredentialBindingOptions,
     loading,
     startRecording,
     stopRecording,

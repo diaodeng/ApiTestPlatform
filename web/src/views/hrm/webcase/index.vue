@@ -14,8 +14,6 @@
                     @open-batch-run-dialog="openBatchRunDialog"
                     @open-run-history="openRunHistory"
                     @open-recording-dialog="openRecordingDialog"
-                    @open-runtime-profile-dialog="openRuntimeProfileDialog"
-                    @open-browser-session-dialog="openBrowserSessionDialog"
                 />
             </el-tab-pane>
 
@@ -49,7 +47,6 @@
 
         <RecordingActionDialogs :context="recordingActionDialogsContext" />
 
-        <StateDialogs :context="stateDialogsContext" />
     </div>
 </template>
 
@@ -62,11 +59,9 @@ import RecordingLiveDialogs from "./components/RecordingLiveDialogs.vue";
 import RunTab from "./components/RunTab.vue";
 import RunDialogs from "./components/RunDialogs.vue";
 import RecordingTab from "./components/RecordingTab.vue";
-import StateDialogs from "./components/StateDialogs.vue";
 import { useCaseEditorManager } from "./composables/useCaseEditorManager.js";
 import { useRecordingManager } from "./composables/useRecordingManager.js";
 import { useRunManager } from "./composables/useRunManager.js";
-import { useStateManager } from "./composables/useStateManager.js";
 import {
     actionOptions,
     assertionTypeOptions,
@@ -91,33 +86,27 @@ import {
     safeJsonStringify,
 } from "./utils/shared.js";
 import { all as getAllAgent } from "@/api/hrm/agent.js";
+import { listCredentialBindingOptions } from "@/api/system/credential.js";
 import { listProject } from "@/api/hrm/project.js";
 import { showModulList } from "@/api/hrm/module.js";
 import {
     addWebCase,
-    addWebBrowserSession,
     applyWebRecording,
     cancelWebRecording,
     cancelWebRun,
     deleteWebRecordingStep,
-    delWebBrowserSession,
-    delWebRuntimeProfile,
     continueWebRecording,
     continueWebRun,
     getWebCase,
     getWebRecording,
     getWebRun,
-    listWebBrowserSession,
-    listWebRuntimeProfile,
     listWebCase,
     replayWebRecording,
+    createCredentialFromWebRecording,
     runWebCase,
-    addWebRuntimeProfile,
     saveWebRecordingAsCase,
     startWebRecording,
     stopWebRecording,
-    updateWebBrowserSession,
-    updateWebRuntimeProfile,
     updateWebCase,
 } from "@/api/hrm/web_case.js";
 
@@ -133,6 +122,7 @@ const agentOptions = ref([]);
 const allCaseOptions = ref([]);
 const caseSelectOptions = ref([]);
 const caseSelectLoading = ref(false);
+const webCredentialBindingOptions = ref([]);
 
 const loading = ref({
     save: false,
@@ -429,6 +419,8 @@ const {
     resolveLocatorIndex
 } = caseEditorManager;
 
+/* 旧 Browser Session / Runtime Profile 状态管理已移除；认证状态统一由凭证绑定提供。 */
+/*
 const stateManager = useStateManager({
     ElMessage,
     ElMessageBox,
@@ -464,6 +456,7 @@ const {
     runtimeProfileImportText,
     runtimeProfileImportHost,
     browserSessions,
+    webCredentialBindingOptions,
     browserSessionKeyword,
     browserSessionImportText,
     showRuntimeProfileDialog,
@@ -497,40 +490,31 @@ const {
     deleteBrowserSession,
     saveBrowserSession,
 } = stateManager;
+*/
 
 const runManager = useRunManager({
     ElMessage,
     loading,
     activeTab,
     runTabRef,
-    runtimeProfiles,
-    browserSessions,
     syncCaseOptions,
     refreshRunTab,
-    openBrowserSessionDialog,
-    openRuntimeProfileDialog,
     normalizeCaseOption,
     normalizeIdValue,
-    normalizeStateSourceType,
     normalizeManualLoginWaitSec,
     normalizeLocatorIndexMode,
-    resolveStateSourceTypeByIds,
     parseBooleanFlag,
     isPlainObject,
     cloneData,
     isSameId,
     safeJsonStringify,
-    profileSupportsWeb,
-    isRuntimeProfileScopeMatch,
-    isBrowserSessionBrowserMatch,
-    formatRuntimeProfileLabel,
-    formatBrowserSessionLabel,
     getCaseName,
     getRunRowFailureReason,
     shouldStopRunDetailPoll,
     confirmAndContinueRunManualLogin,
     runWebCase,
     getWebRun,
+    webCredentialBindingOptions,
 });
 
 const {
@@ -541,8 +525,6 @@ const {
     runDetailTab,
     runAdvancedPanels,
     runForm,
-    availableRuntimeProfilesForRun,
-    availableBrowserSessionsForRun,
     runDetailTitle,
     runTargetLabel,
     runStepResults,
@@ -564,8 +546,6 @@ const recordingManager = useRecordingManager({
     ElMessageBox,
     loading,
     activeTab,
-    runtimeProfiles,
-    browserSessions,
     allCaseOptions,
     caseSelectOptions,
     runDetail,
@@ -573,25 +553,16 @@ const recordingManager = useRecordingManager({
     refreshRecordingTab,
     refreshCaseTab,
     loadAllCaseOptions,
-    openBrowserSessionDialog,
-    openRuntimeProfileDialog,
     handleEdit,
     cloneData,
     isPlainObject,
     isSameId,
     normalizeIdValue,
-    normalizeStateSourceType,
-    resolveStateSourceTypeByIds,
     parseBooleanFlag,
     normalizeManualLoginWaitSec,
     normalizeOptionalPositiveInt,
     normalizeLocatorIndexMode,
     safeJsonStringify,
-    profileSupportsWeb,
-    isRuntimeProfileScopeMatch,
-    isBrowserSessionBrowserMatch,
-    formatRuntimeProfileLabel,
-    formatBrowserSessionLabel,
     getCaseName,
     getActionLabel,
     describeStepTarget,
@@ -607,7 +578,6 @@ const recordingManager = useRecordingManager({
     getRecordingSummaryPayload,
     mergeCaseOptions,
     confirmAndContinueRecordingManualLogin,
-    loadBrowserSessions,
     searchCaseOptions,
     handleCaseSelectVisibleChange,
     moduleOptions,
@@ -618,7 +588,9 @@ const recordingManager = useRecordingManager({
     saveWebRecordingAsCase,
     applyWebRecording,
     replayWebRecording,
+    createCredentialFromWebRecording,
     deleteWebRecordingStep,
+    webCredentialBindingOptions,
 });
 
 const {
@@ -638,10 +610,6 @@ const {
     recordingForm,
     replayForm,
     filteredRecordingActionModules,
-    availableRuntimeProfilesForRecording,
-    availableBrowserSessionsForRecording,
-    availableRuntimeProfilesForReplay,
-    availableBrowserSessionsForReplay,
     recordingLinkedCaseLabel,
     recordingDialogTitle,
     recordingDetailTitle,
@@ -756,12 +724,7 @@ const runDialogsContext = {
     runTargetLabel,
     agentOptions,
     browserOptions,
-    availableBrowserSessionsForRun,
-    formatBrowserSessionLabel,
-    openBrowserSessionDialog,
-    availableRuntimeProfilesForRun,
-    formatRuntimeProfileLabel,
-    openRuntimeProfileDialog,
+    webCredentialBindingOptions,
     runAdvancedPanels,
     loading,
     submitRun,
@@ -798,12 +761,7 @@ const recordingLiveDialogsContext = {
     agentOptions,
     browserOptions,
     recordingAdvancedPanels,
-    availableBrowserSessionsForRecording,
-    formatBrowserSessionLabel,
-    openBrowserSessionDialog,
-    availableRuntimeProfilesForRecording,
-    formatRuntimeProfileLabel,
-    openRuntimeProfileDialog,
+    webCredentialBindingOptions,
     loading,
     startRecording,
     stopRecording,
@@ -849,6 +807,7 @@ const recordingActionDialogsContext = {
     recordingActionMode,
     recordingActionForm,
     browserOptions,
+    webCredentialBindingOptions,
     projectOptions,
     filteredRecordingActionModules,
     searchCaseOptions,
@@ -862,12 +821,6 @@ const recordingActionDialogsContext = {
     replayForm,
     selectedReplayLabel,
     agentOptions,
-    availableBrowserSessionsForReplay,
-    formatBrowserSessionLabel,
-    openBrowserSessionDialog,
-    availableRuntimeProfilesForReplay,
-    formatRuntimeProfileLabel,
-    openRuntimeProfileDialog,
     submitReplay,
     showReplayResultDialog,
     replayResultTitle,
@@ -880,6 +833,7 @@ const recordingActionDialogsContext = {
     replayResultJsonText,
 };
 
+/*
 const stateDialogsContext = {
     showRuntimeProfileDialog,
     runtimeProfileKeyword,
@@ -914,6 +868,7 @@ const stateDialogsContext = {
     deleteBrowserSession,
     saveBrowserSession,
 };
+*/
 
 function formatTime(value) {
     return value ? proxy.parseTime(value) : "-";
@@ -1917,6 +1872,9 @@ watch(activeTab, (value) => {
 });
 
 onMounted(async () => {
+    listCredentialBindingOptions("web_case").then((response) => {
+        webCredentialBindingOptions.value = (response.data || []).filter((item) => item.projectionType === "playwright_storage");
+    }).catch(() => { webCredentialBindingOptions.value = []; });
     await loadBaseData();
     await loadAllCaseOptions().catch(() => {});
     await loadRuntimeProfiles().catch(() => {});

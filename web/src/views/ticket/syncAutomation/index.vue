@@ -27,6 +27,14 @@
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="凭证绑定" prop="credentialBindingId">
+                    <el-select v-model="form.remoteSync.credentialBindingId" filterable clearable style="width: 100%" placeholder="选择远端同步 API Key 绑定">
+                      <el-option v-for="item in remoteCredentialOptions" :key="item.bindingId" :label="`${item.bindingName} / ${item.credentialName}`" :value="item.bindingId" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24"><el-form-item label="Origin（可选）"><el-input v-model="form.remoteSync.origin" placeholder="仅填写非敏感 Origin 请求头" /></el-form-item></el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="飞书 appSecret">
                     <el-input
                       v-model="form.feishuAuth.appSecret"
@@ -2868,7 +2876,9 @@
     externalFieldModelOptions,
     rules,
     remoteRules,
+    remoteCredentialOptions,
     loadConfig,
+    loadRemoteCredentialOptions,
     loadWorkflowStatuses,
     handleSave,
     addStatOption,
@@ -3400,6 +3410,7 @@
 
   onMounted(() => {
     loadConfig();
+    loadRemoteCredentialOptions();
     loadPushOptions();
     loadAiOptions();
     loadWorkflowStatuses();

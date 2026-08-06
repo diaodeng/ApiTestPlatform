@@ -377,10 +377,8 @@ class TicketLogPullService:
             "default": {
                 "insertUrl": cls.DEFAULT_INSERT_URL,
                 "pageUrl": cls.DEFAULT_PAGE_URL,
-                "headers": {
-                    "cookie": "",
-                    "origin": "https://erp.rta-os.com",
-                },
+                "credentialBindingId": "",
+                "origin": "https://erp.rta-os.com",
                 "vendors": [],
             }
         }
@@ -458,9 +456,9 @@ class TicketLogPullService:
         归一化日志拉取外部接口配置，兼容单环境与多环境两种格式。
 
         旧格式（单环境）:
-          {"insertUrl": "...", "pageUrl": "...", "headers": {...}, "vendors": [...]}
+          {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...", "origin": "...", "vendors": [...]}
         新格式（多环境）:
-          {"env1": {"insertUrl": "...", "pageUrl": "...", "headers": {...}, "vendors": [...]},
+          {"env1": {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...", "origin": "...", "vendors": [...]},
            "env2": {...}}
 
         :param raw_config: 原始配置对象
@@ -492,19 +490,18 @@ class TicketLogPullService:
         defaults = {
             "insertUrl": cls.DEFAULT_INSERT_URL,
             "pageUrl": cls.DEFAULT_PAGE_URL,
-            "headers": {"cookie": "", "origin": "https://erp.rta-os.com"},
+            "credentialBindingId": "",
+            "origin": "https://erp.rta-os.com",
         }
-        headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
         env_config = {
             **defaults,
             **config,
-            "headers": {**defaults["headers"], **headers},
         }
         env_config["insertUrl"] = str(env_config.get("insertUrl") or defaults["insertUrl"]).strip()
         env_config["pageUrl"] = str(env_config.get("pageUrl") or defaults["pageUrl"]).strip()
-        env_config["headers"] = {
-            key: str(value or "").strip() for key, value in env_config["headers"].items() if str(value or "").strip()
-        }
+        env_config.pop("headers", None)
+        env_config["credentialBindingId"] = str(env_config.get("credentialBindingId") or "").strip()
+        env_config["origin"] = str(env_config.get("origin") or "").strip()
         env_config["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
         return env_config
 
@@ -1048,14 +1045,22 @@ class TicketLogPullService:
             )
 
     @classmethod
-    def _build_external_request_headers(cls, config: dict[str, Any]) -> dict[str, str]:
+    def _build_external_request_headers(cls, db: Session, config: dict[str, Any], target_url: str) -> dict[str, str]:
         """
         构建请求外部日志平台时使用的请求头。
         :param config: 外部接口配置
         :return: 请求头字典
         """
-        headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
-        return {key: str(value).strip() for key, value in headers.items() if str(value or "").strip()}
+        from modules.credential.service.credential_resolve_service import CredentialResolveService
+
+        binding_id = str(config.get("credentialBindingId") or "").strip()
+        if not binding_id:
+            raise ValueError("日志拉取外部接口未绑定凭证，请配置 credentialBindingId")
+        headers = CredentialResolveService.resolve_http_headers(db, binding_id, target_url)
+        origin = str(config.get("origin") or "").strip()
+        if origin:
+            headers["Origin"] = origin
+        return headers
 
     @classmethod
     def get_storage_config_services(cls, query_db: Session) -> TicketLogPullStorageConfigModel:
@@ -1065,6 +1070,23 @@ class TicketLogPullService:
         :return: 存储配置模型
         """
         return TicketLogPullStorageConfigModel.model_validate(cls._get_storage_config_dict(query_db))
+
+    @classmethod
+    def get_external_config_services(cls, query_db: Session) -> dict[str, Any]:
+        """返回脱敏后的多环境日志拉取外部接口配置。"""
+        return {"environments": cls._get_external_config_dict(query_db)}
+
+    @classmethod
+    def save_external_config_services(cls, query_db: Session, config: dict[str, Any], current_user: CurrentUserModel) -> CrudResponseModel:
+        """保存日志拉取外部接口配置，归一化时会移除任何旧内联认证 Header。"""
+        normalized = cls._normalize_external_config(config.get("environments") if isinstance(config, dict) else {})
+        try:
+            TicketLogPullDao.save_external_config_row(query_db, config_value=cls._json_dumps(normalized), user_name=current_user.user.user_name)
+            query_db.commit()
+            return CrudResponseModel(is_success=True, message="日志拉取外部接口配置已保存")
+        except Exception:
+            query_db.rollback()
+            raise
 
     @classmethod
     def save_storage_config_services(
@@ -2629,19 +2651,10 @@ class TicketLogPullService:
         request_url = str(external_config.get("insertUrl") or "").strip()
         page_url = str(external_config.get("pageUrl") or "").strip()
         loggable_config = dict(external_config)
-        loggable_headers = dict(loggable_config.get("headers") or {})
-        if loggable_headers.get("cookie"):
-            loggable_headers["cookie"] = "***"
-        if loggable_headers.get("authorization"):
-            loggable_headers["authorization"] = "***"
-        loggable_config["headers"] = loggable_headers
+        loggable_config.pop("headers", None)
         logger.info(
-            "日志拉取外部提交配置: record_id=%s ticket_id=%s config=%s request_url=%s page_url=%s",
-            record.id,
-            record.ticket_id,
-            loggable_config,
-            request_url,
-            page_url,
+            f"日志拉取外部提交配置: record_id={record.id} ticket_id={record.ticket_id} "
+            f"config={loggable_config} request_url={request_url} page_url={page_url}",
         )
         if not request_url:
             cls._log_chain_step(
@@ -2670,7 +2683,7 @@ class TicketLogPullService:
                 "commandContent": cls._json_dumps(command_content),
             },
             timeout=httpx.Timeout(10.0, read=30.0),
-            headers=cls._build_external_request_headers(external_config),
+            headers=cls._build_external_request_headers(db, external_config, request_url),
         )
         response.raise_for_status()
         payload = response.json()
@@ -2834,7 +2847,7 @@ class TicketLogPullService:
                 "_": int(datetime.now().timestamp() * 1000),
             },
             timeout=httpx.Timeout(10.0, read=30.0),
-            headers=cls._build_external_request_headers(external_config),
+            headers=cls._build_external_request_headers(db, external_config, external_config["pageUrl"]),
         )
         response.raise_for_status()
         payload = response.json()
@@ -2990,7 +3003,7 @@ class TicketLogPullService:
                     "GET",
                     url,
                     timeout=httpx.Timeout(10.0, read=timeout_seconds),
-                    headers=cls._build_external_request_headers(external_config),
+                    headers=cls._build_external_request_headers(db, external_config, url),
                 ) as response:
                     response.raise_for_status()
                     content_length = response.headers.get("Content-Length")

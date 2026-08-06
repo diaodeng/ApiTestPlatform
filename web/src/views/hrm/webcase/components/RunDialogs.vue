@@ -60,99 +60,20 @@
                     </el-col>
                 </el-row>
 
-                <el-form-item label="状态来源">
-                    <el-radio-group v-model="runForm.stateSourceType">
-                        <el-radio-button value="none">不使用</el-radio-button>
-                        <el-radio-button
-                            value="session"
-                            v-hasPermi="['hrm:webCase:persistContext']"
-                            >浏览器Session</el-radio-button
-                        >
-                        <el-radio-button value="cookie"
-                            >Cookie配置</el-radio-button
-                        >
-                    </el-radio-group>
+                <el-form-item label="凭证绑定">
+                    <el-select v-model="runForm.credentialBindingId" clearable filterable style="width: 100%" placeholder="可选：选择 Web 浏览器凭证绑定">
+                        <el-option v-for="item in webCredentialBindingOptions" :key="item.bindingId" :label="`${item.bindingName} / ${item.credentialName}`" :value="item.bindingId" />
+                    </el-select>
+                    <div class="form-tip">仅显示 web_case + playwright_storage 绑定。普通执行只读取凭证快照。</div>
                 </el-form-item>
-                <el-form-item
-                    v-if="runForm.stateSourceType === 'session'"
-                    label="浏览器Session"
-                    v-hasPermi="['hrm:webCase:persistContext']"
-                >
-                    <el-row :gutter="10" style="width: 100%">
-                        <el-col :span="18">
-                            <el-select
-                                v-model="runForm.browserSessionId"
-                                clearable
-                                filterable
-                                style="width: 100%"
-                                placeholder="可选：选择浏览器Session"
-                            >
-                                <el-option
-                                    v-for="item in availableBrowserSessionsForRun"
-                                    :key="item.sessionId"
-                                    :label="formatBrowserSessionLabel(item)"
-                                    :value="item.sessionId"
-                                />
-                            </el-select>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-button
-                                style="width: 100%"
-                                @click="openBrowserSessionDialog"
-                                >管理Session</el-button
-                            >
-                        </el-col>
-                    </el-row>
-                </el-form-item>
-                <el-form-item
-                    v-if="runForm.stateSourceType === 'cookie'"
-                    label="Cookie配置"
-                >
-                    <el-row :gutter="10" style="width: 100%">
-                        <el-col :span="18">
-                            <el-select
-                                v-model="runForm.runtimeProfileId"
-                                clearable
-                                filterable
-                                style="width: 100%"
-                                placeholder="可选：选择Cookie配置"
-                            >
-                                <el-option
-                                    v-for="item in availableRuntimeProfilesForRun"
-                                    :key="item.profileId"
-                                    :label="formatRuntimeProfileLabel(item)"
-                                    :value="item.profileId"
-                                />
-                            </el-select>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-button
-                                style="width: 100%"
-                                @click="openRuntimeProfileDialog"
-                                >管理Cookie</el-button
-                            >
-                        </el-col>
-                    </el-row>
-                </el-form-item>
-                <el-row v-if="runForm.stateSourceType !== 'none'">
+                <el-row v-if="runForm.credentialBindingId">
                     <el-col :span="12">
                         <el-form-item
-                            label="保留浏览器状态"
+                            label="本地浏览器缓存"
                             v-hasPermi="['hrm:webCase:persistContext']"
                         >
                             <el-switch
                                 v-model="runForm.persistContextEnabled"
-                            />
-                        </el-form-item>
-                    </el-col>
-                    <el-col :span="12">
-                        <el-form-item
-                            label="自动同步状态"
-                            v-hasPermi="['hrm:webCase:persistContext']"
-                        >
-                            <el-switch
-                                v-model="runForm.persistContextAutoSyncSession"
-                                :disabled="!runForm.persistContextEnabled"
                             />
                         </el-form-item>
                     </el-col>
@@ -416,12 +337,7 @@ const {
     runTargetLabel,
     agentOptions,
     browserOptions,
-    availableBrowserSessionsForRun,
-    formatBrowserSessionLabel,
-    openBrowserSessionDialog,
-    availableRuntimeProfilesForRun,
-    formatRuntimeProfileLabel,
-    openRuntimeProfileDialog,
+    webCredentialBindingOptions,
     runAdvancedPanels,
     loading,
     submitRun,
