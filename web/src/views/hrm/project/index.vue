@@ -4,11 +4,11 @@
       <template #table-tool>
         <el-col :span="1.5">
           <el-button
-              type="primary"
-              plain
-              icon="Plus"
-              @click="handleAdd"
-              v-hasPermi="['hrm:project:add']"
+            type="primary"
+            plain
+            icon="Plus"
+            @click="handleAdd"
+            v-hasPermi="['hrm:project:add']"
           >新增
           </el-button>
         </el-col>
@@ -19,16 +19,16 @@
           </el-button>
         </el-col>
       </template>
-      <template #tableOperate="{scope}">
+      <template #tableOperate="{ scope }">
         <el-button link type="primary" icon="Edit" :loading="loading" @click="handleUpdate(scope.row)" v-hasPermi="['hrm:project:edit']"
                    title="修改">
         </el-button>
         <el-button link type="warning" icon="CaretRight" @click="runTest(scope.row)"
                    v-hasPermi="['hrm:case:run']" title="运行">
         </el-button>
-        <!--               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:project:add']">新增</el-button>-->
+        <!-- <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['hrm:project:add']">新增</el-button> -->
         <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
-                   v-hasPermi="['hrm:project:remove']" title="修改">
+                   v-hasPermi="['hrm:project:remove']" title="删除">
         </el-button>
       </template>
     </ProjectTableQuery>
@@ -39,51 +39,56 @@
         <el-row>
           <el-col :span="12">
             <el-form-item label="项目名称" prop="projectName">
-              <el-input v-model="form.projectName" placeholder="请输入项目名称"/>
+              <el-input v-model="form.projectName" placeholder="请输入项目名称" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="项目编码" prop="projectCode">
+              <el-input v-model="form.projectCode" placeholder="建议人工维护，跨环境同步时保持一致" maxlength="128" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="显示排序" prop="orderNum">
-              <el-input-number v-model="form.orderNum" controls-position="right" :min="0"/>
+              <el-input-number v-model="form.orderNum" controls-position="right" :min="0" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="项目负责人" prop="responsibleName">
-              <el-input v-model="form.responsibleName" placeholder="请输入负责人" maxlength="20"/>
+              <el-input v-model="form.responsibleName" placeholder="请输入负责人" maxlength="20" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="测试负责人" prop="testUser">
-              <el-input v-model="form.testUser" placeholder="请输入测试负责人" maxlength="25"/>
+              <el-input v-model="form.testUser" placeholder="请输入测试负责人" maxlength="25" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="开发负责人" prop="devUser">
-              <el-input v-model="form.devUser" placeholder="请输入开发负责人" maxlength="20"/>
+              <el-input v-model="form.devUser" placeholder="请输入开发负责人" maxlength="20" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="发布应用" prop="publishApp">
-              <el-input v-model="form.publishApp" placeholder="请输入发布应用" maxlength="20"/>
+              <el-input v-model="form.publishApp" placeholder="请输入发布应用" maxlength="20" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="简要描述" prop="simpleDesc">
-              <el-input type="textarea" :rows="4" v-model="form.simpleDesc" placeholder="简要描述" maxlength="100"/>
+              <el-input type="textarea" :rows="4" v-model="form.simpleDesc" placeholder="简要描述" maxlength="100" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="其他信息" prop="otherDesc">
-              <el-input type="textarea" :rows="4" v-model="form.otherDesc" placeholder="其他信息" maxlength="100"/>
+              <el-input type="textarea" :rows="4" v-model="form.otherDesc" placeholder="其他信息" maxlength="100" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="项目状态">
               <el-radio-group v-model="form.status">
                 <el-radio
-                    v-for="dict in qtr_data_status"
-                    :key="dict.value * 1"
-                    :value="dict.value * 1"
+                  v-for="dict in qtr_data_status"
+                  :key="dict.value * 1"
+                  :value="dict.value * 1"
                 >{{ dict.label }}
                 </el-radio>
               </el-radio-group>
@@ -93,8 +98,8 @@
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
-          <el-button @click="cancel">取 消</el-button>
+          <el-button type="primary" @click="submitForm">确认</el-button>
+          <el-button @click="cancel">取消</el-button>
         </div>
       </template>
     </el-dialog>
@@ -105,14 +110,14 @@
 </template>
 
 <script setup name="project">
-import {ElMessageBox} from "element-plus";
-import {addProject, delProject, getProject, updateProject} from "@/api/hrm/project.js";
-import {RunTypeEnum, StatusNewEnum} from "@/components/hrm/enum.js";
+import { ElMessageBox } from "element-plus";
+import { addProject, delProject, getProject, updateProject } from "@/api/hrm/project.js";
+import { RunTypeEnum, StatusNewEnum } from "@/components/hrm/enum.js";
 import RunDialog from "@/components/hrm/common/run/run_dialog.vue";
 import ProjectTableQuery from "@/components/hrm/util-data-table/project-table-query.vue";
 
-const {proxy} = getCurrentInstance();
-const {qtr_data_status} = proxy.useDict("qtr_data_status");
+const { proxy } = getCurrentInstance();
+const { qtr_data_status } = proxy.useDict("qtr_data_status");
 
 const projectQueryViewRef = ref(null);
 const total = ref(0);
@@ -135,17 +140,16 @@ const data = reactive({
     pageSize: 10
   },
   rules: {
-    projectName: [{required: true, message: "项目名称不能为空", trigger: "blur"}],
-    orderNum: [{required: true, message: "显示排序不能为空", trigger: "blur"}]
+    projectName: [{ required: true, message: "项目名称不能为空", trigger: "blur" }],
+    orderNum: [{ required: true, message: "显示排序不能为空", trigger: "blur" }]
   },
 });
 
-const {queryParams, form, rules} = toRefs(data);
+const { queryParams, form, rules } = toRefs(data);
 
 function handleSelectionChange(selection) {
   runIds.value = selection.map(item => item.projectId);
 }
-
 
 /** 取消按钮 */
 function cancel() {
@@ -158,13 +162,13 @@ function reset() {
   form.value = {
     projectId: undefined,
     projectName: undefined,
+    projectCode: undefined,
     orderNum: 0,
     simpleDesc: undefined,
     status: StatusNewEnum.normal.value
   };
   proxy.resetForm("projectRef");
 }
-
 
 /** 新增按钮操作 */
 function handleAdd(row) {
@@ -190,7 +194,7 @@ function handleUpdate(row) {
     form.value = response.data;
     open.value = true;
     title.value = "修改项目";
-  }).finally(()=>{
+  }).finally(() => {
     loading.value = false;
   });
 }
@@ -200,13 +204,13 @@ function submitForm() {
   proxy.$refs["projectRef"].validate(valid => {
     if (valid) {
       if (form.value.projectId != undefined) {
-        updateProject(form.value).then(response => {
+        updateProject(form.value).then(() => {
           proxy.$modal.msgSuccess("修改成功");
           open.value = false;
           projectQueryViewRef.value.handleQuery();
         });
       } else {
-        addProject(form.value).then(response => {
+        addProject(form.value).then(() => {
           proxy.$modal.msgSuccess("新增成功");
           open.value = false;
           projectQueryViewRef.value.handleQuery();
@@ -218,7 +222,7 @@ function submitForm() {
 
 /** 删除按钮操作 */
 function handleDelete(row) {
-  proxy.$modal.confirm('是否确认删除名称为"' + row.projectName + '"的数据项?').then(function () {
+  proxy.$modal.confirm('是否确认删除名称为 "' + row.projectName + '" 的数据项？').then(function () {
     return delProject(row.projectId);
   }).then(() => {
     projectQueryViewRef.value.handleQuery();
@@ -232,11 +236,10 @@ function runTest(row) {
     runIds.value = [row.projectId];
   }
   if (!runIds.value || runIds.value.length === 0) {
-    ElMessageBox.alert('请选择要运行的项目', "提示！", {type: 'warning'});
+    ElMessageBox.alert('请选择要运行的项目', "提示", { type: 'warning' });
     return;
   }
 
   runDialogShow.value = true;
-
 }
 </script>

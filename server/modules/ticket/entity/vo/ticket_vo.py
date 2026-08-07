@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
@@ -18,19 +18,44 @@ class TicketBaseModel(BaseModel):
 
     ticket_id: int | None = None
     ticket_no: str | None = None
+    ticket_url: str | None = Field(default=None, description="工单详情链接")
     title: str | None = Field(default=None, description="工单标题")
     description: str | None = Field(default=None, description="工单描述")
     project_id: int | None = Field(default=None, description="所属项目ID")
     project_name: str | None = Field(default=None, description="所属项目名称")
+    project_code: str | None = Field(default=None, description="所属项目业务码")
     merchant_name: str | None = Field(default=None, description="所属项目名称（兼容历史字段 merchantName）")
     module_id: int | None = Field(default=None, description="所属模块ID")
     module_name: str | None = Field(default=None, description="所属模块名称")
-    version_key: str | None = Field(default=None, description="版本号")
+    module_code: str | None = Field(default=None, description="所属模块业务码")
     need_log_pull: bool | None = Field(default=None, description="创建工单后是否自动拉取日志")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="创建工单时的日志拉取配置")
     category_id: int | None = Field(default=None, description="问题分类ID")
     category_name: str | None = Field(default=None, description="问题分类名称")
+    issue_type_id: str | None = Field(default=None, description="工单类型编码")
+    issue_type_name: str | None = Field(default=None, description="工单类型名称")
     status: str | None = Field(default=TicketStatus.PENDING.value, description="当前状态")
+    is_problem: bool | None = Field(default=None, description="是否真实问题")
+    root_cause_type: str | None = Field(default=None, description="根因分类")
+    solution_type: str | None = Field(default=None, description="解决方式")
+    resolution_code: str | None = Field(default=None, description="关闭结果编码")
+    resolution_name: str | None = Field(default=None, description="关闭结果名称")
+    problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
+    problem_pattern_confidence: int | None = Field(default=None, description="细分问题类型置信度，0-100")
+    problem_pattern_source: str | None = Field(default=None, description="细分问题类型来源")
+    problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
+    problem_pattern_verified_by: str | None = Field(default=None, description="细分问题类型确认人")
+    problem_pattern_verified_at: datetime | None = Field(default=None, description="细分问题类型确认时间")
+    issue_id: int | None = Field(default=None, description="归属问题实例ID")
+    issue_no: str | None = Field(default=None, description="归属问题实例编号")
+    issue_title: str | None = Field(default=None, description="归属问题实例标题")
+    issue_relation_type: str | None = Field(default=None, description="问题实例归属类型")
+    issue_confirmed: bool | None = Field(default=False, description="问题归因是否人工确认")
+    affected_version_id: int | None = Field(default=None, description="问题发生版本中心ID")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
     customer_priority: str | None = Field(default="P3", description="对方优先级")
     internal_priority: str | None = Field(default="P3", description="内部优先级")
     severity: str | None = Field(default=None, description="严重等级")
@@ -39,13 +64,20 @@ class TicketBaseModel(BaseModel):
     reporter_name: str | None = Field(default=None, description="提单人名称")
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
     current_assignee_name: str | None = Field(default=None, description="当前处理人名称")
-    is_problem: bool | None = Field(default=None, description="是否真实问题")
+    first_line_assignee_id: int | None = Field(default=None, description="1线人员ID")
+    first_line_assignee_name: str | None = Field(default=None, description="1线人员名称")
+    internal_owner_id: int | None = Field(default=None, description="内部工单负责人ID")
+    internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     root_cause: str | None = Field(default=None, description="最终根因")
     solution: str | None = Field(default=None, description="最终解决方案")
+    submit_time: datetime | None = Field(default=None, description="工单业务提交时间")
     started_at: datetime | None = None
     resolved_at: datetime | None = None
     closed_at: datetime | None = None
     first_response_at: datetime | None = None
+    processed_at: datetime | None = Field(default=None, description="首次形成处理结论时间")
+    released_at: datetime | None = Field(default=None, description="实际发版时间")
+    verified_at: datetime | None = Field(default=None, description="验证完成时间")
     total_process_seconds: int | None = None
     tags: dict[str, Any] | list[str] | None = Field(default=None, description="标签")
     extra_data: dict[str, Any] | None = Field(default=None, description="扩展上下文")
@@ -82,16 +114,63 @@ class TicketQueryModel(QueryModel):
     ticket_no: str | None = Field(default=None, description="工单编号")
     title: str | None = Field(default=None, description="工单标题")
     status: str | None = Field(default=None, description="当前状态")
+    statuses: str | None = Field(default=None, description="当前状态多选，逗号分隔字符串")
     process_status: str | None = Field(default=None, description="工单处理状态")
+    process_statuses: str | None = Field(default=None, description="工单处理状态多选，逗号分隔字符串")
     project_id: int | None = Field(default=None, description="所属项目ID")
+    project_ids: str | None = Field(default=None, description="所属项目ID多选，逗号分隔字符串")
     module_id: int | None = Field(default=None, description="所属模块ID")
+    module_ids: str | None = Field(default=None, description="所属模块ID多选，逗号分隔字符串")
+    module_code: str | None = Field(default=None, description="所属模块业务码")
+    module_codes: str | None = Field(default=None, description="所属模块业务码多选，逗号分隔字符串")
     category_id: int | None = Field(default=None, description="问题分类ID")
+    issue_type_id: str | None = Field(default=None, description="工单类型编码")
+    issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
+    issue_type_name: str | None = Field(default=None, description="工单类型名称")
+    is_problem: bool | None = Field(default=None, description="是否真实问题")
+    is_problems: str | None = Field(default=None, description="是否真实问题多选，true/false 逗号分隔字符串")
+    root_cause_type: str | None = Field(default=None, description="根因分类")
+    root_cause_types: str | None = Field(default=None, description="根因分类多选，逗号分隔字符串")
+    solution_type: str | None = Field(default=None, description="解决方式")
+    solution_types: str | None = Field(default=None, description="解决方式多选，逗号分隔字符串")
+    resolution_code: str | None = Field(default=None, description="关闭结果编码")
+    resolution_codes: str | None = Field(default=None, description="关闭结果编码多选，逗号分隔字符串")
+    resolution_name: str | None = Field(default=None, description="关闭结果名称")
+    problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_codes: str | None = Field(default=None, description="细分问题类型编码多选，逗号分隔字符串")
+    problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
+    issue_id: int | None = Field(default=None, description="归属问题实例ID")
+    issue_no: str | None = Field(default=None, description="归属问题实例编号")
+    issue_title: str | None = Field(default=None, description="归属问题实例标题")
+    issue_relation_type: str | None = Field(default=None, description="问题实例归属类型")
+    issue_confirmed: bool | None = Field(default=None, description="问题归因是否人工确认")
     customer_priority: str | None = Field(default=None, description="对方优先级")
     internal_priority: str | None = Field(default=None, description="内部优先级")
+    internal_priorities: str | None = Field(default=None, description="内部优先级多选，逗号分隔字符串")
     source: str | None = Field(default=None, description="工单来源")
     current_assignee_id: int | None = Field(default=None, description="当前处理人ID")
+    current_assignee_ids: str | None = Field(default=None, description="当前处理人ID多选，逗号分隔字符串")
+    current_assignee_name: str | None = Field(default=None, description="当前处理人名称")
+    first_line_assignee_id: int | None = Field(default=None, description="1线人员ID")
+    first_line_assignee_ids: str | None = Field(default=None, description="1线人员ID多选，逗号分隔字符串")
+    first_line_assignee_name: str | None = Field(default=None, description="1线人员名称")
+    internal_owner_id: int | None = Field(default=None, description="内部工单负责人ID")
+    internal_owner_ids: str | None = Field(default=None, description="内部工单负责人ID多选，逗号分隔字符串")
+    internal_owner_name: str | None = Field(default=None, description="内部工单负责人名称")
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
+    ticket_ids: str | None = Field(default=None, description="工单ID列表，逗号分隔字符串，用于自然语言搜索后的过滤")
+    submit_begin_time: datetime | None = Field(default=None, description="提交时间筛选开始，优先使用外部createTime")
+    submit_end_time: datetime | None = Field(default=None, description="提交时间筛选结束，优先使用外部createTime")
+    processing_conclusion_status: str | None = Field(default=None, description="处理结论状态：processed/unprocessed")
+    processed_begin_time: datetime | None = Field(default=None, description="处理完成时间筛选开始")
+    processed_end_time: datetime | None = Field(default=None, description="处理完成时间筛选结束")
+    affected_version_id: int | None = Field(default=None, description="问题发生版本中心ID")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
+    sort_field: str | None = Field(default="submitTime", description="排序字段，默认按提交时间排序")
+    sort_order: str | None = Field(default="desc", description="排序方向，支持 asc/desc 或 ascending/descending")
 
     sync_consumer: str | None = Field(default=None, description="同步消费者标识，用于筛选未同步数据")
 
@@ -120,6 +199,105 @@ class TicketStatusChangeModel(BaseModel):
     root_cause: str | None = Field(default=None, description="最终根因")
     solution: str | None = Field(default=None, description="最终解决方案")
     is_problem: bool | None = Field(default=None, description="是否真实问题")
+    root_cause_type: str | None = Field(default=None, description="根因分类")
+    solution_type: str | None = Field(default=None, description="解决方式")
+    resolution_code: str | None = Field(default=None, description="关闭结果编码")
+    resolution_name: str | None = Field(default=None, description="关闭结果名称")
+    problem_pattern_code: str | None = Field(default=None, description="细分问题类型编码")
+    problem_pattern_name: str | None = Field(default=None, description="细分问题类型名称")
+    problem_pattern_verified: bool | None = Field(default=None, description="细分问题类型是否人工确认")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
+
+
+class TicketReleaseBatchUpdateModel(BaseModel):
+    """
+    工单版本治理批量维护模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_ids: list[int] = Field(default_factory=list, description="待维护工单ID列表")
+    planned_fix_version_id: int | None = Field(default=None, description="计划修复版本中心ID")
+    fixed_version_id: int | None = Field(default=None, description="实际修复版本中心ID")
+    released_version_id: int | None = Field(default=None, description="实际发版版本中心ID")
+    released_at: datetime | None = Field(default=None, description="实际发版时间")
+    verified_at: datetime | None = Field(default=None, description="验证完成时间")
+    mark_released: bool = Field(default=False, description="是否标记发版完成，未传发版时间时使用当前时间")
+    mark_verified: bool = Field(default=False, description="是否标记验证完成，未传验证时间时使用当前时间")
+    comment: str | None = Field(default=None, description="批量维护说明")
+
+    @model_validator(mode="after")
+    def normalize_payload(self):
+        """
+        归一化批量维护参数，清理空字符串并校验至少存在一个更新字段。
+        :return: 当前模型
+        """
+        normalized_ids: list[int] = []
+        for ticket_id in self.ticket_ids or []:
+            try:
+                parsed_id = int(ticket_id)
+            except Exception:
+                continue
+            if parsed_id > 0 and parsed_id not in normalized_ids:
+                normalized_ids.append(parsed_id)
+        self.ticket_ids = normalized_ids
+        for field_name in ("comment",):
+            value = getattr(self, field_name)
+            setattr(self, field_name, str(value).strip() if value is not None else None)
+        if not self.ticket_ids:
+            raise ValueError("请选择需要维护的工单")
+        has_update = any(
+            [
+                self.planned_fix_version_id is not None,
+                self.fixed_version_id is not None,
+                self.released_version_id is not None,
+                self.released_at is not None,
+                self.verified_at is not None,
+                self.mark_released,
+                self.mark_verified,
+            ]
+        )
+        if not has_update:
+            raise ValueError("请至少填写一个版本治理字段")
+        return self
+
+
+@as_query
+class TicketVersionStatisticsQueryModel(QueryModel):
+    """
+    工单版本统计查询模型。
+    """
+
+    begin_time: date | datetime | str | None = Field(default=None, description="创建时间开始")
+    end_time: date | datetime | str | None = Field(default=None, description="创建时间结束")
+    submit_begin_time: datetime | str | None = Field(default=None, description="提交时间开始")
+    submit_end_time: datetime | str | None = Field(default=None, description="提交时间结束")
+    processed_begin_time: datetime | str | None = Field(default=None, description="处理完成时间开始")
+    processed_end_time: datetime | str | None = Field(default=None, description="处理完成时间结束")
+    project_ids: str | None = Field(default=None, description="项目ID多选，逗号分隔字符串")
+    module_ids: str | None = Field(default=None, description="模块ID多选，逗号分隔字符串")
+    issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
+    root_cause_types: str | None = Field(default=None, description="根因分类多选，逗号分隔字符串")
+    solution_types: str | None = Field(default=None, description="解决方式多选，逗号分隔字符串")
+    resolution_codes: str | None = Field(default=None, description="关闭结果编码多选，逗号分隔字符串")
+    problem_pattern_codes: str | None = Field(default=None, description="细分问题编码多选，逗号分隔字符串")
+    version_keyword: str | None = Field(default=None, description="版本关键字，匹配发生/计划/修复/发版版本")
+    top_limit: int = Field(default=5, description="Top 维度返回数量")
+    version_limit: int = Field(default=50, description="每组版本最大返回数量")
+
+    @model_validator(mode="after")
+    def normalize_query(self):
+        """
+        限制版本统计返回规模，避免一次返回过多维度数据。
+        :return: 当前模型
+        """
+        self.top_limit = min(max(int(self.top_limit or 5), 1), 20)
+        self.version_limit = min(max(int(self.version_limit or 50), 1), 200)
+        self.version_keyword = str(self.version_keyword or "").strip() or None
+        self.is_page = False
+        return self
 
 
 class TicketCommentCreateModel(BaseModel):
@@ -131,6 +309,7 @@ class TicketCommentCreateModel(BaseModel):
 
     content: str = Field(description="评论内容")
     is_internal: bool = Field(default=False, description="是否内部评论")
+    attachments: dict[str, Any] | list[dict[str, Any]] | None = Field(default=None, description="评论附件或引用信息")
 
 
 class TicketMessageCreateModel(BaseModel):
@@ -148,8 +327,9 @@ class TicketMessageCreateModel(BaseModel):
     content: str = Field(description="消息内容")
     attachments: dict[str, Any] | list[dict[str, Any]] | None = Field(default=None, description="附件或引用信息")
     run_ai: bool = Field(default=False, description="提交后是否立即发起 AI 追问分析")
-    version_key: str | None = Field(default=None, description="发起 AI 追问时使用的版本号")
+    version_id: int | None = Field(default=None, description="发起 AI 追问时使用的版本中心ID")
     agent_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Agent 编码")
+    ai_provider_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Provider 编码")
 
 
 class TicketMessageModel(BaseModel):
@@ -244,7 +424,7 @@ class TicketAiRepoMappingBaseModel(BaseModel):
     mapping_id: int | None = None
     project_id: int = Field(description="所属项目ID")
     project_name: str = Field(default="", description="项目名称")
-    version_key: str = Field(description="版本标识")
+    version_id: int = Field(description="版本中心ID")
     repo_url: str = Field(default="", description="仓库地址")
     branch_name: str = Field(default="", description="分支名称")
     local_repo_path: str = Field(default="", description="本地仓库路径（Agent 本地配置优先）")
@@ -267,7 +447,7 @@ class TicketAiRepoMappingQueryModel(QueryModel):
     """
 
     project_id: int | None = Field(default=None, description="所属项目ID")
-    version_key: str | None = Field(default=None, description="版本标识")
+    version_id: int | None = Field(default=None, description="版本中心ID")
     enabled: bool | None = Field(default=None, description="是否启用")
     keyword: str | None = Field(default=None, description="项目名、版本或仓库关键字")
 
@@ -278,7 +458,13 @@ class TicketAiRepoMappingCreateModel(TicketAiRepoMappingBaseModel):
     """
 
     project_id: int = Field(description="所属项目ID")
-    version_key: str = Field(description="版本标识")
+
+    @model_validator(mode="after")
+    def validate_version_reference(self):
+        """校验仓库映射必须关联版本中心。"""
+        if not self.version_id:
+            raise ValueError("请选择版本")
+        return self
 
 
 class TicketAiRepoMappingUpdateModel(TicketAiRepoMappingBaseModel):
@@ -289,6 +475,20 @@ class TicketAiRepoMappingUpdateModel(TicketAiRepoMappingBaseModel):
     mapping_id: int = Field(description="映射ID")
 
 
+class TicketAiRepoMappingResponseModel(TicketAiRepoMappingBaseModel):
+    """工单 AI 仓库映射接口响应模型。"""
+
+    version_id: str = Field(description="版本中心ID，字符串避免前端整数精度丢失")
+    version_name: str = Field(default="", description="版本展示名称")
+    version_key: str = Field(default="", description="版本标识")
+
+    @field_validator("version_id", mode="before")
+    @classmethod
+    def serialize_version_id(cls, value: int | str) -> str:
+        """将 ORM 版本ID转换为浏览器可精确传输的字符串。"""
+        return str(value)
+
+
 class TicketAiAnalysisRequestModel(BaseModel):
     """
     工单 AI 分析提交模型。
@@ -296,12 +496,28 @@ class TicketAiAnalysisRequestModel(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    mapping_id: int | None = Field(default=None, description="仓库映射ID，兼容手动指定")
-    version_key: str = Field(description="版本标识，用于匹配仓库映射")
+    mapping_id: int | None = Field(default=None, description="仓库映射ID")
+    version_id: int | None = Field(default=None, description="版本中心ID；留空时后端会尝试从日志提取")
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
+    ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
+    resume: bool = Field(default=False, description="是否复用上次 AI 分析会话继续分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
+    prompt_template_codes: list[str] | None = Field(default=None, description="本次分析追加的提示词模板编码列表")
+    log_analysis_mode: str | None = Field(
+        default=None,
+        description="日志分析模式：digest摘要、full_directory完整目录、hybrid摘要+完整目录",
+    )
+    log_window_missing_strategy: str | None = Field(
+        default=None,
+        description="时间窗口模式下缺少已截取日志时的处理策略：server_extract服务端截取、agent_extract下发Agent截取",
+    )
+    log_begin_time: datetime | str | None = Field(default=None, description="AI分析日志窗口开始时间")
+    log_end_time: datetime | str | None = Field(default=None, description="AI分析日志窗口结束时间")
+    log_point_time: datetime | str | None = Field(default=None, description="AI分析日志时间点")
+    range_before_minutes: int | None = Field(default=None, description="AI分析时间点前回溯分钟数")
+    range_after_minutes: int | None = Field(default=None, description="AI分析时间点后延伸分钟数")
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -309,11 +525,22 @@ class TicketAiAnalysisRequestModel(BaseModel):
         校验 AI 分析提交参数。
         :return: 当前模型
         """
-        self.version_key = str(self.version_key or "").strip()
-        if not self.version_key:
-            raise ValueError("版本号不能为空")
         self.agent_code = str(self.agent_code or "").strip() or None
+        self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        self.log_analysis_mode = str(self.log_analysis_mode or "").strip() or None
+        self.log_window_missing_strategy = str(self.log_window_missing_strategy or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip()
+        normalized_codes: list[str] = []
+        for item in self.prompt_template_codes or []:
+            template_code = str(item or "").strip()
+            if template_code and template_code not in normalized_codes:
+                normalized_codes.append(template_code)
+        self.prompt_template_codes = normalized_codes or None
+        for attr_name in ("range_before_minutes", "range_after_minutes"):
+            value = getattr(self, attr_name)
+            if value is None:
+                continue
+            setattr(self, attr_name, max(int(value), 0))
         return self
 
 
@@ -329,7 +556,7 @@ class TicketAiAnalysisTaskModel(BaseModel):
     project_id: int | None = None
     mapping_id: int | None = None
     project_name: str | None = None
-    version_key: str | None = None
+    version_id: int | None = None
     repo_url: str | None = None
     branch_name: str | None = None
     local_repo_path: str | None = None
@@ -363,7 +590,7 @@ class TicketAiAnalysisTaskQueryModel(QueryModel):
 
     status: str | None = Field(default=None, description="任务状态")
     ticket_id: int | None = Field(default=None, description="工单ID")
-    version_key: str | None = Field(default=None, description="版本标识")
+    version_id: int | None = Field(default=None, description="版本中心ID")
 
 
 class TicketSyncSourcePayloadModel(BaseModel):
@@ -398,16 +625,23 @@ class TicketSyncAutomationModel(BaseModel):
     auto_identify: bool = Field(default=True, description="是否自动识别工单归属信息")
     auto_log_pull: bool = Field(default=False, description="是否根据识别结果自动拉取日志")
     auto_ai_analysis: bool = Field(default=False, description="是否自动发起 AI 分析")
+    auto_translate: bool = Field(default=False, description="是否自动翻译工单描述")
     ai_agent_code: str | None = Field(default=None, description="自动 AI 使用的 Agent 编码")
+    ai_provider_code: str | None = Field(default=None, description="自动 AI 使用的 Provider 编码")
     log_pull_config: dict[str, Any] | None = Field(default=None, description="默认日志拉取参数")
+    status_mappings: list[dict[str, Any]] | None = Field(default=None, description="外部状态到本地状态的映射")
+    assignee_mappings: list[dict[str, Any]] | None = Field(default=None, description="外部处理人到本地用户的映射")
     extra_instruction: str | None = Field(default=None, description="自动 AI 额外说明")
 
     @model_validator(mode="after")
     def validate_automation(self):
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
+        self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip() or None
-        if self.auto_ai_analysis and not self.ai_agent_code:
-            raise ValueError("启用自动 AI 时需要 aiAgentCode")
+        self.status_mappings = self.status_mappings if isinstance(self.status_mappings, list) else None
+        self.assignee_mappings = self.assignee_mappings if isinstance(self.assignee_mappings, list) else None
+        if self.auto_ai_analysis and not (self.ai_provider_code or self.ai_agent_code):
+            raise ValueError("启用自动 AI 时需要 aiProviderCode 或 aiAgentCode")
         return self
 
 
@@ -420,18 +654,19 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
     automation: TicketSyncAutomationModel | None = Field(default=None, description="同步后自动化配置")
     sync_consumer: str | None = Field(default=None, description="同步消费者名称，用于预初始化交付状态")
     raw_payload: dict[str, Any] | None = Field(default=None, description="外部工单原始载荷")
+    step_reason: str | None = Field(default=None, description="外部排查过程原始文本")
+    detected_version_key: str | None = Field(default=None, description="外部来源识别到的版本文本，仅用于解析版本中心ID")
     ticket_no: str = Field(description="工单编号")
-    title: str = Field(description="工单标题")
+    title: str | None = Field(default=None, description="工单标题，可为空后由服务端自动生成")
 
     @model_validator(mode="after")
     def validate_sync_upsert(self):
         self.ticket_no = str(self.ticket_no or "").strip()
-        self.title = str(self.title or "").strip()
+        self.title = str(self.title or "").strip() or None
         self.sync_consumer = str(self.sync_consumer or "").strip() or None
+        self.step_reason = str(self.step_reason or "").strip() or None
         if not self.ticket_no:
             raise ValueError("ticketNo 不能为空")
-        if not self.title:
-            raise ValueError("title 不能为空")
         return self
 
 
@@ -495,6 +730,193 @@ class TicketSyncAckRequestModel(BaseModel):
         return self
 
 
+class TicketSyncPersonReminderPreviewModel(BaseModel):
+    """
+    人维度催办统计预览请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: int | None = Field(default=None, description="系统用户ID")
+    email: str | None = Field(default=None, description="用户邮箱")
+
+    @model_validator(mode="after")
+    def validate_preview_request(self):
+        """
+        校验预览请求参数。
+        :return: 当前模型。
+        """
+        self.email = str(self.email or "").strip() or None
+        if not self.user_id and not self.email:
+            raise ValueError("userId 或 email 至少填写一个")
+        return self
+
+
+class TicketSyncPersonReminderRunModel(BaseModel):
+    """
+    人维度催办执行请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: int | None = Field(default=None, description="系统用户ID，留空表示全量执行")
+    email: str | None = Field(default=None, description="用户邮箱，留空表示全量执行")
+
+    @model_validator(mode="after")
+    def validate_run_request(self):
+        """
+        校验执行请求参数。
+        :return: 当前模型。
+        """
+        self.email = str(self.email or "").strip() or None
+        return self
+
+
+class TicketSyncGroupPushSendModel(BaseModel):
+    """
+    按工单号手动发送群消息请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_no: str = Field(description="工单号")
+    push_ids: list[int] | None = Field(default=None, description="覆盖推送配置ID列表")
+    message_template: str | None = Field(default=None, description="覆盖消息模板")
+    force_push: bool = Field(default=False, description="是否强制推送（忽略已推送状态）")
+
+    @model_validator(mode="after")
+    def validate_group_push_request(self):
+        """
+        校验手动群推送请求参数。
+        :return: 当前模型。
+        """
+        self.ticket_no = str(self.ticket_no or "").strip()
+        if not self.ticket_no:
+            raise ValueError("ticketNo 不能为空")
+        if isinstance(self.push_ids, list):
+            normalized_ids: list[int] = []
+            for item in self.push_ids:
+                try:
+                    parsed = int(item)
+                except Exception:
+                    continue
+                if parsed > 0 and parsed not in normalized_ids:
+                    normalized_ids.append(parsed)
+            self.push_ids = normalized_ids or None
+        else:
+            self.push_ids = None
+        self.message_template = str(self.message_template or "").strip() or None
+        self.force_push = bool(self.force_push)
+        return self
+
+
+class TicketSyncSummaryRunModel(BaseModel):
+    """
+    工单汇总统计通知手动执行请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    start_time: datetime | None = Field(default=None, description="统计开始时间，可选")
+    end_time: datetime | None = Field(default=None, description="统计结束时间，可选")
+
+    @model_validator(mode="after")
+    def validate_summary_run_request(self):
+        """
+        校验汇总统计执行参数。
+        :return: 当前模型。
+        """
+        if self.start_time and self.end_time and self.start_time > self.end_time:
+            raise ValueError("startTime 不能晚于 endTime")
+        return self
+
+
+class TicketCustomStatisticsRunModel(BaseModel):
+    """自定义工单统计手动执行请求模型。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    profile_codes: list[str] | None = Field(default=None, description="统计方案编码列表，留空执行全部启用方案")
+    start_time: datetime | None = Field(default=None, description="可选统一统计开始时间")
+    end_time: datetime | None = Field(default=None, description="可选统一统计结束时间")
+    send: bool = Field(default=True, description="是否按方案配置发送通知")
+
+    @model_validator(mode="after")
+    def validate_custom_statistics_run_request(self):
+        """校验方案编码和可选时间覆盖范围。"""
+        normalized_codes: list[str] = []
+        for item in self.profile_codes or []:
+            code = str(item or "").strip()
+            if code and code not in normalized_codes:
+                normalized_codes.append(code)
+        self.profile_codes = normalized_codes or None
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("startTime 和 endTime 必须同时传入")
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValueError("startTime 必须早于 endTime")
+        self.send = bool(self.send)
+        return self
+
+
+class TicketBatchReclassifyRequestModel(BaseModel):
+    """
+    工单批量重归类请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_nos: list[str] | None = Field(default=None, description="指定重归类的工单号列表(ticketNo)，留空时按分页扫描")
+    all_tickets: bool = Field(default=False, description="是否忽略分页直接扫描全部工单")
+    only_uncategorized: bool = Field(default=False, description="是否仅处理未归类工单")
+    page_num: int = Field(default=1, description="分页页码，ticketNos 为空时生效")
+    page_size: int = Field(default=100, description="分页大小，ticketNos 为空时生效")
+    strategy: str = Field(default="ai", description="归类策略：ai/regex/external_mapping")
+    ai_prompt_code: str | None = Field(default=None, description="AI归类提示词编码，留空走系统配置")
+    regex_rules: list[dict[str, Any]] | None = Field(
+        default=None,
+        description='正则归类规则列表，元素示例：{"pattern":"支付|扣款","category":"支付问题"}',
+    )
+    force_reclassify: bool = Field(default=False, description="是否覆盖已归类工单")
+
+    @model_validator(mode="after")
+    def validate_batch_reclassify_request(self):
+        """
+        校验批量重归类请求参数。
+        :return: 当前模型。
+        """
+        normalized_nos: list[str] = []
+        for item in self.ticket_nos or []:
+            item_str = str(item).strip()
+            if item_str and item_str not in normalized_nos:
+                normalized_nos.append(item_str)
+        self.ticket_nos = normalized_nos or None
+        self.all_tickets = bool(self.all_tickets)
+        self.only_uncategorized = bool(self.only_uncategorized)
+        self.page_num = max(int(self.page_num or 1), 1)
+        self.page_size = min(max(int(self.page_size or 100), 1), 500)
+        strategy_value = str(self.strategy or "ai").strip().lower()
+        self.strategy = strategy_value if strategy_value in {"ai", "regex", "external_mapping"} else "ai"
+        self.ai_prompt_code = str(self.ai_prompt_code or "").strip() or None
+        normalized_rules: list[dict[str, Any]] = []
+        for item in self.regex_rules or []:
+            if not isinstance(item, dict):
+                continue
+            pattern = str(item.get("pattern") or "").strip()
+            category = str(item.get("category") or item.get("categoryName") or "").strip()
+            if not pattern or not category:
+                continue
+            normalized_rules.append(
+                {
+                    "pattern": pattern,
+                    "category": category,
+                    "flags": str(item.get("flags") or "").strip(),
+                }
+            )
+        self.regex_rules = normalized_rules or None
+        self.force_reclassify = bool(self.force_reclassify)
+        return self
+
+
 class KnowledgeArticleModel(BaseModel):
     """
     知识库文章模型，用于沉淀历史解决方案和复盘内容。
@@ -524,6 +946,72 @@ class KnowledgeArticleQueryModel(QueryModel):
     title: str | None = Field(default=None, description="文章标题")
     category: str | None = Field(default=None, description="文章分类")
     keyword: str | None = Field(default=None, description="关键字，匹配标题和内容")
+
+
+class TicketEmbeddingRebuildRequestModel(BaseModel):
+    """
+    工单向量重建请求模型，用于手工批量刷新本地向量和外部向量库。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    ticket_ids: list[int] | None = Field(default=None, description="兼容旧入口的系统工单ID列表")
+    ticket_nos: list[str] | None = Field(
+        default=None, description="指定重建的工单号列表(ticketNo)，为空时按条件批量重建"
+    )
+    all_tickets: bool = Field(default=True, description="是否重建全部有效工单")
+    page_size: int = Field(default=100, description="每批处理数量")
+    provider: str | None = Field(default=None, description="指定检索提供方，默认读取系统配置")
+    include_qdrant: bool | None = Field(default=None, description="是否同步写入 Qdrant，默认由系统配置决定")
+    force_rebuild: bool = Field(default=False, description="是否强制重新生成向量，默认按内容哈希幂等跳过")
+    run_in_background: bool = Field(default=True, description="是否后台执行，避免长任务阻塞接口")
+
+    @model_validator(mode="after")
+    def normalize_payload(self):
+        """
+        归一化重建参数，限制分页大小并清理无效工单ID。
+        :return: 当前模型
+        """
+        ids: list[int] = []
+        for ticket_id in self.ticket_ids or []:
+            try:
+                normalized_id = int(ticket_id)
+            except Exception:
+                continue
+            if normalized_id > 0 and normalized_id not in ids:
+                ids.append(normalized_id)
+        self.ticket_ids = ids or None
+        ticket_nos: list[str] = []
+        for ticket_no in self.ticket_nos or []:
+            normalized_no = str(ticket_no or "").strip()
+            if normalized_no and normalized_no not in ticket_nos:
+                ticket_nos.append(normalized_no)
+        self.ticket_nos = ticket_nos or None
+        self.all_tickets = bool(self.all_tickets or not (self.ticket_nos or self.ticket_ids))
+        self.page_size = min(max(int(self.page_size or 100), 1), 500)
+        self.provider = str(self.provider or "").strip() or None
+        self.force_rebuild = bool(self.force_rebuild)
+        return self
+
+
+class TicketSimilarityConfigModel(BaseModel):
+    """
+    工单相似度配置模型，用于可视化保存 Provider、Embedding、Qdrant 和场景触发开关。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+    enabled: bool = Field(default=True, description="是否启用相似工单检索")
+    provider: str = Field(default="local_hash", description="相似度检索 Provider")
+    fallback_provider: str = Field(default="local_hash", description="历史兼容字段，严格模式不使用")
+    top_k: int = Field(default=20, description="默认召回数量")
+    threshold: float = Field(default=0.05, description="相似度阈值")
+    keyword_weight: float = Field(default=0.15, description="关键词加权")
+    vector_weight: float = Field(default=0.85, description="向量加权")
+    fields: list[str] = Field(default_factory=list, description="参与向量化的字段")
+    embedding: dict[str, Any] = Field(default_factory=dict, description="Embedding 服务配置")
+    qdrant: dict[str, Any] = Field(default_factory=dict, description="Qdrant 配置")
+    scene_triggers: dict[str, bool] = Field(default_factory=dict, description="不同业务场景的自动向量化开关")
 
 
 class WorkflowStatusModel(BaseModel):
@@ -580,3 +1068,16 @@ class TicketStatisticsQueryModel(QueryModel):
 
     begin_time: date | datetime | str | None = Field(default=None, description="开始时间")
     end_time: date | datetime | str | None = Field(default=None, description="结束时间")
+    statistics_mode: str | None = Field(default="realtime", description="统计口径：realtime/snapshot")
+    project_ids: str | None = Field(default=None, description="项目ID多选，逗号分隔字符串")
+    module_ids: str | None = Field(default=None, description="模块ID多选，逗号分隔字符串")
+    module_codes: str | None = Field(default=None, description="模块业务码多选，逗号分隔字符串")
+    issue_type_ids: str | None = Field(default=None, description="工单类型编码多选，逗号分隔字符串")
+    granularity: str | None = Field(default="week", description="趋势粒度：day/week/month")
+    week_bucket_mode: str | None = Field(default="calendar_week", description="周趋势分桶：calendar_week/business_week")
+    problem_pattern_codes: str | None = Field(default=None, description="细分问题类型编码多选，逗号分隔字符串")
+    metric_codes: str | None = Field(default=None, description="自定义趋势指标编码多选，逗号分隔字符串")
+    automation_scope_only: bool = Field(
+        default=True,
+        description="是否默认仅统计自动化关注范围内的模块；false 时统计全部模块",
+    )

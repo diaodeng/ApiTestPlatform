@@ -4,7 +4,7 @@ import hmac
 import json
 import time
 
-import requests
+import httpx
 
 # 飞书通知机器人
 FeishuTalk_Robots = {
@@ -41,7 +41,8 @@ class Feishu:
             self.keywords = ""
         content_text = self._get_user_ids() + self.keywords + content
         payload_message['content'].update({"text": content_text})
-        res = requests.post(url=self.robot['url'], data=json.dumps(payload_message), headers=self.headers)
+        with httpx.Client() as client:
+            res = client.post(url=self.robot['url'], content=json.dumps(payload_message), headers=self.headers)
         return res.json()
 
     def sendFuTextmessage(self, content):
@@ -73,7 +74,8 @@ class Feishu:
             self.keywords = ""
         content_text = self._get_user_ids() + self.keywords + content
         payload_message['content'].update({"text": content_text})
-        res = requests.post(url=self.robot['url'], data=json.dumps(payload_message), headers=self.headers)
+        with httpx.Client() as client:
+            res = client.post(url=self.robot['url'], content=json.dumps(payload_message), headers=self.headers)
         return res.json()
 
     def _get_user_ids(self):

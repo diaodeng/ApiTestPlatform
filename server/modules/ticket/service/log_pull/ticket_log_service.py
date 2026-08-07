@@ -1,0 +1,1996 @@
+from __future__ import annotations
+
+import codecs
+import json
+import os
+import re
+import shutil
+import subprocess
+import time
+from collections import Counter
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from charset_normalizer import from_bytes
+from sqlalchemy.orm import Session
+
+from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
+from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
+from modules.ticket.entity.vo.ticket_log_pull_vo import (
+    TicketLogContextLineModel,
+    TicketLogContextModel,
+    TicketLogErrorSummaryModel,
+    TicketLogFileModel,
+    TicketLogPrepareModel,
+    TicketLogSearchHitModel,
+)
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
+from utils.log_util import logger
+
+
+class LogService:
+    """
+    工单日志统一服务，负责把日志拉取归档准备为可搜索文件，并提供搜索、上下文和异常摘要能力。
+    """
+
+    BASE_DIR = Path(__file__).resolve().parents[4] / "data" / "logs"
+    SOURCE_FILE_NAME = "log.zip"
+    META_FILE_NAME = "meta.json"
+    TEXT_EXTENSIONS = {".log", ".txt", ".out"}
+    ERROR_KEYWORDS = ("ERROR", "Exception", "Traceback", "timeout", "failed")
+    LINE_INDEX_SUFFIX = ".lineidx"
+    LINE_INDEX_ENCODING_VERSION = 2
+    SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
+    CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
+
+    @classmethod
+    def prepare(
+        cls,
+        db: Session,
+        ticket_id: int,
+        record_id: int | None = None,
+        progress_callback: Callable[[int, int | None, str], None] | None = None,
+    ) -> TicketLogPrepareModel:
+        """
+        准备指定工单的日志目录：复用最新日志拉取归档，下载或复制到 source 后递归解压到 extract。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID，为空时使用当前工单最新日志记录
+        :param progress_callback: 远程归档下载进度回调，参数依次为已下载字节数、总字节数、来源
+        :return: 准备结果
+        """
+        prepare_started_at = time.monotonic()
+        logger.info(f"开始准备工单日志查看目录，ticket_id={ticket_id}，record_id={record_id}")
+        runtime_config = cls._get_runtime_config(db)
+        ticket_dir = cls._ticket_dir(ticket_id, record_id)
+        source_dir = ticket_dir / "source"
+        extract_dir = ticket_dir / "extract"
+        meta_path = ticket_dir / cls.META_FILE_NAME
+        if extract_dir.exists() and any(extract_dir.iterdir()):
+            cls._validate_extracted_resource_usage(extract_dir, runtime_config)
+            files = cls.files(ticket_id, record_id)
+            logger.info(
+                f"工单日志已存在解压目录，跳过重复准备，ticket_id={ticket_id}，record_id={record_id}，"
+                f"source_path={cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME}，"
+                f"extract_path={extract_dir}，file_count={len(files)}，"
+                f"elapsed_ms={int((time.monotonic() - prepare_started_at) * 1000)}"
+            )
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record_id,
+                prepared=True,
+                source_path=str(cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME),
+                extract_path=str(extract_dir),
+                file_count=len(files),
+                message="日志已准备完成",
+            )
+
+        record = cls._resolve_record(db, ticket_id, record_id)
+        if not record:
+            logger.warning(f"未找到工单日志拉取记录，无法准备日志，ticket_id={ticket_id}")
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record_id,
+                prepared=False,
+                file_count=0,
+                message="未找到日志文件，且未配置下载地址",
+            )
+
+        record_ticket_id = int(record.ticket_id or 0)
+        request_ticket_id = int(ticket_id or 0)
+        # 记录已关联工单时，请求的 ticket_id 必须匹配；记录未关联工单时，允许任意 ticket_id（含 0）
+        if record_id and record_ticket_id > 0 and record_ticket_id != request_ticket_id:
+            logger.warning(
+                f"日志拉取记录不属于当前工单，拒绝准备，ticket_id={ticket_id}, "
+                f"record_id={record_id}, record_ticket_id={record.ticket_id}"
+            )
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record_id,
+                prepared=False,
+                file_count=0,
+                message="日志拉取记录不属于当前工单",
+            )
+
+        archive_path, should_cleanup = TicketLogPullService._resolve_archive_source_for_view(
+            record,
+            db,
+            progress_callback=progress_callback,
+        )
+        if not archive_path:
+            logger.warning(f"未解析到可用日志归档文件，ticket_id={ticket_id}，record_id={record.id}")
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record.id,
+                prepared=False,
+                file_count=0,
+                message="未找到日志文件，且未配置下载地址",
+            )
+
+        try:
+            source_dir.mkdir(parents=True, exist_ok=True)
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            source_path = source_dir / cls._build_source_file_name(archive_path)
+            logger.info(
+                f"工单日志准备解析到归档，ticket_id={ticket_id}，record_id={record.id}，"
+                f"archive_path={archive_path}，source_path={source_path}，extract_path={extract_dir}，"
+                f"should_cleanup={should_cleanup}"
+            )
+            if archive_path.resolve() != source_path.resolve():
+                shutil.copy2(archive_path, source_path)
+            else:
+                logger.info(f"工单日志源文件已位于 source 目录，跳过复制，archive_path={archive_path}")
+            if should_cleanup:
+                archive_path.unlink(missing_ok=True)
+            cls._extract_recursive(source_path, extract_dir, runtime_config, time.monotonic())
+            files = cls.files(ticket_id, record.id if record_id else None)
+            cls._write_meta(
+                meta_path,
+                {
+                    "ticket_id": ticket_id,
+                    "record_id": record.id,
+                    "source_path": str(source_path),
+                    "extract_path": str(extract_dir),
+                    "prepared_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+                    "file_count": len(files),
+                },
+            )
+            logger.info(
+                f"工单日志准备完成，ticket_id={ticket_id}，record_id={record.id}，"
+                f"archive_path={archive_path}，source_path={source_path}，extract_path={extract_dir}，"
+                f"file_count={len(files)}，elapsed_ms={int((time.monotonic() - prepare_started_at) * 1000)}"
+            )
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record.id,
+                prepared=True,
+                source_path=str(source_path),
+                extract_path=str(extract_dir),
+                file_count=len(files),
+                message="日志准备完成",
+            )
+        except Exception as exc:
+            logger.exception(exc)
+            failed_source_path = cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME
+            logger.warning(
+                f"工单日志准备失败，ticket_id={ticket_id}，record_id={record.id}，"
+                f"archive_path={archive_path}，source_path={failed_source_path}，extract_path={extract_dir}，"
+                f"elapsed_ms={int((time.monotonic() - prepare_started_at) * 1000)}"
+            )
+            return TicketLogPrepareModel(
+                ticket_id=ticket_id,
+                record_id=record.id,
+                prepared=False,
+                source_path=str(cls._find_source_archive(source_dir) or source_dir / cls.SOURCE_FILE_NAME),
+                extract_path=str(extract_dir),
+                file_count=0,
+                message=f"日志准备失败：{exc}",
+            )
+
+    @classmethod
+    def files(cls, ticket_id: int, record_id: int | None = None) -> list[TicketLogFileModel]:
+        """
+        查询指定工单已准备目录中的可读日志文本文件。
+        :param ticket_id: 工单ID
+        :return: 日志文件列表
+        """
+        extract_dir = cls._extract_dir(ticket_id, record_id)
+        if not extract_dir.exists():
+            return []
+        result: list[TicketLogFileModel] = []
+        for path in extract_dir.rglob("*"):
+            if not path.is_file() or path.stat().st_size <= 0:
+                continue
+            if path.name.endswith(cls.LINE_INDEX_SUFFIX):
+                continue
+            if cls._is_archive(path):
+                continue
+            if not cls._is_text_file(path):
+                continue
+            result.append(
+                TicketLogFileModel(
+                    file=cls._relative_log_path(ticket_id, path, record_id),
+                    size=path.stat().st_size,
+                    modified_at=datetime.fromtimestamp(path.stat().st_mtime),
+                )
+            )
+        return sorted(result, key=lambda item: item.file)
+
+    @classmethod
+    def search(
+        cls,
+        ticket_id: int,
+        keyword: str,
+        context_before: int = 20,
+        context_after: int = 20,
+        limit: int = 100,
+        with_context: bool = True,
+        record_id: int | None = None,
+        file_path: str | None = None,
+        db: Session | None = None,
+        file_paths: list[str] | None = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        使用 ripgrep 搜索工单日志，并按需返回每个命中的上下文。
+        :param ticket_id: 工单ID
+        :param keyword: 搜索关键字
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定单个相对日志文件路径，兼容旧调用
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
+        :param file_paths: 指定多个相对日志文件路径，空值表示全局搜索
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :return: 搜索命中列表
+        """
+        search_started_at = time.monotonic()
+        keyword = str(keyword or "").strip()
+        if not keyword:
+            return []
+        extract_dir = cls._extract_dir(ticket_id, record_id)
+        if not extract_dir.exists():
+            return []
+        runtime_config = cls._get_runtime_config(db)
+        target_files = cls._resolve_search_files(ticket_id, record_id, file_path, runtime_config, file_paths)
+        file_scope = ",".join(target_files) or None
+        search_mode = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
+        if search_mode == "python":
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=[keyword],
+                search_mode="any",
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_scope,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "env_python",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            logger.info(f"日志搜索使用 Python 降级模式，ticket_id={ticket_id}，keyword={keyword}")
+            hits = cls._search_by_python(
+                ticket_id,
+                keyword,
+                context_before,
+                context_after,
+                limit,
+                with_context,
+                record_id,
+                file_scope,
+                runtime_config,
+                target_files,
+                ignore_case,
+                word_regexp,
+            )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
+
+        executable = (
+            shutil.which("rg")
+            or shutil.which("rg.exe")
+            or shutil.which("ripgrep")
+            or shutil.which("ripgrep.exe")
+        )
+        if not executable:
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=[keyword],
+                search_mode="any",
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_scope,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_not_found",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            logger.warning(f"未找到 rg/ripgrep，日志搜索降级为 Python，ticket_id={ticket_id}，keyword={keyword}")
+            hits = cls._search_by_python(
+                ticket_id,
+                keyword,
+                context_before,
+                context_after,
+                limit,
+                with_context,
+                record_id,
+                file_scope,
+                runtime_config,
+                target_files,
+                ignore_case,
+                word_regexp,
+            )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
+
+        cls._log_search_execution(
+            tool="rg",
+            ticket_id=ticket_id,
+            record_id=record_id,
+            extract_dir=extract_dir,
+            keywords=[keyword],
+            search_mode="any",
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            file_path=file_scope,
+            target_file_count=len(target_files),
+            args={
+                "executable": executable,
+                "rgArgs": [
+                    "-n",
+                    "--no-heading",
+                    "--with-filename",
+                    "--color",
+                    "never",
+                    "--fixed-strings",
+                    *(["--ignore-case"] if ignore_case else []),
+                    *(["--word-regexp"] if word_regexp else []),
+                    "-m",
+                    "<remaining_limit>",
+                    "-e",
+                    "<keyword...>",
+                    "--",
+                    "<target_file...>",
+                ],
+                "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+            },
+        )
+        return cls._search_by_rg_keywords(
+            ticket_id=ticket_id,
+            keywords=[keyword],
+            search_mode="any",
+            executable=executable,
+            extract_dir=extract_dir,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            runtime_config=runtime_config,
+            target_files=target_files,
+            file_path=file_scope,
+            ignore_case=ignore_case,
+            word_regexp=word_regexp,
+            search_started_at=search_started_at,
+        )
+
+    @classmethod
+    def search_keywords(
+        cls,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str = "any",
+        context_before: int = 20,
+        context_after: int = 20,
+        limit: int = 100,
+        with_context: bool = True,
+        record_id: int | None = None,
+        file_path: str | None = None,
+        db: Session | None = None,
+        file_paths: list[str] | None = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        使用多个固定字符串搜索工单日志，支持任一命中或同一行全部命中。
+        :param ticket_id: 工单ID
+        :param keywords: 搜索关键字列表
+        :param search_mode: 匹配模式，any 表示任一命中，all 表示同一行全部命中
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定单个相对日志文件路径，兼容旧调用
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
+        :param file_paths: 指定多个相对日志文件路径，空值表示全局搜索
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :return: 搜索命中列表
+        """
+        search_started_at = time.monotonic()
+        normalized_keywords = cls._normalize_keywords(keywords)
+        if not normalized_keywords:
+            return []
+        normalized_mode = str(search_mode or "any").strip().lower()
+        if normalized_mode not in {"any", "all"}:
+            normalized_mode = "any"
+        if len(normalized_keywords) == 1:
+            return cls.search(
+                ticket_id=ticket_id,
+                keyword=normalized_keywords[0],
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                file_path=file_path,
+                db=db,
+                file_paths=file_paths,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+
+        extract_dir = cls._extract_dir(ticket_id, record_id)
+        if not extract_dir.exists():
+            return []
+        runtime_config = cls._get_runtime_config(db)
+        target_files = cls._resolve_search_files(ticket_id, record_id, file_path, runtime_config, file_paths)
+        file_scope = ",".join(target_files) or None
+        search_mode_config = cls._resolve_mode(cls.SEARCH_MODE_ENV, default="auto")
+        if search_mode_config == "python":
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_scope,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "env_python",
+                    "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
+
+        executable = (
+            shutil.which("rg")
+            or shutil.which("rg.exe")
+            or shutil.which("ripgrep")
+            or shutil.which("ripgrep.exe")
+        )
+        if not executable:
+            logger.warning(f"未找到 rg/ripgrep，多关键字日志搜索降级为 Python，ticket_id={ticket_id}")
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_scope,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_not_found",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=normalized_keywords,
+                search_mode=normalized_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+            cls._log_search_completed("python", ticket_id, record_id, len(hits), search_started_at)
+            return hits
+        cls._log_search_execution(
+            tool="rg",
+            ticket_id=ticket_id,
+            record_id=record_id,
+            extract_dir=extract_dir,
+            keywords=normalized_keywords,
+            search_mode=normalized_mode,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            file_path=file_scope,
+            target_file_count=len(target_files),
+            args={
+                "executable": executable,
+                "rgArgs": [
+                    "-n",
+                    "--no-heading",
+                    "--with-filename",
+                    "--color",
+                    "never",
+                    "--fixed-strings",
+                    *(["--ignore-case"] if ignore_case else []),
+                    *(["--word-regexp"] if word_regexp else []),
+                    "-m",
+                    "<remaining_limit>",
+                    "-e",
+                    "<keyword...>",
+                    "--",
+                    "<target_file...>",
+                ],
+                "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+            },
+        )
+        hits = cls._search_by_rg_keywords(
+            ticket_id=ticket_id,
+            keywords=normalized_keywords,
+            search_mode=normalized_mode,
+            executable=executable,
+            extract_dir=extract_dir,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            runtime_config=runtime_config,
+            target_files=target_files,
+            file_path=file_scope,
+            ignore_case=ignore_case,
+            word_regexp=word_regexp,
+            search_started_at=search_started_at,
+        )
+        return hits
+
+    @classmethod
+    def context(
+        cls,
+        ticket_id: int,
+        file_path: str,
+        line_no: int,
+        before: int,
+        after: int,
+        record_id: int | None = None,
+    ) -> TicketLogContextModel:
+        """
+        按行号索引读取指定日志文件在某行附近的上下文，必要时跨轮转文件补足前后文。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 中心行号
+        :param before: 前置行数
+        :param after: 后置行数
+        :return: 上下文内容
+        """
+        context_mode = cls._resolve_mode(cls.CONTEXT_MODE_ENV, default="auto")
+        if context_mode == "native":
+            try:
+                return cls._context_by_native(ticket_id, file_path, line_no, before, after, record_id)
+            except Exception as exc:
+                logger.warning(f"原生命令读取日志上下文失败，降级为 Python 行索引，ticket_id={ticket_id}，reason={exc}")
+        elif context_mode == "auto":
+            logger.debug(f"日志上下文读取使用 Python 行索引模式，ticket_id={ticket_id}，file={file_path}")
+        return cls._context_by_python(ticket_id, file_path, line_no, before, after, record_id)
+
+    @classmethod
+    def _context_by_python(
+        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int, record_id: int | None = None
+    ) -> TicketLogContextModel:
+        """
+        使用 Python 行偏移索引读取日志上下文。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 中心行号
+        :param before: 前置行数
+        :param after: 后置行数
+        :return: 上下文内容
+        """
+        normalized_file = cls._normalize_relative_path(file_path)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file, record_id)
+        center = max(int(line_no or 1), 1)
+        before_count = max(int(before or 0), 0)
+        after_count = max(int(after or 0), 0)
+        index_data = cls._ensure_line_index(target_path)
+        total = int(index_data.get("line_count") or 0)
+        bounded_center = min(center, max(total, 1))
+        start = max(bounded_center - before_count, 1)
+        end = min(bounded_center + after_count, total)
+        current_lines = cls._read_lines_by_index(target_path, start, end)
+        return cls._build_context_model(
+            ticket_id=ticket_id,
+            file_path=normalized_file,
+            center=bounded_center,
+            start=start,
+            end=end,
+            total=total,
+            before_count=before_count,
+            after_count=after_count,
+            current_lines=current_lines,
+            record_id=record_id,
+        )
+
+    @classmethod
+    def search_time(
+        cls,
+        ticket_id: int,
+        time_keyword: str,
+        context_before: int = 20,
+        context_after: int = 20,
+        limit: int = 100,
+        with_context: bool = True,
+        record_id: int | None = None,
+        db: Session | None = None,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        按时间文本搜索日志，典型输入为 14:32。
+        :param ticket_id: 工单ID
+        :param time_keyword: 时间关键字
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
+        :return: 搜索命中列表
+        """
+        return cls.search(
+            ticket_id=ticket_id,
+            keyword=time_keyword,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            db=db,
+        )
+
+    @classmethod
+    def _search_by_python(
+        cls,
+        ticket_id: int,
+        keyword: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None = None,
+        file_path: str | None = None,
+        runtime_config: dict[str, Any] | None = None,
+        target_files: list[str] | None = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        Python 降级搜索实现，在没有 rg/ripgrep 时使用。
+        :param ticket_id: 工单ID
+        :param keyword: 搜索关键字
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定相对日志文件路径，空值表示全局搜索
+        :param runtime_config: 运行保护配置
+        :param target_files: 已归一化的搜索文件列表
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        resolved_config = runtime_config or cls._get_runtime_config()
+        resolved_target_files = target_files or cls._resolve_search_files(
+            ticket_id, record_id, file_path, resolved_config
+        )
+        max_scan_bytes = cls._config_int(resolved_config, "maxPythonSearchBytes", 268435456)
+        scanned_bytes = 0
+        for target_file in resolved_target_files:
+            if len(hits) >= limit:
+                break
+            path = cls._resolve_log_file(ticket_id, target_file, record_id)
+            scanned_bytes += path.stat().st_size
+            if scanned_bytes > max_scan_bytes:
+                raise RuntimeError("日志搜索扫描量超过当前保护阈值，请缩小文件范围或调整日志拉取存储配置")
+            encoding = cls._detect_file_encoding(path)
+            with path.open("r", encoding=encoding, errors="replace") as file_obj:
+                for line_no, content in enumerate(file_obj, start=1):
+                    matched_keywords = cls._match_keywords(
+                        content, [keyword], "any", ignore_case=ignore_case, word_regexp=word_regexp
+                    )
+                    if not matched_keywords:
+                        continue
+                    hit = TicketLogSearchHitModel(
+                        file=target_file,
+                        line=line_no,
+                        content=content.rstrip("\r\n"),
+                        matched_keywords=matched_keywords,
+                    )
+                    if with_context:
+                        hit.context = cls.context(
+                            ticket_id, target_file, line_no, context_before, context_after, record_id
+                        )
+                    hits.append(hit)
+                    if len(hits) >= limit:
+                        break
+        return hits
+
+    @classmethod
+    def _search_by_rg_keywords(
+        cls,
+        *,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        executable: str,
+        extract_dir: Path,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        runtime_config: dict[str, Any],
+        target_files: list[str],
+        file_path: str | None = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+        search_started_at: float | None = None,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        使用 rg 一次匹配多个 ASCII 固定字符串。
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param executable: rg 可执行文件路径
+        :param extract_dir: 日志解压目录
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param runtime_config: 运行保护配置
+        :param target_files: 搜索文件列表
+        :param file_path: 指定文件范围
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :param search_started_at: 搜索开始时间戳
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        seen_keys: set[tuple[str, int]] = set()
+        max_seconds = cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        first_keyword = keywords[0]
+        first_command = [
+            executable,
+            "-n",
+            "--no-heading",
+            "--with-filename",
+            "--color",
+            "never",
+            "--fixed-strings",
+            "-e",
+            first_keyword,
+        ]
+        if ignore_case:
+            first_command.append("--ignore-case")
+        if word_regexp:
+            first_command.append("--word-regexp")
+        if search_mode == "any":
+            for keyword in keywords[1:]:
+                first_command.extend(["-e", keyword])
+        first_command.extend(["--", *target_files])
+
+        commands = [first_command]
+        if search_mode == "all":
+            for index, keyword in enumerate(keywords[1:], start=1):
+                command = [executable, "--color", "never"]
+                if index == len(keywords) - 1:
+                    command.extend(["-m", str(limit)])
+                command.append(cls._build_rg_output_content_pattern(keyword, ignore_case, word_regexp))
+                commands.append(command)
+        else:
+            commands.append([executable, "--color", "never", "-m", str(limit), "."])
+
+        try:
+            stdout_text = cls._run_rg_pipeline(commands, extract_dir, max_seconds)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"rg 日志搜索达到保护超时，日志搜索降级为 Python，"
+                f"ticket_id={ticket_id}，record_id={record_id}"
+            )
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_timeout",
+                    "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+            if search_started_at is not None:
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
+        except FileNotFoundError as exc:
+            logger.warning(f"执行 rg 失败，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_file_not_found",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+            if search_started_at is not None:
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
+        except RuntimeError as exc:
+            logger.warning(f"rg 日志搜索返回异常，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}")
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_returncode",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+            if search_started_at is not None:
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
+
+        for raw_line in stdout_text.splitlines():
+            if len(hits) >= limit:
+                break
+            hit = cls._parse_rg_line(raw_line)
+            if not hit:
+                continue
+            unique_key = (hit.file, hit.line)
+            if unique_key in seen_keys:
+                continue
+            matched_keywords = cls._match_keywords(
+                hit.content, keywords, search_mode, ignore_case=ignore_case, word_regexp=word_regexp
+            )
+            if not matched_keywords:
+                continue
+            hit.matched_keywords = matched_keywords
+            if with_context:
+                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
+            hits.append(hit)
+            seen_keys.add(unique_key)
+        if search_started_at is not None:
+            cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+        return hits
+
+    @classmethod
+    def _run_rg_pipeline(cls, commands: list[list[str]], extract_dir: Path, timeout_seconds: int) -> str:
+        """
+        使用管道串联多个 rg 进程，避免把中间匹配结果收集到 Python 内存。
+        :param commands: rg 命令链，第一段读取日志文件，后续段从 stdin 过滤
+        :param extract_dir: 日志解压目录
+        :param timeout_seconds: 管道最大执行秒数
+        :return: 最后一段 rg 的标准输出
+        """
+        processes: list[subprocess.Popen] = []
+        previous_stdout = None
+        try:
+            for index, command in enumerate(commands):
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(extract_dir),
+                    stdin=previous_stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE if index == len(commands) - 1 else subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                if previous_stdout is not None:
+                    previous_stdout.close()
+                previous_stdout = process.stdout
+                processes.append(process)
+            stdout_text, stderr_text = processes[-1].communicate(timeout=timeout_seconds)
+            for process in processes[:-1]:
+                process.wait(timeout=1)
+            final_returncode = processes[-1].returncode
+            if final_returncode not in (0, 1):
+                raise RuntimeError(str(stderr_text or stdout_text or "rg 搜索失败").strip())
+            return stdout_text
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+
+    @staticmethod
+    def _build_rg_output_content_pattern(keyword: str, ignore_case: bool, word_regexp: bool) -> str:
+        """
+        构造用于过滤 rg 输出内容区的正则，避免后续管道误匹配文件名或行号。
+        :param keyword: 固定字符串关键字
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :return: rg 可用的正则表达式
+        """
+        pattern = re.escape(keyword)
+        if word_regexp:
+            pattern = rf"\b{{start-half}}{pattern}\b{{end-half}}"
+        if ignore_case:
+            pattern = rf"(?i:{pattern})"
+        return rf"^[^:\r\n]+:\d+:.*{pattern}"
+
+    @classmethod
+    def _search_by_python_keywords(
+        cls,
+        *,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        runtime_config: dict[str, Any],
+        target_files: list[str],
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        Python 多关键字搜索实现，支持任一命中和同一行全部命中。
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param search_mode: 匹配模式
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param runtime_config: 运行保护配置
+        :param target_files: 搜索文件列表
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        max_scan_bytes = cls._config_int(runtime_config, "maxPythonSearchBytes", 268435456)
+        deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        scanned_bytes = 0
+        for target_file in target_files:
+            if len(hits) >= limit:
+                break
+            if time.monotonic() > deadline:
+                logger.warning(f"Python 多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}")
+                break
+            path = cls._resolve_log_file(ticket_id, target_file, record_id)
+            scanned_bytes += path.stat().st_size
+            if scanned_bytes > max_scan_bytes:
+                raise RuntimeError("日志搜索扫描量超过当前保护阈值，请缩小文件范围或调整日志拉取存储配置")
+            encoding = cls._detect_file_encoding(path)
+            with path.open("r", encoding=encoding, errors="replace") as file_obj:
+                for line_no, content in enumerate(file_obj, start=1):
+                    if time.monotonic() > deadline:
+                        logger.warning(
+                            f"Python 多关键字日志搜索达到保护超时，ticket_id={ticket_id}，record_id={record_id}"
+                        )
+                        return hits
+                    matched_keywords = cls._match_keywords(
+                        content, keywords, search_mode, ignore_case=ignore_case, word_regexp=word_regexp
+                    )
+                    if not matched_keywords:
+                        continue
+                    hit = TicketLogSearchHitModel(
+                        file=target_file,
+                        line=line_no,
+                        content=content.rstrip("\r\n"),
+                        matched_keywords=matched_keywords,
+                    )
+                    if with_context:
+                        hit.context = cls.context(
+                            ticket_id, target_file, line_no, context_before, context_after, record_id
+                        )
+                    hits.append(hit)
+                    if len(hits) >= limit:
+                        break
+        return hits
+
+    @classmethod
+    def _context_by_native(
+        cls, ticket_id: int, file_path: str, line_no: int, before: int, after: int, record_id: int | None = None
+    ) -> TicketLogContextModel:
+        """
+        使用系统命令读取当前文件上下文，再复用 Python 索引补跨文件边界。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 中心行号
+        :param before: 前置行数
+        :param after: 后置行数
+        :return: 上下文内容
+        """
+        normalized_file = cls._normalize_relative_path(file_path)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file, record_id)
+        center = max(int(line_no or 1), 1)
+        before_count = max(int(before or 0), 0)
+        after_count = max(int(after or 0), 0)
+        total = int(cls._ensure_line_index(target_path).get("line_count") or 0)
+        bounded_center = min(center, max(total, 1))
+        start = max(bounded_center - before_count, 1)
+        end = min(bounded_center + after_count, total)
+        current_lines = cls._read_current_file_lines_by_native(target_path, start, end)
+        return cls._build_context_model(
+            ticket_id=ticket_id,
+            file_path=normalized_file,
+            center=bounded_center,
+            start=start,
+            end=end,
+            total=total,
+            before_count=before_count,
+            after_count=after_count,
+            current_lines=current_lines,
+            record_id=record_id,
+        )
+
+    @classmethod
+    def errors(
+        cls, ticket_id: int, limit: int = 100, record_id: int | None = None, db: Session | None = None
+    ) -> TicketLogErrorSummaryModel:
+        """
+        提取常见异常关键字并聚合计数。
+        :param ticket_id: 工单ID
+        :param limit: 最大样例数量
+        :param record_id: 日志拉取记录ID
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
+        :return: 异常摘要
+        """
+        samples: list[TicketLogSearchHitModel] = []
+        counter: Counter[str] = Counter()
+        for keyword in cls.ERROR_KEYWORDS:
+            remain = max(limit - len(samples), 0)
+            if remain <= 0:
+                break
+            for hit in cls.search(ticket_id, keyword, 0, 0, remain, with_context=False, record_id=record_id, db=db):
+                summary = cls._normalize_error_summary(hit.content)
+                if not summary:
+                    continue
+                counter[summary] += 1
+                samples.append(hit)
+                if len(samples) >= limit:
+                    break
+        return TicketLogErrorSummaryModel(
+            ticket_id=ticket_id,
+            total=sum(counter.values()),
+            items=dict(counter.most_common(50)),
+            samples=samples,
+        )
+
+    @classmethod
+    def _latest_record(cls, db: Session, ticket_id: int) -> TicketLogPullRecord | None:
+        """
+        查询指定工单最新一条可作为日志来源的日志拉取记录。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 日志拉取记录
+        """
+        rows = TicketLogPullDao.list_latest_records_by_ticket_ids(db, [ticket_id])
+        return rows.get(ticket_id)
+
+    @classmethod
+    def _get_runtime_config(cls, db: Session | None = None) -> dict[str, Any]:
+        """
+        读取日志查看运行保护配置，数据库不可用时使用默认存储配置兜底。
+        :param db: 数据库会话
+        :return: 标准化后的运行配置
+        """
+        if db is None:
+            return {
+                "maxExtractSeconds": 300,
+                "maxExtractFileCount": 2000,
+                "maxExtractTotalBytes": 2147483648,
+                "maxSearchSeconds": 30,
+                "maxSearchFileCount": 1000,
+                "maxPythonSearchBytes": 268435456,
+            }
+        return TicketLogPullService.get_storage_config_dict(db)
+
+    @classmethod
+    def _log_search_execution(
+        cls,
+        *,
+        tool: str,
+        ticket_id: int,
+        record_id: int | None,
+        extract_dir: Path,
+        keywords: list[str],
+        search_mode: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        file_path: str | None,
+        target_file_count: int,
+        args: dict[str, Any],
+    ) -> None:
+        """
+        记录日志搜索执行计划，便于定位实际使用的工具、参数和搜索目录。
+        :param tool: 搜索工具名称，如 rg/python
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param extract_dir: 本次搜索的日志解压目录
+        :param keywords: 搜索关键字列表
+        :param search_mode: 搜索模式
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回数量
+        :param with_context: 是否返回上下文
+        :param file_path: 指定文件范围
+        :param target_file_count: 本次扫描的文件数量
+        :param args: 工具相关参数
+        :return: 无
+        """
+        logger.info(
+            f"工单日志搜索开始，ticket_id={ticket_id}，record_id={record_id}，tool={tool}，"
+            f"extract_dir={extract_dir}，file={file_path or '<all>'}，target_file_count={target_file_count}，"
+            f"keywords={keywords}，search_mode={search_mode}，context_before={context_before}，"
+            f"context_after={context_after}，limit={limit}，with_context={with_context}，args={args}"
+        )
+
+    @staticmethod
+    def _log_search_completed(
+        tool: str,
+        ticket_id: int,
+        record_id: int | None,
+        hit_count: int,
+        started_at: float,
+    ) -> None:
+        """
+        记录日志搜索完成耗时和命中数量。
+        :param tool: 搜索工具名称
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param hit_count: 返回命中数量
+        :param started_at: 搜索开始时间戳
+        :return: 无
+        """
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        logger.info(
+            f"工单日志搜索完成，ticket_id={ticket_id}，record_id={record_id}，tool={tool}，"
+            f"hit_count={hit_count}，elapsed_ms={elapsed_ms}"
+        )
+
+    @staticmethod
+    def _config_int(config: dict[str, Any], key: str, default: int) -> int:
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.config_int(config, key, default)
+
+    @staticmethod
+    def _normalize_keywords(keywords: list[str] | tuple[str, ...] | None) -> list[str]:
+        """
+        归一化日志搜索关键字列表，保持输入顺序并去重。
+        :param keywords: 原始关键字列表
+        :return: 去重后的非空关键字列表
+        """
+        result: list[str] = []
+        for item in keywords or []:
+            keyword = str(item or "").strip()
+            if keyword and keyword not in result:
+                result.append(keyword[:200])
+        return result[:10]
+
+    @staticmethod
+    def _match_keywords(
+        content: str,
+        keywords: list[str],
+        search_mode: str,
+        *,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+    ) -> list[str]:
+        """
+        计算单行日志命中的关键字列表。
+        :param content: 日志行内容
+        :param keywords: 关键字列表
+        :param search_mode: any/all 匹配模式
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :return: 命中的关键字；all 模式未全部命中时返回空列表
+        """
+        text = str(content or "")
+        if not ignore_case and not word_regexp:
+            matched = [keyword for keyword in keywords if keyword and keyword in text]
+            if search_mode == "all" and len(matched) != len(keywords):
+                return []
+            return matched
+        flags = re.IGNORECASE if ignore_case else 0
+        matched = []
+        for keyword in keywords:
+            if not keyword:
+                continue
+            pattern = re.escape(keyword)
+            if word_regexp:
+                pattern = rf"(?<!\w){pattern}(?!\w)"
+            if re.search(pattern, text, flags):
+                matched.append(keyword)
+        if search_mode == "all" and len(matched) != len(keywords):
+            return []
+        return matched
+
+    @classmethod
+    def _resolve_search_files(
+        cls,
+        ticket_id: int,
+        record_id: int | None,
+        file_path: str | None,
+        runtime_config: dict[str, Any],
+        file_paths: list[str] | None = None,
+    ) -> list[str]:
+        """
+        解析本次日志搜索允许扫描的文件列表，并按配置做数量保护。
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :param file_path: 指定单个相对日志文件路径，兼容旧调用
+        :param runtime_config: 运行保护配置
+        :param file_paths: 指定多个相对日志文件路径
+        :return: 相对日志文件列表
+        """
+        selected_files: list[str] = []
+        for raw_path in [file_path, *(file_paths or [])]:
+            path = str(raw_path or "").strip()
+            if not path:
+                continue
+            normalized_path = cls._normalize_relative_path(path)
+            if normalized_path not in selected_files:
+                cls._resolve_log_file(ticket_id, normalized_path, record_id)
+                selected_files.append(normalized_path)
+        if selected_files:
+            return selected_files
+        max_file_count = cls._config_int(runtime_config, "maxSearchFileCount", 1000)
+        files = [file_item.file for file_item in cls.files(ticket_id, record_id)]
+        if len(files) > max_file_count:
+            raise RuntimeError("日志文件数量超过当前搜索保护阈值，请指定文件范围或调整日志拉取存储配置")
+        return files
+
+    @classmethod
+    def _resolve_record(cls, db: Session, ticket_id: int, record_id: int | None = None) -> TicketLogPullRecord | None:
+        """
+        解析本次日志查看使用的拉取记录。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param record_id: 指定日志拉取记录ID
+        :return: 日志拉取记录
+        """
+        if record_id:
+            return TicketLogPullDao.get_record_by_id(db, record_id)
+        return cls._latest_record(db, ticket_id)
+
+    @classmethod
+    def _extract_recursive(
+        cls, archive_path: Path, target_dir: Path, runtime_config: dict[str, Any], started_at: float
+    ) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_recursive(archive_path, target_dir, runtime_config, started_at, context="日志")
+
+    @classmethod
+    def _ensure_prepare_budget(cls, started_at: float, runtime_config: dict[str, Any]) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.ensure_prepare_budget(started_at, runtime_config, context="日志")
+
+    @classmethod
+    def _validate_extracted_resource_usage(cls, target_dir: Path, runtime_config: dict[str, Any]) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.validate_extracted_resource_usage(target_dir, runtime_config, context="日志")
+
+    @classmethod
+    def _extract_one(cls, archive_path: Path, target_dir: Path) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_one(archive_path, target_dir)
+
+    @classmethod
+    def _extract_zip_safely(cls, archive_path: Path, target_dir: Path) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_zip_safely(archive_path, target_dir)
+
+    @classmethod
+    def _extract_tar_safely(cls, archive_path: Path, target_dir: Path) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_tar_safely(archive_path, target_dir)
+
+    @classmethod
+    def _extract_7z(cls, archive_path: Path, target_dir: Path) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_7z(archive_path, target_dir)
+
+    @classmethod
+    def _extract_by_7z(cls, archive_path: Path, target_dir: Path) -> None:
+        """委托到 TicketLogArchiveUtil。"""
+        TicketLogArchiveUtil.extract_by_7z(archive_path, target_dir)
+
+    @classmethod
+    def _is_archive(cls, path: Path) -> bool:
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.is_archive(path)
+
+    @classmethod
+    def _is_relative_to(cls, path: Path, root: Path) -> bool:
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.is_relative_to(path, root)
+
+    @classmethod
+    def _build_source_file_name(cls, archive_path: Path) -> str:
+        """委托到 TicketLogArchiveUtil。"""
+        return TicketLogArchiveUtil.build_source_file_name(archive_path, TicketLogArchiveUtil.DEFAULT_SOURCE_NAME)
+
+    @classmethod
+    def _find_source_archive(cls, source_dir: Path) -> Path | None:
+        """
+        查找 source 目录中已经缓存的源压缩包。
+        :param source_dir: source 目录
+        :return: 源压缩包路径
+        """
+        if not source_dir.exists():
+            return None
+        for path in sorted(source_dir.iterdir()):
+            if path.is_file() and cls._is_archive(path):
+                return path
+        return None
+
+    @classmethod
+    def _is_text_file(cls, path: Path) -> bool:
+        """
+        判断文件是否可按文本日志处理。
+        :param path: 文件路径
+        :return: 是否文本文件
+        """
+        if path.suffix.lower() in cls.TEXT_EXTENSIONS:
+            return True
+        with path.open("rb") as file_obj:
+            sample = file_obj.read(8192)
+        if b"\x00" in sample:
+            return False
+        result = from_bytes(sample).best()
+        return bool(result and result.encoding)
+
+    @classmethod
+    def _ensure_line_index(cls, path: Path) -> dict[str, Any]:
+        """
+        确保日志文件存在行号到字节偏移的索引，后续上下文读取可直接 seek 到目标行。
+        :param path: 日志文件路径
+        :return: 索引元数据
+        """
+        index_path = cls._line_index_path(path)
+        stat = path.stat()
+        detected_encoding = cls._detect_file_encoding(path)
+        if index_path.exists():
+            try:
+                with index_path.open("r", encoding="utf-8") as file_obj:
+                    meta = json.loads(file_obj.readline() or "{}")
+                if (
+                    meta.get("size") == stat.st_size
+                    and meta.get("mtime_ns") == stat.st_mtime_ns
+                    and meta.get("encoding_version") == cls.LINE_INDEX_ENCODING_VERSION
+                    and meta.get("encoding") == detected_encoding
+                ):
+                    return meta
+                if meta.get("encoding") != detected_encoding:
+                    logger.info(
+                        f"日志行索引编码与当前文件不一致，将重建索引，path={path}，"
+                        f"cached_encoding={meta.get('encoding')}，detected_encoding={detected_encoding}"
+                    )
+            except Exception as exc:
+                logger.warning(f"读取日志行索引失败，将重建索引，path={path}，reason={exc}")
+
+        logger.info(f"开始构建日志行索引，path={path}，size={stat.st_size}")
+        encoding = detected_encoding
+        line_count = 0
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_index_path = index_path.with_name(f"{index_path.name}.tmp")
+        with path.open("rb") as source, temp_index_path.open("w", encoding="utf-8", newline="\n") as temp_index_file:
+            while True:
+                offset = source.tell()
+                line = source.readline()
+                if not line:
+                    break
+                line_count += 1
+                temp_index_file.write(f"{offset}\n")
+        meta = {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "line_count": line_count,
+            "encoding": encoding,
+            "encoding_version": cls.LINE_INDEX_ENCODING_VERSION,
+            "created_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+        }
+        with index_path.open("w", encoding="utf-8", newline="\n") as index_file:
+            index_file.write(json.dumps(meta, ensure_ascii=False) + "\n")
+            with temp_index_path.open("r", encoding="utf-8") as temp_index_file:
+                shutil.copyfileobj(temp_index_file, index_file)
+        temp_index_path.unlink(missing_ok=True)
+        logger.info(f"日志行索引构建完成，path={path}，line_count={line_count}")
+        return meta
+
+    @classmethod
+    def _build_context_model(
+        cls,
+        ticket_id: int,
+        file_path: str,
+        center: int,
+        start: int,
+        end: int,
+        total: int,
+        before_count: int,
+        after_count: int,
+        current_lines: list[tuple[int, str]],
+        record_id: int | None = None,
+    ) -> TicketLogContextModel:
+        """
+        统一组装上下文响应，并在当前文件边界不足时跨轮转文件补齐上下文。
+        :param ticket_id: 工单ID
+        :param file_path: 当前日志相对路径
+        :param center: 当前中心行
+        :param start: 当前文件开始行
+        :param end: 当前文件结束行
+        :param total: 当前文件总行数
+        :param before_count: 需要的前置上下文行数
+        :param after_count: 需要的后置上下文行数
+        :param current_lines: 当前文件已读取行
+        :return: 上下文响应
+        """
+        context_parts: list[tuple[str, int, str]] = []
+        missing_before = max(before_count - (center - start), 0)
+        missing_after = max(after_count - (end - center), 0)
+        if missing_before > 0:
+            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous", record_id=record_id)
+            if previous_file:
+                previous_path = cls._resolve_log_file(ticket_id, previous_file, record_id)
+                previous_index = cls._ensure_line_index(previous_path)
+                previous_total = int(previous_index.get("line_count") or 0)
+                previous_start = max(previous_total - missing_before + 1, 1)
+                context_parts.extend(
+                    (previous_file, line, content)
+                    for line, content in cls._read_lines_by_index(previous_path, previous_start, previous_total)
+                )
+
+        context_parts.extend((file_path, line, content) for line, content in current_lines)
+
+        if missing_after > 0:
+            next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id)
+            if next_file:
+                next_path = cls._resolve_log_file(ticket_id, next_file, record_id)
+                context_parts.extend(
+                    (next_file, line, content)
+                    for line, content in cls._read_lines_by_index(next_path, 1, missing_after)
+                )
+
+        context_lines = [
+            TicketLogContextLineModel(file=line_file, line=index, content=content.rstrip("\r\n"))
+            for line_file, index, content in context_parts
+        ]
+        has_prev = (
+            start > 1
+            or cls._adjacent_log_file(ticket_id, file_path, direction="previous", record_id=record_id) is not None
+        )
+        has_next = (
+            end < total
+            or cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id) is not None
+        )
+        prev_file, prev_line = cls._build_context_page_pointer(
+            ticket_id,
+            file_path,
+            start,
+            end,
+            total,
+            before_count,
+            after_count,
+            direction="previous",
+            record_id=record_id,
+        )
+        next_file, next_line = cls._build_context_page_pointer(
+            ticket_id, file_path, start, end, total, before_count, after_count, direction="next", record_id=record_id
+        )
+        return TicketLogContextModel(
+            ticket_id=ticket_id,
+            record_id=record_id,
+            file=file_path,
+            line=center,
+            start=start,
+            end=end,
+            has_prev=has_prev,
+            has_next=has_next,
+            prev_file=prev_file,
+            prev_line=prev_line,
+            next_file=next_file,
+            next_line=next_line,
+            total_lines=total,
+            lines=context_lines,
+        )
+
+    @classmethod
+    def _read_current_file_lines_by_native(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+        """
+        使用系统工具读取当前文件指定行段。
+        :param path: 日志文件路径
+        :param start: 起始行号
+        :param end: 结束行号
+        :return: 行号与内容列表
+        """
+        if end < start:
+            return []
+        if os.name == "nt":
+            executable = shutil.which("powershell") or shutil.which("powershell.exe")
+            if not executable:
+                raise RuntimeError("未找到 PowerShell")
+            escaped_path = str(path).replace("'", "''")
+            escaped_encoding = cls._detect_file_encoding(path).replace("'", "''")
+            powershell_command = (
+                "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+                "$reader=$null;"
+                "try {"
+                f"$reader=[IO.StreamReader]::new('{escaped_path}',[Text.Encoding]::GetEncoding('{escaped_encoding}'),$true);"
+                f"for($lineNo=1;$lineNo -le {end};$lineNo++){{"
+                "$line=$reader.ReadLine();"
+                "if($null -eq $line){break};"
+                f"if($lineNo -ge {start}){{[Console]::Out.WriteLine($line)}}"
+                "}"
+                "} finally {if($null -ne $reader){$reader.Dispose()}}"
+            )
+            command = [
+                executable,
+                "-NoProfile",
+                "-Command",
+                powershell_command,
+            ]
+        else:
+            executable = shutil.which("sed")
+            if not executable:
+                raise RuntimeError("未找到 sed")
+            command = [executable, "-n", f"{start},{end}p", str(path)]
+
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "原生命令读取上下文失败")
+        return [(line_no, content) for line_no, content in enumerate(process.stdout.splitlines(), start=start)]
+
+    @classmethod
+    def _read_lines_by_index(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+        """
+        基于行索引读取指定行范围，不扫描整份日志。
+        :param path: 日志文件路径
+        :param start: 起始行号
+        :param end: 结束行号
+        :return: 行号与文本内容列表
+        """
+        if end < start:
+            return []
+        meta = cls._ensure_line_index(path)
+        total = int(meta.get("line_count") or 0)
+        if total <= 0:
+            return []
+        normalized_start = max(int(start or 1), 1)
+        normalized_end = min(int(end or total), total)
+        offsets = cls._read_line_offsets(path, normalized_start, normalized_end)
+        encoding = str(meta.get("encoding") or "utf-8")
+        result: list[tuple[int, str]] = []
+        with path.open("rb") as source:
+            for line_no, offset in offsets:
+                source.seek(offset)
+                content = source.readline().decode(encoding, errors="replace")
+                result.append((line_no, content))
+        return result
+
+    @classmethod
+    def _read_line_offsets(cls, path: Path, start: int, end: int) -> list[tuple[int, int]]:
+        """
+        从行索引中读取指定行范围的字节偏移。
+        :param path: 日志文件路径
+        :param start: 起始行号
+        :param end: 结束行号
+        :return: 行号与字节偏移列表
+        """
+        offsets: list[tuple[int, int]] = []
+        index_path = cls._line_index_path(path)
+        with index_path.open("r", encoding="utf-8") as index_file:
+            next(index_file, None)
+            for line_no, raw_offset in enumerate(index_file, start=1):
+                if line_no < start:
+                    continue
+                if line_no > end:
+                    break
+                try:
+                    offsets.append((line_no, int(raw_offset.strip())))
+                except ValueError:
+                    logger.warning(f"日志行索引偏移非法，path={path}，line={line_no}，offset={raw_offset.strip()}")
+        return offsets
+
+    @classmethod
+    def _line_index_path(cls, path: Path) -> Path:
+        """
+        获取日志文件对应的行索引文件路径。
+        :param path: 日志文件路径
+        :return: 行索引路径
+        """
+        return path.with_name(f"{path.name}{cls.LINE_INDEX_SUFFIX}")
+
+    @classmethod
+    def _detect_file_encoding(cls, path: Path) -> str:
+        """
+        读取文件头部样本并探测编码，优先兼容 UTF-8 和常见中文日志编码。
+        :param path: 文件路径
+        :return: 编码名称
+        """
+        with path.open("rb") as file_obj:
+            sample = file_obj.read(65536)
+        if not sample:
+            return "utf-8"
+        if sample.startswith(b"\xef\xbb\xbf"):
+            return "utf-8-sig"
+        try:
+            codecs.getincrementaldecoder("utf-8")("strict").decode(sample, final=False)
+            return "utf-8"
+        except UnicodeDecodeError:
+            pass
+        for fallback_encoding in ("gb18030", "gbk", "big5"):
+            try:
+                codecs.getincrementaldecoder(fallback_encoding)("strict").decode(sample, final=False)
+                return fallback_encoding
+            except UnicodeDecodeError:
+                continue
+        detected = from_bytes(sample).best()
+        detected_encoding = str(detected.encoding or "").strip() if detected else ""
+        if detected_encoding:
+            return detected_encoding
+        try:
+            sample.decode("latin-1")
+            return "latin-1"
+        except UnicodeDecodeError:
+            pass
+        return "utf-8"
+
+    @classmethod
+    def _parse_rg_line(cls, raw_line: str) -> TicketLogSearchHitModel | None:
+        """
+        解析 rg 的 no-heading 输出行。搜索命令在 extract 目录内执行，因此这里拿到的是相对路径。
+        :param raw_line: rg 输出原始行
+        :return: 搜索命中
+        """
+        remain = raw_line.lstrip(".\\/")
+        parts = remain.split(":", 2)
+        if len(parts) < 3:
+            return None
+        try:
+            line_no = int(parts[1])
+        except ValueError:
+            return None
+        return TicketLogSearchHitModel(
+            file=cls._normalize_relative_path(parts[0]),
+            line=line_no,
+            content=parts[2],
+        )
+
+    @classmethod
+    def _adjacent_log_file(
+        cls, ticket_id: int, file_path: str, direction: str, record_id: int | None = None
+    ) -> str | None:
+        """
+        按日志轮转顺序查找相邻文件。数字越大越旧，数字越小越靠近当前，无数字文件最新。
+        :param ticket_id: 工单ID
+        :param file_path: 当前相对日志路径
+        :param direction: previous 查更旧文件，next 查更新文件
+        :return: 相邻相对日志路径
+        """
+        current = cls._resolve_log_file(ticket_id, file_path, record_id)
+        current_key = cls._rotation_key(current.name)
+        candidates: list[tuple[int, str]] = []
+        for item in cls.files(ticket_id, record_id):
+            candidate_path = cls._resolve_log_file(ticket_id, item.file, record_id)
+            if candidate_path.parent != current.parent:
+                continue
+            candidate_key = cls._rotation_key(candidate_path.name)
+            if candidate_key[0] != current_key[0]:
+                continue
+            candidates.append((candidate_key[1], item.file))
+        ordered = sorted(candidates, key=lambda item: item[0], reverse=True)
+        current_file = cls._normalize_relative_path(file_path)
+        ordered_files = [item[1] for item in ordered]
+        if current_file not in ordered_files:
+            return None
+        current_index = ordered_files.index(current_file)
+        if direction == "previous" and current_index > 0:
+            return ordered_files[current_index - 1]
+        if direction == "next" and current_index < len(ordered_files) - 1:
+            return ordered_files[current_index + 1]
+        return None
+
+    @classmethod
+    def _rotation_key(cls, file_name: str) -> tuple[str, int]:
+        """
+        解析日志轮转文件名，返回同组基名和时间序。时间序越大越旧，0 表示当前文件。
+        :param file_name: 文件名
+        :return: 轮转基名和时间序
+        """
+        name = str(file_name or "")
+        match = re.match(r"^(?P<base>.+?)(?:\.(?P<suffix>\d+))?$", name)
+        if not match:
+            return name, 0
+        base = match.group("base") or name
+        suffix = match.group("suffix")
+        if not suffix:
+            return base, 0
+        if len(suffix) >= 8:
+            # 日期轮转通常是 app.log.20260618，日期越大越新；转换成负数后排序仍是旧 -> 新。
+            return base, -int(suffix)
+        # 普通轮转通常是 app.log.2 -> app.log.1 -> app.log，数字越大越旧。
+        return base, int(suffix)
+
+    @classmethod
+    def _build_context_page_pointer(
+        cls,
+        ticket_id: int,
+        file_path: str,
+        start: int,
+        end: int,
+        total: int,
+        before_count: int,
+        after_count: int,
+        direction: str,
+        record_id: int | None = None,
+    ) -> tuple[str | None, int | None]:
+        """
+        生成上下文翻页建议位置，当前文件不足时跳到相邻轮转文件。
+        :param ticket_id: 工单ID
+        :param file_path: 当前文件
+        :param start: 当前上下文开始行
+        :param end: 当前上下文结束行
+        :param total: 当前文件总行数
+        :param before_count: 前置上下文行数
+        :param after_count: 后置上下文行数
+        :param direction: previous/next
+        :return: 建议文件和中心行
+        """
+        page_size = max(before_count + after_count + 1, 1)
+        if direction == "previous":
+            if start > 1:
+                previous_start = max(start - page_size, 1)
+                previous_end = start - 1
+                return file_path, min(previous_start + before_count, previous_end)
+            previous_file = cls._adjacent_log_file(ticket_id, file_path, direction="previous", record_id=record_id)
+            if previous_file:
+                previous_path = cls._resolve_log_file(ticket_id, previous_file, record_id)
+                previous_total = int(cls._ensure_line_index(previous_path).get("line_count") or 0)
+                previous_start = max(previous_total - page_size + 1, 1)
+                return previous_file, min(previous_start + before_count, max(previous_total, 1))
+            return None, None
+        if end < total:
+            next_start = end + 1
+            return file_path, min(next_start + before_count, total)
+        next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id)
+        if next_file:
+            next_path = cls._resolve_log_file(ticket_id, next_file, record_id)
+            next_total = int(cls._ensure_line_index(next_path).get("line_count") or 0)
+            return next_file, min(1 + before_count, max(next_total, 1))
+        return None, None
+
+    @classmethod
+    def _resolve_log_file(cls, ticket_id: int, file_path: str, record_id: int | None = None) -> Path:
+        """
+        将前端传入的相对日志路径解析为解压目录内的安全绝对路径。
+        :param ticket_id: 工单ID
+        :param file_path: 相对路径
+        :return: 绝对路径
+        """
+        extract_dir = cls._extract_dir(ticket_id, record_id).resolve()
+        target_path = (extract_dir / cls._normalize_relative_path(file_path)).resolve()
+        try:
+            target_path.relative_to(extract_dir)
+        except ValueError as exc:
+            raise ValueError("日志文件路径非法") from exc
+        if not target_path.exists() or not target_path.is_file():
+            raise FileNotFoundError("日志文件不存在")
+        return target_path
+
+    @classmethod
+    def _relative_log_path(cls, ticket_id: int, path: Path, record_id: int | None = None) -> str:
+        """
+        生成相对日志路径。
+        :param ticket_id: 工单ID
+        :param path: 绝对路径
+        :return: 相对路径
+        """
+        return cls._normalize_relative_path(str(path.relative_to(cls._extract_dir(ticket_id, record_id))))
+
+    @classmethod
+    def _normalize_relative_path(cls, path: str) -> str:
+        """
+        统一相对路径分隔符。
+        :param path: 原始路径
+        :return: 规范化相对路径
+        """
+        return str(path or "").replace("\\", "/").lstrip("/")
+
+    @classmethod
+    def _normalize_error_summary(cls, content: str) -> str:
+        """
+        将异常命中行归一化为聚合键。
+        :param content: 命中行内容
+        :return: 聚合摘要
+        """
+        text = " ".join(str(content or "").strip().split())
+        if not text:
+            return ""
+        return text[:200]
+
+    @classmethod
+    def _resolve_mode(cls, env_key: str, default: str = "auto") -> str:
+        """
+        从环境变量读取日志读取模式，非法值按默认值处理。
+        :param env_key: 环境变量名称
+        :param default: 默认模式
+        :return: auto/native/python
+        """
+        value = str(os.getenv(env_key) or default or "auto").strip().lower()
+        if value not in {"auto", "native", "python"}:
+            logger.warning(f"日志读取模式配置非法，env_key={env_key}，value={value}，fallback={default}")
+            return default
+        return value
+
+    @classmethod
+    def _write_meta(cls, path: Path, payload: dict[str, Any]) -> None:
+        """
+        写入日志准备元数据。
+        :param path: 元数据文件路径
+        :param payload: 元数据内容
+        :return: 无
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @classmethod
+    def _ticket_dir(cls, ticket_id: int, record_id: int | None = None) -> Path:
+        """
+        获取工单日志根目录。
+        :param ticket_id: 工单ID
+        :return: 根目录
+        """
+        ticket_dir = cls.BASE_DIR / f"ticket_{ticket_id}"
+        return ticket_dir / f"record_{record_id}" if record_id else ticket_dir
+
+    @classmethod
+    def _extract_dir(cls, ticket_id: int, record_id: int | None = None) -> Path:
+        """
+        获取工单日志解压目录。
+        :param ticket_id: 工单ID
+        :return: 解压目录
+        """
+        return cls._ticket_dir(ticket_id, record_id) / "extract"

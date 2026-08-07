@@ -15,7 +15,7 @@
         />
       </el-form-item>
     </el-col>
-    <el-col :span="12">
+    <el-col v-if="model.allowPush" :span="12">
       <el-form-item label="推送项" :prop="getProp('pushIds')">
         <el-select
           v-model="model.pushIds"
@@ -25,7 +25,6 @@
           collapse-tags
           collapse-tags-tooltip
           placeholder="选择已有推送项"
-          :disabled="!model.allowPush"
         >
           <el-option
             v-for="item in pushOptions"
@@ -36,7 +35,7 @@
         </el-select>
       </el-form-item>
     </el-col>
-    <el-col :span="12">
+    <el-col v-if="model.allowPush" :span="12">
       <el-form-item label="成功通知" :prop="getProp('success.push')">
         <el-switch
           v-model="model.success.push"
@@ -48,7 +47,7 @@
         />
       </el-form-item>
     </el-col>
-    <el-col :span="12">
+    <el-col v-if="model.allowPush" :span="12">
       <el-form-item label="失败通知" :prop="getProp('failed.push')">
         <el-switch
           v-model="model.failed.push"
@@ -83,4 +82,13 @@ const model = defineModel({
 function getProp(name) {
   return props.fieldPrefix ? `${props.fieldPrefix}.${name}` : name
 }
+
+watch(
+  () => model.value?.allowPush,
+  allowPush => {
+    if (!allowPush) {
+      model.value.pushIds = []
+    }
+  }
+)
 </script>

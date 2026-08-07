@@ -11,11 +11,12 @@ from module_hrm.enums.enums import QtrDataStatusEnum
 
 class ModuleModel(CommonDataModel):
     """
-    模块信息表对应pydantic模型
+    妯″潡淇℃伅琛ㄥ搴攑ydantic妯″瀷
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
     module_id: Optional[int] = None
+    module_code: Optional[str] = None
     project_id: Optional[int] = None
     module_name: Optional[str] = None
     test_user: Optional[str] = None
@@ -24,16 +25,12 @@ class ModuleModel(CommonDataModel):
     desc2mind: Optional[str] = None
     sort: Optional[int] = None
     status: Optional[int] = QtrDataStatusEnum.normal.value
-    # create_by: Optional[str] = None
-    # create_time: Optional[datetime] = None
-    # update_by: Optional[str] = None
-    # update_time: Optional[datetime] = None
     remark: Optional[str] = None
 
 
 class ModuleProjectModel(BaseModel):
     """
-    模块和项目关联表对应pydantic模型
+    妯″潡鍜岄」鐩叧鑱旇〃瀵瑰簲pydantic妯″瀷
     """
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True)
 
@@ -43,7 +40,7 @@ class ModuleProjectModel(BaseModel):
 
 class ModuleQueryModel(ModuleModel):
     """
-    模块管理不分页查询模型
+    妯″潡绠＄悊涓嶅垎椤垫煡璇㈡ā鍨?
     """
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
@@ -52,7 +49,7 @@ class ModuleQueryModel(ModuleModel):
 
 class ModuleQuery(ModuleModel):
     """
-    模块查询
+    妯″潡鏌ヨ
     """
     project_id: Optional[int] = None
 
@@ -61,14 +58,14 @@ class ModuleQuery(ModuleModel):
 @as_form
 class ModulePageQueryModel(QueryModel, ModuleQueryModel):
     """
-    模块管理分页查询模型
+    妯″潡绠＄悊鍒嗛〉鏌ヨ妯″瀷
     """
     pass
 
 
 class AddModuleModel(ModuleModel):
     """
-    新增模块模型
+    鏂板妯″潡妯″瀷
     """
     project_id: Optional[int] = None
     type: Optional[str] = None
@@ -76,7 +73,7 @@ class AddModuleModel(ModuleModel):
 
 class DeleteModuleModel(BaseModel):
     """
-    删除模块模型
+    鍒犻櫎妯″潡妯″瀷
     """
     model_config = ConfigDict(alias_generator=to_camel)
 

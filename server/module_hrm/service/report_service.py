@@ -77,7 +77,7 @@ class ReportService:
         report = await ReportDao.get_by_id(query_db, query_info.report_id)
         data = {
             "title": f"{report.report_name}",
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "report_name": report.report_name,
             "start_time": report.start_at.strftime("%Y-%m-%d %H:%M:%S"),
             "info": count_info,
@@ -126,7 +126,7 @@ class ReportService:
             template_file="report.html",
             data={
                 "title": "数据报告",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "data": result,
             })
         return pdf_content

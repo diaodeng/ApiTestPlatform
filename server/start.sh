@@ -8,7 +8,7 @@ export APP_ENV="${APP_ENV:-prod}"
 echo "开始安装系统依赖。。。"
 sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
     sed -i 's|security.debian.org/debian-security|mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list && \
-    apt-get update && apt-get install --no-install-recommends -y libcairo2 supervisor && \
+    apt-get update && apt-get install --no-install-recommends -y libcairo2 supervisor ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
 echo "系统依赖安装完成。。。"

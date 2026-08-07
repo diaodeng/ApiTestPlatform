@@ -19,6 +19,7 @@ from module_admin.entity.vo.job_vo import (
 from module_admin.service.job_log_service import JobLogService
 from module_admin.service.job_service import JobService
 from module_admin.service.login_service import CurrentUserModel, LoginService
+from module_task.celery_job_service import CeleryJobService
 from utils.common_util import bytes2file_response
 from utils.log_util import logger
 from utils.page_util import PageResponseModel
@@ -330,6 +331,17 @@ async def export_system_job_log_list(
         job_log_export_result = await JobLogService.export_job_log_list_services(request, job_log_query_result)
         logger.info("导出成功")
         return ResponseUtil.streaming(data=bytes2file_response(job_log_export_result))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@jobController.get("/job/worker-check", dependencies=[Depends(CheckUserInterfaceAuth("monitor:job:query"))])
+async def check_system_worker():
+    """检查系统任务的进程模式 Celery Worker 是否在线。"""
+    try:
+        result = CeleryJobService.check_process_worker_available("sys")
+        return ResponseUtil.success(data=result, msg=result.get("detail", ""))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

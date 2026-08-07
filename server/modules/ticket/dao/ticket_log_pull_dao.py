@@ -4,13 +4,21 @@ from collections.abc import Iterable
 from datetime import date, datetime
 
 from loguru import logger
-from sqlalchemy import Date, cast, or_
+from sqlalchemy import Date, cast, func, or_
 from sqlalchemy.orm import Session, defer
 
 from module_admin.entity.do.config_do import SysConfig
 from modules.ticket.entity.do.ticket_do import Ticket
-from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
-from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullQueryModel
+from modules.ticket.entity.do.ticket_log_pull_do import (
+    TicketLogPullProjectVendorMap,
+    TicketLogPullRecord,
+    TicketLogPullStoreConfig,
+)
+from modules.ticket.entity.vo.ticket_log_pull_vo import (
+    TicketLogPullProjectVendorMapQueryModel,
+    TicketLogPullQueryModel,
+    TicketLogPullStoreConfigQueryModel,
+)
 from utils.page_util import PageUtil
 
 
@@ -22,7 +30,11 @@ class TicketLogPullDao:
     CONFIG_KEY = "ticket.logPull.storage"
     CONFIG_NAME = "工单日志拉取存储配置"
     EXTERNAL_CONFIG_KEY = "ticket.logPull.external"
+    PARAM_EXAMPLE_CONFIG_KEY = "ticket.logPull.parameterExamples"
+    PARAM_EXAMPLE_CONFIG_NAME = "工单日志拉取参数示例配置"
     EXTERNAL_CONFIG_NAME = "工单日志拉取外部接口配置"
+    VENDOR_CONFIG_KEY = "ticket.logPull.vendors"
+    VENDOR_CONFIG_NAME = "工单日志拉取商家配置"
 
     @classmethod
     def add_record(cls, db: Session, record: TicketLogPullRecord) -> TicketLogPullRecord:
@@ -45,6 +57,24 @@ class TicketLogPullDao:
         :return: 记录对象
         """
         return db.query(TicketLogPullRecord).filter(TicketLogPullRecord.id == record_id).first()
+
+    @classmethod
+    def get_latest_success_record_by_ticket_id(cls, db: Session, ticket_id: int) -> TicketLogPullRecord | None:
+        """
+        查询指定工单最近一条成功的日志拉取记录。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 成功的日志拉取记录，未命中返回 None
+        """
+        return (
+            db.query(TicketLogPullRecord)
+            .filter(
+                TicketLogPullRecord.ticket_id == ticket_id,
+                TicketLogPullRecord.status == "success",
+            )
+            .order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())
+            .first()
+        )
 
     @classmethod
     def update_record(cls, db: Session, record_id: int, data: dict) -> None:
@@ -121,6 +151,9 @@ class TicketLogPullDao:
             .filter(
                 TicketLogPullRecord.ticket_id == query.ticket_id if query.ticket_id is not None else True,
                 TicketLogPullRecord.status == query.status if query.status else True,
+                TicketLogPullRecord.environment == query.environment
+                if query.environment
+                else True,
                 TicketLogPullRecord.vendor_id == query.vendor_id if query.vendor_id is not None else True,
                 TicketLogPullRecord.store_id == query.store_id if query.store_id is not None else True,
                 TicketLogPullRecord.pos_no == query.pos_no if query.pos_no is not None else True,
@@ -200,6 +233,24 @@ class TicketLogPullDao:
         :return: 系统参数记录
         """
         return cls.get_config_row(db, cls.EXTERNAL_CONFIG_KEY)
+
+    @classmethod
+    def get_param_example_config_row(cls, db: Session) -> SysConfig | None:
+        """
+        获取日志拉取参数示例配置记录。
+        :param db: 数据库会话
+        :return: 系统参数记录
+        """
+        return cls.get_config_row(db, cls.PARAM_EXAMPLE_CONFIG_KEY)
+
+    @classmethod
+    def get_vendor_config_row(cls, db: Session) -> SysConfig | None:
+        """
+        获取日志拉取商家参数配置记录。
+        :param db: 数据库会话
+        :return: 系统参数记录
+        """
+        return cls.get_config_row(db, cls.VENDOR_CONFIG_KEY)
 
     @classmethod
     def get_config_row(cls, db: Session, config_key: str) -> SysConfig | None:
@@ -310,3 +361,249 @@ class TicketLogPullDao:
             )
         )
         db.flush()
+
+    @classmethod
+    def list_store_configs(cls, db: Session, query: TicketLogPullStoreConfigQueryModel):
+        """
+        分页查询门店配置。
+        :param db: 数据库会话
+        :param query: 查询参数
+        :return: 分页结果
+        """
+        keyword = str(query.keyword or "").strip()
+        filters = []
+        if keyword:
+            filters.extend(
+                [
+                    TicketLogPullStoreConfig.group_no.like(f"%{keyword}%"),
+                    TicketLogPullStoreConfig.vender_no.like(f"%{keyword}%"),
+                    TicketLogPullStoreConfig.org_no.like(f"%{keyword}%"),
+                    TicketLogPullStoreConfig.sap_org_no.like(f"%{keyword}%"),
+                    TicketLogPullStoreConfig.org_name.like(f"%{keyword}%"),
+                    TicketLogPullStoreConfig.platform_no.like(f"%{keyword}%"),
+                    TicketLogPullStoreConfig.company_no.like(f"%{keyword}%"),
+                ]
+            )
+        record_query = db.query(TicketLogPullStoreConfig).filter(
+            TicketLogPullStoreConfig.group_no == query.group_no if query.group_no else True,
+            TicketLogPullStoreConfig.vender_no == query.vender_no if query.vender_no else True,
+            TicketLogPullStoreConfig.org_no == query.org_no if query.org_no else True,
+            TicketLogPullStoreConfig.sap_org_no == query.sap_org_no if query.sap_org_no else True,
+        )
+        if filters:
+            record_query = record_query.filter(or_(*filters))
+        record_query = record_query.order_by(
+            TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc()
+        )
+        return PageUtil.paginate(record_query, query.page_num, query.page_size, query.is_page)
+
+    @classmethod
+    def list_all_store_configs(cls, db: Session) -> list[TicketLogPullStoreConfig]:
+        """
+        查询全部门店配置。
+        :param db: 数据库会话
+        :return: 配置列表
+        """
+        return (
+            db.query(TicketLogPullStoreConfig)
+            .order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc())
+            .all()
+        )
+
+    @classmethod
+    def list_store_configs_by_vender_no(cls, db: Session, vender_no: str) -> list[TicketLogPullStoreConfig]:
+        """
+        按商户编号查询门店配置，供日志拉取弹窗按需加载门店。
+        :param db: 数据库会话
+        :param vender_no: 商户编号
+        :return: 当前商户下的门店配置列表
+        """
+        resolved_vender_no = str(vender_no or "").strip()
+        if not resolved_vender_no:
+            return []
+        return (
+            db.query(TicketLogPullStoreConfig)
+            .filter(TicketLogPullStoreConfig.vender_no == resolved_vender_no)
+            .order_by(TicketLogPullStoreConfig.org_name.asc(), TicketLogPullStoreConfig.id.asc())
+            .all()
+        )
+
+    @classmethod
+    def get_store_config_by_match(
+        cls, db: Session, *, vender_no: str = "", org_no: str = "", sap_org_no: str = ""
+    ) -> TicketLogPullStoreConfig | None:
+        """
+        按 vender_no + org_no + sap_org_no 联合唯一键查找门店配置。
+        :param db: 数据库会话
+        :param vender_no: 商户编号
+        :param org_no: 机构编号
+        :param sap_org_no: SAP机构编号
+        :return: 匹配到的配置
+        """
+        query = db.query(TicketLogPullStoreConfig)
+        vender_no = str(vender_no or "").strip()
+        org_no = str(org_no or "").strip()
+        sap_org_no = str(sap_org_no or "").strip()
+        return (
+            query.filter(
+                func.coalesce(TicketLogPullStoreConfig.vender_no, "") == vender_no,
+                func.coalesce(TicketLogPullStoreConfig.org_no, "") == org_no,
+                func.coalesce(TicketLogPullStoreConfig.sap_org_no, "") == sap_org_no,
+            )
+            .order_by(TicketLogPullStoreConfig.modifid.desc())
+            .first()
+        )
+
+    @classmethod
+    def save_store_config(cls, db: Session, store: TicketLogPullStoreConfig) -> TicketLogPullStoreConfig:
+        """
+        新增或更新门店配置。
+        :param db: 数据库会话
+        :param store: 门店配置对象
+        :return: 保存后的对象
+        """
+        existing = None
+        if store.org_no or store.sap_org_no or store.vender_no:
+            existing = cls.get_store_config_by_match(
+                db,
+                vender_no=store.vender_no,
+                org_no=store.org_no or "",
+                sap_org_no=store.sap_org_no or "",
+            )
+        if existing:
+            for field in (
+                "group_no",
+                "vender_no",
+                "region_no",
+                "org_no",
+                "org_name",
+                "sap_org_no",
+                "platform_no",
+                "parent_org_no",
+                "perm_node_id",
+                "org_type",
+                "company_no",
+                "city_no",
+                "biz_type_no",
+                "status",
+                "created",
+                "modifid",
+                "open_date",
+                "language_desc",
+            ):
+                setattr(existing, field, getattr(store, field))
+            db.flush()
+            return existing
+        db.add(store)
+        db.flush()
+        return store
+
+    @classmethod
+    def delete_all_store_configs(cls, db: Session) -> int:
+        """
+        清空门店配置表。
+        :param db: 数据库会话
+        :return: 受影响行数
+        """
+        return db.query(TicketLogPullStoreConfig).delete(synchronize_session=False)
+
+    @classmethod
+    def list_project_vendor_maps(
+        cls, db: Session, query: TicketLogPullProjectVendorMapQueryModel
+    ) -> list[TicketLogPullProjectVendorMap] | PageUtil:
+        """
+        查询项目商家映射。
+        :param db: 数据库会话
+        :param query: 查询参数
+        :return: 列表或分页结果
+        """
+        keyword = str(query.keyword or "").strip()
+        record_query = db.query(TicketLogPullProjectVendorMap).filter(
+            TicketLogPullProjectVendorMap.project_id == query.project_id if query.project_id else True
+        )
+        if keyword:
+            record_query = record_query.filter(
+                or_(
+                    TicketLogPullProjectVendorMap.project_name.like(f"%{keyword}%"),
+                    TicketLogPullProjectVendorMap.vender_no.like(f"%{keyword}%"),
+                )
+            )
+        record_query = record_query.order_by(
+            TicketLogPullProjectVendorMap.modifid.desc(), TicketLogPullProjectVendorMap.id.desc()
+        )
+        return PageUtil.paginate(record_query, query.page_num, query.page_size, query.is_page)
+
+    @classmethod
+    def list_all_project_vendor_maps(cls, db: Session) -> list[TicketLogPullProjectVendorMap]:
+        """
+        查询全部项目商家映射。
+        :param db: 数据库会话
+        :return: 映射列表
+        """
+        return (
+            db.query(TicketLogPullProjectVendorMap)
+            .order_by(TicketLogPullProjectVendorMap.modifid.desc(), TicketLogPullProjectVendorMap.id.desc())
+            .all()
+        )
+
+    @classmethod
+    def get_project_vendor_map_by_project_id(
+        cls, db: Session, project_id: int
+    ) -> TicketLogPullProjectVendorMap | None:
+        """
+        根据项目ID获取商家映射。
+        :param db: 数据库会话
+        :param project_id: 项目ID
+        :return: 映射对象
+        """
+        return (
+            db.query(TicketLogPullProjectVendorMap)
+            .filter(TicketLogPullProjectVendorMap.project_id == project_id)
+            .first()
+        )
+
+    @classmethod
+    def save_project_vendor_map(
+        cls, db: Session, project_vendor_map: TicketLogPullProjectVendorMap
+    ) -> TicketLogPullProjectVendorMap:
+        """
+        新增或更新项目商家映射。
+        :param db: 数据库会话
+        :param project_vendor_map: 映射对象
+        :return: 保存后的对象
+        """
+        existing = cls.get_project_vendor_map_by_project_id(db, project_vendor_map.project_id)
+        if existing:
+            existing.project_name = project_vendor_map.project_name
+            existing.vender_no = project_vendor_map.vender_no
+            existing.modifid = project_vendor_map.modifid
+            db.flush()
+            return existing
+        db.add(project_vendor_map)
+        db.flush()
+        return project_vendor_map
+
+    @classmethod
+    def verify_store_by_org_no(
+        cls, db: Session, *, vendor_no: str, org_no: str
+    ) -> bool:
+        """
+        按商家编号 + org_no 校验门店是否存在于 ticket_log_pull_store_config 表中。
+        :param db: 数据库会话
+        :param vendor_no: 商户编号
+        :param org_no: 机构编号
+        :return: 匹配到记录返回 True，否则返回 False
+        """
+        resolved_vendor_no = str(vendor_no or "").strip()
+        resolved_org = str(org_no or "").strip()
+        if not resolved_vendor_no or not resolved_org:
+            return False
+        row = (
+            db.query(TicketLogPullStoreConfig)
+            .filter(
+                TicketLogPullStoreConfig.vender_no == resolved_vendor_no,
+                TicketLogPullStoreConfig.org_no == resolved_org,
+            )
+            .first()
+        )
+        return row is not None

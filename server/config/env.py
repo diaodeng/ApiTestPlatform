@@ -6,6 +6,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
+from version import __version__ as _default_app_version
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -18,7 +20,7 @@ class AppSettings(BaseSettings):
     app_root_path: str = '/dev-api'
     app_host: str = '0.0.0.0'
     app_port: int = 9099
-    app_version: str = '1.0.0'
+    app_version: str = _default_app_version
     app_reload: bool = True
     app_ip_location_query: bool = True
     app_same_time_login: bool = True

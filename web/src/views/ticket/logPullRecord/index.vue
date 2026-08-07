@@ -21,6 +21,11 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="环境" prop="environment">
+        <el-select v-model="queryParams.environment" placeholder="全部环境" clearable style="width: 160px">
+          <el-option v-for="item in environmentOptions" :key="item" :label="item" :value="item" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="状态" prop="status">
         <el-select v-model="queryParams.status" placeholder="全部状态" clearable style="width: 160px">
           <el-option v-for="item in logPullStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -41,14 +46,16 @@
           placeholder="选择商家"
           clearable
           filterable
+          allow-create
+          default-first-option
           style="width: 220px"
           @change="handleQueryVendorChange"
         >
           <el-option
             v-for="item in vendorOptions"
-            :key="item.vendorId"
+            :key="item.venderNo"
             :label="item.label"
-            :value="item.vendorId"
+            :value="item.venderNo"
           />
         </el-select>
       </el-form-item>
@@ -58,7 +65,10 @@
           placeholder="先选择商家"
           clearable
           filterable
+          allow-create
+          default-first-option
           :disabled="!queryParams.vendorId"
+          :loading="queryStoreLoading"
           style="width: 260px"
         >
           <el-option
@@ -94,11 +104,25 @@
           新增拉取
         </el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button type="success" plain icon="FolderOpened" @click="openStoreConfigDialog" v-hasPermi="['ticket:logpull:config']">
+          门店配置
+        </el-button>
+      </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
     </el-row>
 
-    <el-table v-loading="loading" :data="recordList" row-key="id">
+    <el-table
+      v-loading="loading"
+      :data="recordList"
+      row-key="id"
+      class="log-pull-record-table"
+      scrollbar-always-on
+    >
       <el-table-column label="记录ID" prop="id" width="180" show-overflow-tooltip />
+      <el-table-column label="环境" width="100" align="center">
+        <template #default="scope">{{ scope.row.environment || '-' }}</template>
+      </el-table-column>
       <el-table-column label="关联工单" min-width="220" show-overflow-tooltip>
         <template #default="scope">
           <div v-if="scope.row.ticketId">
@@ -126,16 +150,65 @@
       <el-table-column label="保存方式" width="100" align="center">
         <template #default="scope">{{ getOptionLabel(logPullStorageModeOptions, scope.row.storageMode) }}</template>
       </el-table-column>
+      <el-table-column label="拉取参数" min-width="180" show-overflow-tooltip>
+        <template #default="scope">{{ formatLogPullParameter(scope.row) }}</template>
+      </el-table-column>
+      <el-table-column label="归档地址" min-width="220" show-overflow-tooltip>
+        <template #default="scope">
+          <el-link
+            v-if="getLogPullArchiveDownloadUrl(scope.row)"
+            type="primary"
+            :href="getLogPullArchiveDownloadUrl(scope.row)"
+            target="_blank"
+            @click.prevent="downloadLogPullArchive(scope.row)"
+            @contextmenu.prevent="copyLogPullArchiveDownloadUrl(scope.row)"
+          >
+            {{ getLogPullArchiveDisplayText(scope.row) }}
+          </el-link>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="原始压缩包" min-width="220" show-overflow-tooltip>
+        <template #default="scope">
+          <el-link
+            v-if="getLogPullOriginalDownloadUrl(scope.row)"
+            type="primary"
+            :href="getLogPullOriginalDownloadUrl(scope.row)"
+            target="_blank"
+            @click.prevent="downloadLogPullOriginal(scope.row)"
+            @contextmenu.prevent="copyLogPullOriginalDownloadUrl(scope.row)"
+          >
+            {{ getLogPullOriginalDownloadUrl(scope.row) }}
+          </el-link>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="摘要/异常" min-width="240" prop="contentSummary" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="340">
         <template #default="scope">
-          <el-button link type="primary" icon="View" @click="openContentDialog(scope.row)" v-hasPermi="['ticket:logpull:query']">
+          <el-tooltip
+            v-if="getContentDownloadProgress(scope.row)"
+            :content="getContentDownloadProgress(scope.row).message"
+            placement="top"
+          >
+            <el-progress
+              class="log-view-download-progress"
+              type="circle"
+              :percentage="getContentDownloadProgress(scope.row).percentage"
+              :width="26"
+              :stroke-width="3"
+            />
+          </el-tooltip>
+          <el-button v-else link type="primary" icon="View" @click="openLogViewer(scope.row)" v-hasPermi="['ticket:logpull:query']">
             查看日志
+          </el-button>
+          <el-button link type="primary" icon="CopyDocument" @click="handleCopyLogPull(scope.row)" :disabled="actionLoading || activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:add']">
+            复制
           </el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
@@ -153,12 +226,12 @@
           <el-button
             link
             type="danger"
-            icon="Scissor"
-            @click="reextractLogPull(scope.row)"
-            :disabled="actionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
-            v-hasPermi="['ticket:logpull:add']"
+            icon="Delete"
+            @click="deleteLogPull(scope.row)"
+            :disabled="actionLoading"
+            v-hasPermi="['ticket:logpull:remove']"
           >
-            重新截取
+            删除
           </el-button>
         </template>
       </el-table-column>
@@ -227,7 +300,10 @@
           <LogPullConfigFields
             v-model="createForm"
             :vendor-options="vendorOptions"
+            :environment-options="environmentOptions"
+            :parameter-examples="parameterExamples"
             :agent-options="agentOptions"
+            :provider-options="providerOptions"
             :data-type-options="logPullDataTypeOptions"
             :storage-mode-options="logPullStorageModeOptions"
             :show-auto-ai="false"
@@ -244,167 +320,195 @@
       </template>
     </el-dialog>
 
+    <LogViewerDialog v-model="viewerVisible" :record="viewerRecord" />
+
     <el-dialog
-      v-model="contentOpen"
-      title="日志内容"
-      width="80%"
+      v-model="storeConfigOpen"
+      title="门店配置"
+      width="88%"
       top="5vh"
       append-to-body
       destroy-on-close
       :close-on-click-modal="false"
-      @closed="resetContentDialog"
+      @closed="resetStoreConfigQuery"
     >
-      <div v-loading="contentLoading">
-        <el-descriptions :column="3" border class="mb16">
-          <el-descriptions-item label="记录ID">{{ selectedRecord?.id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="关联工单">
-            <span v-if="selectedRecord?.ticketId">
-              {{ selectedRecord?.ticketNo || selectedRecord?.ticketId }} {{ selectedRecord?.ticketTitle || '' }}
-            </span>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag v-if="selectedRecord?.status" :type="getLogPullStatusTagType(selectedRecord.status)">
-              {{ selectedRecord.statusDesc || getOptionLabel(logPullStatusOptions, selectedRecord.status) }}
-            </el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="查看模式">
-            <el-radio-group v-model="viewForm.viewMode">
-              <el-radio value="stored">入库内容</el-radio>
-              <el-radio value="archive">原始文档</el-radio>
-            </el-radio-group>
-          </el-descriptions-item>
-          <el-descriptions-item label="截取方式" :span="2">
-            <el-radio-group v-model="viewForm.viewRangeMode">
-              <el-radio value="between">开始 + 结束</el-radio>
-              <el-radio value="point">时间点 + 前后范围</el-radio>
-            </el-radio-group>
-          </el-descriptions-item>
-          <el-descriptions-item label="开始时间">
-            <el-date-picker
-              v-model="viewForm.logBeginTime"
-              type="datetime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              placeholder="开始时间"
-              clearable
-              :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'between'"
-              class="log-view-time-picker"
-            />
-          </el-descriptions-item>
-          <el-descriptions-item label="结束时间">
-            <el-date-picker
-              v-model="viewForm.logEndTime"
-              type="datetime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              placeholder="结束时间"
-              clearable
-              :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'between'"
-              class="log-view-time-picker"
-            />
-          </el-descriptions-item>
-          <el-descriptions-item label="时间点">
-            <el-date-picker
-              v-model="viewForm.logPointTime"
-              type="datetime"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              placeholder="时间点"
-              clearable
-              :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'point'"
-              class="log-view-time-picker"
-            />
-          </el-descriptions-item>
-          <el-descriptions-item label="前后范围">
-            <div class="time-range-inline">
-              <span>前</span>
-              <el-input-number
-                v-model="viewForm.rangeBeforeMinutes"
-                :min="0"
-                controls-position="right"
-                :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'point'"
-              />
-              <span>分钟，后</span>
-              <el-input-number
-                v-model="viewForm.rangeAfterMinutes"
-                :min="0"
-                controls-position="right"
-                :disabled="viewForm.viewMode !== 'archive' || viewForm.viewRangeMode !== 'point'"
-              />
-              <span>分钟</span>
-            </div>
-          </el-descriptions-item>
-          <el-descriptions-item label="日志字符数">{{ contentDetail?.contentCharCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="命中条目">{{ contentDetail?.matchedEntryCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="压缩包文件数">{{ contentDetail?.archiveEntryCount || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="归档地址" :span="2">{{ contentDetail?.storagePath || '-' }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="content-toolbar">
-          <el-input
-            v-model="contentKeyword"
-            placeholder="本地过滤关键字"
-            clearable
-            class="content-keyword"
-          />
-          <el-switch v-model="contentWrapEnabled" inline-prompt active-text="换行" inactive-text="不换行" />
-          <el-button type="primary" @click="reloadContent">{{ viewForm.viewMode === 'archive' ? '按当前范围查看' : '查看入库内容' }}</el-button>
-          <el-button type="warning" @click="retryLogPull(selectedRecord)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">重新拉取</el-button>
-          <el-button type="success" @click="redownloadLogPull(selectedRecord)" :disabled="actionLoading || !canDownloadCurrent" v-hasPermi="['ticket:logpull:add']">重新下载</el-button>
-          <el-button type="danger" @click="reextractLogPull(selectedRecord)" :disabled="actionLoading || viewForm.viewMode !== 'archive'" v-hasPermi="['ticket:logpull:add']">重新截取</el-button>
-        </div>
-        <el-alert
-          v-if="contentDetail?.contentTruncated"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="当前日志文本已按配置截断入库，如需更多内容请调整字符上限后重新拉取。"
-          class="mb16"
-        />
-        <pre :class="['log-content-block', { 'log-content-wrap': contentWrapEnabled }]">{{ filteredContentText }}</pre>
-      </div>
+      <el-form :model="storeConfigQuery" :inline="true" class="mb16">
+        <el-form-item label="集团编号">
+          <el-input v-model="storeConfigQuery.groupNo" placeholder="group_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="商户编号">
+          <el-input v-model="storeConfigQuery.venderNo" placeholder="vender_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="机构编号">
+          <el-input v-model="storeConfigQuery.orgNo" placeholder="org_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="SAP机构编号">
+          <el-input v-model="storeConfigQuery.sapOrgNo" placeholder="sap_org_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+        <el-form-item label="关键字">
+          <el-input v-model="storeConfigQuery.keyword" placeholder="门店名称/编号" clearable style="width: 220px" @keyup.enter="handleStoreConfigQuery" />
+        </el-form-item>
+      <el-form-item>
+        <el-button type="primary" icon="Search" @click="handleStoreConfigQuery">搜索</el-button>
+        <el-button icon="Refresh" @click="resetStoreConfigQuery">重置</el-button>
+        <el-button type="success" plain icon="Download" @click="downloadStoreConfigTemplate">下载模板</el-button>
+        <el-button type="warning" plain icon="Upload" @click="storeConfigImportOpen = true">导入配置</el-button>
+      </el-form-item>
+      </el-form>
+
+      <el-table v-loading="storeConfigLoading" :data="storeConfigList" row-key="id">
+        <el-table-column label="ID" prop="id" width="110" />
+        <el-table-column label="集团编号" prop="groupNo" width="120" show-overflow-tooltip />
+        <el-table-column label="商户编号" prop="venderNo" width="140" show-overflow-tooltip />
+        <el-table-column label="区域编号" prop="regionNo" width="120" show-overflow-tooltip />
+        <el-table-column label="机构编号" prop="orgNo" width="140" show-overflow-tooltip />
+        <el-table-column label="SAP机构编号" prop="sapOrgNo" width="150" show-overflow-tooltip />
+        <el-table-column label="机构名称" prop="orgName" min-width="180" show-overflow-tooltip />
+        <el-table-column label="会员渠道" prop="platformNo" width="110" show-overflow-tooltip />
+        <el-table-column label="公司代码" prop="companyNo" width="120" show-overflow-tooltip />
+        <el-table-column label="状态" prop="status" width="90" align="center" />
+        <el-table-column label="修改时间" prop="modifid" width="170">
+          <template #default="scope">{{ parseTime(scope.row.modifid) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <pagination
+        v-show="storeConfigTotal > 0"
+        :total="storeConfigTotal"
+        v-model:page="storeConfigQuery.pageNum"
+        v-model:limit="storeConfigQuery.pageSize"
+        @pagination="loadStoreConfigList"
+      />
+    </el-dialog>
+
+    <el-dialog
+      v-model="storeConfigImportOpen"
+      title="导入门店配置"
+      width="560px"
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      @closed="resetStoreConfigImportDialog"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="增量导入会按 vender_no / org_no / sap_org_no 匹配，存在则覆盖；覆盖导入会先清空旧数据再导入。"
+        class="mb16"
+      />
+      <el-form :model="storeConfigImportForm" label-width="100px">
+        <el-form-item label="导入方式">
+          <el-radio-group v-model="storeConfigImportMode">
+            <el-radio value="incremental">增量导入</el-radio>
+            <el-radio value="overwrite">覆盖导入</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="导入文件">
+          <el-upload
+            ref="storeConfigUploadRef"
+            :auto-upload="false"
+            :show-file-list="false"
+            :limit="1"
+            accept=".xlsx"
+            :on-change="handleStoreConfigUploadChange"
+          >
+            <template #trigger>
+              <el-button type="primary" plain icon="Upload">选择 xlsx 文件</el-button>
+            </template>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <el-alert
+        v-if="storeConfigImportResult"
+        type="success"
+        :closable="false"
+        show-icon
+        class="mb16"
+        :title="`导入完成：新增 ${storeConfigImportResult.insertedCount || 0} 条，更新 ${storeConfigImportResult.updatedCount || 0} 条，失败 ${storeConfigImportResult.failedRows?.length || 0} 条。`"
+      />
+      <el-table v-if="storeConfigImportResult?.failedRows?.length" :data="storeConfigImportResult.failedRows" size="small" border>
+        <el-table-column label="行号" prop="row" width="90" />
+        <el-table-column label="失败原因" prop="reason" min-width="280" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="storeConfigImportOpen = false">取消</el-button>
+        <el-button type="primary" :loading="storeConfigImporting" @click="submitStoreConfigImport">开始导入</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup name="TicketLogPullRecord">
 import {
+  delTicketLogPull,
   createTicketLogPullRecord,
-  getTicketLogPullContent,
+  downloadTicketLogPull,
+  downloadTicketLogPullStoreConfigTemplate,
+  getTicket,
   getTicketLogPullVendorStoreOptions,
   listTicket,
+  listTicketLogPullStoreConfigs,
   listTicketLogPullRecords,
+  importTicketLogPullStoreConfigs,
   redownloadTicketLogPull,
-  reextractTicketLogPull,
   retryTicketLogPull
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
+import { listAiProviderOptions } from '@/api/system/aiprovider'
+import { saveAs } from 'file-saver'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
+import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
-import { buildOptionalLogPullTimeRangePayload, getOptionalLogPullTimeRangeError } from '../logPull.shared'
+import {
+  applyLogPullRecordToForm,
+  buildOptionalLogPullTimeRangePayload,
+  createDefaultLogPullNotifyConfig,
+  formatLogPullParameter,
+  getOptionalLogPullTimeRangeError,
+  normalizeLogPullNotifyConfig,
+  resolveLogPullArchiveLink,
+  resolveLogPullOriginalLink,
+  isHttpDownloadUrl
+} from '../logPull.shared'
+import { useLogPrepareProgress } from '../hooks/useLogPrepareProgress'
+import { blobValidate } from '@/utils/ruoyi'
 
 const { proxy } = getCurrentInstance()
+const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress()
 
 const loading = ref(false)
 const submitting = ref(false)
 const actionLoading = ref(false)
-const contentLoading = ref(false)
 const createOpen = ref(false)
-const contentOpen = ref(false)
+const viewerVisible = ref(false)
+const viewerRecord = ref(null)
 const showSearch = ref(true)
 const recordList = ref([])
 const total = ref(0)
 const ticketLoading = ref(false)
 const ticketOptions = ref([])
 const agentOptions = ref([])
+const providerOptions = ref([])
 const vendorOptions = ref([])
+const queryStoreOptions = ref([])
+const queryStoreLoading = ref(false)
+const parameterExamples = ref([])
+const environmentOptions = ref([])
 const pushOptions = ref([])
 const selectedRecord = ref(null)
-const contentDetail = ref(null)
-const contentText = ref('')
-const contentKeyword = ref('')
-const contentWrapEnabled = ref(false)
-const logPullRefreshTimer = ref(null)
+const storeConfigOpen = ref(false)
+const storeConfigLoading = ref(false)
+const storeConfigList = ref([])
+const storeConfigTotal = ref(0)
+const storeConfigImportOpen = ref(false)
+const storeConfigImporting = ref(false)
+const storeConfigImportResult = ref(null)
+const storeConfigImportMode = ref('incremental')
+const storeConfigImportForm = ref({})
+const storeConfigUploadRef = ref()
 
 const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing']
 
@@ -412,6 +516,7 @@ const queryParams = ref({
   pageNum: 1,
   pageSize: 10,
   ticketId: undefined,
+  environment: '',
   status: '',
   keyword: '',
   vendorId: undefined,
@@ -420,8 +525,17 @@ const queryParams = ref({
   modifyTime: ''
 })
 
+const storeConfigQuery = ref({
+  pageNum: 1,
+  pageSize: 10,
+  groupNo: '',
+  venderNo: '',
+  orgNo: '',
+  sapOrgNo: '',
+  keyword: ''
+})
+
 const createForm = ref(createDefaultForm())
-const viewForm = ref(createDefaultViewForm())
 
 const createRules = {
   vendorId: [{ required: true, message: 'vendorId 不能为空', trigger: 'change' }],
@@ -432,12 +546,15 @@ const createRules = {
 function createDefaultForm() {
   return {
     ticketId: undefined,
+    environment: '',
     vendorId: undefined,
     storeId: undefined,
     posNo: undefined,
     commandDataType: 1,
+    pullMethod: 'time',
     modifyTime: '',
     path: '',
+    cutLogEnabled: false,
     timeRangeMode: 'between',
     logBeginTime: '',
     logEndTime: '',
@@ -449,31 +566,14 @@ function createDefaultForm() {
     storageMode: 'local',
     autoAiEnabled: false,
     aiAgentCode: '',
-    notifyConfig: {
-      allowPush: 1,
-      pushIds: [],
-      success: {
-        push: true,
-        reminder: 1
-      },
-      failed: {
-        push: true,
-        reminder: 1
-      }
-    }
+    aiProviderCode: '',
+    notifyConfig: createDefaultLogPullNotifyConfig()
   }
 }
 
-function createDefaultViewForm() {
-  return {
-    viewMode: 'stored',
-    viewRangeMode: 'between',
-    logBeginTime: '',
-    logEndTime: '',
-    logPointTime: '',
-    rangeBeforeMinutes: 30,
-    rangeAfterMinutes: 30
-  }
+function openLogViewer(row) {
+  viewerRecord.value = row
+  viewerVisible.value = true
 }
 
 function getList() {
@@ -481,7 +581,6 @@ function getList() {
   listTicketLogPullRecords(queryParams.value).then(response => {
     recordList.value = response.rows || []
     total.value = response.total || 0
-    updateAutoRefresh()
   }).finally(() => {
     loading.value = false
   })
@@ -497,6 +596,7 @@ function resetQuery() {
     pageNum: 1,
     pageSize: 10,
     ticketId: undefined,
+    environment: '',
     status: '',
     keyword: '',
     vendorId: undefined,
@@ -536,6 +636,111 @@ function loadAgentOptions() {
   })
 }
 
+function openStoreConfigDialog() {
+  storeConfigOpen.value = true
+  loadStoreConfigList()
+}
+
+function loadStoreConfigList() {
+  storeConfigLoading.value = true
+  return listTicketLogPullStoreConfigs(storeConfigQuery.value).then(response => {
+    const pageData = response.data || response
+    storeConfigList.value = Array.isArray(pageData)
+      ? pageData
+      : (Array.isArray(pageData?.rows) ? pageData.rows : [])
+    storeConfigTotal.value = pageData?.total || 0
+  }).finally(() => {
+    storeConfigLoading.value = false
+  })
+}
+
+function handleStoreConfigQuery() {
+  storeConfigQuery.value.pageNum = 1
+  loadStoreConfigList()
+}
+
+function resetStoreConfigQuery() {
+  storeConfigQuery.value = {
+    pageNum: 1,
+    pageSize: 10,
+    groupNo: '',
+    venderNo: '',
+    orgNo: '',
+    sapOrgNo: '',
+    keyword: ''
+  }
+  loadStoreConfigList()
+}
+
+function resetStoreConfigImportDialog() {
+  storeConfigImportForm.value = {}
+  storeConfigImportResult.value = null
+  storeConfigImportMode.value = 'incremental'
+  if (storeConfigUploadRef.value) {
+    storeConfigUploadRef.value.clearFiles?.()
+  }
+}
+
+function downloadStoreConfigTemplate() {
+  downloadTicketLogPullStoreConfigTemplate().then(async blob => {
+    if (!blobValidate(blob)) {
+      try {
+        const text = await blob.text()
+        const payload = JSON.parse(text)
+        proxy.$modal.msgError(payload.msg || '模板下载失败')
+      } catch (error) {
+        proxy.$modal.msgError('模板下载失败')
+      }
+      return
+    }
+    saveAs(blob, '门店配置导入模板.xlsx')
+  }).catch(() => {
+    proxy.$modal.msgError('模板下载失败')
+  })
+}
+
+function handleStoreConfigUploadChange(uploadFile) {
+  const rawFile = uploadFile?.raw
+  if (!rawFile) {
+    return
+  }
+  if (!rawFile.name?.toLowerCase().endsWith('.xlsx')) {
+    proxy.$modal.msgWarning('仅支持 xlsx 文件')
+    return
+  }
+  storeConfigImportForm.value = {
+    file: rawFile
+  }
+  storeConfigImportOpen.value = true
+}
+
+function submitStoreConfigImport() {
+  const rawFile = storeConfigImportForm.value?.file
+  if (!rawFile) {
+    proxy.$modal.msgWarning('请先选择 xlsx 文件')
+    return
+  }
+  const formData = new FormData()
+  formData.append('file', rawFile)
+  formData.append('import_mode', storeConfigImportMode.value)
+  storeConfigImporting.value = true
+  importTicketLogPullStoreConfigs(formData).then(response => {
+    storeConfigImportResult.value = response.data || null
+    proxy.$modal.msgSuccess('门店配置导入完成')
+    loadStoreConfigList()
+  }).catch(() => {
+    proxy.$modal.msgError('门店配置导入失败')
+  }).finally(() => {
+    storeConfigImporting.value = false
+  })
+}
+
+function loadProviderOptions() {
+  return listAiProviderOptions({ usage: 'ticket_analysis_worker', executor: 'codex' }).then(response => {
+    providerOptions.value = response.data || []
+  })
+}
+
 function loadPushOptions() {
   return listAllPushConfig({ pageNum: 1, pageSize: 500 }).then(response => {
     const rows = response.data || []
@@ -545,66 +750,61 @@ function loadPushOptions() {
 
 function normalizeVendorOptions(rows = []) {
   return rows.map(item => ({
-    vendorId: Number(item.vendorId),
-    vendorCode: String(item.vendorCode || '').trim(),
-    vendorName: String(item.vendorName || item.vendorId || '').trim(),
+    venderNo: String(item.venderNo || '').trim(),
+    vendorName: String(item.vendorName || '').trim(),
     label: buildVendorOptionLabel(item),
-    stores: Array.isArray(item.stores)
-      ? item.stores.map(store => ({
-        storeId: Number(store.storeId),
-        storeCode: String(store.storeCode || '').trim(),
-        storeName: String(store.storeName || store.storeId || '').trim(),
-        label: buildStoreOptionLabel(store),
-      }))
-      : []
-  }))
+  })).filter(item => item.venderNo && item.vendorName)
 }
 
 function buildVendorOptionLabel(vendor) {
-  const name = String(vendor.vendorName || vendor.vendorId || '').trim()
-  const code = String(vendor.vendorCode || '').trim()
-  const id = String(vendor.vendorId || '').trim()
-  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+  const venderNo = String(vendor.venderNo || '').trim()
+  const name = String(vendor.vendorName || '').trim()
+  return [venderNo, name].filter(Boolean).join(' - ')
 }
 
 function buildStoreOptionLabel(store) {
   const name = String(store.storeName || store.storeId || '').trim()
-  const code = String(store.storeCode || '').trim()
-  const id = String(store.storeId || '').trim()
-  return [name, code, id ? `[${id}]` : ''].filter(Boolean).join(' ')
+  const code = String(store.storeCode || store.storeId || '').trim()
+  const sapOrgNo = String(store.sapOrgNo || '').trim()
+  return [name, code ? `[${code}]` : '', sapOrgNo ? `(${sapOrgNo})` : ''].filter(Boolean).join(' ')
 }
 
 function loadVendorOptions() {
   return getTicketLogPullVendorStoreOptions().then(response => {
     vendorOptions.value = normalizeVendorOptions(response.data?.vendors || [])
+    environmentOptions.value = Array.isArray(response.data?.environments)
+      ? response.data.environments
+      : []
+    parameterExamples.value = Array.isArray(response.data?.parameterExamples)
+      ? response.data.parameterExamples
+      : []
   })
 }
 
-function getVendorStoreOptions(vendorId) {
-  const resolvedVendorId = Number(vendorId)
-  if (!resolvedVendorId) {
-    return []
+function loadQueryStoreOptions(venderNo) {
+  const resolvedVenderNo = String(venderNo || '').trim()
+  queryStoreOptions.value = []
+  if (!resolvedVenderNo) {
+    return Promise.resolve()
   }
-  const vendor = vendorOptions.value.find(item => item.vendorId === resolvedVendorId)
-  return vendor?.stores || []
+  queryStoreLoading.value = true
+  return getTicketLogPullVendorStoreOptions(resolvedVenderNo).then(response => {
+    const rows = Array.isArray(response.data?.stores) ? response.data.stores : []
+    queryStoreOptions.value = rows.map(store => ({
+      storeId: String(store.storeId || '').trim(),
+      storeCode: String(store.storeCode || '').trim(),
+      sapOrgNo: String(store.sapOrgNo || '').trim(),
+      storeName: String(store.storeName || store.storeId || '').trim(),
+      label: buildStoreOptionLabel(store)
+    })).filter(store => store.storeId)
+  }).finally(() => {
+    queryStoreLoading.value = false
+  })
 }
 
-const queryStoreOptions = computed(() => getVendorStoreOptions(queryParams.value.vendorId))
-
-function resetStoreSelection(target, vendorId) {
-  const storeId = Number(target.storeId)
-  if (!storeId) {
-    target.storeId = undefined
-    return
-  }
-  const storeOptions = getVendorStoreOptions(vendorId)
-  if (storeOptions.length && !storeOptions.some(item => item.storeId === storeId)) {
-    target.storeId = undefined
-  }
-}
-
-function handleQueryVendorChange(vendorId) {
-  resetStoreSelection(queryParams.value, vendorId)
+function handleQueryVendorChange(venderNo) {
+  queryParams.value.storeId = undefined
+  loadQueryStoreOptions(venderNo)
 }
 
 function openCreateDialog() {
@@ -623,13 +823,130 @@ function openCreateDialog() {
   }
   createOpen.value = true
   loadTicketOptions()
+  if (createForm.value.ticketId) {
+    handleCreateTicketChange(createForm.value.ticketId)
+  }
+}
+
+function pickFirstFilledValue(candidates = []) {
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined) {
+      continue
+    }
+    if (typeof candidate === 'string' && !candidate.trim()) {
+      continue
+    }
+    return candidate
+  }
+  return undefined
+}
+
+function resolveTicketSyncSource(detail) {
+  const payload = detail || {}
+  const extraData = payload.extraData || payload.extra_data || {}
+  const externalSync = extraData.externalSync || extraData.external_sync || {}
+  const source = externalSync.source || {}
+  const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {}
+  const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {}
+  const automationLogPullConfig = ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {}
+  const latestLogPull = payload.latestLogPull || payload.latest_log_pull || {}
+  const directLogPullConfig = payload.logPullConfig || payload.log_pull_config || {}
+  return {
+    vendorId: pickFirstFilledValue([
+      source.vendorId,
+      source.vendor_id,
+      logPullHints.vendorId,
+      logPullHints.vendor_id,
+      latestLogPull.vendorId,
+      latestLogPull.vendor_id,
+      automationLogPullConfig.vendorId,
+      automationLogPullConfig.vendor_id,
+      directLogPullConfig.vendorId,
+      directLogPullConfig.vendor_id
+    ]),
+    storeId: pickFirstFilledValue([
+      source.storeId,
+      source.store_id,
+      logPullHints.storeId,
+      logPullHints.store_id,
+      latestLogPull.storeId,
+      latestLogPull.store_id,
+      automationLogPullConfig.storeId,
+      automationLogPullConfig.store_id,
+      directLogPullConfig.storeId,
+      directLogPullConfig.store_id
+    ]),
+    posNo: pickFirstFilledValue([
+      source.posNo,
+      source.pos_no,
+      source.posId,
+      source.pos_id,
+      source.scoNo,
+      source.sco_no,
+      logPullHints.posNo,
+      logPullHints.pos_no,
+      latestLogPull.posNo,
+      latestLogPull.pos_no,
+      automationLogPullConfig.posNo,
+      automationLogPullConfig.pos_no,
+      automationLogPullConfig.posId,
+      automationLogPullConfig.pos_id,
+      automationLogPullConfig.scoNo,
+      automationLogPullConfig.sco_no,
+      directLogPullConfig.posNo,
+      directLogPullConfig.pos_no,
+      directLogPullConfig.posId,
+      directLogPullConfig.pos_id,
+      directLogPullConfig.scoNo,
+      directLogPullConfig.sco_no
+    ]),
+    modifyTime: pickFirstFilledValue([
+      logPullHints.modifyTime,
+      logPullHints.modify_time,
+      logPullHints.logDate,
+      logPullHints.log_date,
+      source.modifyTime,
+      source.modify_time,
+      source.logDate,
+      source.log_date,
+      automationLogPullConfig.modifyTime,
+      automationLogPullConfig.modify_time,
+      directLogPullConfig.modifyTime,
+      directLogPullConfig.modify_time
+    ])
+  }
+}
+
+function applyTicketLogPullPrefill(ticketDetail) {
+  const source = resolveTicketSyncSource(ticketDetail)
+  const vendorId = Number(source.vendorId)
+  if (Number.isFinite(vendorId) && vendorId > 0) {
+    createForm.value.vendorId = vendorId
+  }
+  const storeId = String(source.storeId || '').trim()
+  if (storeId) {
+    createForm.value.storeId = storeId
+  }
+  const posNo = Number(source.posNo)
+  if (Number.isFinite(posNo) && posNo > 0) {
+    createForm.value.posNo = posNo
+  }
+  const modifyTime = String(source.modifyTime || '').trim()
+  if (modifyTime) {
+    createForm.value.modifyTime = modifyTime.slice(0, 10)
+  }
 }
 
 function handleCreateTicketChange(ticketId) {
   if (!ticketId) {
     createForm.value.autoAiEnabled = false
     createForm.value.aiAgentCode = ''
+    createForm.value.aiProviderCode = ''
+    return
   }
+  getTicket(ticketId).then(response => {
+    applyTicketLogPullPrefill(response.data || {})
+  }).catch(() => {})
 }
 
 function resetCreateForm() {
@@ -642,8 +959,12 @@ function resetCreateForm() {
 function submitCreateForm() {
   proxy.$refs.createRef.validate(valid => {
     if (!valid) return
-    if (!createForm.value.modifyTime && !createForm.value.path) {
-      proxy.$modal.msgWarning('modifyTime 和 path 至少需要填写一个')
+    if (createForm.value.pullMethod === 'path' && !createForm.value.path) {
+      proxy.$modal.msgWarning('拉取方式为路径时，path 不能为空')
+      return
+    }
+    if (createForm.value.pullMethod !== 'path' && !createForm.value.modifyTime) {
+      proxy.$modal.msgWarning('拉取方式为时间时，modifyTime 不能为空')
       return
     }
     const timeRangeError = getOptionalLogPullTimeRangeError(createForm.value)
@@ -655,16 +976,27 @@ function submitCreateForm() {
       proxy.$modal.msgWarning('未关联工单时不能启用自动AI分析')
       return
     }
-    if (createForm.value.autoAiEnabled && !String(createForm.value.aiAgentCode || '').trim()) {
-      proxy.$modal.msgWarning('启用自动AI分析时必须选择Agent')
+    if (
+      createForm.value.autoAiEnabled
+      && !String(createForm.value.aiAgentCode || '').trim()
+      && !String(createForm.value.aiProviderCode || '').trim()
+    ) {
+      proxy.$modal.msgWarning('启用自动AI分析时必须选择Provider或Agent')
       return
     }
 
     submitting.value = true
     const payload = {
       ...createForm.value,
-      ticketId: createForm.value.ticketId || null
+      ticketId: createForm.value.ticketId || null,
+      notifyConfig: normalizeLogPullNotifyConfig(createForm.value.notifyConfig)
     }
+    if (payload.pullMethod === 'path') {
+      delete payload.modifyTime
+    } else {
+      delete payload.path
+    }
+    delete payload.cutLogEnabled
     const timeRangePayload = buildOptionalLogPullTimeRangePayload(createForm.value)
     Object.assign(payload, timeRangePayload)
     if (!timeRangePayload.timeRangeMode) {
@@ -684,6 +1016,7 @@ function submitCreateForm() {
     }
     if (!payload.autoAiEnabled) {
       payload.aiAgentCode = ''
+      payload.aiProviderCode = ''
     }
     createTicketLogPullRecord(payload).then(() => {
       proxy.$modal.msgSuccess('日志拉取任务已提交')
@@ -695,91 +1028,28 @@ function submitCreateForm() {
   })
 }
 
-function resetContentDialog() {
-  selectedRecord.value = null
-  contentDetail.value = null
-  contentText.value = ''
-  contentKeyword.value = ''
-  contentWrapEnabled.value = false
-  viewForm.value = createDefaultViewForm()
+/**
+ * 获取管理列表行当前可展示的日志远程下载进度。
+ * @param {object} row 日志拉取记录行数据。
+ * @returns {object|null} 正在下载时返回进度信息，否则返回 null。
+ */
+function getContentDownloadProgress(row) {
+  return getDownloadProgress(row?.ticketId || row?.ticket_id, row?.id)
 }
 
-function buildContentQuery() {
-  const query = {
-    viewMode: viewForm.value.viewMode
-  }
-  if (viewForm.value.viewMode === 'archive') {
-    if (viewForm.value.viewRangeMode === 'between' && viewForm.value.logBeginTime && viewForm.value.logEndTime) {
-      query.logBeginTime = viewForm.value.logBeginTime
-      query.logEndTime = viewForm.value.logEndTime
-    } else if (viewForm.value.viewRangeMode === 'point' && viewForm.value.logPointTime) {
-      query.logPointTime = viewForm.value.logPointTime
-      query.rangeBeforeMinutes = viewForm.value.rangeBeforeMinutes
-      query.rangeAfterMinutes = viewForm.value.rangeAfterMinutes
-    }
-  }
-  return query
-}
-
-function openContentDialog(row) {
-  selectedRecord.value = row
-  contentOpen.value = true
-  viewForm.value = createDefaultViewForm()
-  const commandContent = row.commandContent || row.command_content || {}
-  const timeRangeMode = String(commandContent.timeRangeMode || '').trim().toLowerCase()
-  if (timeRangeMode === 'point') {
-    viewForm.value.viewMode = 'archive'
-    viewForm.value.viewRangeMode = 'point'
-    viewForm.value.logPointTime = commandContent.logPointTime || row.logPointTime || ''
-    viewForm.value.rangeBeforeMinutes = commandContent.rangeBeforeMinutes ?? row.rangeBeforeMinutes ?? 30
-    viewForm.value.rangeAfterMinutes = commandContent.rangeAfterMinutes ?? row.rangeAfterMinutes ?? 30
-  } else if (timeRangeMode === 'between') {
-    viewForm.value.viewMode = 'archive'
-    viewForm.value.viewRangeMode = 'between'
-    viewForm.value.logBeginTime = commandContent.logBeginTime || row.logBeginTime || ''
-    viewForm.value.logEndTime = commandContent.logEndTime || row.logEndTime || ''
-  } else if (row.logBeginTime && row.logEndTime) {
-    viewForm.value.viewMode = 'archive'
-    viewForm.value.viewRangeMode = 'between'
-    viewForm.value.logBeginTime = row.logBeginTime
-    viewForm.value.logEndTime = row.logEndTime
-  }
-  loadContent()
-}
-
-function loadContent() {
-  if (!selectedRecord.value?.id) {
+function handleCopyLogPull(row) {
+  if (!row) return
+  if (activeLogPullStatuses.includes(row.status)) {
+    proxy.$modal.msgWarning('当前日志拉取任务仍在执行中，不能复制')
     return
   }
-  contentLoading.value = true
-  getTicketLogPullContent(selectedRecord.value.id, buildContentQuery()).then(response => {
-    contentDetail.value = response.data || {}
-    contentText.value = response.data?.text || ''
-  }).finally(() => {
-    contentLoading.value = false
-  })
+  createForm.value = createDefaultForm()
+  createForm.value.ticketId = row.ticketId || undefined
+  applyLogPullRecordToForm(createForm.value, row)
+  createOpen.value = true
 }
 
-const filteredContentText = computed(() => {
-  const raw = String(contentText.value || '')
-  if (!contentKeyword.value.trim()) {
-    return raw || '暂无可展示日志内容'
-  }
-  const keyword = contentKeyword.value.trim().toLowerCase()
-  const filtered = raw
-    .split(/\r?\n/)
-    .filter(line => line.toLowerCase().includes(keyword))
-    .join('\n')
-  return filtered || '未匹配到日志内容'
-})
-
-const canDownloadCurrent = computed(() => Boolean(selectedRecord.value?.commandResultUrl || selectedRecord.value?.storagePath))
-
-function reloadContent() {
-  loadContent()
-}
-
-function runAction(request, successMessage, refreshContent = false) {
+function runAction(request, successMessage) {
   if (actionLoading.value) {
     return
   }
@@ -787,12 +1057,165 @@ function runAction(request, successMessage, refreshContent = false) {
   request.then(() => {
     proxy.$modal.msgSuccess(successMessage)
     handleQuery()
-    if (refreshContent) {
-      loadContent()
-    }
   }).finally(() => {
     actionLoading.value = false
   })
+}
+
+function resolveDownloadFileName(row) {
+  let remoteName = ''
+  if (row?.commandResultUrl) {
+    try {
+      remoteName = new URL(String(row.commandResultUrl)).pathname.split('/').pop() || ''
+    } catch (error) {
+      remoteName = String(row.commandResultUrl).split('/').pop() || ''
+    }
+  }
+  const candidates = [
+    row?.downloadFileName,
+    row?.storagePath ? String(row.storagePath).split(/[\\/]/).pop() : '',
+    remoteName,
+    `ticket_log_pull_${row?.id || Date.now()}.zip`
+  ]
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim()
+    if (text) {
+      return text
+    }
+  }
+  return `ticket_log_pull_${row?.id || Date.now()}.zip`
+}
+
+function openBrowserDownload(url) {
+  const targetUrl = String(url || '').trim()
+  if (!targetUrl) {
+    return false
+  }
+  window.open(targetUrl, '_blank', 'noopener')
+  return true
+}
+
+function getLogPullArchiveDownloadUrl(row) {
+  return resolveLogPullArchiveLink(row, 'service').url
+}
+
+function getLogPullArchiveDisplayText(row) {
+  const link = resolveLogPullArchiveLink(row, 'service')
+  return link.text || link.url
+}
+
+function getLogPullOriginalDownloadUrl(row) {
+  return resolveLogPullOriginalLink(row).url
+}
+
+/**
+ * 复制文本到系统剪贴板，优先使用 Clipboard API，不支持时回退到临时输入框。
+ * @param {string} text 需要复制的文本
+ * @returns {Promise<boolean>} 是否复制成功
+ */
+async function copyTextToClipboard(text) {
+  const copyText = String(text || '').trim()
+  if (!copyText) {
+    return false
+  }
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(copyText)
+    return true
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = copyText
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+async function copyResolvedLogPullUrl(link, emptyMessage) {
+  if (!link?.url) {
+    proxy.$modal.msgWarning(emptyMessage)
+    return
+  }
+  try {
+    const copied = await copyTextToClipboard(link.url)
+    if (!copied) {
+      proxy.$modal.msgError('复制失败，请手动复制链接')
+      return
+    }
+    proxy.$modal.msgSuccess(link.needLogin ? '下载链接已复制，访问时需要当前系统登录态' : '下载链接已复制')
+  } catch (error) {
+    console.error(error)
+    proxy.$modal.msgError('复制失败，请手动复制链接')
+  }
+}
+
+function copyLogPullArchiveDownloadUrl(row) {
+  return copyResolvedLogPullUrl(resolveLogPullArchiveLink(row, 'service'), '当前记录缺少本服务归档地址')
+}
+
+function copyLogPullOriginalDownloadUrl(row) {
+  return copyResolvedLogPullUrl(resolveLogPullOriginalLink(row), '当前记录缺少原始压缩包地址')
+}
+
+function downloadLogPullArchive(row) {
+  if (!row?.storagePath) {
+    proxy.$modal.msgWarning('当前记录缺少本服务归档地址')
+    return
+  }
+  if (isHttpDownloadUrl(row.storagePath)) {
+    openBrowserDownload(row.storagePath)
+    return
+  }
+  downloadLogPull(row)
+}
+
+function downloadLogPullOriginal(row) {
+  if (!row?.commandResultUrl) {
+    proxy.$modal.msgWarning('当前记录缺少原始压缩包地址')
+    return
+  }
+  openBrowserDownload(row.commandResultUrl)
+}
+
+async function downloadLogPull(row) {
+  if (!row?.id) {
+    return
+  }
+  if (!row.commandResultUrl && !row.storagePath) {
+    proxy.$modal.msgWarning('当前记录缺少可下载的归档文件')
+    return
+  }
+  if (!row.storagePath && row.commandResultUrl) {
+    openBrowserDownload(row.commandResultUrl)
+    return
+  }
+  if (isHttpDownloadUrl(row.storagePath)) {
+    openBrowserDownload(row.storagePath)
+    return
+  }
+  try {
+    actionLoading.value = true
+    const blob = await downloadTicketLogPull(row.id, 'auto')
+    if (!blobValidate(blob)) {
+      try {
+        const text = await blob.text()
+        const payload = JSON.parse(text)
+        proxy.$modal.msgError(payload.msg || '下载失败')
+      } catch (error) {
+        proxy.$modal.msgError('下载失败')
+      }
+      return
+    }
+    saveAs(blob, resolveDownloadFileName(row))
+  } catch (error) {
+    console.error(error)
+    proxy.$modal.msgError('下载失败')
+  } finally {
+    actionLoading.value = false
+  }
 }
 
 function retryLogPull(row) {
@@ -802,44 +1225,35 @@ function retryLogPull(row) {
 
 function redownloadLogPull(row) {
   if (!row?.id) return
-  runAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载', true)
+  runAction(redownloadTicketLogPull(row.id), '日志压缩包已重新下载')
 }
 
-function reextractLogPull(row) {
-  if (!row?.id) return
-  runAction(reextractTicketLogPull(row.id, buildContentQuery()), '日志已重新截取', true)
-}
-
-function updateAutoRefresh() {
-  if (logPullRefreshTimer.value) {
-    window.clearTimeout(logPullRefreshTimer.value)
-    logPullRefreshTimer.value = null
-  }
-  const hasRunningTask = recordList.value.some(item => activeLogPullStatuses.includes(item.status))
-  if (!hasRunningTask) {
+function deleteLogPull(row) {
+  if (!row?.id) {
     return
   }
-  logPullRefreshTimer.value = window.setTimeout(() => {
-    if (createOpen.value || contentOpen.value) {
-      return
+  proxy.$modal.confirm(`是否确认删除日志拉取记录 #${row.id}？删除后会同步清理关联文件数据。`).then(() => {
+    actionLoading.value = true
+    return delTicketLogPull(row.id)
+  }).then(() => {
+    proxy.$modal.msgSuccess('日志拉取记录已删除')
+    if (selectedRecord.value?.id === row.id) {
+      viewerVisible.value = false
+      selectedRecord.value = null
     }
-    getList()
-  }, 5000)
+    return getList()
+  }).catch(() => {}).finally(() => {
+    actionLoading.value = false
+  })
 }
 
 onMounted(() => {
   loadTicketOptions()
   loadAgentOptions()
+  loadProviderOptions()
   loadVendorOptions()
   loadPushOptions()
   getList()
-})
-
-onBeforeUnmount(() => {
-  if (logPullRefreshTimer.value) {
-    window.clearTimeout(logPullRefreshTimer.value)
-    logPullRefreshTimer.value = null
-  }
 })
 </script>
 
@@ -867,37 +1281,24 @@ onBeforeUnmount(() => {
   width: 140px;
 }
 
-.content-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
+.log-view-download-progress {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  margin: 0 7px;
+  pointer-events: none;
+  vertical-align: middle;
 }
 
-.content-keyword {
-  width: 260px;
+.log-view-download-progress :deep(.el-progress__text) {
+  font-size: 8px !important;
 }
 
-.log-view-time-picker {
-  width: 100%;
+.log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal) {
+  height: 12px;
 }
 
-.log-content-block {
-  min-height: 340px;
-  margin: 0;
-  padding: 16px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: Consolas, 'Courier New', monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: auto;
-}
-
-.log-content-wrap {
-  white-space: pre-wrap;
+.log-pull-record-table :deep(.el-scrollbar__bar.is-horizontal .el-scrollbar__thumb) {
+  min-width: 48px;
 }
 </style>

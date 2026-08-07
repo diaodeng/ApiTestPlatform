@@ -1,4 +1,6 @@
 import request from '@/utils/request';
+import { getToken } from '@/utils/auth';
+import { tansParams } from '@/utils/ruoyi';
 
 function sanitizeQueryParams(query) {
   return Object.fromEntries(
@@ -48,11 +50,141 @@ export function searchTicketNaturalLanguage(query) {
   });
 }
 
+// 查询相似工单检索配置
+export function getTicketSimilarityConfig() {
+  return request({
+    url: '/ticket/similarity/config',
+    method: 'get',
+  });
+}
+
+// 保存相似工单检索配置
+export function saveTicketSimilarityConfig(data) {
+  return request({
+    url: '/ticket/similarity/config',
+    method: 'put',
+    data,
+  });
+}
+
+// 查询 Qdrant Collection 列表
+export function listTicketSimilarityQdrantCollections(data) {
+  return request({
+    url: '/ticket/similarity/qdrant/collections',
+    method: 'post',
+    data,
+  });
+}
+
+// 重建相似工单向量
+export function rebuildTicketSimilarity(data) {
+  return request({
+    url: '/ticket/similarity/rebuild',
+    method: 'post',
+    data,
+  });
+}
+
 // 查询工单详情
 export function getTicket(ticketId) {
   return request({
     url: `/ticket/${ticketId}`,
     method: 'get',
+  });
+}
+
+// 查询问题实例列表
+export function listTicketIssues(query) {
+  return request({
+    url: '/ticket/issues/list',
+    method: 'get',
+    params: query,
+  });
+}
+
+// 查询问题实例详情
+export function getTicketIssue(issueId) {
+  return request({
+    url: `/ticket/issues/${issueId}`,
+    method: 'get',
+  });
+}
+
+// 新增问题实例
+export function addTicketIssue(data) {
+  return request({
+    url: '/ticket/issues',
+    method: 'post',
+    data,
+  });
+}
+
+// 修改问题实例
+export function updateTicketIssue(data) {
+  return request({
+    url: '/ticket/issues',
+    method: 'put',
+    data,
+  });
+}
+
+// 绑定工单到已有问题实例
+export function bindTicketIssue(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/issue/bind`,
+    method: 'post',
+    data,
+  });
+}
+
+// 新建问题实例并绑定当前工单
+export function createAndBindTicketIssue(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/issue/create-and-bind`,
+    method: 'post',
+    data,
+  });
+}
+
+// 从相似工单确认归入同一问题
+export function bindTicketIssueFromSimilar(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/issue/bind-from-similar`,
+    method: 'post',
+    data,
+  });
+}
+
+// 解除工单问题归因
+export function unbindTicketIssue(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/issue/unbind`,
+    method: 'post',
+  });
+}
+
+// 新增工单补充关系
+export function addTicketRelation(data) {
+  return request({
+    url: '/ticket/relations',
+    method: 'post',
+    data,
+  });
+}
+
+// 确认工单补充关系
+export function confirmTicketRelation(relationId) {
+  return request({
+    url: `/ticket/relations/${relationId}/confirm`,
+    method: 'put',
+  });
+}
+
+// 删除工单补充关系
+export function delTicketRelation(relationId) {
+  return request({
+    url: `/ticket/relations/${relationId}`,
+    method: 'delete',
   });
 }
 
@@ -70,6 +202,118 @@ export function saveTicketLogPullStorageConfig(data) {
     url: '/ticket/log-pull/storage-config',
     method: 'put',
     data,
+  });
+}
+
+// 鏌ヨ宸ュ崟鍚屾鑷姩鍖栭厤缃?
+export function getTicketSyncAutomationConfig() {
+  return request({
+    url: '/ticket/sync/automation',
+    method: 'get',
+  });
+}
+
+// 淇濆瓨宸ュ崟鍚屾鑷姩鍖栭厤缃?
+export function saveTicketSyncAutomationConfig(data) {
+  return request({
+    url: '/ticket/sync/automation',
+    method: 'put',
+    data,
+  });
+}
+
+// 预览主动拉取多维表格字段
+export function previewTicketSyncBitablePullFields(data) {
+  return request({
+    url: '/ticket/sync/automation/bitable-pull/fields-preview',
+    method: 'post',
+    data,
+  });
+}
+
+// 查询同步通知推送配置选项
+export function listTicketSyncNotifyPushOptions() {
+  return request({
+    url: '/ticket/sync/notify/push-options',
+    method: 'get',
+  });
+}
+
+// 预览按人催办统计
+export function previewTicketSyncPersonReminder(data) {
+  return request({
+    url: '/ticket/sync/notify/person/preview',
+    method: 'post',
+    data,
+  });
+}
+
+// 执行按人催办通知
+export function runTicketSyncPersonReminder(data) {
+  return request({
+    url: '/ticket/sync/notify/person/run',
+    method: 'post',
+    data,
+  });
+}
+
+// 执行工单汇总统计通知
+export function runTicketSyncSummaryReport(data) {
+  return request({
+    url: '/ticket/sync/notify/summary/run',
+    method: 'post',
+    data,
+  });
+}
+
+// 查询自定义工单统计支持的字段和时间口径
+export function getTicketCustomStatisticsDefinitions() {
+  return request({
+    url: '/ticket/sync/custom-statistics/definitions',
+    method: 'get',
+  });
+}
+
+// 手动执行当前系统工单自定义统计
+export function runTicketCustomStatistics(data) {
+  return request({
+    url: '/ticket/sync/custom-statistics/run',
+    method: 'post',
+    data,
+  });
+}
+
+// 按工单号手动发送群消息
+export function sendTicketSyncGroupPushByTicket(data) {
+  return request({
+    url: '/ticket/sync/notify/group/send-by-ticket',
+    method: 'post',
+    data,
+  });
+}
+
+// 批量重跑工单自动分类
+export function batchReclassifyTicketSync(data) {
+  return request({
+    url: '/ticket/sync/auto-category/reclassify',
+    method: 'post',
+    data,
+  });
+}
+
+// 获取自动分类统计（未归类数量）
+export function getTicketSyncAutoCategoryStats() {
+  return request({
+    url: '/ticket/sync/auto-category/stats',
+    method: 'get',
+  });
+}
+
+// 查询工单分类统计枚举选项
+export function getTicketStatClassificationOptions() {
+  return request({
+    url: '/ticket/stat-classification/options',
+    method: 'get',
   });
 }
 
@@ -117,12 +361,46 @@ export function changeTicketStatus(ticketId, data) {
   });
 }
 
+// 批量维护工单版本治理字段
+export function batchUpdateTicketRelease(data) {
+  return request({
+    url: '/ticket/release/batch',
+    method: 'post',
+    data,
+  });
+}
+
+// 查询工单版本统计
+export function getTicketVersionStatistics(query) {
+  return request({
+    url: '/ticket/release/statistics',
+    method: 'get',
+    params: sanitizeQueryParams(query),
+  });
+}
+
+// 手动翻译工单描述
+export function translateTicketDescription(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/translate-description`,
+    method: 'post',
+  });
+}
+
 // 新增工单评论
 export function addTicketComment(ticketId, data) {
   return request({
     url: `/ticket/${ticketId}/comments`,
     method: 'post',
     data,
+  });
+}
+
+// 查询工单评论列表
+export function getTicketComments(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/comments`,
+    method: 'get',
   });
 }
 
@@ -197,10 +475,76 @@ export function listTicketLogPullRecords(query) {
 }
 
 // 查询日志拉取商家/门店联动选项
-export function getTicketLogPullVendorStoreOptions() {
+export function getTicketLogPullVendorStoreOptions(venderNo) {
   return request({
     url: '/ticket/log-pull/vendor-store-options',
     method: 'get',
+    params: venderNo ? { vender_no: venderNo } : undefined,
+  });
+}
+
+// 下载门店配置导入模板
+export function downloadTicketLogPullStoreConfigTemplate() {
+  return request({
+    url: '/ticket/log-pull/store-config/template',
+    method: 'get',
+    responseType: 'blob',
+  });
+}
+
+// 查询门店配置列表
+export function listTicketLogPullStoreConfigs(query) {
+  return request({
+    url: '/ticket/log-pull/store-configs',
+    method: 'get',
+    params: sanitizeQueryParams(query),
+  });
+}
+
+// 导入门店配置
+export function importTicketLogPullStoreConfigs(data) {
+  return request({
+    url: '/ticket/log-pull/store-configs/import',
+    method: 'post',
+    data,
+    headers: {
+      'Content-Type': 'multipart/form-data',
+      repeatSubmit: false,
+    },
+  });
+}
+
+// 查询项目商家映射列表
+export function listTicketLogPullProjectVendorMaps(query) {
+  return request({
+    url: '/ticket/log-pull/project-vendor-maps',
+    method: 'get',
+    params: sanitizeQueryParams(query),
+  });
+}
+
+// 查询项目商家映射选项
+export function listTicketLogPullProjectVendorMapOptions() {
+  return request({
+    url: '/ticket/log-pull/project-vendor-maps/options',
+    method: 'get',
+  });
+}
+
+// 根据项目ID查询项目商家映射
+export function getTicketLogPullProjectVendorMap(projectId) {
+  return request({
+    url: `/ticket/log-pull/project-vendor-maps/${projectId}`,
+    method: 'get',
+  });
+}
+
+// 保存项目商家映射
+export function saveTicketLogPullProjectVendorMap(data) {
+  return request({
+    url: '/ticket/log-pull/project-vendor-maps',
+    method: 'post',
+    data,
   });
 }
 
@@ -222,6 +566,16 @@ export function createTicketLogPullRecord(data) {
   });
 }
 
+// 下载日志拉取压缩包
+export function downloadTicketLogPull(recordId, source) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/download`,
+    method: 'get',
+    params: source ? { source } : undefined,
+    responseType: 'blob',
+  });
+}
+
 // 重新拉取日志任务
 export function retryTicketLogPull(recordId) {
   return request({
@@ -230,20 +584,19 @@ export function retryTicketLogPull(recordId) {
   });
 }
 
+// 删除日志拉取记录
+export function delTicketLogPull(recordId) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}`,
+    method: 'delete',
+  });
+}
+
 // 重新下载日志压缩包
 export function redownloadTicketLogPull(recordId) {
   return request({
     url: `/ticket/log-pulls/${recordId}/redownload`,
     method: 'post',
-  });
-}
-
-// 重新截取日志内容
-export function reextractTicketLogPull(recordId, query) {
-  return request({
-    url: `/ticket/log-pulls/${recordId}/reextract`,
-    method: 'post',
-    params: query,
   });
 }
 
@@ -297,6 +650,7 @@ export function addTicketAiAnalysis(ticketId, data) {
     url: `/ticket/${ticketId}/ai-analysis`,
     method: 'post',
     data,
+    showErrorMessage: false,
   });
 }
 
@@ -305,6 +659,7 @@ export function retryTicketAiAnalysis(ticketId, taskId) {
   return request({
     url: `/ticket/${ticketId}/ai-analysis/tasks/${taskId}/retry`,
     method: 'post',
+    showErrorMessage: false,
   });
 }
 
@@ -314,6 +669,113 @@ export function getTicketLogPullContent(recordId, query) {
     url: `/ticket/log-pulls/${recordId}/content`,
     method: 'get',
     params: query,
+  });
+}
+
+// 流式查询日志拉取文本内容，按 NDJSON 事件逐块回调
+export async function streamTicketLogPullContent(recordId, query, handlers = {}) {
+  const baseURL = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || '';
+  const queryText = tansParams(sanitizeQueryParams(query || {})).replace(/&$/, '');
+  const url = `${baseURL}/ticket/log-pulls/${recordId}/content/stream${queryText ? `?${queryText}` : ''}`;
+  const headers = {};
+  if (getToken()) {
+    headers.Authorization = `Bearer ${getToken()}`;
+  }
+  const response = await fetch(url, { method: 'GET', headers });
+  if (!response.ok || !response.body) {
+    throw new Error(`日志内容流式读取失败: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  const handleLine = rawLine => {
+    const line = String(rawLine || '').trim();
+    if (!line) return;
+    const event = JSON.parse(line);
+    const data = event.data || {};
+    if (event.type === 'meta') {
+      handlers.onMeta?.(data);
+    } else if (event.type === 'chunk') {
+      handlers.onChunk?.(data.text || '');
+    } else if (event.type === 'done') {
+      handlers.onDone?.(data);
+    } else if (event.type === 'error') {
+      throw new Error(data.message || '日志内容流式读取失败');
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    lines.forEach(handleLine);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    handleLine(buffer);
+  }
+}
+
+// 准备工单日志查看目录
+export function prepareTicketLogs(ticketId, recordId) {
+  return request({
+    url: '/ticket/logs/prepare',
+    method: 'post',
+    data: { ticketId, recordId },
+  });
+}
+
+// 查询工单日志准备阶段的远程下载进度
+export function getTicketLogPrepareProgress(ticketId, recordId) {
+  return request({
+    url: '/ticket/logs/prepare-progress',
+    method: 'get',
+    params: { ticket_id: ticketId, record_id: recordId },
+    showErrorMessage: false,
+  });
+}
+
+// 查询工单日志文件列表
+export function listTicketLogFiles(ticketId, recordId) {
+  return request({
+    url: '/ticket/logs/files',
+    method: 'get',
+    // GET 查询参数需要使用后端显式声明的 snake_case 字段名。
+    params: { ticket_id: ticketId, record_id: recordId },
+  });
+}
+
+// 搜索工单日志关键字
+export function searchTicketLogs(data) {
+  return request({
+    url: '/ticket/logs/search',
+    method: 'post',
+    data,
+  });
+}
+
+// 查询工单日志上下文
+export function getTicketLogContext(query) {
+  const params = { ...(query || {}) };
+  // 上下文接口的 ticket_id 不是 Pydantic body，前端这里统一做一次兼容转换。
+  if (params.ticketId !== undefined && params.ticket_id === undefined) {
+    params.ticket_id = params.ticketId;
+    delete params.ticketId;
+  }
+  return request({
+    url: '/ticket/logs/context',
+    method: 'get',
+    params,
+  });
+}
+
+// 提取工单日志异常摘要
+export function getTicketLogErrors(data) {
+  return request({
+    url: '/ticket/logs/errors',
+    method: 'post',
+    data,
   });
 }
 
@@ -395,12 +857,34 @@ export function listTicketModuleOptions(query) {
 }
 
 // 查询工单统计
+export function getTicketStatisticsTimeConfig() {
+  return request({
+    url: '/ticket/statistics/time-config',
+    method: 'get',
+  });
+}
+
+// 查询工单统计
 export function getTicketStatistics(query) {
   return request({
     url: '/ticket/statistics/overview',
     method: 'get',
     params: query,
   });
+}
+
+// 查询工单趋势统计
+export function getTicketStatisticsTrend(query) {
+  return request({
+    url: '/ticket/statistics/trend',
+    method: 'get',
+    params: query,
+  });
+}
+
+// 获取可配置趋势指标定义，趋势数据仅在查询时按选择项请求。
+export function getTicketStatisticMetricDefinitions() {
+  return request({ url: '/ticket/statistics/metric-definitions', method: 'get' });
 }
 
 // 查询知识库列表

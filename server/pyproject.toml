@@ -1,6 +1,6 @@
 [project]
 name = "server"
-version = "1.0.4.2"
+version = "1.1.1.0"  # 运行时版本以 version.py 为准，此处为包元数据需手动同步
 description = "一款现代化的多功能测试管理平台"
 readme = "README.md"
 target-version = "py310"  # 目标版本，ruff语法检测使用
@@ -14,6 +14,7 @@ dependencies = [
     "jinja2==3.1.6",
     "jmespath==1.0.1",
     "jsonpath==0.82.2",
+    "lark-oapi>=1.6.9",
     "loguru==0.7.2",
     "openpyxl==3.1.2",
     "paramiko>=3.4.0",
@@ -25,7 +26,7 @@ dependencies = [
     "quickjs>=1.19.4",
     "redis==5.0.1",
     "redlock==1.2.0",
-    "requests==2.31.0",
+    "py7zr>=0.21.0",
     "sqlalchemy==2.0.25",
     "user-agents==2.2.0",
     "uvicorn==0.29.0",

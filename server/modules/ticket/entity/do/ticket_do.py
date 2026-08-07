@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
@@ -15,11 +15,40 @@ class Ticket(Base):
     """
 
     __tablename__ = "ticket"
+    __table_args__ = (
+        Index("idx_ticket_del_status_create", "del_flag", "status", "create_time", "ticket_id"),
+        Index(
+            "idx_ticket_del_project_module_create",
+            "del_flag",
+            "project_id",
+            "module_id",
+            "create_time",
+            "ticket_id",
+        ),
+        Index("idx_ticket_del_current_assignee_create", "del_flag", "current_assignee_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_internal_owner_create", "del_flag", "internal_owner_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_first_line_create", "del_flag", "first_line_assignee_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_issue_type_create", "del_flag", "issue_type_id", "create_time", "ticket_id"),
+        Index("idx_ticket_del_problem_pattern_create", "del_flag", "problem_pattern_code", "create_time", "ticket_id"),
+        Index("idx_ticket_del_root_cause_create", "del_flag", "root_cause_type", "create_time", "ticket_id"),
+        Index("idx_ticket_del_solution_create", "del_flag", "solution_type", "create_time", "ticket_id"),
+        Index("idx_ticket_del_resolution_create", "del_flag", "resolution_code", "create_time", "ticket_id"),
+        Index("idx_ticket_del_submit_time", "del_flag", "submit_time", "ticket_id"),
+        Index("idx_ticket_del_processed_time", "del_flag", "processed_at", "ticket_id"),
+        Index("idx_ticket_del_resolved_time", "del_flag", "resolved_at", "ticket_id"),
+        Index("idx_ticket_del_closed_time", "del_flag", "closed_at", "ticket_id"),
+        Index("idx_ticket_del_affected_version_id", "del_flag", "affected_version_id", "ticket_id"),
+        Index("idx_ticket_del_planned_fix_version_id", "del_flag", "planned_fix_version_id", "ticket_id"),
+        Index("idx_ticket_del_fixed_version_id", "del_flag", "fixed_version_id", "ticket_id"),
+        Index("idx_ticket_del_released_version_id", "del_flag", "released_version_id", "ticket_id"),
+        Index("idx_ticket_del_issue", "del_flag", "issue_id", "ticket_id"),
+    )
 
     ticket_id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="工单ID"
     )
     ticket_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="工单编号")
+    ticket_url: Mapped[str | None] = mapped_column(String(1000), nullable=True, comment="工单详情链接")
     title: Mapped[str] = mapped_column(String(500), nullable=False, comment="工单标题")
     description: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="工单描述")
     project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="所属项目ID")
@@ -28,6 +57,15 @@ class Ticket(Base):
     module_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="所属模块名称")
     category_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="问题分类ID")
     category_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="问题分类名称")
+    issue_type_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="工单类型编码")
+    issue_type_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="工单类型名称")
+    classification_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="", comment="工单类型分类来源：manual/external_mapping/ai"
+    )
+    classification_rule_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="外部字段分类规则ID"
+    )
+    classification_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="工单类型分类更新时间")
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=TicketStatus.PENDING.value, comment="当前状态"
     )
@@ -39,13 +77,59 @@ class Ticket(Base):
     reporter_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="提单人名称")
     current_assignee_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="当前处理人ID")
     current_assignee_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="当前处理人名称")
+    first_line_assignee_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="1线人员ID")
+    first_line_assignee_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="1线人员名称")
+    internal_owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="内部工单负责人ID")
+    internal_owner_name: Mapped[str] = mapped_column(
+        String(100), nullable=True, default="", comment="内部工单负责人名称"
+    )
     is_problem: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="是否真实问题")
+    root_cause_type: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="根因分类")
+    solution_type: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="解决方式")
+    resolution_code: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="关闭结果编码")
+    resolution_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="关闭结果名称")
+    problem_pattern_code: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default="", comment="细分问题类型编码"
+    )
+    problem_pattern_name: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default="", comment="细分问题类型名称"
+    )
+    problem_pattern_confidence: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="细分问题类型置信度，0-100"
+    )
+    problem_pattern_source: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default="", comment="细分问题类型来源"
+    )
+    problem_pattern_verified: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, comment="细分问题类型是否人工确认"
+    )
+    problem_pattern_verified_by: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, default="", comment="细分问题类型确认人"
+    )
+    problem_pattern_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="细分问题类型确认时间"
+    )
+    issue_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="归属问题实例ID")
+    issue_relation_type: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default="", comment="问题实例归属类型，如 primary/similar/manual"
+    )
+    issue_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, comment="问题归因是否人工确认"
+    )
+    affected_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="发生版本中心ID")
+    planned_fix_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="计划修复版本中心ID")
+    fixed_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="实际修复版本中心ID")
+    released_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="实际发版版本中心ID")
     root_cause: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终根因")
     solution: Mapped[str] = mapped_column(long_text_type(), nullable=True, comment="最终解决方案")
+    submit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="工单业务提交时间")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始处理时间")
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="解决时间")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="处置完成时间")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="关闭时间")
     first_response_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="首次响应时间")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="首次形成处理结论时间")
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="实际发版时间")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="验证完成时间")
     total_process_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="总处理耗时秒")
     tags: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="标签，建议存储字符串数组")
     extra_data: Mapped[dict | None] = mapped_column(
@@ -81,6 +165,82 @@ class TicketStatusHistory(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
+class TicketIssue(Base):
+    """
+    真实问题实例主表，用于承载多张工单归属到同一个业务问题的主归因口径。
+    """
+
+    __tablename__ = "ticket_issue"
+    __table_args__ = (
+        UniqueConstraint("issue_no", name="uk_ticket_issue_no"),
+        Index("idx_ticket_issue_del_status_update", "del_flag", "status", "update_time", "issue_id"),
+        Index("idx_ticket_issue_del_project_module", "del_flag", "project_id", "module_id", "issue_id"),
+        Index("idx_ticket_issue_del_pattern", "del_flag", "problem_pattern_code", "issue_id"),
+    )
+
+    issue_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, nullable=False, default=snowIdWorker.get_id, comment="问题实例ID"
+    )
+    issue_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="问题实例编号")
+    title: Mapped[str] = mapped_column(String(500), nullable=False, comment="问题标题")
+    summary: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="问题摘要")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open", comment="问题状态")
+    severity: Mapped[str | None] = mapped_column(String(50), nullable=True, default="", comment="严重等级")
+    project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="所属项目ID")
+    project_name: Mapped[str | None] = mapped_column(String(200), nullable=True, default="", comment="所属项目名称")
+    module_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="所属模块ID")
+    module_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="所属模块名称")
+    root_cause_type: Mapped[str | None] = mapped_column(String(128), nullable=True, default="", comment="根因分类")
+    problem_pattern_code: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default="", comment="细分问题类型编码"
+    )
+    problem_pattern_name: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default="", comment="细分问题类型名称"
+    )
+    owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="负责人ID")
+    owner_name: Mapped[str | None] = mapped_column(String(100), nullable=True, default="", comment="负责人名称")
+    first_ticket_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="首张工单ID")
+    affected_ticket_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="影响工单数")
+    del_flag: Mapped[str] = mapped_column(String(1), nullable=False, default="0", comment="删除标志（0存在 2删除）")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketRelation(Base):
+    """
+    工单补充关系表，仅记录工单间相似、重复、关联等辅助关系，不替代 ticket.issue_id 主归因。
+    """
+
+    __tablename__ = "ticket_relation"
+    __table_args__ = (
+        UniqueConstraint("source_ticket_id", "target_ticket_id", "relation_type", name="uk_ticket_relation_pair_type"),
+        Index("idx_ticket_relation_source", "source_ticket_id", "relation_type", "del_flag"),
+        Index("idx_ticket_relation_target", "target_ticket_id", "relation_type", "del_flag"),
+    )
+
+    relation_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, nullable=False, default=snowIdWorker.get_id, comment="关系ID"
+    )
+    source_ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="源工单ID")
+    target_ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="目标工单ID")
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False, default="similar", comment="关系类型")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True, comment="关系置信度，0-1")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual", comment="关系来源")
+    confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否人工确认")
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
+    del_flag: Mapped[str] = mapped_column(String(1), nullable=False, default="0", comment="删除标志（0存在 2删除）")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
 class TicketAssignHistory(Base):
     """
     工单指派历史表，记录每次处理人变化和原因。
@@ -106,6 +266,10 @@ class TicketComment(Base):
     """
 
     __tablename__ = "ticket_comment"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "source_segment_key", name="uk_ticket_comment_source_segment"),
+        Index("idx_ticket_comment_source", "source_type", "source_record_id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="评论ID")
     ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
@@ -113,6 +277,15 @@ class TicketComment(Base):
     user_name: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="评论人名称")
     content: Mapped[str] = mapped_column(long_text_type(), nullable=False, comment="评论内容")
     is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否内部评论")
+    attachments: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="评论附件或引用信息")
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, default="local", comment="评论来源类型")
+    source_system: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="外部来源系统")
+    source_record_id: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="外部来源记录ID")
+    source_field: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="外部来源字段")
+    source_segment_key: Mapped[str | None] = mapped_column(String(256), nullable=True, comment="外部评论分段幂等键")
+    source_segment_index: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="外部分段序号")
+    source_content_hash: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="外部内容哈希")
+    external_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="外部评论时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
@@ -213,6 +386,75 @@ class TicketSnapshot(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
+class TicketVersion(Base):
+    """
+    项目版本主数据，统一承接人工维护和工单自动发现的版本。
+    """
+
+    __tablename__ = "ticket_version"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version_key", name="uk_ticket_version_project_key"),
+        Index("idx_ticket_version_project_status", "project_id", "lifecycle_status", "enabled"),
+    )
+
+    version_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="版本ID")
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="所属项目ID")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="所属项目名称")
+    version_key: Mapped[str] = mapped_column(String(100), nullable=False, comment="规范化版本标识")
+    version_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="版本展示名称")
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="discovered", comment="版本状态：discovered/confirmed/deprecated"
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual", comment="首次来源")
+    raw_version: Mapped[str] = mapped_column(String(200), nullable=True, default="", comment="首次发现原始版本文本")
+    first_ticket_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="首次发现工单ID")
+    first_detected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="首次发现时间")
+    planned_release_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="计划发布时间")
+    default_branch: Mapped[str] = mapped_column(String(200), nullable=True, default="", comment="默认代码分支")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment="是否可选")
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketVersionRelease(Base):
+    """
+    版本在各环境的发布事实记录，支持同一版本多次发布与回滚审计。
+    """
+
+    __tablename__ = "ticket_version_release"
+    __table_args__ = (
+        UniqueConstraint("version_id", "environment", "batch_no", name="uk_ticket_version_release_batch"),
+        Index("idx_ticket_version_release_version_time", "version_id", "released_at"),
+    )
+
+    release_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="发布记录ID"
+    )
+    version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="版本ID")
+    environment: Mapped[str] = mapped_column(String(64), nullable=False, default="production", comment="发布环境")
+    batch_no: Mapped[str] = mapped_column(String(64), nullable=False, default="default", comment="发布批次")
+    release_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="planned", comment="发布状态：planned/released/rolled_back"
+    )
+    planned_release_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="计划发布时间")
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="实际发布时间")
+    rollback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="回滚时间")
+    release_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="发布人")
+    ci_url: Mapped[str] = mapped_column(String(1000), nullable=True, default="", comment="CI/CD 链接")
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="发布说明")
+    create_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="创建者")
+    update_by: Mapped[str] = mapped_column(String(100), nullable=True, default="", comment="更新者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
 class TicketAiRepoMapping(Base):
     """
     工单 AI 分析仓库映射表，用于维护项目、版本与仓库分支的对应关系。
@@ -220,14 +462,14 @@ class TicketAiRepoMapping(Base):
 
     __tablename__ = "ticket_ai_repo_mapping"
     __table_args__ = (
-        UniqueConstraint("project_id", "version_key", name="uk_ticket_ai_repo_mapping_project_version"),
+        UniqueConstraint("project_id", "version_id", name="uk_ticket_ai_repo_mapping_project_version"),
         Index("idx_ticket_ai_repo_mapping_project_enabled", "project_id", "enabled"),
     )
 
     mapping_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="映射ID")
     project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="项目ID")
     project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称")
-    version_key: Mapped[str] = mapped_column(String(100), nullable=False, comment="版本标识")
+    version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="版本中心ID")
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="仓库地址")
     branch_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="分支名称")
     local_repo_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="Worker本地仓库路径")
@@ -257,7 +499,7 @@ class TicketAiAnalysisTask(Base):
     project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="项目ID")
     mapping_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True, comment="仓库映射ID")
     project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称")
-    version_key: Mapped[str] = mapped_column(String(100), nullable=False, default="", comment="版本标识")
+    version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="版本中心ID")
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="仓库地址")
     branch_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="分支名称")
     local_repo_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", comment="本地仓库路径")
@@ -374,18 +616,158 @@ class WorkflowTransition(Base):
 
 class TicketStatisticsDaily(Base):
     """
-    工单每日统计表，预留离线聚合结果。
+    工单每日统计表，按自然日冻结工单处理口径汇总结果。
     """
 
     __tablename__ = "ticket_statistics_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "statistics_date",
+            "snapshot_scope",
+            "project_id",
+            "module_id",
+            "issue_type_id",
+            name="uk_ticket_statistics_daily_scope",
+        ),
+        Index("idx_ticket_statistics_daily_date", "statistics_date"),
+        Index("idx_ticket_statistics_daily_scope_date", "snapshot_scope", "statistics_date"),
+        Index("idx_ticket_statistics_daily_project", "statistics_date", "project_id"),
+        Index("idx_ticket_statistics_daily_module", "statistics_date", "module_id", "module_code"),
+        Index("idx_ticket_statistics_daily_issue_type", "statistics_date", "issue_type_id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="统计ID")
-    statistics_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True, comment="统计日期")
-    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增数量")
-    resolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="解决数量")
-    closed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="关闭数量")
-    avg_process_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处理秒数")
+    statistics_date: Mapped[date] = mapped_column(Date, nullable=False, comment="统计日期")
+    snapshot_scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all", comment="快照范围：all全局，leaf项目模块问题类型明细"
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID，0表示全局或未归属")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称快照")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID，0表示全局或未归属")
+    module_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块名称快照")
+    module_code: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块业务码快照")
+    issue_type_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="工单类型编码，空表示全局或未填写"
+    )
+    issue_type_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="工单类型名称快照")
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="工单总数")
+    submitted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数")
+    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数（兼容旧字段）")
+    first_responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已响应数")
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已处理数")
+    processed_in_new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单已处理数")
+    process_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment="新增工单处理率")
+    resolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="处置完成数")
+    closed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="关闭数")
+    unprocessed_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未处理存量")
+    open_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未关闭存量")
+    avg_first_response_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次响应耗时"
+    )
+    avg_first_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次处理耗时"
+    )
+    avg_resolve_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处置完成耗时")
+    avg_close_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均关闭耗时")
+    avg_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均处理秒数（旧字段，兼容保留）"
+    )
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+
+class TicketStatisticsPeriodSnapshot(Base):
+    """
+    工单周期统计快照表，用于冻结非自然日周期，例如周四 18:00 开始的业务周。
+    """
+
+    __tablename__ = "ticket_statistics_period_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "period_type",
+            "period_start_time",
+            "snapshot_scope",
+            "project_id",
+            "module_id",
+            "issue_type_id",
+            name="uk_ticket_statistics_period_scope",
+        ),
+        Index("idx_ticket_statistics_period_start", "period_type", "period_start_time"),
+        Index("idx_ticket_statistics_period_scope_start", "snapshot_scope", "period_type", "period_start_time"),
+        Index("idx_ticket_statistics_period_project", "period_start_time", "project_id"),
+        Index("idx_ticket_statistics_period_module", "period_start_time", "module_id", "module_code"),
+        Index("idx_ticket_statistics_period_issue_type", "period_start_time", "issue_type_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="统计ID")
+    period_type: Mapped[str] = mapped_column(String(32), nullable=False, default="business_week", comment="周期类型")
+    period_key: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="周期键，如业务周开始日期")
+    period_start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="周期开始时间")
+    period_end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="周期结束时间")
+    snapshot_scope: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all", comment="快照范围：all全局，leaf项目模块问题类型明细"
+    )
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID，0表示全局或未归属")
+    project_name: Mapped[str] = mapped_column(String(200), nullable=False, default="", comment="项目名称快照")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID，0表示全局或未归属")
+    module_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块名称快照")
+    module_code: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="模块业务码快照")
+    issue_type_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="工单类型编码，空表示全局或未填写"
+    )
+    issue_type_name: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="工单类型名称快照")
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="工单总数")
+    submitted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数")
+    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单数（兼容旧字段）")
+    first_responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已响应数")
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="已处理数")
+    processed_in_new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="新增工单已处理数")
+    process_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0, comment="新增工单处理率")
+    resolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="处置完成数")
+    closed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="关闭数")
+    unprocessed_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未处理存量")
+    open_backlog: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="周期末未关闭存量")
+    avg_first_response_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次响应耗时"
+    )
+    avg_first_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均首次处理耗时"
+    )
+    avg_resolve_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均处置完成耗时")
+    avg_close_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="平均关闭耗时")
+    avg_process_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, comment="平均处理秒数（旧字段，兼容保留）"
+    )
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+
+class TicketStatisticsMetricSnapshot(Base):
+    """工单可配置趋势指标快照，按日或业务周覆盖写入。"""
+
+    __tablename__ = "ticket_statistics_metric_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_type", "snapshot_key", "snapshot_scope", "project_id", "module_id",
+            "issue_type_id", "metric_code", "group_code", name="uk_ticket_metric_snapshot_scope"
+        ),
+        Index("idx_ticket_metric_snapshot_time", "snapshot_type", "snapshot_key"),
+        Index("idx_ticket_metric_snapshot_metric", "metric_code", "snapshot_type", "snapshot_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="指标快照ID")
+    snapshot_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="快照类型：daily/business_week")
+    snapshot_key: Mapped[str] = mapped_column(String(64), nullable=False, comment="快照日期或业务周开始日期")
+    snapshot_scope: Mapped[str] = mapped_column(String(20), nullable=False, default="all", comment="快照范围：all/leaf")
+    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="项目ID")
+    module_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="模块ID")
+    issue_type_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="工单类型编码")
+    metric_code: Mapped[str] = mapped_column(String(64), nullable=False, comment="自定义指标编码")
+    metric_label: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="自定义指标名称")
+    group_code: Mapped[str] = mapped_column(String(64), nullable=False, comment="指标分组编码")
+    group_label: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="指标分组名称")
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="命中数量")
+    definition_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="指标定义版本")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间")
 
 
 class UserStatisticsDaily(Base):
