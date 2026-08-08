@@ -672,7 +672,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       limit,
       withContext: false,
     };
-    const keywords = normalizeLogViewerKeywords(logViewerForm.value.keywords);
+    const keywords = normalizeLogViewerSearchKeywords(logViewerForm.value.keywords);
     payload.keywords = keywords;
     payload.keyword = keywords[0] || String(logViewerForm.value[keywordField] || '').trim();
     payload.searchMode =
@@ -702,8 +702,21 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     logViewerForm.value.file = '';
   }
 
-  /** 归一化日志搜索或高亮关键字，支持数组、逗号、分号和换行分隔。 */
-  function normalizeLogViewerKeywords(value) {
+  /** 归一化日志搜索关键字，支持数组、逗号、分号和换行分隔，最多保留 20 个。 */
+  function normalizeLogViewerSearchKeywords(value) {
+    const rawItems = Array.isArray(value) ? value : String(value || '').split(/[\n,，;；]+/);
+    const keywords = [];
+    rawItems.forEach((item) => {
+      const keyword = String(item || '').trim();
+      if (keyword && !keywords.includes(keyword)) {
+        keywords.push(keyword.slice(0, 200));
+      }
+    });
+    return keywords.slice(0, 20);
+  }
+
+  /** 归一化日志高亮关键字，继续沿用原有限制，最多保留 10 个。 */
+  function normalizeLogViewerHighlightKeywords(value) {
     const rawItems = Array.isArray(value) ? value : String(value || '').split(/[\n,，;；]+/);
     const keywords = [];
     rawItems.forEach((item) => {
@@ -717,7 +730,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
 
   /** 同步多高亮关键字，并维护旧展示字段。 */
   function syncLogViewerHighlightKeywords(value, displayText) {
-    const keywords = normalizeLogViewerKeywords(value);
+    const keywords = normalizeLogViewerHighlightKeywords(value);
     logViewerHighlightKeywords.value = keywords;
     logViewerHighlightText.value = displayText === undefined ? keywords.join('\n') : displayText;
   }
@@ -726,14 +739,14 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   function removeLogViewerSelectionOwnedKeyword(keywords = logViewerHighlightKeywords.value) {
     const selectedKeyword = logViewerSelectionHighlightKeyword.value;
     if (!selectedKeyword || !logViewerSelectionHighlightOwned.value) {
-      return normalizeLogViewerKeywords(keywords);
+      return normalizeLogViewerHighlightKeywords(keywords);
     }
-    return normalizeLogViewerKeywords(keywords).filter((keyword) => keyword !== selectedKeyword);
+    return normalizeLogViewerHighlightKeywords(keywords).filter((keyword) => keyword !== selectedKeyword);
   }
 
   /** 同步用户输入的多高亮关键字；存在选区时保留选区对应的临时高亮词。 */
   function updateLogViewerHighlightKeywords(value) {
-    const keywords = normalizeLogViewerKeywords(value);
+    const keywords = normalizeLogViewerHighlightKeywords(value);
     const selectedKeyword = logViewerSelectionHighlightKeyword.value;
     if (selectedKeyword && !keywords.includes(selectedKeyword)) {
       keywords.push(selectedKeyword);
@@ -814,7 +827,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   }
 
   function searchLogViewerKeyword() {
-    const keywords = normalizeLogViewerKeywords(logViewerForm.value.keywords);
+    const keywords = normalizeLogViewerSearchKeywords(logViewerForm.value.keywords);
     if (!keywords.length) {
       proxy.$modal.msgWarning('请输入搜索关键字');
       return;
@@ -970,7 +983,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     searchLogViewerInFile,
     clearLogViewerFileScope,
     normalizeLogViewerSelectedText,
-    normalizeLogViewerKeywords,
+    normalizeLogViewerSearchKeywords,
+    normalizeLogViewerHighlightKeywords,
     captureLogViewerHighlight,
     clearLogViewerSelectionHighlight,
     updateLogViewerHighlightKeywords,

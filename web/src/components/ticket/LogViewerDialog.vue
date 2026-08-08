@@ -331,7 +331,11 @@ const selectionHighlightKeyword = ref('')
 const selectionHighlightOwned = ref(false)
 const contextBlockRef = ref(null)
 
-const highlightName = 'ticket-log-context-highlight'
+const highlightNamePrefix = 'ticket-log-context-highlight'
+const highlightColorCount = 20
+const highlightNativeNames = Array.from({ length: highlightColorCount }, (_, index) =>
+  `${highlightNamePrefix}-${index}`
+)
 const nativeHighlightSupported = computed(() =>
   Boolean(
     window.CSS?.highlights &&
@@ -371,6 +375,23 @@ const resultTableHeight = computed(() =>
       : 320
 )
 
+const RESULT_COLUMN_DEFAULT_WIDTHS = {
+  file: 140,
+  line: 90,
+  content: 360,
+  actions: 130,
+}
+
+const RESULT_COLUMN_MIN_WIDTHS = {
+  file: 120,
+  line: 80,
+  content: 260,
+  actions: 120,
+}
+
+const resultColumnWidths = ref({ ...RESULT_COLUMN_DEFAULT_WIDTHS })
+const resultColumnResizeState = ref(null)
+
 function renderHitTextCell(className, value, style) {
   const text = String(value ?? '')
   return h('span', { class: className, style, title: text }, text)
@@ -394,37 +415,102 @@ function extractLogTime(content) {
   return { text: matched, value: Number.isFinite(value) ? value : null }
 }
 
-const resultTableColumns = [
-  {
-    key: 'file',
-    dataKey: 'file',
-    title: '文件',
-    width: 100,
-    minWidth: 100,
-    flexGrow: 1,
-    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-file', rowData.file),
-  },
-  {
-    key: 'line',
-    dataKey: 'line',
-    title: '行号',
-    width: 90,
-    align: 'center',
-    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-line', rowData.line),
-  },
-  {
-    key: 'logTime',
-    dataKey: 'logTime',
-    title: '日志时间',
-    width: 180,
-    headerCellRenderer: () =>
-      h(
+/**
+ * 获取当前结果列宽，并在缺省时回退到默认值。
+ * @param {keyof typeof RESULT_COLUMN_DEFAULT_WIDTHS} columnKey 列键
+ * @returns {number} 当前列宽
+ */
+function getResultColumnWidth(columnKey) {
+  return Number(resultColumnWidths.value[columnKey] || RESULT_COLUMN_DEFAULT_WIDTHS[columnKey] || 0)
+}
+
+/**
+ * 将列宽限制在安全范围内，避免拖拽后列完全消失。
+ * @param {keyof typeof RESULT_COLUMN_DEFAULT_WIDTHS} columnKey 列键
+ * @param {number} width 目标宽度
+ * @returns {number} 修正后的列宽
+ */
+function clampResultColumnWidth(columnKey, width) {
+  const minWidth = Number(RESULT_COLUMN_MIN_WIDTHS[columnKey] || 80)
+  return Math.max(Math.round(Number(width) || minWidth), minWidth)
+}
+
+/**
+ * 返回当前时间排序箭头，未排序时显示中性箭头。
+ * @returns {string} 排序箭头
+ */
+function getResultSortIndicator() {
+  if (resultSortOrder.value === 'asc') return '▲'
+  if (resultSortOrder.value === 'desc') return '▼'
+  return '↕'
+}
+
+/**
+ * 开始拖动结果表列宽，仅更新当前列宽状态，不改动命中数据。
+ * @param {PointerEvent} event 指针按下事件
+ * @param {keyof typeof RESULT_COLUMN_DEFAULT_WIDTHS} columnKey 列键
+ * @returns {void}
+ */
+function startResultColumnResize(event, columnKey) {
+  // Pointer Events 同时覆盖鼠标、触控板和触摸屏；只允许鼠标左键开始调整。
+  if (!columnKey || (event.pointerType === 'mouse' && event.button !== 0)) return
+  event.preventDefault()
+  event.stopPropagation()
+  resultColumnResizeState.value = {
+    columnKey,
+    startX: Number(event.clientX || 0),
+    startWidth: getResultColumnWidth(columnKey),
+  }
+
+  // 捕获指针，防止拖动过快离开手柄后丢失 move / up 事件。
+  event.currentTarget?.setPointerCapture?.(event.pointerId)
+  document.body.classList.add('log-viewer-column-resizing')
+  window.addEventListener('pointermove', handleResultColumnResize)
+  window.addEventListener('pointerup', stopResultColumnResize)
+  window.addEventListener('pointercancel', stopResultColumnResize)
+}
+
+/**
+ * 在拖拽过程中实时更新列宽；虚拟表格仅重算列配置，性能影响有限。
+ * @param {PointerEvent} event 指针移动事件
+ * @returns {void}
+ */
+function handleResultColumnResize(event) {
+  const state = resultColumnResizeState.value
+  if (!state) return
+  const deltaX = Number(event.clientX || 0) - state.startX
+  const nextWidth = clampResultColumnWidth(state.columnKey, state.startWidth + deltaX)
+  resultColumnWidths.value = {
+    ...resultColumnWidths.value,
+    [state.columnKey]: nextWidth,
+  }
+}
+
+/** 停止列宽拖拽并清理全局事件。 */
+function stopResultColumnResize() {
+  if (!resultColumnResizeState.value) return
+  resultColumnResizeState.value = null
+  document.body.classList.remove('log-viewer-column-resizing')
+  window.removeEventListener('pointermove', handleResultColumnResize)
+  window.removeEventListener('pointerup', stopResultColumnResize)
+  window.removeEventListener('pointercancel', stopResultColumnResize)
+}
+
+/**
+ * 渲染带可选排序入口和列宽拖拽手柄的表头。
+ * @param {{ title: string, columnKey: keyof typeof RESULT_COLUMN_DEFAULT_WIDTHS, sortable?: boolean }} options 表头配置
+ * @returns {import('vue').VNode} 表头节点
+ */
+function renderResultHeader(options) {
+  const { title, columnKey, sortable = false } = options
+  const titleNode = sortable
+    ? h(
         'span',
         {
           class: 'log-hit-sort-header',
           role: 'button',
           tabindex: 0,
-          title: '点击切换日志时间升序或降序',
+          title: '点击按日志时间切换升序或降序',
           'aria-label': '切换日志时间排序',
           onClick: toggleLogTimeSort,
           onKeydown: (event) => {
@@ -434,19 +520,53 @@ const resultTableColumns = [
           },
         },
         [
-          h('span', '日志时间'),
-          h('span', { class: 'log-hit-sort-indicator' }, resultSortOrder.value === 'asc' ? '▲' : '▼'),
+          h('span', title),
+          h('span', { class: 'log-hit-sort-indicator' }, getResultSortIndicator()),
         ]
-      ),
-    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell', rowData.logTime || '-'),
+      )
+    : h('span', { class: 'log-hit-header-title', title }, title)
+  const resizeHandle =
+    columnKey === 'actions'
+      ? null
+      : h('span', {
+          class: 'log-hit-resize-handle',
+          role: 'separator',
+          title: '拖动调整列宽',
+          'aria-label': '拖动调整' + title + '列宽',
+          onPointerdown: (event) => startResultColumnResize(event, columnKey),
+        })
+  return h('div', { class: 'log-hit-header-cell' }, [titleNode, resizeHandle])
+}
+
+const resultTableColumns = computed(() => [
+  {
+    key: 'file',
+    dataKey: 'file',
+    title: '文件',
+    width: getResultColumnWidth('file'),
+    minWidth: RESULT_COLUMN_MIN_WIDTHS.file,
+    headerCellRenderer: () => renderResultHeader({ title: '文件', columnKey: 'file' }),
+    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-file', rowData.file),
+  },
+  {
+    key: 'line',
+    dataKey: 'line',
+    title: '行号',
+    width: getResultColumnWidth('line'),
+    minWidth: RESULT_COLUMN_MIN_WIDTHS.line,
+    align: 'center',
+    headerCellRenderer: () => renderResultHeader({ title: '行号', columnKey: 'line' }),
+    cellRenderer: ({ rowData }) => renderHitTextCell('log-hit-cell log-hit-cell-line', rowData.line),
   },
   {
     key: 'content',
     dataKey: 'content',
-    title: '内容',
-    width: 360,
-    minWidth: 260,
-    flexGrow: 2,
+    title: '日志内容',
+    width: getResultColumnWidth('content'),
+    minWidth: RESULT_COLUMN_MIN_WIDTHS.content,
+    flexGrow: 1,
+    headerCellRenderer: () =>
+      renderResultHeader({ title: '日志内容', columnKey: 'content', sortable: true }),
     cellRenderer: ({ rowData }) =>
       renderHitTextCell(
         'log-hit-cell log-hit-cell-content',
@@ -464,9 +584,11 @@ const resultTableColumns = [
   {
     key: 'actions',
     title: '操作',
-    width: 130,
+    width: getResultColumnWidth('actions'),
+    minWidth: RESULT_COLUMN_MIN_WIDTHS.actions,
     fixed: 'right',
     align: 'center',
+    headerCellRenderer: () => renderResultHeader({ title: '操作', columnKey: 'actions' }),
     cellRenderer: ({ rowData }) =>
       h(
         'el-button',
@@ -482,8 +604,7 @@ const resultTableColumns = [
         '在此文件搜索'
       ),
   },
-]
-
+])
 const resultTableRowEventHandlers = {
   onClick: ({ rowData }) => {
     selectHit(rowData)
@@ -527,6 +648,8 @@ function resetViewerState() {
   form.value.wordRegexp = false
   contextJumpLine.value = 1
   resultSortOrder.value = ''
+  resultColumnWidths.value = { ...RESULT_COLUMN_DEFAULT_WIDTHS }
+  stopResultColumnResize()
   clearHighlight()
   resultViewMode.value = 'normal'
   contextViewMode.value = 'normal'
@@ -595,7 +718,12 @@ function handleClosed() {
 }
 
 // ── 关键字归一化 ──
-function normalizeKeywords(value) {
+/**
+ * 归一化日志搜索关键字，并将搜索关键字上限提升到 20 个。
+ * @param {unknown} value 搜索关键字输入
+ * @returns {string[]} 去重后的搜索关键字列表
+ */
+function normalizeSearchKeywords(value) {
   const rawItems = Array.isArray(value) ? value : String(value || '').split(/[\n,，;；]+/)
   const keywords = []
   rawItems.forEach((item) => {
@@ -604,9 +732,42 @@ function normalizeKeywords(value) {
       keywords.push(keyword.slice(0, 200))
     }
   })
-  return keywords.slice(0, 10)
+  return keywords.slice(0, 20)
 }
 
+/**
+ * 归一化高亮关键字，最多保留 20 个，避免一次性高亮过多关键词影响阅读与渲染。
+ * @param {unknown} value 高亮关键字输入
+ * @returns {string[]} 去重后的高亮关键字列表
+ */
+function normalizeHighlightKeywords(value) {
+  const rawItems = Array.isArray(value) ? value : String(value || '').split(/[\n,，;；]+/)
+  const keywords = []
+  rawItems.forEach((item) => {
+    const keyword = String(item || '').trim()
+    if (keyword && !keywords.includes(keyword)) {
+      keywords.push(keyword.slice(0, 200))
+    }
+  })
+  return keywords.slice(0, 20)
+}
+
+/**
+ * 归一化上下文高亮关键字，保留输入顺序但会在渲染前按长度降序匹配。
+ * @returns {{ keyword: string, keywordIndex: number }[]} 可用于高亮渲染的关键字条目
+ */
+function getHighlightKeywordEntries() {
+  return Array.from(new Set(highlightKeywords.value || []))
+    .map((item, keywordIndex) => ({
+      keyword: String(item || '').trim(),
+      keywordIndex,
+    }))
+    .filter((item) => item.keyword)
+    .sort(
+      (left, right) =>
+        right.keyword.length - left.keyword.length || left.keywordIndex - right.keywordIndex
+    )
+}
 /**
  * 归一化已选搜索文件，保留选择顺序并去除空项。
  * @param {unknown} value 文件选择值
@@ -624,7 +785,7 @@ function normalizeSelectedFiles(value) {
 
 // ── 搜索 ──
 function searchKeyword() {
-  const keywords = normalizeKeywords(form.value.keywords)
+  const keywords = normalizeSearchKeywords(form.value.keywords)
   const files = normalizeSelectedFiles(form.value.files)
   if (!keywords.length) {
     if (files.length) {
@@ -727,7 +888,7 @@ function jumpToContextLine() {
  * @returns {void}
  */
 function ensureSearchKeywordsHighlighted() {
-  const searchKeywords = normalizeKeywords(form.value.keywords)
+  const searchKeywords = normalizeSearchKeywords(form.value.keywords)
   const missingKeywords = searchKeywords.filter((keyword) => !highlightKeywords.value.includes(keyword))
   if (!missingKeywords.length) return
   syncHighlightKeywords([...highlightKeywords.value, ...missingKeywords])
@@ -785,15 +946,15 @@ function clearFileScope() {
 
 // ── 高亮 ──
 function syncHighlightKeywords(value) {
-  const keywords = normalizeKeywords(value)
+  const keywords = normalizeHighlightKeywords(value)
   highlightKeywords.value = keywords
   highlightText.value = keywords.join('\n')
 }
 
 function updateHighlightKeywords(value) {
   // 用户输入触发：只更新高亮关键词数组，不回写 highlightText
-  // 避免 normalizeKeywords 去掉尾部换行导致光标跳转，使回车换行失效
-  const keywords = normalizeKeywords(value)
+  // 避免 normalizeHighlightKeywords 去掉尾部换行导致光标跳转，使回车换行失效
+  const keywords = normalizeHighlightKeywords(value)
   const selectedKw = selectionHighlightKeyword.value
   if (selectedKw && !keywords.includes(selectedKw)) {
     keywords.push(selectedKw)
@@ -813,9 +974,9 @@ function clearHighlight() {
 function removeSelectionOwnedKeyword() {
   const selectedKw = selectionHighlightKeyword.value
   if (!selectedKw || !selectionHighlightOwned.value) {
-    return normalizeKeywords(highlightKeywords.value)
+    return normalizeHighlightKeywords(highlightKeywords.value)
   }
-  return normalizeKeywords(highlightKeywords.value).filter((kw) => kw !== selectedKw)
+  return normalizeHighlightKeywords(highlightKeywords.value).filter((kw) => kw !== selectedKw)
 }
 
 function captureHighlight(text) {
@@ -846,84 +1007,99 @@ function normalizeSelectedText(text) {
 // ── 原生 CSS Highlight API 高亮 ──
 function clearNativeHighlights() {
   if (!nativeHighlightSupported.value) return
-  window.CSS.highlights.delete(highlightName)
+  highlightNativeNames.forEach((highlightName) => {
+    window.CSS.highlights.delete(highlightName)
+  })
 }
 
-function buildHighlightRanges(textNode, keywords) {
+function buildHighlightRanges(textNode, keywordEntries, rangesByKeywordIndex) {
   const text = textNode.textContent || ''
-  const ranges = []
   let cursor = 0
+  let hasMatch = false
   while (cursor < text.length) {
     let nextMatch = null
-    keywords.forEach((keyword) => {
-      const index = text.indexOf(keyword, cursor)
+    keywordEntries.forEach((entry) => {
+      const index = text.indexOf(entry.keyword, cursor)
       if (index < 0) return
       if (
         !nextMatch ||
         index < nextMatch.index ||
-        (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
+        (index === nextMatch.index && entry.keyword.length > nextMatch.keyword.length)
       ) {
-        nextMatch = { index, keyword }
+        nextMatch = {
+          index,
+          keyword: entry.keyword,
+          keywordIndex: entry.keywordIndex,
+        }
       }
     })
     if (!nextMatch) break
     const range = new window.Range()
     range.setStart(textNode, nextMatch.index)
     range.setEnd(textNode, nextMatch.index + nextMatch.keyword.length)
-    ranges.push(range)
+    rangesByKeywordIndex[nextMatch.keywordIndex].push(range)
+    hasMatch = true
     cursor = nextMatch.index + nextMatch.keyword.length
   }
-  return ranges
+  return hasMatch
 }
 
 function refreshNativeHighlights() {
   if (!nativeHighlightSupported.value) return
   const block = contextBlockRef.value
-  const keywords = Array.from(new Set(highlightKeywords.value || []))
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length)
-  if (!block || !keywords.length || contextViewMode.value === 'minimized') {
+  const keywordEntries = getHighlightKeywordEntries()
+  if (!block || !keywordEntries.length || contextViewMode.value === 'minimized') {
     clearNativeHighlights()
     return
   }
-  const ranges = []
+  const rangesByKeywordIndex = Array.from({ length: highlightColorCount }, () => [])
+  let hasRanges = false
   block.querySelectorAll('.log-context-line-content').forEach((contentNode) => {
     const walker = document.createTreeWalker(contentNode, window.NodeFilter.SHOW_TEXT)
     let textNode = walker.nextNode()
     while (textNode) {
-      ranges.push(...buildHighlightRanges(textNode, keywords))
+      if (buildHighlightRanges(textNode, keywordEntries, rangesByKeywordIndex)) {
+        hasRanges = true
+      }
       textNode = walker.nextNode()
     }
   })
-  if (!ranges.length) {
+  if (!hasRanges) {
     clearNativeHighlights()
     return
   }
-  window.CSS.highlights.set(highlightName, new window.Highlight(...ranges))
+  clearNativeHighlights()
+  rangesByKeywordIndex.forEach((ranges, index) => {
+    if (!ranges.length) return
+    window.CSS.highlights.set(
+      highlightNativeNames[index],
+      new window.Highlight(...ranges)
+    )
+  })
 }
 
 // ── 回退 DOM mark 高亮 ──
 function splitHighlightParts(content) {
   const text = String(content || '')
-  const keywords = Array.from(new Set(highlightKeywords.value || []))
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length)
+  const keywords = getHighlightKeywordEntries()
   if (!keywords.length) return [{ text, highlight: false }]
   const parts = []
   let cursor = 0
   while (cursor < text.length) {
     let nextMatch = null
-    keywords.forEach((keyword, keywordIndex) => {
-      const index = text.indexOf(keyword, cursor)
+    keywords.forEach((entry) => {
+      const index = text.indexOf(entry.keyword, cursor)
       if (index < 0) return
       if (
         !nextMatch ||
         index < nextMatch.index ||
-        (index === nextMatch.index && keyword.length > nextMatch.keyword.length)
+        (index === nextMatch.index && entry.keyword.length > nextMatch.keyword.length)
       ) {
-        nextMatch = { index, keyword, keywordIndex }
+        nextMatch = {
+          index,
+          keyword: entry.keyword,
+          keywordIndex: entry.keywordIndex,
+        }
       }
     })
     if (!nextMatch) {
@@ -936,7 +1112,7 @@ function splitHighlightParts(content) {
     parts.push({
       text: text.slice(nextMatch.index, nextMatch.index + nextMatch.keyword.length),
       highlight: true,
-      highlightClass: `log-context-highlight-${nextMatch.keywordIndex % 6}`,
+      highlightClass: `log-context-highlight-${nextMatch.keywordIndex % highlightColorCount}`,
     })
     cursor = nextMatch.index + nextMatch.keyword.length
   }
@@ -1011,6 +1187,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', handleDocumentSelectionChange)
   document.removeEventListener('keydown', handleEscapeKey, true)
   clearNativeHighlights()
+  stopResultColumnResize()
   stopPrepareProgressPolling()
 })
 </script>
@@ -1097,55 +1274,6 @@ onBeforeUnmount(() => {
   padding: 14px;
   overflow: hidden;
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
-}
-
-.log-hit-row {
-  cursor: pointer;
-}
-
-.log-hit-cell {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.log-hit-cell-line {
-  text-align: center;
-}
-
-.log-hit-sort-header {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  height: 100%;
-  cursor: pointer;
-  user-select: none;
-}
-
-.log-hit-sort-header:focus-visible {
-  outline: 2px solid #409eff;
-  outline-offset: -2px;
-}
-
-.log-hit-sort-indicator {
-  color: #909399;
-  font-size: 11px;
-}
-
-.log-hit-action-btn {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #409eff;
-  cursor: pointer;
-  font: inherit;
-}
-
-.log-hit-action-btn:hover {
-  text-decoration: underline;
 }
 
 .log-view-panel-fullscreen .log-content-block { flex: 1; max-height: none; }
@@ -1283,12 +1411,145 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-/* 全局样式：CSS Highlight API 伪元素 */
-::highlight(ticket-log-context-highlight) {
-  color: #111827;
-  background: #fde047;
+/*
+ * el-table-v2 在 Element Plus 子组件内部调用 headerCellRenderer/cellRenderer。
+ * 这类回调生成的 VNode 不会稳定携带本组件的 scoped 标记，拖动手柄样式若写在
+ * <style scoped> 中会失效，最终表现为没有竖向分隔条、鼠标没有 col-resize 光标。
+ * 因此这里使用弹窗类名作为作用域，既确保样式能命中动态单元格，也不影响其他表格。
+ */
+.ticket-log-viewer-dialog .log-hit-row {
+  cursor: pointer;
 }
 
+.ticket-log-viewer-dialog .log-hit-cell {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ticket-log-viewer-dialog .log-hit-cell-line {
+  text-align: center;
+}
+
+.ticket-log-viewer-dialog .log-hit-header-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding-right: 10px;
+  gap: 4px;
+}
+
+.ticket-log-viewer-dialog .log-hit-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ticket-log-viewer-dialog .log-hit-sort-header {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ticket-log-viewer-dialog .log-hit-sort-header:focus-visible {
+  outline: 2px solid #409eff;
+  outline-offset: -2px;
+}
+
+.ticket-log-viewer-dialog .log-hit-sort-indicator {
+  color: #909399;
+  font-size: 11px;
+}
+
+/* 手柄脱离表头 Flex 布局，避免最小高度把虚拟表格表头撑高。 */
+.ticket-log-viewer-dialog .log-hit-resize-handle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 12px;
+  height: 22px;
+  min-height: 0;
+  cursor: col-resize !important;
+  touch-action: none;
+  user-select: none;
+  transform: translateY(-50%);
+}
+
+/* 仅保留紧凑的 1px、16px 高分隔线；12px 宽的透明区域仍可稳定拖动。 */
+.ticket-log-viewer-dialog .log-hit-resize-handle::before {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 50%;
+  width: 1px;
+  content: '';
+  pointer-events: none;
+  background: #d0d5dd;
+  border-radius: 1px;
+  transform: translateX(-50%);
+  transition: background-color 0.16s ease, width 0.16s ease;
+}
+
+.ticket-log-viewer-dialog .log-hit-resize-handle:hover::before,
+.ticket-log-viewer-dialog .log-hit-resize-handle:focus-visible::before {
+  width: 2px;
+  background: #409eff;
+}
+
+body.log-viewer-column-resizing,
+body.log-viewer-column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.ticket-log-viewer-dialog .log-hit-action-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #409eff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ticket-log-viewer-dialog .log-hit-action-btn:hover {
+  text-decoration: underline;
+}
+
+/* 全局样式：CSS Highlight API 伪元素 */
+::highlight(ticket-log-context-highlight-0) { color: #111827; background: #fde68a; }
+::highlight(ticket-log-context-highlight-1) { color: #111827; background: #bfdbfe; }
+::highlight(ticket-log-context-highlight-2) { color: #111827; background: #bbf7d0; }
+::highlight(ticket-log-context-highlight-3) { color: #111827; background: #fecaca; }
+::highlight(ticket-log-context-highlight-4) { color: #111827; background: #ddd6fe; }
+::highlight(ticket-log-context-highlight-5) { color: #111827; background: #fed7aa; }
+::highlight(ticket-log-context-highlight-6) { color: #111827; background: #a7f3d0; }
+::highlight(ticket-log-context-highlight-7) { color: #111827; background: #bae6fd; }
+::highlight(ticket-log-context-highlight-8) { color: #111827; background: #fbcfe8; }
+::highlight(ticket-log-context-highlight-9) { color: #111827; background: #c7d2fe; }
+::highlight(ticket-log-context-highlight-10) { color: #111827; background: #fcd34d; }
+::highlight(ticket-log-context-highlight-11) { color: #111827; background: #93c5fd; }
+::highlight(ticket-log-context-highlight-12) { color: #111827; background: #86efac; }
+::highlight(ticket-log-context-highlight-13) { color: #111827; background: #fda4af; }
+::highlight(ticket-log-context-highlight-14) { color: #111827; background: #d8b4fe; }
+::highlight(ticket-log-context-highlight-15) { color: #111827; background: #fdba74; }
+::highlight(ticket-log-context-highlight-16) { color: #111827; background: #6ee7b7; }
+::highlight(ticket-log-context-highlight-17) { color: #111827; background: #7dd3fc; }
+::highlight(ticket-log-context-highlight-18) { color: #111827; background: #f9a8d4; }
+::highlight(ticket-log-context-highlight-19) { color: #111827; background: #ecfccb; }
 /* LogViewerDialog 弹窗全屏高度适配 */
 .ticket-log-viewer-dialog .el-dialog__body {
   position: relative;

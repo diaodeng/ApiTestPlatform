@@ -525,7 +525,7 @@ class TicketLogSearchRequestModel(TicketLogPullBaseModel):
             keyword = str(item or "").strip()
             if keyword and keyword not in normalized_keywords:
                 normalized_keywords.append(keyword[:200])
-        self.keywords = normalized_keywords[:10]
+        self.keywords = normalized_keywords[:20]
         self.keyword = self.keywords[0] if self.keywords else None
         raw_files: list[str] = []
         if self.file:

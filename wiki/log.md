@@ -3,10 +3,26 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-03
+updated: 2026-08-08
 ---
 
 # 操作日志
+
+## [2026-08-08] INGEST-CODE | 工单日志查看器列宽拖拽手柄修复
+
+- 触发：用户反馈日志查看弹窗搜索结果列表没有列宽分隔线，鼠标也不会显示左右拖动状态，导致列宽拖拽无法使用。
+- 架构层：Web 前端 / 工单日志查看器 / Element Plus 虚拟表格。
+- 更新的页面：`web/src/components/ticket/LogViewerDialog.vue`、`web/public/docs/updates/2026-08-08-ticket-log-viewer-column-resize-handle-fix.md`、`web/public/docs/updates/history.md`、`wiki/flows/ticket-log-record-isolated-view.md`。
+- 变更传播链：`el-table-v2.headerCellRenderer` 回调 VNode -> 全局且受 `.ticket-log-viewer-dialog` 限定的手柄样式 -> 16px 可命中分隔线 -> `pointerdown/pointermove/pointerup` 更新列宽状态 -> 虚拟表格列配置重新计算。
+- 关键结论：表格回调生成的 VNode 不能稳定匹配组件 `scoped` 样式；拖拽手柄样式改为弹窗范围内的全局样式，并使用 Pointer Events 和指针捕获避免快速拖动时丢失事件。
+- 视觉调整：初版 16px 宽、32px 最小高度的手柄虽然恢复可用性，但会显得过大并可能撑高表头；现改为绝对定位的 12px 热区和 1px/16px 细分隔线，不参与 Flex 布局，保持表头默认 44px 高度。
+
+## [2026-08-07] INGEST-CODE | 工单日志搜索结果列宽拖拽与关键字上限调整
+
+- 触发：用户要求日志搜索结果去掉独立时间列，在日志内容列表头保留时间排序箭头，并评估后直接实现结果列宽拖拽；同时把搜索关键字上限从 10 提升到 20，其他限制保持不变。
+- 关键结论：`LogViewerDialog.vue` 继续使用 `el-table-v2` 虚拟表格，但时间排序入口已移动到“日志内容”表头；独立时间列已移除，结果表新增轻量自定义列宽拖拽，拖拽期间只更新列配置，对当前结果量级性能影响可控。
+- 变更传播链：`LogViewerDialog.vue` 搜索关键字归一化 -> 后端 `TicketLogSearchRequestModel` 请求校验 -> 旧版 `useLogViewer.js` 兼容 Hook -> 更新记录与知识库说明。
+- 限制结论：搜索关键字上限已改为最多 20 个、每个最多 200 字符；高亮关键字也同步改为最多 20 个，并按关键字轮换不同颜色，性能影响仍可接受。
 
 ## [2026-08-03] INGEST-CODE | 工单日志查看器搜索结果内容列不换行
 
@@ -1763,4 +1779,3 @@ updated: 2026-08-03
 - 现象：凭证新增、更新、删除接口返回 500，日志装饰器在鉴权查询时收到 `query_db=None`。
 - 根因：凭证控制器使用 `db` 参数名，而系统日志装饰器按约定读取 `query_db`。
 - 修复：统一凭证控制器各接口数据库依赖参数为 `query_db`，保证鉴权和操作日志写入使用同一会话。
-

@@ -8,7 +8,7 @@ entry_points:
     path: /ticket/logs/prepare
     trigger: 用户从工单详情或日志拉取记录列表打开指定日志记录
 created: 2026-06-23
-updated: 2026-08-05
+updated: 2026-08-08
 related_files:
   - server/modules/ticket/service/log_pull/ticket_log_service.py
   - server/modules/ticket/service/log_pull/ticket_log_prepare_progress_service.py
@@ -41,6 +41,7 @@ related_files:
 - 前端从某条日志拉取记录打开查看器后发起 AI 分析，会默认把该记录 ID 写入 `logPullRecordId`。
 - 日志搜索结果区或日志详情区全屏时，`Esc` 仅还原全屏区域；只有两个区域均未全屏时，`Esc` 才关闭日志查看弹窗。
 - 搜索结果的“日志时间”表头由前端组件直接维护排序状态，点击可在升序和降序间切换；排序仅处理已加载的命中结果，不会重新请求后端。
+- 搜索结果虚拟表格的表头和单元格由 Element Plus 在子组件内回调渲染；列宽拖拽相关的动态节点样式必须使用弹窗类名限定的全局样式，不能仅依赖组件 scoped 样式，否则手柄分隔线和拖动光标不会命中。
 
 ## 下载进度链路
 
