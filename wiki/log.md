@@ -8,6 +8,24 @@ updated: 2026-08-09
 
 # 操作日志
 
+## [2026-08-09] INGEST-CODE | 统一凭证 HTTP 刷新失败自动登录兜底（补充前端配置入口）
+
+- 触发：统一凭证的 `http_refresh` 场景在刷新失败后，需要自动切换到登录接口重新获取凭证，再用登录得到的新凭证继续刷新。
+- 架构层：统一凭证 / HTTP 刷新服务 / 刷新流程文档 / 用户说明文档 / 凭证编辑表单。
+- 更新的页面：`server/modules/credential/service/credential_refresh_service.py`、`server/tests/test_credential_refresh_service.py`、`web/src/views/system/credential/components/CredentialDialog.vue`、`wiki/flows/credential-refresh.md`、`web/public/docs/credential_management.md`、`web/public/docs/updates/2026-08-09-credential-refresh-login-fallback.md`、`web/public/docs/updates/history.md`。
+- 变更传播链：`http_refresh` 请求失败 -> 读取同配置的 `login_url` -> 执行登录请求并提取新密文 -> 用登录后的新凭证重试刷新 -> 乐观锁写回。
+- 关键规则：只影响 `http_refresh` 且已配置登录地址的场景；`http_login` 仍保持单次登录语义不变；登录、刷新和重试请求都继续携带当前凭证中的附加 Header、附加 Cookie 和模板变量；前端在 `http_refresh` 模式下同时提供刷新接口和兜底登录接口配置入口。
+- 验证：补充了刷新失败后登录兜底和 `refresh_credential()` 分支调用的定向测试，确保最终写回成功。
+
+## [2026-08-09] INGEST-CODE | 统一凭证 HTTP 刷新失败自动登录兜底
+
+- 触发：统一凭证的 `http_refresh` 场景在刷新失败后，需要自动切换到登录接口重新获取凭证，再用登录得到的新凭证继续刷新。
+- 架构层：统一凭证 / HTTP 刷新服务 / 刷新流程文档 / 用户说明文档。
+- 更新的页面：`server/modules/credential/service/credential_refresh_service.py`、`server/tests/test_credential_refresh_service.py`、`wiki/flows/credential-refresh.md`、`web/public/docs/credential_management.md`、`web/public/docs/updates/2026-08-09-credential-refresh-login-fallback.md`、`web/public/docs/updates/history.md`。
+- 变更传播链：`http_refresh` 请求失败 -> 读取同配置的 `login_url` -> 执行登录请求并提取新密文 -> 用登录后的新凭证重试刷新 -> 乐观锁写回。
+- 关键规则：只影响 `http_refresh` 且已配置登录地址的场景；`http_login` 仍保持单次登录语义不变；登录、刷新和重试请求都继续携带当前凭证中的附加 Header、附加 Cookie 和模板变量。
+- 验证：补充了刷新失败后登录兜底和 `refresh_credential()` 分支调用的定向测试，确保最终写回成功。
+
 ## [2026-08-09] INGEST-CODE | 凭证模板变量校验与 Cookie 写回边界
 
 - 触发：主 Header 为 `Cookie` 的凭证在刷新后被响应映射写入结构化 `cookies`，页面因 Cookie Header 与结构化 Cookie 冲突而无法保存；同时请求模板缺少可发现的变量插入和保存前校验。

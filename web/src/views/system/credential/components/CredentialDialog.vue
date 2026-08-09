@@ -12,7 +12,7 @@
         </el-col>
         <el-col :span="12">
           <el-form-item>
-            <template #label>更新方式<PromptButton width="560"><div class="credential-help"><div class="credential-help-title">更新方式说明</div><table class="credential-help-table"><thead><tr><th>方式</th><th>适用场景</th><th>自动刷新</th></tr></thead><tbody><tr><td>手工录入</td><td>长期有效的 API Key / 静态 Token</td><td>不支持</td></tr><tr><td>HTTP 登录</td><td>需要账号密码登录获取凭证</td><td>支持（TOTP 可自动）</td></tr><tr><td>HTTP 刷新</td><td>用现有 Cookie/Header 调刷新接口续期</td><td>支持</td></tr><tr><td>浏览器人工登录</td><td>人工在浏览器中登录</td><td>不支持</td></tr><tr><td>浏览器刷新</td><td>浏览器自动刷新状态</td><td>视实现而定</td></tr></tbody></table><div class="credential-help-note">手工录入初始值后想自动续期，请选择"HTTP 刷新"并配置刷新接口。</div></div></PromptButton></template>
+            <template #label>更新方式<PromptButton width="560"><div class="credential-help"><div class="credential-help-title">更新方式说明</div><table class="credential-help-table"><thead><tr><th>方式</th><th>适用场景</th><th>自动刷新</th></tr></thead><tbody><tr><td>手工录入</td><td>长期有效的 API Key / 静态 Token</td><td>不支持</td></tr><tr><td>HTTP 登录</td><td>需要账号密码登录获取凭证</td><td>支持（TOTP 可自动）</td></tr><tr><td>HTTP 刷新</td><td>用现有 Cookie/Header 调刷新接口续期；可配置兜底登录接口，刷新失败后自动登录并重试</td><td>支持</td></tr><tr><td>浏览器人工登录</td><td>人工在浏览器中登录</td><td>不支持</td></tr><tr><td>浏览器刷新</td><td>浏览器自动刷新状态</td><td>视实现而定</td></tr></tbody></table><div class="credential-help-note">手工录入初始值后想自动续期，请选择"HTTP 刷新"并按需配置刷新接口和兜底登录接口。</div></div></PromptButton></template>
             <el-select v-model="form.authMode" style="width:100%"><el-option v-for="item in authModes" :key="item.value" :label="item.label" :value="item.value" /></el-select>
           </el-form-item>
         </el-col>
@@ -98,7 +98,7 @@
         </el-collapse-item>
       </el-collapse>
 
-      <template v-if="form.authMode === 'http_login'">
+      <template v-if="showLoginConfig">
         <el-divider content-position="left">登录账号</el-divider>
         <el-row :gutter="16">
           <el-col :span="12">
@@ -130,21 +130,56 @@
         </el-row>
       </template>
 
-      <template v-if="isHttpMode">
-        <el-divider content-position="left">{{ form.authMode === 'http_login' ? '登录接口' : '刷新接口' }}</el-divider>
-        <el-alert v-if="form.authMode === 'http_refresh'" type="success" :closable="false" show-icon class="section-alert" title="刷新请求会自动携带当前 Cookie/Header；响应值仅按下方已配置的提取规则写回，不会自动合并 Set-Cookie。" />
+      <template v-if="requestEditors.length">
+
+        <el-alert v-if="form.authMode === 'http_refresh'" type="success" :closable="false" show-icon class="section-alert" title="HTTP 刷新模式下会同时配置两段请求：刷新接口和兜底登录接口。刷新失败后会先执行登录，再用登录后的新凭证重试刷新。" />
+        <el-collapse class="credential-collapse">
+            <el-collapse-item v-for="editor in requestEditors" :key="editor.kind" :title="editor.label">
+            <template v-if="editor.label==='兜底登录接口'">
+            <el-divider content-position="left">登录账号</el-divider>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item>
+                  <template #label>用户名<PromptButton placement="top" width="440"><div class="credential-help"><div class="credential-help-title">登录用户名说明</div><p>目标系统的登录账号，会被加密保存。</p><p>在请求模板中通过 <b>${secret.username}</b> 引用。</p><p>来源：由用户自行填写目标系统的登录账号。</p></div></PromptButton></template>
+                  <el-input v-model="sensitive.username" autocomplete="off" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item>
+                  <template #label>密码<PromptButton placement="top" width="440"><div class="credential-help"><div class="credential-help-title">登录密码说明</div><p>目标系统的登录密码，会被加密保存。</p><p>在请求模板中通过 <b>${secret.password}</b> 引用。</p><p>来源：由用户自行填写目标系统的登录密码。</p></div></PromptButton></template>
+                  <el-input v-model="sensitive.password" type="password" show-password autocomplete="new-password" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <el-form-item>
+                  <template #label>OTP 类型<PromptButton placement="top" width="460"><div class="credential-help"><div class="credential-help-title">OTP（一次性密码）类型说明</div><table class="credential-help-table"><thead><tr><th>类型</th><th>说明</th><th>自动刷新可用</th></tr></thead><tbody><tr><td>不需要</td><td>登录不要求二次验证</td><td>是</td></tr><tr><td>TOTP 自动生成</td><td>基于时间的一次性密码，需填写 TOTP 密钥</td><td>是</td></tr><tr><td>短信验证码</td><td>需人工接收短信</td><td>否</td></tr><tr><td>邮箱验证码</td><td>需人工查收邮件</td><td>否</td></tr><tr><td>人工确认</td><td>需人工手动确认</td><td>否</td></tr></tbody></table><p>验证码通过 <b>${secret.otp}</b> 注入请求体。</p></div></PromptButton></template>
+                  <el-select v-model="form.authConfig.otpType" style="width:100%"><el-option v-for="item in otpTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select>
+                </el-form-item>
+              </el-col>
+              <el-col v-if="form.authConfig.otpType === 'totp'" :span="12">
+                <el-form-item>
+                  <template #label>TOTP 密钥<PromptButton placement="top" width="440"><div class="credential-help"><div class="credential-help-title">TOTP 密钥说明</div><p>目标系统提供的 TOTP 共享密钥（通常是一串 Base32 编码的字符串）。系统会基于此密钥按标准 RFC 6238 算法自动生成 6 位验证码。</p><div class="credential-help-code">JBSWY3DPEHPK3PXP</div></div></PromptButton></template>
+                  <el-input v-model="sensitive.otpSecret" type="password" show-password autocomplete="new-password" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            </template>
+        <el-collapse class="credential-collapse">
+            <el-collapse-item title="请求信息">
         <el-alert type="info" :closable="false" show-icon class="section-alert">
           <template #title>请求模板可引用已加密保存的 <code>${secret.变量名}</code>。使用各输入框右侧的“插入变量”时，光标在 JSON 字符串外会自动补全双引号；保存前会校验变量格式和可用性。<code>${secret.headerValue}</code> 为高级用法，直接读取 HTTP Header / API Key 的主 Header 值；通常请优先使用 <code>${secret.cookie}</code>、<code>${secret.token}</code> 等语义变量。</template>
         </el-alert>
         <el-row :gutter="16">
-          <el-col :span="7"><el-form-item label="请求方法"><el-select v-model="activeRequest.method" style="width:100%"><el-option v-for="method in requestMethods" :key="method" :value="method" /></el-select></el-form-item></el-col>
-          <el-col :span="17"><el-form-item label="接口地址" required><el-input v-model="activeRequest.url" placeholder="https://example.com/api/login" /></el-form-item></el-col>
+          <el-col :span="7"><el-form-item label="请求方法"><el-select v-model="editor.request.method" style="width:100%"><el-option v-for="method in requestMethods" :key="method" :value="method" /></el-select></el-form-item></el-col>
+          <el-col :span="17"><el-form-item label="接口地址" required><el-input v-model="editor.request.url" :placeholder="editor.kind === 'login' ? 'https://example.com/api/login' : 'https://example.com/api/refresh'" /></el-form-item></el-col>
         </el-row>
         <el-form-item>
           <template #label>请求 Header<PromptButton placement="top" width="440"><div class="credential-help"><div class="credential-help-title">请求 Header 说明</div><p>JSON 对象格式，额外的 HTTP 请求头。系统会自动携带当前凭证的 Cookie/Header，无需在此重复填写。</p><div class="credential-help-code">{"Content-Type":"application/json"}</div></div></PromptButton></template>
           <div class="template-editor">
-            <el-input :ref="element => setTemplateInputRef('headersText', element)" v-model="activeRequest.headersText" type="textarea" :rows="2" placeholder='JSON，例如 {"Content-Type":"application/json"}' />
-            <el-dropdown trigger="click" @command="variable => insertTemplateVariable('headersText', variable)">
+            <el-input :ref="element => setTemplateInputRef(`${editor.kind}:headersText`, element)" v-model="editor.request.headersText" type="textarea" :rows="2" placeholder='JSON，例如 {"Content-Type":"application/json"}' />
+            <el-dropdown trigger="click" @command="variable => insertTemplateVariable(`${editor.kind}:headersText`, variable)">
               <el-button plain>插入变量</el-button>
               <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="variable in templateVariables" :key="variable.value" :command="variable.value" :divided="variable.advanced"><code>{{ variable.value }}</code>（{{ variable.label }}<template v-if="variable.advanced">，高级用法</template>）</el-dropdown-item></el-dropdown-menu></template>
             </el-dropdown>
@@ -153,8 +188,8 @@
         <el-form-item>
           <template #label>查询参数<PromptButton placement="top" width="400"><div class="credential-help"><div class="credential-help-title">查询参数说明</div><p>JSON 对象格式，URL 查询字符串参数。</p><div class="credential-help-code">{"tenant":"prod", "source":"api"}</div></div></PromptButton></template>
           <div class="template-editor">
-            <el-input :ref="element => setTemplateInputRef('queryText', element)" v-model="activeRequest.queryText" type="textarea" :rows="2" placeholder='JSON，例如 {"tenant":"prod"}' />
-            <el-dropdown trigger="click" @command="variable => insertTemplateVariable('queryText', variable)">
+            <el-input :ref="element => setTemplateInputRef(`${editor.kind}:queryText`, element)" v-model="editor.request.queryText" type="textarea" :rows="2" placeholder='JSON，例如 {"tenant":"prod"}' />
+            <el-dropdown trigger="click" @command="variable => insertTemplateVariable(`${editor.kind}:queryText`, variable)">
               <el-button plain>插入变量</el-button>
               <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="variable in templateVariables" :key="variable.value" :command="variable.value" :divided="variable.advanced"><code>{{ variable.value }}</code>（{{ variable.label }}<template v-if="variable.advanced">，高级用法</template>）</el-dropdown-item></el-dropdown-menu></template>
             </el-dropdown>
@@ -163,8 +198,8 @@
         <el-form-item>
           <template #label>JSON 请求体<PromptButton placement="top" width="520"><div class="credential-help"><div class="credential-help-title">JSON 请求体说明</div><p>JSON 对象格式，用于 <b>application/json</b> 类型的请求。可使用占位符引用加密字段：</p><table class="credential-help-table"><thead><tr><th>占位符</th><th>说明</th></tr></thead><tbody><tr><td><code>${secret.username}</code></td><td>登录用户名</td></tr><tr><td><code>${secret.password}</code></td><td>登录密码</td></tr><tr><td><code>${secret.otp}</code></td><td>OTP 验证码（自动生成或手工输入）</td></tr><tr><td><code>${secret.token}</code></td><td>当前存储的 Token 值</td></tr><tr><td><code>${secret.cookie}</code></td><td>当前完整 Cookie；主 Header 名称为 Cookie 时自动读取其 Header 值</td></tr><tr><td><code>${secret.headerValue}</code></td><td><b>高级用法</b>：直接读取 HTTP Header / API Key 的主 Header 值</td></tr></tbody></table><p>占位符变量来自凭证 secret 中的字段名，系统发送请求前会自动替换。</p></div></PromptButton></template>
           <div class="template-editor">
-            <el-input :ref="element => setTemplateInputRef('bodyText', element)" v-model="activeRequest.bodyText" type="textarea" :rows="4" :placeholder="requestBodyPlaceholder" />
-            <el-dropdown trigger="click" @command="variable => insertTemplateVariable('bodyText', variable)">
+            <el-input :ref="element => setTemplateInputRef(`${editor.kind}:bodyText`, element)" v-model="editor.request.bodyText" type="textarea" :rows="4" :placeholder="editor.bodyPlaceholder" />
+            <el-dropdown trigger="click" @command="variable => insertTemplateVariable(`${editor.kind}:bodyText`, variable)">
               <el-button plain>插入变量</el-button>
               <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="variable in templateVariables" :key="variable.value" :command="variable.value" :divided="variable.advanced"><code>{{ variable.value }}</code>（{{ variable.label }}<template v-if="variable.advanced">，高级用法</template>）</el-dropdown-item></el-dropdown-menu></template>
             </el-dropdown>
@@ -173,93 +208,106 @@
         <el-form-item>
           <template #label>表单请求体<PromptButton placement="top" width="460"><div class="credential-help"><div class="credential-help-title">表单请求体说明</div><p>JSON 对象格式，用于 <b>application/x-www-form-urlencoded</b> 请求。支持与 JSON 请求体相同的占位符引用。</p><div class="credential-help-code">{"username":"${secret.username}","password":"${secret.password}"}</div></div></PromptButton></template>
           <div class="template-editor">
-            <el-input :ref="element => setTemplateInputRef('dataText', element)" v-model="activeRequest.dataText" type="textarea" :rows="3" placeholder='仅 application/x-www-form-urlencoded 使用，例如 {"username":"${secret.username}"}' />
-            <el-dropdown trigger="click" @command="variable => insertTemplateVariable('dataText', variable)">
+            <el-input :ref="element => setTemplateInputRef(`${editor.kind}:dataText`, element)" v-model="editor.request.dataText" type="textarea" :rows="3" placeholder='仅 application/x-www-form-urlencoded 使用，例如 {"username":"${secret.username}"}' />
+            <el-dropdown trigger="click" @command="variable => insertTemplateVariable(`${editor.kind}:dataText`, variable)">
               <el-button plain>插入变量</el-button>
               <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="variable in templateVariables" :key="variable.value" :command="variable.value" :divided="variable.advanced"><code>{{ variable.value }}</code>（{{ variable.label }}<template v-if="variable.advanced">，高级用法</template>）</el-dropdown-item></el-dropdown-menu></template>
             </el-dropdown>
           </div>
         </el-form-item>
+        </el-collapse-item>
+        </el-collapse>
 
-        <el-divider content-position="left">成功断言</el-divider>
-        <el-alert type="info" :closable="false" show-icon class="section-alert">
-          <template #title>
-            HTTP 状态码为 2xx 后，所有已配置断言都必须通过，才会提取并写回凭证。未配置时仅按 HTTP 状态码和响应提取结果判断。
-            <PromptButton placement="top" width="560" :teleported="true"><div class="credential-help"><div class="credential-help-title">成功断言说明</div><p>断言用于判断接口业务是否真正成功，和响应提取规则分开配置。</p><table class="credential-help-table"><thead><tr><th>来源</th><th>示例</th></tr></thead><tbody><tr><td>HTTP 状态码</td><td><code>status</code></td></tr><tr><td>JSON 字段</td><td><code>json:code</code>、<code>json:data.success</code></td></tr><tr><td>响应头</td><td><code>header:X-Result</code></td></tr><tr><td>标准响应 Cookie</td><td><code>cookie:SESSION</code></td></tr></tbody></table><p>期望值必须是合法 JSON：字符串填写 <code>"0000"</code>，数字填写 <code>0</code>，布尔值填写 <code>true</code>，集合填写 <code>[200,201]</code>。</p><div class="credential-help-note">例如：来源 <code>json:code</code>、操作符 <code>等于</code>、期望值 <code>"0000"</code>。任一断言失败都会保留旧凭证。</div></div></PromptButton>
-          </template>
-        </el-alert>
-        <div v-for="(item, index) in activeRequest.assertions" :key="`assertion-${index}`" class="assertion-row">
-          <el-input v-model="item.source" placeholder="来源，例如 json:code、status" />
-          <el-select v-model="item.operator" placeholder="操作符"><el-option v-for="operator in assertionOperators" :key="operator.value" :label="operator.label" :value="operator.value" /></el-select>
-          <el-input v-model="item.expectedText" :disabled="['exists', 'not_empty'].includes(item.operator)" placeholder='期望值，例如 "0000"、true、[200,201]' />
-          <el-input v-model="item.message" placeholder="失败提示（可选）" />
-          <el-button :icon="Delete" circle plain type="danger" title="删除成功断言" @click="activeRequest.assertions.splice(index, 1)" />
-        </div>
-        <el-button :icon="Plus" plain @click="activeRequest.assertions.push(emptyAssertion())">添加成功断言</el-button>
-
-        <el-divider content-position="left">响应提取</el-divider>
-        <el-alert type="info" :closable="false" show-icon class="section-alert">
-          <template #title>
-            把响应中的新值写回凭证字段。
-            <PromptButton placement="top" width="580" :teleported="true">
-              <div class="credential-help">
-                <div class="credential-help-title">响应提取规则详细说明</div>
-               <p><b>凭证字段</b>（左）：要写入的凭证位置。只有配置了规则的目标才会更新；可以配置多条规则，分别更新 Header、Token 和结构化 Cookie。</p>
-                <table class="credential-help-table">
-                  <thead><tr><th>凭证字段</th><th>对应凭证类型</th><th>写入方式</th></tr></thead>
-                  <tbody><tr><td>token</td><td>HTTP Token</td><td>直接替换 Token 值</td></tr><tr><td>header.cookie</td><td>HTTP Header（Header 名为 Cookie）</td><td>覆盖整个 Cookie Header，未包含的 Cookie 会丢失</td></tr><tr><td>header.cookie.UYBFEWAEE</td><td>HTTP Header（Header 名为 Cookie）</td><td>只替换该 Cookie；原 Header 没有该项时追加</td></tr><tr><td>cookies</td><td>HTTP Cookie / 其他敏感字段</td><td>覆盖整个结构化 Cookie 对象</td></tr><tr><td>cookies.SESSION</td><td>HTTP Cookie / 其他敏感字段</td><td>只更新结构化 Cookie 中的 SESSION，其他项保留</td></tr><tr><td>headerValue / headerName</td><td>API Key / HTTP Header</td><td>直接替换整个字段</td></tr></tbody>
-                </table>
-                <p style="margin-top:10px"><b>来源</b>（右）：从响应中提取值的路径，格式为 <b>类型:路径</b>：</p>
-                <table class="credential-help-table">
-                  <thead><tr><th>格式</th><th>含义</th><th>示例</th></tr></thead>
-                  <tbody><tr><td>json:路径</td><td>从 JSON 响应体提取</td><td>json:data.accessToken</td></tr><tr><td>header:名称</td><td>从单个响应头提取；header:set-cookie 读取唯一原始 Set-Cookie 值</td><td>header:X-Auth-Token</td></tr><tr><td>header:set-cookie[n]</td><td>从多条原始 Set-Cookie 中按序号选择一条，序号从 1 开始</td><td>header:set-cookie[1]</td></tr><tr><td>cookie:名称</td><td>从标准 Set-Cookie 中提取单个 Cookie 值</td><td>cookie:SESSION</td></tr><tr><td>cookies</td><td>提取全部标准 Set-Cookie 为对象</td><td>cookies</td></tr></tbody>
-                </table>
-                <p style="margin-top:10px"><b>Cookie 更新示例：</b></p>
-                <table class="credential-help-table">
-                  <thead><tr><th>凭证字段</th><th>来源</th><th>行为</th></tr></thead>
-                  <tbody><tr><td>header.cookie.UYBFEWAEE</td><td>header:set-cookie</td><td>适用于响应 <code>Set-Cookie: new_value</code>，将 new_value 写入 Cookie 内 UYBFEWAEE 项</td></tr><tr><td>header.cookie.SESSION</td><td>cookie:SESSION</td><td>适用于标准响应 <code>Set-Cookie: SESSION=new_value; Path=/</code></td></tr><tr><td>cookies</td><td>cookies</td><td>以响应中全部标准 Set-Cookie 覆盖现有结构化 Cookie 对象</td></tr><tr><td>cookies.SESSION</td><td>cookie:SESSION</td><td>仅更新结构化 Cookie 中的 SESSION</td></tr></tbody>
-                </table>
-                <div class="credential-help-note">
-                  <p><b>关键约束：</b></p>
-                  <ul>
-                    <li><b>header.cookie</b> 和 <b>header.cookie.名称</b> 仅在 Header 名称为 Cookie 时有效，大小写不敏感</li>
-                    <li><b>header.cookie</b> 会覆盖整串 Cookie Header，属于高风险操作；优先使用 <b>header.cookie.名称</b> 更新单项</li>
-                    <li>响应含多条 Set-Cookie 时不能直接用 <b>header:set-cookie</b> 写入单个值；请使用 <b>header:set-cookie[1]</b> 这类序号规则明确选择一条，或用 <b>cookie:名称</b> 读取标准 Cookie</li>
-                    <li><b>cookies ← cookies</b> 会覆盖整组结构化 Cookie；响应没有标准 Set-Cookie 时不会以空对象覆盖旧值</li>
-                    <li>未配置规则的字段不会自动更新，包括响应中的 Set-Cookie</li>
-                    <li>提取结果会与旧凭证合并，未提取的字段保留原值</li>
-                  </ul>
+        <el-collapse class="credential-collapse">
+            <el-collapse-item name="assert" title="成功断言">
+                <el-alert type="info" :closable="false" show-icon class="section-alert">
+                <template #title>
+                    HTTP 状态码为 2xx 后，所有已配置断言都必须通过，才会提取并写回凭证。未配置时仅按 HTTP 状态码和响应提取结果判断。
+                    <PromptButton placement="top" width="560" :teleported="true"><div class="credential-help"><div class="credential-help-title">成功断言说明</div><p>断言用于判断接口业务是否真正成功，和响应提取规则分开配置。</p><table class="credential-help-table"><thead><tr><th>来源</th><th>示例</th></tr></thead><tbody><tr><td>HTTP 状态码</td><td><code>status</code></td></tr><tr><td>JSON 字段</td><td><code>json:code</code>、<code>json:data.success</code></td></tr><tr><td>响应头</td><td><code>header:X-Result</code></td></tr><tr><td>标准响应 Cookie</td><td><code>cookie:SESSION</code></td></tr></tbody></table><p>期望值必须是合法 JSON：字符串填写 <code>"0000"</code>，数字填写 <code>0</code>，布尔值填写 <code>true</code>，集合填写 <code>[200,201]</code>。</p><div class="credential-help-note">例如：来源 <code>json:code</code>、操作符 <code>等于</code>、期望值 <code>"0000"</code>。任一断言失败都会保留旧凭证。</div></div></PromptButton>
+                </template>
+                </el-alert>
+                <div v-for="(item, index) in editor.request.assertions" :key="`assertion-${index}`" class="assertion-row">
+                <el-input v-model="item.source" placeholder="来源，例如 json:code、status" />
+                <el-select v-model="item.operator" placeholder="操作符"><el-option v-for="operator in assertionOperators" :key="operator.value" :label="operator.label" :value="operator.value" /></el-select>
+                <el-input v-model="item.expectedText" :disabled="['exists', 'not_empty'].includes(item.operator)" placeholder='期望值，例如 "0000"、true、[200,201]' />
+                <el-input v-model="item.message" placeholder="失败提示（可选）" />
+                <el-button :icon="Delete" circle plain type="danger" title="删除成功断言" @click="editor.request.assertions.splice(index, 1)" />
                 </div>
-              </div>
-            </PromptButton>
-          </template>
-        </el-alert>
-        <div v-for="(item, index) in activeRequest.mappings" :key="index" class="mapping-row">
-          <div class="mapping-target">
-            <el-input v-model="item.target" placeholder="凭证字段，例如 token、header.cookie.SESSION、cookies.SESSION" />
-            <el-tag v-if="item.target.trim() === 'header.cookie'" type="danger" size="small">高风险：覆盖整个 Cookie Header</el-tag>
-          </div>
-          <el-input v-model="item.source" placeholder="来源，例如 json:data.accessToken、header:X-Auth-Token、cookie:SESSION" />
-          <el-button :icon="Delete" circle plain type="danger" title="删除映射" @click="activeRequest.mappings.splice(index, 1)" />
-        </div>
-        <el-button :icon="Plus" plain @click="activeRequest.mappings.push({ target: '', source: '' })">添加提取规则</el-button>
+                <el-button :icon="Plus" plain @click="editor.request.assertions.push(emptyAssertion())">添加成功断言</el-button>
+            </el-collapse-item>
+        </el-collapse>
+
+        <el-collapse class="credential-collapse">
+            <el-collapse-item name="get_response" title="响应提取">
+                <el-alert type="info" :closable="false" show-icon class="section-alert">
+                <template #title>
+                    把响应中的新值写回凭证字段。
+                    <PromptButton placement="top" width="580" :teleported="true">
+                    <div class="credential-help">
+                        <div class="credential-help-title">响应提取规则详细说明</div>
+                    <p><b>凭证字段</b>（左）：要写入的凭证位置。只有配置了规则的目标才会更新；可以配置多条规则，分别更新 Header、Token 和结构化 Cookie。</p>
+                        <table class="credential-help-table">
+                        <thead><tr><th>凭证字段</th><th>对应凭证类型</th><th>写入方式</th></tr></thead>
+                        <tbody><tr><td>token</td><td>HTTP Token</td><td>直接替换 Token 值</td></tr><tr><td>header.cookie</td><td>HTTP Header（Header 名为 Cookie）</td><td>覆盖整个 Cookie Header，未包含的 Cookie 会丢失</td></tr><tr><td>header.cookie.UYBFEWAEE</td><td>HTTP Header（Header 名为 Cookie）</td><td>只替换该 Cookie；原 Header 没有该项时追加</td></tr><tr><td>cookies</td><td>HTTP Cookie / 其他敏感字段</td><td>覆盖整个结构化 Cookie 对象</td></tr><tr><td>cookies.SESSION</td><td>HTTP Cookie / 其他敏感字段</td><td>只更新结构化 Cookie 中的 SESSION，其他项保留</td></tr><tr><td>headerValue / headerName</td><td>API Key / HTTP Header</td><td>直接替换整个字段</td></tr></tbody>
+                        </table>
+                        <p style="margin-top:10px"><b>来源</b>（右）：从响应中提取值的路径，格式为 <b>类型:路径</b>：</p>
+                        <table class="credential-help-table">
+                        <thead><tr><th>格式</th><th>含义</th><th>示例</th></tr></thead>
+                        <tbody><tr><td>json:路径</td><td>从 JSON 响应体提取</td><td>json:data.accessToken</td></tr><tr><td>header:名称</td><td>从单个响应头提取；header:set-cookie 读取唯一原始 Set-Cookie 值</td><td>header:X-Auth-Token</td></tr><tr><td>header:set-cookie[n]</td><td>从多条原始 Set-Cookie 中按序号选择一条，序号从 1 开始</td><td>header:set-cookie[1]</td></tr><tr><td>cookie:名称</td><td>从标准 Set-Cookie 中提取单个 Cookie 值</td><td>cookie:SESSION</td></tr><tr><td>cookies</td><td>提取全部标准 Set-Cookie 为对象</td><td>cookies</td></tr></tbody>
+                        </table>
+                        <p style="margin-top:10px"><b>Cookie 更新示例：</b></p>
+                        <table class="credential-help-table">
+                        <thead><tr><th>凭证字段</th><th>来源</th><th>行为</th></tr></thead>
+                        <tbody><tr><td>header.cookie.UYBFEWAEE</td><td>header:set-cookie</td><td>适用于响应 <code>Set-Cookie: new_value</code>，将 new_value 写入 Cookie 内 UYBFEWAEE 项</td></tr><tr><td>header.cookie.SESSION</td><td>cookie:SESSION</td><td>适用于标准响应 <code>Set-Cookie: SESSION=new_value; Path=/</code></td></tr><tr><td>cookies</td><td>cookies</td><td>以响应中全部标准 Set-Cookie 覆盖现有结构化 Cookie 对象</td></tr><tr><td>cookies.SESSION</td><td>cookie:SESSION</td><td>仅更新结构化 Cookie 中的 SESSION</td></tr></tbody>
+                        </table>
+                        <div class="credential-help-note">
+                        <p><b>关键约束：</b></p>
+                        <ul>
+                            <li><b>header.cookie</b> 和 <b>header.cookie.名称</b> 仅在 Header 名称为 Cookie 时有效，大小写不敏感</li>
+                            <li><b>header.cookie</b> 会覆盖整串 Cookie Header，属于高风险操作；优先使用 <b>header.cookie.名称</b> 更新单项</li>
+                            <li>响应含多条 Set-Cookie 时不能直接用 <b>header:set-cookie</b> 写入单个值；请使用 <b>header:set-cookie[1]</b> 这类序号规则明确选择一条，或用 <b>cookie:名称</b> 读取标准 Cookie</li>
+                            <li><b>cookies ← cookies</b> 会覆盖整组结构化 Cookie；响应没有标准 Set-Cookie 时不会以空对象覆盖旧值</li>
+                            <li>未配置规则的字段不会自动更新，包括响应中的 Set-Cookie</li>
+                            <li>提取结果会与旧凭证合并，未提取的字段保留原值</li>
+                        </ul>
+                        </div>
+                    </div>
+                    </PromptButton>
+                </template>
+                </el-alert>
+                <div v-for="(item, index) in editor.request.mappings" :key="index" class="mapping-row">
+                <div class="mapping-target">
+                    <el-input v-model="item.target" placeholder="凭证字段，例如 token、header.cookie.SESSION、cookies.SESSION" />
+                    <el-tag v-if="item.target.trim() === 'header.cookie'" type="danger" size="small">高风险：覆盖整个 Cookie Header</el-tag>
+                </div>
+                <el-input v-model="item.source" placeholder="来源，例如 json:data.accessToken、header:X-Auth-Token、cookie:SESSION" />
+                <el-button :icon="Delete" circle plain type="danger" title="删除映射" @click="editor.request.mappings.splice(index, 1)" />
+                </div>
+                <el-button :icon="Plus" plain @click="editor.request.mappings.push({ target: '', source: '' })">添加提取规则</el-button>
+            </el-collapse-item>
+        </el-collapse>
+        </el-collapse-item>
+        </el-collapse>
       </template>
 
-      <el-divider content-position="left">刷新与状态</el-divider>
-      <el-form-item>
-        <template #label>自动刷新<PromptButton placement="top" width="420"><div class="credential-help"><div class="credential-help-title">自动刷新说明</div><p>开启后定时任务会按间隔自动调用登录或刷新接口更新凭证。</p><p><b>仅"HTTP 登录"和"HTTP 刷新"支持自动刷新。</b></p><p>刷新间隔至少 60 秒。建议根据凭证有效期设置，如 Token 有效期 30 分钟则设 1500 秒。</p></div></PromptButton></template>
-        <el-switch v-model="form.autoRefreshEnabled" :disabled="!supportsAutoRefresh" /><el-input-number v-if="form.autoRefreshEnabled" v-model="form.refreshIntervalSec" :min="60" class="ml8" /><span v-if="form.autoRefreshEnabled" class="ml8 unit-text">秒</span>
-      </el-form-item>
-      <el-form-item>
-        <template #label>并发策略<PromptButton width="460"><div class="credential-help"><div class="credential-help-title">并发策略说明</div><table class="credential-help-table"><thead><tr><th>策略</th><th>说明</th></tr></thead><tbody><tr><td>共享读取</td><td>多个任务可同时使用凭证，互不影响</td></tr><tr><td>刷新时独占</td><td>刷新期间锁定凭证，其他任务等待</td></tr><tr><td>使用期间独占</td><td>使用和刷新期间均锁定凭证</td></tr></tbody></table><div class="credential-help-note">会使同账号会话失效的系统建议选择"刷新时独占"或"使用期间独占"。</div></div></PromptButton></template>
-        <el-select v-model="form.sharingMode" style="width:100%"><el-option v-for="item in sharingModes" :key="item.value" :label="item.label" :value="item.value" /></el-select>
-      </el-form-item>
-      <el-form-item>
-        <template #label>允许域名<PromptButton placement="top" width="420"><div class="credential-help"><div class="credential-help-title">允许域名说明</div><p>凭证允许被投影到的目标域名模式，多个用英文逗号分隔。</p><div class="credential-help-code">*.example.com, api.example.com, 192.168.*</div><p>支持通配符 <b>*</b>，留空表示不限制域名。</p></div></PromptButton></template>
-        <el-input v-model="targetHostsText" placeholder="多个域名用英文逗号分隔，例如 *.example.com" />
-      </el-form-item>
-      <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
-      <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
+      <el-collapse class="credential-collapse">
+        <el-collapse-item name="status_fresh" title="刷新与状态">
+            <el-form-item>
+                <template #label>自动刷新<PromptButton placement="top" width="420"><div class="credential-help"><div class="credential-help-title">自动刷新说明</div><p>开启后定时任务会按间隔自动调用登录或刷新接口更新凭证。</p><p><b>仅"HTTP 登录"和"HTTP 刷新"支持自动刷新。</b></p><p>刷新间隔至少 60 秒。建议根据凭证有效期设置，如 Token 有效期 30 分钟则设 1500 秒。</p></div></PromptButton></template>
+                <el-switch v-model="form.autoRefreshEnabled" :disabled="!supportsAutoRefresh" /><el-input-number v-if="form.autoRefreshEnabled" v-model="form.refreshIntervalSec" :min="60" class="ml8" /><span v-if="form.autoRefreshEnabled" class="ml8 unit-text">秒</span>
+            </el-form-item>
+            <el-form-item>
+                <template #label>并发策略<PromptButton width="460"><div class="credential-help"><div class="credential-help-title">并发策略说明</div><table class="credential-help-table"><thead><tr><th>策略</th><th>说明</th></tr></thead><tbody><tr><td>共享读取</td><td>多个任务可同时使用凭证，互不影响</td></tr><tr><td>刷新时独占</td><td>刷新期间锁定凭证，其他任务等待</td></tr><tr><td>使用期间独占</td><td>使用和刷新期间均锁定凭证</td></tr></tbody></table><div class="credential-help-note">会使同账号会话失效的系统建议选择"刷新时独占"或"使用期间独占"。</div></div></PromptButton></template>
+                <el-select v-model="form.sharingMode" style="width:100%"><el-option v-for="item in sharingModes" :key="item.value" :label="item.label" :value="item.value" /></el-select>
+            </el-form-item>
+            <el-form-item>
+                <template #label>允许域名<PromptButton placement="top" width="420"><div class="credential-help"><div class="credential-help-title">允许域名说明</div><p>凭证允许被投影到的目标域名模式，多个用英文逗号分隔。</p><div class="credential-help-code">*.example.com, api.example.com, 192.168.*</div><p>支持通配符 <b>*</b>，留空表示不限制域名。</p></div></PromptButton></template>
+                <el-input v-model="targetHostsText" placeholder="多个域名用英文逗号分隔，例如 *.example.com" />
+            </el-form-item>
+            <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+            <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
+        </el-collapse-item>
+      </el-collapse>
     </el-form>
     <template #footer><el-button @click="visible=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template>
   </el-dialog>
@@ -283,7 +331,7 @@ const requestTemplateInputRefs = {}
 const sensitive = reactive({ cookie: '', headerName: '', headerValue: '', valuePrefix: 'Bearer ', token: '', username: '', password: '', otpSecret: '' })
 const requestMethods = ['GET', 'POST', 'PUT', 'PATCH']
 const credentialTypes = [{ value:'browser_storage',label:'浏览器状态'},{value:'http_cookie',label:'HTTP Cookie'},{value:'http_token',label:'HTTP Token'},{value:'http_api_key',label:'API Key'},{value:'http_header',label:'HTTP Header'}]
-const authModes = [{value:'manual',label:'手工录入，不自动更新'},{value:'http_login',label:'HTTP 登录重新获取'},{value:'http_refresh',label:'携带现有凭证刷新'},{value:'browser_login',label:'浏览器人工登录'},{value:'browser_refresh',label:'浏览器刷新'}]
+const authModes = [{value:'manual',label:'手工录入，不自动更新'},{value:'http_login',label:'HTTP 登录重新获取'},{value:'http_refresh',label:'携带现有凭证刷新（可配兜底登录）'},{value:'browser_login',label:'浏览器人工登录'},{value:'browser_refresh',label:'浏览器刷新'}]
 const otpTypes = [{value:'none',label:'不需要'},{value:'totp',label:'TOTP 自动生成'},{value:'sms',label:'短信验证码（需人工/外部服务）'},{value:'email',label:'邮箱验证码（需人工/外部服务）'},{value:'manual',label:'人工确认'}]
 const sharingModes = [{value:'shared_read',label:'共享读取'},{value:'exclusive_refresh',label:'刷新时独占'},{value:'exclusive_use',label:'使用期间独占'}]
 const assertionOperators = [{ value:'equals', label:'等于' },{ value:'not_equals', label:'不等于' },{ value:'exists', label:'存在' },{ value:'not_empty', label:'非空' },{ value:'contains', label:'包含' },{ value:'in', label:'属于' }]
@@ -295,10 +343,22 @@ const loginRequest = reactive(emptyRequest())
 const refreshRequest = reactive(emptyRequest())
 const emptyForm = () => ({ credentialName:'', credentialType:'http_cookie', authMode:'manual', enabled:true, autoRefreshEnabled:false, refreshIntervalSec:0, sharingMode:'shared_read', authConfig:{ otpType:'none', targetHostPatterns:[] }, remark:'' })
 const form = reactive(emptyForm())
-const isHttpMode = computed(() => ['http_login','http_refresh'].includes(form.authMode))
-const supportsAutoRefresh = computed(() => ['http_login','http_refresh'].includes(form.authMode))
-const activeRequest = computed(() => form.authMode === 'http_login' ? loginRequest : refreshRequest)
-const requestBodyPlaceholder = computed(() => form.authMode === 'http_login' ? '{"username":"${secret.username}","password":"${secret.password}"}' : '{}，刷新时当前 Cookie/Header 会自动携带')
+const isHttpMode = computed(() => ['http_login', 'http_refresh'].includes(form.authMode))
+const supportsAutoRefresh = computed(() => ['http_login', 'http_refresh'].includes(form.authMode))
+const showLoginConfig = computed(() => form.authMode === 'http_login')
+// HTTP 登录和 HTTP 刷新都复用同一组请求编辑器；http_refresh 会同时展示刷新接口和兜底登录接口。
+const requestEditors = computed(() => {
+  if (form.authMode === 'http_login') {
+    return [{ kind: 'login', label: '登录接口', bodyPlaceholder: '{"username":"${secret.username}","password":"${secret.password}"}', request: loginRequest }]
+  }
+  if (form.authMode === 'http_refresh') {
+    return [
+      { kind: 'refresh', label: '刷新接口', bodyPlaceholder: '{}，刷新时当前 Cookie/Header 会自动携带', request: refreshRequest },
+      { kind: 'login', label: '兜底登录接口', bodyPlaceholder: '{"username":"${secret.username}","password":"${secret.password}"}', request: loginRequest },
+    ]
+  }
+  return []
+})
 const hasCookieHeaderPrimary = computed(() => ['http_header', 'http_api_key'].includes(form.credentialType) && sensitive.headerName.trim().toLowerCase() === 'cookie')
 const templateVariables = [
   { value:'${secret.username}', label:'登录用户名' },
@@ -310,20 +370,10 @@ const templateVariables = [
 ]
 const templateVariableNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-watch(() => form.authMode, mode => {
-  if (mode === 'http_login' && loginRequest.bodyText.trim() === '{}') {
-    loginRequest.bodyText = jsonText({ username:'${secret.username}', password:'${secret.password}' })
-  }
+watch([() => form.authMode, () => form.authConfig.otpType], ([mode]) => {
+  if (mode === 'http_login' || mode === 'http_refresh') ensureLoginRequestDefaults()
   if (!supportsAutoRefresh.value) form.autoRefreshEnabled = false
 })
-watch(() => form.authConfig.otpType, otpType => {
-  if (form.authMode !== 'http_login' || otpType !== 'totp') return
-  try {
-    const body = parseObject(loginRequest.bodyText, 'JSON 请求体')
-    if (!Object.values(body).includes('${secret.otp}')) loginRequest.bodyText = jsonText({ ...body, otp:'${secret.otp}' })
-  } catch (_) { /* 用户正在编辑 JSON 时不覆盖输入。 */ }
-})
-
 function jsonText(value) { return JSON.stringify(value || {}, null, 2) }
 function jsonValueText(value) { return value === undefined ? '' : JSON.stringify(value) }
 function restoreRedacted(value) {
@@ -370,6 +420,16 @@ function populateFromSecret(secret) {
   if (Object.keys(extra).length) advancedSecretText.value = JSON.stringify(extra, null, 2)
   if (additionalHeaders.length || additionalCookies.length || advancedSecretText.value.trim()) advancedPanels.value = ['additional-auth']
 }
+function ensureLoginRequestDefaults() {
+  if (loginRequest.bodyText.trim() === '{}') {
+    loginRequest.bodyText = jsonText({ username:'${secret.username}', password:'${secret.password}' })
+  }
+  if (form.authConfig.otpType !== 'totp') return
+  try {
+    const body = parseObject(loginRequest.bodyText, 'JSON 请求体')
+    if (!Object.values(body).includes('${secret.otp}')) loginRequest.bodyText = jsonText({ ...body, otp:'${secret.otp}' })
+  } catch (_) { /* 用户正在编辑 JSON 时不覆盖输入。 */ }
+}
 function open(row) {
   Object.assign(form, emptyForm(), row || {}, { authConfig: { ...emptyForm().authConfig, ...(row?.authConfig || {}) } })
   Object.keys(sensitive).forEach(key => { sensitive[key] = key === 'valuePrefix' ? 'Bearer ' : '' })
@@ -383,6 +443,7 @@ function open(row) {
   targetHostsText.value = (form.authConfig.targetHostPatterns || []).join(', ')
   resetRequest(loginRequest, form.authConfig, 'login')
   resetRequest(refreshRequest, form.authConfig, 'refresh')
+  if (form.authMode === 'http_login' || form.authMode === 'http_refresh') ensureLoginRequestDefaults()
   visible.value = true
   /* 编辑时从后端获取解密后的凭证明文并回填到表单，敏感字段默认 mask 可通过眼睛图标查看 */
   if (row?.credentialId) {
@@ -401,6 +462,10 @@ function setTemplateInputRef(field, component) {
   if (component) requestTemplateInputRefs[field] = component
   else delete requestTemplateInputRefs[field]
 }
+function resolveRequestEditor(field) {
+  const [kind, requestField] = String(field || '').split(':')
+  return { request: kind === 'login' ? loginRequest : refreshRequest, requestField }
+}
 function isJsonStringPosition(source, position) {
   let insideString = false
   let escaped = false
@@ -418,14 +483,14 @@ function isJsonStringPosition(source, position) {
   return insideString
 }
 function insertTemplateVariable(field, variable) {
-  const request = activeRequest.value
+  const { request, requestField } = resolveRequestEditor(field)
   const component = requestTemplateInputRefs[field]
   const input = component?.$el?.querySelector('textarea')
-  const source = String(request[field] || '')
+  const source = String(request[requestField] || '')
   const start = input?.selectionStart ?? source.length
   const end = input?.selectionEnd ?? source.length
   const insertion = isJsonStringPosition(source, start) ? variable : `"${variable}"`
-  request[field] = `${source.slice(0, start)}${insertion}${source.slice(end)}`
+  request[requestField] = `${source.slice(0, start)}${insertion}${source.slice(end)}`
   const cursor = start + insertion.length
   nextTick(() => {
     const current = requestTemplateInputRefs[field]?.$el?.querySelector('textarea')

@@ -12,6 +12,9 @@ title: 更新历史
 4. 请求模板新增变量插入按钮和保存前校验；新增高级变量 `${secret.headerValue}`。
 5. 主 Header 名称为 `Cookie` 时，响应提取不再允许写入结构化 `cookies`，避免刷新后无法编辑保存；非 Cookie Header 仍支持 Header + Cookie 联合认证。
 6. 新增说明文档：`web/public/docs/updates/2026-08-09-credential-template-variables-and-cookie-writeback.md`。
+7. HTTP 刷新凭证在同时配置登录地址时支持“刷新失败 → 自动登录 → 再继续刷新”的兜底链路。
+8. 新增说明文档：`web/public/docs/updates/2026-08-09-credential-refresh-login-fallback.md`。
+9. `http_refresh` 更新方式在编辑页新增“兜底登录接口”配置入口，和刷新接口一起维护，刷新失败后会自动走登录再重试。
 
 ## 2026-08-08
 

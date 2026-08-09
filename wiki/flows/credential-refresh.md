@@ -10,26 +10,31 @@ related_files:
 ---
 # 统一凭证刷新流程
 
-定时任务只刷新开启自动刷新且已到间隔或临近过期的 HTTP 凭证；静态手工凭证和浏览器人工登录明确跳过。手工录入的 Cookie、Header 或 Token 可以选择 `http_refresh`，刷新器会把当前凭证注入请求，不需要账号密码。刷新前获取凭证级独占租约，释放租约后才提交事务。
+定时任务只刷新开启自动刷新且已到间隔或临近过期的 HTTP 凭证；静态手工凭证和浏览器人工登录明确跳过。手工录入的 Cookie、Header 或 Token 可以选择 `http_refresh`，刷新器会把当前凭证注入请求，不需要账号密码。刷新前获取凭证级独占租约，释放租约后才提交事务。对于 `http_refresh` 且同时配置了 `login_url` 的凭证，服务端会先按刷新接口续期；如果刷新失败，则自动执行登录，再用登录得到的新凭证重试刷新。前端编辑页会在 `http_refresh` 模式下额外提供“兜底登录接口”配置入口，方便直接维护刷新和登录两段请求。登录和刷新两次请求都会继续携带当前凭证中的附加 Header、附加 Cookie 和模板变量。
 
 ```mermaid
 graph TD
   A[定时任务] --> B{是否到刷新时间}
   B -->|否| C[记录跳过]
-  B -->|是| D[调用 HTTP 登录或刷新]
+  B -->|是| D[调用 HTTP 刷新或登录]
   D -->|HTTP 2xx| E[执行业务成功断言]
   E -->|全部通过| H[按显式规则提取响应]
   H --> I[乐观锁写回新密文]
   E -->|任一失败| F[保留旧快照并记录失败]
   D -->|非 2xx| F
   D --> G[获取 exclusive_refresh 租约]
+  D -->|刷新失败且配置了登录地址| J[执行登录兜底]
+  J -->|登录成功| K[用新凭证重试刷新]
+  K -->|HTTP 2xx| E
+  K -->|非 2xx| F
+  J -->|登录失败| F
 ```
 
 | 步骤 | 说明 |
 |---|---|
 | 判断 | 根据 autoRefreshEnabled、刷新间隔、上次成功时间和过期时间窗口判断 |
 | 租约 | 锁定凭证聚合根行后获取短期独占刷新租约，避免并发刷新 |
-| 刷新 | 用认证配置和密文中的占位符组装请求；自动携带当前 Cookie/Header；当 HTTP Header 凭证的 Header 名称为 `Cookie` 时，`${secret.cookie}` 读取其 Header 值；`${secret.headerValue}` 作为直接读取主 Header 值的高级变量 |
+| 刷新 | 用认证配置和密文中的占位符组装请求；自动携带当前 Cookie/Header；当 HTTP Header 凭证的 Header 名称为 `Cookie` 时，`${secret.cookie}` 读取其 Header 值；`${secret.headerValue}` 作为直接读取主 Header 值的高级变量；`http_refresh` 若同时配置登录地址，刷新失败会自动登录并重试刷新；前端会为 `http_refresh` 同时展示刷新接口和兜底登录接口配置区 |
 | 业务成功 | HTTP 状态为 2xx 后，按登录或刷新各自的成功断言逐条校验；断言失败不会提取或写回，并保留旧快照 |
 | 提取 | 仅按显式响应提取规则写回，支持 JSON 字段、响应头、单个响应 Cookie 和全部标准 `Set-Cookie`；不会自动合并 Cookie |
 | 写回 | revision 一致才写入；冲突不覆盖 |

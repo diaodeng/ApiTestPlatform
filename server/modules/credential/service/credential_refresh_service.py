@@ -38,10 +38,12 @@ class CredentialRefreshService:
         if credential.auth_mode not in {"http_login", "http_refresh"}:
             return {"success": False, "message": "当前认证方式不能由服务端 HTTP 自动刷新", "status": "manual_required"}
         config = CredentialDao.get_auth_config(db, credential_id)
-        url = (config.refresh_url if credential.auth_mode == "http_refresh" else config.login_url) if config else ""
-        if not url:
-            return {"success": False, "message": "未配置 HTTP 登录或刷新地址", "status": "invalid_config"}
-        old_secret = decrypt_secret(credential.secret_cipher_text)
+        refresh_url = str(getattr(config, "refresh_url", "") or "").strip() if config else ""
+        login_url = str(getattr(config, "login_url", "") or "").strip() if config else ""
+        if credential.auth_mode == "http_refresh" and not refresh_url:
+            return {"success": False, "message": "未配置 HTTP 刷新地址", "status": "invalid_config"}
+        if credential.auth_mode == "http_login" and not login_url:
+            return {"success": False, "message": "未配置 HTTP 登录地址", "status": "invalid_config"}
         lease_token = ""
         try:
             try:
@@ -55,22 +57,20 @@ class CredentialRefreshService:
             if not credential or credential.revision != expected_revision:
                 return {"success": False, "message": "凭证版本冲突", "status": "conflict"}
             old_secret = decrypt_secret(credential.secret_cipher_text)
-            request_config = cls._request_config(config, credential.auth_mode)
-            response = cls._execute_http_request(
-                url,
-                request_config,
-                old_secret,
-                config.otp_type if config else "none",
-                otp_code,
-            )
-            response.raise_for_status()
-            cls._validate_response_success_assertions(
-                response,
-                cls._response_success_assertions(config, credential.auth_mode),
-            )
-            new_secret, extracted_any = cls._extract_response_secret(old_secret, response, cls._response_mapping(config, credential.auth_mode))
-            if not extracted_any:
-                raise ValueError("刷新响应未提取到新凭证，请在凭证编辑页配置【响应提取规则】。若当前凭证主要依赖 Cookie 鉴权，可将凭证类型改为 HTTP Cookie。")
+            otp_type = config.otp_type if config else "none"
+            if credential.auth_mode == "http_refresh":
+                new_secret = cls._execute_http_refresh_with_login_fallback(config, old_secret, otp_type, otp_code, credential_id)
+            else:
+                new_secret = cls._execute_http_auth_step(
+                    login_url,
+                    cls._request_config(config, credential.auth_mode),
+                    old_secret,
+                    otp_type,
+                    otp_code,
+                    cls._response_success_assertions(config, credential.auth_mode),
+                    cls._response_mapping(config, credential.auth_mode),
+                    "HTTP 登录",
+                )
             now = datetime.now()
             updated = CredentialDao.update_credential(db, credential_id, {"secret_cipher_text": encrypt_secret(new_secret), "secret_mask": mask_secret(new_secret), "revision": expected_revision + 1, "last_refresh_time": now, "last_refresh_status": "success", "last_refresh_message": "HTTP 刷新成功", "update_by": operator, "update_time": now}, expected_revision)
             if not updated:
@@ -263,6 +263,7 @@ class CredentialRefreshService:
         secret: dict[str, Any],
         otp_type: str = "none",
         otp_code: str | None = None,
+        action_label: str = "凭证刷新",
     ):
         """按配置组装请求，并默认携带当前凭证的 Cookie/Header，支持登录和无账号刷新。"""
         if otp_type == "totp":
@@ -300,8 +301,168 @@ class CredentialRefreshService:
             kwargs["data"] = data
         elif body is not None and method not in {"GET", "HEAD"}:
             kwargs["json"] = body
-        logger.info(f"凭证刷新：{json.dumps(cls._mask_request_for_log(kwargs), ensure_ascii=False)}")
+        logger.info(f"{action_label}请求：url:{url},method:{method},{json.dumps(cls._mask_request_for_log(kwargs), ensure_ascii=False)}")
         return httpx.request(method, url, **kwargs)
+
+    @classmethod
+    def _execute_http_auth_step(
+        cls,
+        url: str,
+        request_config: dict[str, Any],
+        secret: dict[str, Any],
+        otp_type: str,
+        otp_code: str | None,
+        assertions: list[Any],
+        mapping: Any,
+        action_label: str,
+    ) -> dict[str, Any]:
+        """执行单次 HTTP 登录或刷新，并在成功后提取新凭证。"""
+        response = cls._execute_http_request(url, request_config, secret, otp_type, otp_code, action_label)
+        logger.info(f"{action_label}响应状态：{response.status_code},响应cookies：{response.cookies},响应头：{response.headers},响应信息：{response.content.decode('utf-8')}")
+        response.raise_for_status()
+        cls._validate_response_success_assertions(response, assertions)
+        new_secret, extracted_any = cls._extract_response_secret(secret, response, mapping)
+        if not extracted_any:
+            if "登录" in action_label:
+                raise ValueError("登录响应未提取到新凭证，请在凭证编辑页配置【登录响应映射】。")
+            raise ValueError("刷新响应未提取到新凭证，请在凭证编辑页配置【响应提取规则】。若当前凭证主要依赖 Cookie 鉴权，可将凭证类型改为 HTTP Cookie。")
+        return new_secret
+
+    @classmethod
+    def _execute_http_refresh_with_login_fallback(
+        cls,
+        config,
+        secret: dict[str, Any],
+        otp_type: str,
+        otp_code: str | None,
+        credential_id: int,
+    ) -> dict[str, Any]:
+        """先刷新，失败后自动登录兜底，再用登录后的新凭证重试刷新。"""
+        refresh_request_config = cls._request_config(config, "http_refresh")
+        refresh_assertions = cls._response_success_assertions(config, "http_refresh")
+        refresh_mapping = cls._response_mapping(config, "http_refresh")
+        try:
+            return cls._execute_http_auth_step(
+                config.refresh_url,
+                refresh_request_config,
+                secret,
+                otp_type,
+                otp_code,
+                refresh_assertions,
+                refresh_mapping,
+                "HTTP 刷新",
+            )
+        except Exception as refresh_exc:
+            login_url = str(getattr(config, "login_url", "") or "").strip()
+            if not login_url:
+                raise
+            logger.warning(f"HTTP 刷新失败，准备使用登录兜底后重试，credential_id={credential_id}，error={refresh_exc}")
+            try:
+                login_secret = cls._execute_http_auth_step(
+                    login_url,
+                    cls._request_config(config, "http_login"),
+                    secret,
+                    otp_type,
+                    otp_code,
+                    cls._response_success_assertions(config, "http_login"),
+                    cls._response_mapping(config, "http_login"),
+                    "HTTP 登录",
+                )
+            except Exception as login_exc:
+                raise ValueError(f"HTTP 刷新失败且登录兜底失败：原始刷新失败={refresh_exc}；登录失败={login_exc}") from login_exc
+            try:
+                return cls._execute_http_auth_step(
+                    config.refresh_url,
+                    refresh_request_config,
+                    login_secret,
+                    otp_type,
+                    otp_code,
+                    refresh_assertions,
+                    refresh_mapping,
+                    "HTTP 刷新",
+                )
+            except Exception as retry_exc:
+                raise ValueError(f"HTTP 刷新在登录兜底后仍然失败：原始刷新失败={refresh_exc}；登录后重试失败={retry_exc}") from retry_exc
+
+    @classmethod
+    def _execute_http_auth_step(
+        cls,
+        url: str,
+        request_config: dict[str, Any],
+        secret: dict[str, Any],
+        otp_type: str,
+        otp_code: str | None,
+        assertions: list[Any],
+        mapping: Any,
+        action_label: str,
+    ) -> dict[str, Any]:
+        """执行单次 HTTP 登录或刷新，并在成功后提取新凭证。"""
+        response = cls._execute_http_request(url, request_config, secret, otp_type, otp_code, action_label)
+        logger.info(f"{action_label}响应状态：{response.status_code},响应cookies：{response.cookies},响应头：{response.headers},响应信息：{response.content.decode('utf-8')}")
+        response.raise_for_status()
+        cls._validate_response_success_assertions(response, assertions)
+        new_secret, extracted_any = cls._extract_response_secret(secret, response, mapping)
+        if not extracted_any:
+            if "登录" in action_label:
+                raise ValueError("登录响应未提取到新凭证，请在凭证编辑页配置【登录响应映射】。")
+            raise ValueError("刷新响应未提取到新凭证，请在凭证编辑页配置【响应提取规则】。若当前凭证主要依赖 Cookie 鉴权，可将凭证类型改为 HTTP Cookie。")
+        return new_secret
+
+    @classmethod
+    def _execute_http_refresh_with_login_fallback(
+        cls,
+        config,
+        secret: dict[str, Any],
+        otp_type: str,
+        otp_code: str | None,
+        credential_id: int,
+    ) -> dict[str, Any]:
+        """先刷新，失败后自动登录兜底，再用登录后的新凭证重试刷新。"""
+        refresh_request_config = cls._request_config(config, "http_refresh")
+        refresh_assertions = cls._response_success_assertions(config, "http_refresh")
+        refresh_mapping = cls._response_mapping(config, "http_refresh")
+        try:
+            return cls._execute_http_auth_step(
+                config.refresh_url,
+                refresh_request_config,
+                secret,
+                otp_type,
+                otp_code,
+                refresh_assertions,
+                refresh_mapping,
+                "HTTP 刷新",
+            )
+        except Exception as refresh_exc:
+            login_url = str(getattr(config, "login_url", "") or "").strip()
+            if not login_url:
+                raise
+            logger.warning(f"HTTP 刷新失败，准备使用登录兜底后重试，credential_id={credential_id}，error={refresh_exc}")
+            try:
+                login_secret = cls._execute_http_auth_step(
+                    login_url,
+                    cls._request_config(config, "http_login"),
+                    secret,
+                    otp_type,
+                    otp_code,
+                    cls._response_success_assertions(config, "http_login"),
+                    cls._response_mapping(config, "http_login"),
+                    "HTTP 登录",
+                )
+            except Exception as login_exc:
+                raise ValueError(f"HTTP 刷新失败且登录兜底失败：原始刷新失败={refresh_exc}；登录失败={login_exc}") from login_exc
+            try:
+                return cls._execute_http_auth_step(
+                    config.refresh_url,
+                    refresh_request_config,
+                    login_secret,
+                    otp_type,
+                    otp_code,
+                    refresh_assertions,
+                    refresh_mapping,
+                    "HTTP 刷新",
+                )
+            except Exception as retry_exc:
+                raise ValueError(f"HTTP 刷新在登录兜底后仍然失败：原始刷新失败={refresh_exc}；登录后重试失败={retry_exc}") from retry_exc
 
     @staticmethod
     def _generate_totp(secret: str, digits: int = 6, period: int = 30) -> str:

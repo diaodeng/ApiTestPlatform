@@ -1,6 +1,10 @@
+from types import SimpleNamespace
+
 import httpx
 
+from modules.credential.dao.credential_dao import CredentialDao
 from modules.credential.entity.vo.credential_vo import CredentialAuthConfigModel, CredentialResponseAssertionModel
+from modules.credential.service.credential_lease_service import CredentialLeaseService
 from modules.credential.service.credential_refresh_service import CredentialRefreshService
 from modules.credential.service.credential_resolve_service import CredentialResolveService
 from modules.credential.service.credential_service import CredentialService
@@ -332,3 +336,192 @@ def test_auth_config_normalizes_nullable_database_json_fields():
     assert model.login_success_assertions == []
     assert model.refresh_success_assertions == []
     assert model.target_host_patterns == []
+
+
+
+def test_execute_http_refresh_with_login_fallback_retries_refresh_with_login_secret(monkeypatch):
+    refresh_url = 'https://example.test/refresh'
+    login_url = 'https://example.test/login'
+    refresh_request_config = {'method': 'POST', 'headers': {'X-Step': 'refresh'}}
+    login_request_config = {'method': 'POST', 'headers': {'X-Step': 'login'}}
+    old_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=old', 'cookies': {'SESSION': 'old'}}
+    login_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=new', 'cookies': {'SESSION': 'new'}}
+    final_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=final', 'cookies': {'SESSION': 'final'}}
+    calls = []
+
+    def fake_execute_http_auth_step(url, request_config, secret, otp_type, otp_code, assertions, mapping, action_label):
+        calls.append({
+            'url': url,
+            'request_config': request_config,
+            'secret': secret,
+            'otp_type': otp_type,
+            'otp_code': otp_code,
+            'action_label': action_label,
+        })
+        if url == refresh_url and len([item for item in calls if item['url'] == refresh_url]) == 1:
+            raise ValueError('refresh failed')
+        if url == login_url:
+            assert secret == old_secret
+            return login_secret
+        if url == refresh_url and secret == login_secret:
+            return final_secret
+        raise AssertionError(f'未预期的调用：{url}')
+
+    monkeypatch.setattr(
+        CredentialRefreshService,
+        '_execute_http_auth_step',
+        fake_execute_http_auth_step,
+    )
+
+    result = CredentialRefreshService._execute_http_refresh_with_login_fallback(
+        SimpleNamespace(
+            refresh_url=refresh_url,
+            login_url=login_url,
+            refresh_request_template=refresh_request_config,
+            login_request_template=login_request_config,
+            refresh_response_mapping={},
+            login_response_mapping={},
+            refresh_success_assertions=[],
+            login_success_assertions=[],
+            response_mapping={},
+            refresh_method='POST',
+            login_method='POST',
+            otp_type='none',
+        ),
+        old_secret,
+        'none',
+        None,
+        5,
+    )
+
+    assert result == final_secret
+    assert [item['url'] for item in calls] == [refresh_url, login_url, refresh_url]
+    assert calls[0]['request_config'] == refresh_request_config
+    assert calls[1]['request_config'] == login_request_config
+    assert calls[2]['secret'] == login_secret
+    assert calls[0]['action_label'] == 'HTTP 刷新'
+    assert calls[1]['action_label'] == 'HTTP 登录'
+    assert calls[2]['action_label'] == 'HTTP 刷新'
+
+
+def test_refresh_credential_http_refresh_uses_login_fallback_helper(monkeypatch):
+    refresh_calls = []
+    credential = SimpleNamespace(
+        enabled=True,
+        revision=7,
+        auth_mode='http_refresh',
+        secret_cipher_text='cipher-text',
+    )
+    config = SimpleNamespace(
+        refresh_url='https://example.test/refresh',
+        login_url='https://example.test/login',
+        otp_type='none',
+    )
+    old_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=old'}
+    new_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=new'}
+    update_payloads = []
+    operation_logs = []
+    commits = []
+
+    monkeypatch.setattr(CredentialDao, 'get_credential', lambda db, credential_id: credential)
+    monkeypatch.setattr(CredentialDao, 'get_auth_config', lambda db, credential_id: config)
+
+    def fake_acquire(db, credential_id, operation_type, operator):
+        return 'lease-token'
+
+    def fake_release(db, lease_token):
+        commits.append('release')
+
+    def fake_update_credential(db, credential_id, values, expected_revision=None):
+        update_payloads.append(
+            {
+                'credential_id': credential_id,
+                'values': values,
+                'expected_revision': expected_revision,
+            }
+        )
+        return True
+
+    def fake_add_operation_log(db, values):
+        operation_logs.append(values)
+
+    monkeypatch.setattr(CredentialLeaseService, 'acquire', fake_acquire)
+    monkeypatch.setattr(CredentialLeaseService, 'release', fake_release)
+    monkeypatch.setattr(CredentialDao, 'update_credential', fake_update_credential)
+    monkeypatch.setattr(CredentialDao, 'add_operation_log', fake_add_operation_log)
+
+    def fake_decrypt_secret(cipher_text):
+        return old_secret
+
+    def fake_encrypt_secret(secret):
+        return f"encrypted:{secret['headerValue']}"
+
+    def fake_mask_secret(secret):
+        return f"masked:{secret['headerValue']}"
+
+    monkeypatch.setattr('modules.credential.service.credential_refresh_service.decrypt_secret', fake_decrypt_secret)
+    monkeypatch.setattr('modules.credential.service.credential_refresh_service.encrypt_secret', fake_encrypt_secret)
+    monkeypatch.setattr('modules.credential.service.credential_refresh_service.mask_secret', fake_mask_secret)
+
+    def fake_refresh_with_login_fallback(
+        config_obj,
+        secret,
+        otp_type,
+        otp_code,
+        credential_id,
+    ):
+        refresh_calls.append(
+            {
+                'config': config_obj,
+                'secret': secret,
+                'otp_type': otp_type,
+                'otp_code': otp_code,
+                'credential_id': credential_id,
+            }
+        )
+        return new_secret
+
+    monkeypatch.setattr(
+        CredentialRefreshService,
+        '_execute_http_refresh_with_login_fallback',
+        fake_refresh_with_login_fallback,
+    )
+
+    class FakeDb:
+        def commit(self):
+            commits.append('commit')
+
+    result = CredentialRefreshService.refresh_credential(FakeDb(), 5, 7, 'operator-a')
+
+    assert result == {'success': True, 'message': '刷新成功', 'status': 'success'}
+    assert refresh_calls == [
+        {
+            'config': config,
+            'secret': old_secret,
+            'otp_type': 'none',
+            'otp_code': None,
+            'credential_id': 5,
+        }
+    ]
+    assert len(update_payloads) == 1
+    update_call = update_payloads[0]
+    assert update_call['credential_id'] == 5
+    assert update_call['expected_revision'] == 7
+    assert update_call['values']['secret_cipher_text'] == 'encrypted:SESSION=new'
+    assert update_call['values']['secret_mask'] == 'masked:SESSION=new'
+    assert update_call['values']['revision'] == 8
+    assert update_call['values']['last_refresh_status'] == 'success'
+    assert update_call['values']['last_refresh_message'] == 'HTTP 刷新成功'
+    assert update_call['values']['update_by'] == 'operator-a'
+    assert update_call['values']['last_refresh_time'] == update_call['values']['update_time']
+    assert operation_logs == [
+        {
+            'credential_id': 5,
+            'operation_type': 'refresh',
+            'status': 'success',
+            'revision': 8,
+            'message': 'HTTP 刷新并写回成功',
+            'operator': 'operator-a',
+        }
+    ]
+    assert commits == ['commit', 'release', 'commit']
