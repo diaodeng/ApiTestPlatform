@@ -54,6 +54,12 @@ async def get_credential(request: Request, credential_id: int, query_db: Session
     """获取指定凭证的脱敏详情。"""
     result = await run_in_threadpool(CredentialService.get_credential, query_db, credential_id)
     return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="凭证不存在")
+@credentialController.get("/{credential_id}/secret", dependencies=[Depends(CheckUserInterfaceAuth("system:credential:edit"))])
+async def get_credential_secret(request: Request, credential_id: int, query_db: Session = Depends(get_db)):
+    """获取指定凭证的解密后明文内容，用于编辑时回显。权限等同于编辑操作。"""
+    result = await run_in_threadpool(CredentialService.get_credential_secret, query_db, credential_id)
+    return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="凭证不存在")
+
 
 
 @credentialController.post("", dependencies=[Depends(CheckUserInterfaceAuth("system:credential:add"))])

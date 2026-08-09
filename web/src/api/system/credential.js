@@ -1,6 +1,8 @@
 import request from '@/utils/request'
 
 export const listCredentials = (params) => request({ url: '/system/credentials', method: 'get', params })
+export const getCredentialSecret = (id) => request({ url: `/system/credentials/${id}/secret`, method: 'get' })
+
 export const getCredential = (id) => request({ url: `/system/credentials/${id}`, method: 'get' })
 export const addCredential = (data) => request({ url: '/system/credentials', method: 'post', data })
 export const updateCredential = (id, data) => request({ url: `/system/credentials/${id}`, method: 'put', data })

@@ -5,13 +5,30 @@ from sqlalchemy.orm import Session
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from modules.credential.dao.credential_dao import CredentialDao
-from modules.credential.entity.vo.credential_vo import CredentialAuthConfigModel, CredentialModel, CredentialSaveModel, CredentialUpdateModel
+from modules.credential.entity.vo.credential_vo import (
+    CredentialAuthConfigModel,
+    CredentialModel,
+    CredentialSaveModel,
+    CredentialUpdateModel,
+)
 from modules.credential.util.credential_secret_util import decrypt_secret, encrypt_secret, mask_secret
 from utils.log_util import logger
 
 
 class CredentialService:
     """凭证聚合根服务，负责密文快照、版本控制和安全审计。"""
+
+    @classmethod
+    def get_credential_secret(cls, db: Session, credential_id: int) -> dict | None:
+        """获取解密后的凭证明文，仅用于编辑回显。调用方需自行控制权限。"""
+        row = CredentialDao.get_credential(db, credential_id)
+        if not row or not row.secret_cipher_text:
+            return None
+        try:
+            return decrypt_secret(row.secret_cipher_text)
+        except Exception:
+            logger.warning(f"解密凭证失败，credential_id={credential_id}")
+            return None
 
     @classmethod
     def list_credentials(cls, db: Session, keyword: str, enabled: bool | None) -> list[CredentialModel]:
@@ -62,7 +79,8 @@ class CredentialService:
     @classmethod
     def update_credential(cls, db: Session, credential_id: int, model: CredentialUpdateModel, current_user: CurrentUserModel) -> CrudResponseModel:
         """乐观锁更新凭证；冲突不会覆盖刷新后的有效凭证。"""
-        if not CredentialDao.get_credential(db, credential_id):
+        current = CredentialDao.get_credential(db, credential_id)
+        if not current:
             return CrudResponseModel(is_success=False, message="凭证不存在")
         now = datetime.now()
         values = model.model_dump(exclude={"expected_revision", "secret", "auth_config"}, by_alias=False)
@@ -73,9 +91,11 @@ class CredentialService:
             "update_time": now,
         })
         # 详情接口不会返回密文，编辑普通字段时必须保留原快照，避免空 JSON 覆盖有效凭证。
-        if model.secret:
-            current = CredentialDao.get_credential(db, credential_id)
+        # 但凭证类型变化时，旧类型的主凭证不能继续被刷新请求携带。
+        if model.secret or current.credential_type != model.credential_type:
             merged_secret = decrypt_secret(current.secret_cipher_text)
+            if current.credential_type != model.credential_type:
+                cls._clear_primary_secret_fields(merged_secret)
             merged_secret.update(model.secret)
             values["secret_cipher_text"] = encrypt_secret(merged_secret)
             values["secret_mask"] = mask_secret(merged_secret)
@@ -92,6 +112,26 @@ class CredentialService:
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def _clear_primary_secret_fields(secret: dict) -> None:
+        """切换凭证类型时删除旧类型主字段，保留附加 Header、Cookie 和登录账号等共享字段。"""
+        primary_fields = {
+            "cookie",
+            "cookieHeader",
+            "headerName",
+            "header_name",
+            "headerValue",
+            "header_value",
+            "valuePrefix",
+            "value_prefix",
+            "token",
+            "apiKey",
+            "storageState",
+            "storage_state",
+        }
+        for field in primary_fields:
+            secret.pop(field, None)
 
     @classmethod
     def delete_credential(cls, db: Session, credential_id: int, current_user: CurrentUserModel) -> CrudResponseModel:

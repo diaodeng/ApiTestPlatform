@@ -13,6 +13,31 @@ class CredentialBaseModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
 
 
+class CredentialResponseAssertionModel(CredentialBaseModel):
+    """HTTP 登录或刷新接口的业务成功断言。"""
+
+    source: str = Field(min_length=1, max_length=256)
+    operator: Literal["equals", "not_equals", "exists", "not_empty", "contains", "in"] = "equals"
+    expected: Any = None
+    message: str = Field(default="", max_length=200)
+
+    @model_validator(mode="after")
+    def validate_response_assertion(self):
+        """限制断言来源和操作符，避免执行任意表达式。"""
+        self.source = self.source.strip()
+        valid_source = self.source == "status" or any(
+            self.source.startswith(prefix) and len(self.source) > len(prefix)
+            for prefix in ("json:", "header:", "cookie:")
+        )
+        if not valid_source:
+            raise ValueError("成功断言来源仅支持 status、json:字段、header:名称或 cookie:名称")
+        if self.operator in {"contains", "in"} and self.expected is None:
+            raise ValueError(f"成功断言操作符 {self.operator} 必须填写期望值")
+        if self.operator == "in" and not isinstance(self.expected, list):
+            raise ValueError("成功断言操作符 in 的期望值必须是 JSON 数组")
+        return self
+
+
 class CredentialAuthConfigModel(CredentialBaseModel):
     """HTTP 或浏览器登录刷新配置；账号、密码和 OTP 秘钥应放入 secret。"""
 
@@ -25,8 +50,10 @@ class CredentialAuthConfigModel(CredentialBaseModel):
     refresh_method: Literal["GET", "POST", "PUT", "PATCH"] = "POST"
     login_request_template: dict[str, Any] = Field(default_factory=dict)
     login_response_mapping: dict[str, Any] = Field(default_factory=dict)
+    login_success_assertions: list[CredentialResponseAssertionModel] = Field(default_factory=list)
     refresh_request_template: dict[str, Any] = Field(default_factory=dict)
     refresh_response_mapping: dict[str, Any] = Field(default_factory=dict)
+    refresh_success_assertions: list[CredentialResponseAssertionModel] = Field(default_factory=list)
     browser_start_url: str = ""
     otp_type: Literal["none", "totp", "sms", "email", "manual"] = "none"
     target_host_patterns: list[str] = Field(default_factory=list)
@@ -44,6 +71,12 @@ class CredentialAuthConfigModel(CredentialBaseModel):
     def normalize_nullable_json_object(cls, value):
         """数据库旧记录中的 JSON NULL 统一转换为空对象。"""
         return {} if value is None else value
+
+    @field_validator("login_success_assertions", "refresh_success_assertions", mode="before")
+    @classmethod
+    def normalize_nullable_success_assertions(cls, value):
+        """数据库旧记录中的断言 JSON NULL 统一转换为空列表。"""
+        return [] if value is None else value
 
     @field_validator("target_host_patterns", mode="before")
     @classmethod

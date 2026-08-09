@@ -4,6 +4,15 @@ title: 更新历史
 
 > 本文档保留历史变更记录。新的更新记录请优先写入 `web/public/docs/updates/` 下的独立日期文件。
 
+## 2026-08-09
+
+1. 修复 HTTP Header 凭证（Header 名称为 `Cookie`）在 HTTP 刷新请求模板中使用 `${secret.cookie}` 时未替换的问题。
+2. 刷新请求日志会对 Cookie、Token、Authorization、密码等敏感内容脱敏。
+3. 新增说明文档：`web/public/docs/updates/2026-08-09-credential-refresh-cookie-template.md`。
+4. 请求模板新增变量插入按钮和保存前校验；新增高级变量 `${secret.headerValue}`。
+5. 主 Header 名称为 `Cookie` 时，响应提取不再允许写入结构化 `cookies`，避免刷新后无法编辑保存；非 Cookie Header 仍支持 Header + Cookie 联合认证。
+6. 新增说明文档：`web/public/docs/updates/2026-08-09-credential-template-variables-and-cookie-writeback.md`。
+
 ## 2026-08-08
 
 1. 修复并优化工单日志查看弹窗搜索结果的列宽拖拽手柄：表头右侧显示紧凑竖向分隔线，鼠标经过显示左右拖动状态；手柄不再撑高表头，并使用 Pointer Events 保证按住拖动时不会丢失移动或释放事件。

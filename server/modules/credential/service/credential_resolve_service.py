@@ -1,4 +1,5 @@
 from fnmatch import fnmatch
+from http.cookies import SimpleCookie
 from typing import Any
 from urllib.parse import urlparse
 
@@ -78,19 +79,25 @@ class CredentialResolveService:
 
     @classmethod
     def _build_cookie_header(cls, secret: dict[str, Any], target_url: str) -> str:
-        """按目标域、路径、secure 规则投影浏览器 Cookie，禁止无差别透传全部 Cookie。"""
+        """合并主 Cookie、结构化 Cookie 和目标域可用的浏览器 Cookie。"""
         cookies = secret.get("cookies")
-        if isinstance(cookies, dict):
-            return "; ".join(f"{name}={value}" for name, value in cookies.items() if str(name).strip())
+        pairs_by_name: dict[str, str] = {}
         raw_cookie = str(secret.get("cookie") or secret.get("cookieHeader") or "").strip()
+        header_name = str(secret.get("headerName") or secret.get("header_name") or "").strip()
+        if not raw_cookie and header_name.lower() == "cookie":
+            raw_cookie = str(secret.get("headerValue") or secret.get("header_value") or "").strip()
         if raw_cookie:
-            return raw_cookie
-        if not isinstance(cookies, list):
+            parsed_cookie = SimpleCookie()
+            parsed_cookie.load(raw_cookie)
+            pairs_by_name.update({name: morsel.value for name, morsel in parsed_cookie.items()})
+        if isinstance(cookies, dict):
+            pairs_by_name.update({str(name): str(value) for name, value in cookies.items() if str(name).strip()})
+            cookies = []
+        elif not isinstance(cookies, list):
             storage_state = secret.get("storageState") or secret.get("storage_state") or {}
             cookies = storage_state.get("cookies") if isinstance(storage_state, dict) else []
         parsed = urlparse(target_url)
         host, path, secure = parsed.hostname or "", parsed.path or "/", parsed.scheme == "https"
-        pairs = []
         for cookie in cookies if isinstance(cookies, list) else []:
             if not isinstance(cookie, dict):
                 continue
@@ -102,8 +109,8 @@ class CredentialResolveService:
                 continue
             name, value = str(cookie.get("name") or "").strip(), str(cookie.get("value") or "")
             if name:
-                pairs.append(f"{name}={value}")
-        return "; ".join(pairs)
+                pairs_by_name[name] = value
+        return "; ".join(f"{name}={value}" for name, value in pairs_by_name.items())
 
     @classmethod
     def _assert_target_allowed(cls, db: Session, binding, credential, target_url: str) -> None:

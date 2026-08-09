@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import json
 import struct
 import time
 from datetime import datetime, timedelta
@@ -63,9 +64,13 @@ class CredentialRefreshService:
                 otp_code,
             )
             response.raise_for_status()
-            new_secret = cls._extract_response_secret(old_secret, response, cls._response_mapping(config, credential.auth_mode))
-            if new_secret == old_secret:
-                raise ValueError("刷新响应未提取到新凭证，请检查响应字段映射")
+            cls._validate_response_success_assertions(
+                response,
+                cls._response_success_assertions(config, credential.auth_mode),
+            )
+            new_secret, extracted_any = cls._extract_response_secret(old_secret, response, cls._response_mapping(config, credential.auth_mode))
+            if not extracted_any:
+                raise ValueError("刷新响应未提取到新凭证，请在凭证编辑页配置【响应提取规则】。若当前凭证主要依赖 Cookie 鉴权，可将凭证类型改为 HTTP Cookie。")
             now = datetime.now()
             updated = CredentialDao.update_credential(db, credential_id, {"secret_cipher_text": encrypt_secret(new_secret), "secret_mask": mask_secret(new_secret), "revision": expected_revision + 1, "last_refresh_time": now, "last_refresh_status": "success", "last_refresh_message": "HTTP 刷新成功", "update_by": operator, "update_time": now}, expected_revision)
             if not updated:
@@ -124,6 +129,45 @@ class CredentialRefreshService:
             return {key: CredentialRefreshService._render_request_template(item, secret) for key, item in template.items()}
         return template
 
+    @staticmethod
+    def _build_template_secret(secret: dict[str, Any]) -> dict[str, Any]:
+        """构造请求模板变量上下文，兼容将 Cookie 保存为 HTTP Header 的凭证。"""
+        template_secret = dict(secret)
+        primary_cookie = template_secret.get("cookie") or template_secret.get("cookieHeader")
+        header_name = str(template_secret.get("headerName") or template_secret.get("header_name") or "").strip()
+        header_value = template_secret.get("headerValue") or template_secret.get("header_value")
+        if header_value is not None and "headerValue" not in template_secret:
+            # 兼容历史字段 header_value，并保持模板变量统一使用 camelCase 的 ${secret.headerValue}。
+            template_secret["headerValue"] = header_value
+        if not primary_cookie and header_name.lower() == "cookie" and header_value:
+            # HTTP Header 类型可将 Cookie 保存在 headerName/headerValue 中；模板仍可统一使用 ${secret.cookie}。
+            template_secret["cookie"] = header_value
+        return template_secret
+
+    @staticmethod
+    def _mask_request_for_log(kwargs: dict[str, Any]) -> dict[str, Any]:
+        """脱敏刷新请求日志，避免 Cookie、Token、密码等凭证内容写入日志。"""
+        sensitive_names = {
+            "authorization", "cookie", "set_cookie", "proxy_authorization", "password",
+            "passwd", "secret", "token", "api_key", "apikey",
+        }
+        sensitive_fragments = ("token", "secret", "password", "cookie", "api_key")
+
+        def mask(value: Any, key: str = "") -> Any:
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key in sensitive_names or any(name in normalized_key for name in sensitive_fragments):
+                return "******"
+            if normalized_key == "headers" and isinstance(value, dict):
+                # 请求模板可把任意 secret 字段注入自定义 Header，日志中不再按 Header 名称猜测敏感性。
+                return {str(item_key): "******" for item_key in value}
+            if isinstance(value, dict):
+                return {str(item_key): mask(item_value, str(item_key)) for item_key, item_value in value.items()}
+            if isinstance(value, list):
+                return [mask(item) for item in value]
+            return value
+
+        return mask(kwargs)
+
     @classmethod
     def _request_config(cls, config, auth_mode: str) -> dict[str, Any]:
         """读取新旧两种认证配置，旧字段继续作为登录/刷新模板的回退值。"""
@@ -153,6 +197,65 @@ class CredentialRefreshService:
         return mapping or config.response_mapping or {}
 
     @classmethod
+    def _response_success_assertions(cls, config, auth_mode: str) -> list[Any]:
+        """读取登录或刷新接口独立配置的业务成功断言。"""
+        if not config:
+            return []
+        assertions = getattr(config, "login_success_assertions" if auth_mode == "http_login" else "refresh_success_assertions", None)
+        return assertions if isinstance(assertions, list) else []
+
+    @classmethod
+    def _validate_response_success_assertions(cls, response: httpx.Response, assertions: list[Any]) -> None:
+        """校验业务成功断言，任何一条不通过都保留旧凭证并终止写回。"""
+        if not assertions:
+            return
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        response_cookies = cls._response_cookies(response)
+        for index, raw_assertion in enumerate(assertions, start=1):
+            assertion = raw_assertion.model_dump() if hasattr(raw_assertion, "model_dump") else raw_assertion
+            if not isinstance(assertion, dict):
+                raise ValueError(f"响应成功断言第 {index} 条格式错误")
+            source = str(assertion.get("source") or "").strip()
+            operator = str(assertion.get("operator") or "equals")
+            expected = assertion.get("expected")
+            actual = response.status_code if source == "status" else cls._read_response_value(payload, response, response_cookies, source)
+            if cls._matches_response_assertion(actual, operator, expected):
+                continue
+            message = str(assertion.get("message") or "").strip()
+            detail = message or f"来源 {source} 的实际值 {actual!r} 不满足 {operator} {expected!r}"
+            raise ValueError(f"响应成功断言第 {index} 条未通过：{detail}")
+
+    @staticmethod
+    def _matches_response_assertion(actual: Any, operator: str, expected: Any) -> bool:
+        """使用固定操作符比较响应值，避免在凭证刷新中执行任意代码。"""
+        if operator == "exists":
+            return actual is not None
+        if operator == "not_empty":
+            if actual is None:
+                return False
+            if isinstance(actual, str):
+                return bool(actual.strip())
+            if isinstance(actual, (dict, list, tuple, set)):
+                return bool(actual)
+            return True
+        if operator == "equals":
+            return actual == expected
+        if operator == "not_equals":
+            return actual != expected
+        if operator == "contains":
+            if isinstance(actual, str):
+                return str(expected) in actual
+            if isinstance(actual, (dict, list, tuple, set)):
+                return expected in actual
+            return False
+        if operator == "in":
+            return isinstance(expected, list) and actual in expected
+        raise ValueError(f"不支持的响应成功断言操作符: {operator}")
+
+    @classmethod
     def _execute_http_request(
         cls,
         url: str,
@@ -172,7 +275,7 @@ class CredentialRefreshService:
             secret = {**secret, "otp": otp_code}
         elif otp_type not in {"none", ""}:
             raise ValueError("不支持的 OTP 类型")
-        rendered = cls._render_request_template(request_config, secret)
+        rendered = cls._render_request_template(request_config, cls._build_template_secret(secret))
         method = str(rendered.pop("method", "POST")).upper()
         headers = {str(k): str(v) for k, v in (rendered.pop("headers", {}) or {}).items()}
         headers.update({str(k): str(v) for k, v in (secret.get("headers") or {}).items() if k not in headers})
@@ -197,6 +300,7 @@ class CredentialRefreshService:
             kwargs["data"] = data
         elif body is not None and method not in {"GET", "HEAD"}:
             kwargs["json"] = body
+        logger.info(f"凭证刷新：{json.dumps(cls._mask_request_for_log(kwargs), ensure_ascii=False)}")
         return httpx.request(method, url, **kwargs)
 
     @staticmethod
@@ -212,24 +316,30 @@ class CredentialRefreshService:
 
     @staticmethod
     def _secret_cookies(secret: dict[str, Any]) -> dict[str, str]:
-        """把 Cookie 字典、Cookie 字符串和 storageState 统一为请求 Cookie。"""
-        cookies = secret.get("cookies")
-        if isinstance(cookies, dict):
-            return {str(k): str(v) for k, v in cookies.items()}
-        if isinstance(cookies, list):
-            return {str(item.get("name")): str(item.get("value", "")) for item in cookies if isinstance(item, dict) and item.get("name")}
+        """合并结构化 Cookie、主 Cookie 字符串和 storageState 为请求 Cookie。"""
+        result: dict[str, str] = {}
+        storage = secret.get("storageState") or secret.get("storage_state")
+        if isinstance(storage, dict) and storage:
+            result.update(CredentialRefreshService._secret_cookies(storage))
         raw = secret.get("cookie") or secret.get("cookieHeader")
         if raw:
             parsed = SimpleCookie()
             parsed.load(str(raw))
-            return {key: morsel.value for key, morsel in parsed.items()}
-        storage = secret.get("storageState") or secret.get("storage_state") or {}
-        return CredentialRefreshService._secret_cookies(storage) if isinstance(storage, dict) else {}
+            result.update({key: morsel.value for key, morsel in parsed.items()})
+        cookies = secret.get("cookies")
+        if isinstance(cookies, dict):
+            result.update({str(key): str(value) for key, value in cookies.items() if str(key).strip()})
+        elif isinstance(cookies, list):
+            result.update({str(item.get("name")): str(item.get("value", "")) for item in cookies if isinstance(item, dict) and item.get("name")})
+        return result
 
     @classmethod
-    def _extract_response_secret(cls, old_secret: dict[str, Any], response: httpx.Response, mapping: Any) -> dict[str, Any]:
-        """从 JSON、响应头和 Set-Cookie 提取新凭证，并保留未变化的旧字段。"""
+    def _extract_response_secret(cls, old_secret: dict[str, Any], response: httpx.Response, mapping: Any) -> tuple[dict[str, Any], bool]:
+        """从 JSON、响应头和 Set-Cookie 提取新凭证，并保留未变化的旧字段。
+        返回值: (新的 secret 字典, 是否实际提取到了新内容)。
+        """
         result = dict(old_secret)
+        extracted_any = False
         try:
             payload = response.json()
         except ValueError:
@@ -239,20 +349,73 @@ class CredentialRefreshService:
             for secret_key, source in mapping.items():
                 value = cls._read_response_value(payload, response, response_cookies, source)
                 if value is not None:
-                    if str(secret_key) in {"cookies", "headers"} and isinstance(value, dict):
-                        merged = cls._secret_cookies(result) if str(secret_key) == "cookies" else dict(result.get("headers") or {})
-                        merged.update(value)
-                        result[str(secret_key)] = merged
-                    else:
-                        result[str(secret_key)] = value
-        # 未配置映射时，Set-Cookie 仍可按 cookie 字段自动合并，满足手工 Cookie 刷新场景。
-        if response_cookies:
-            merged = cls._secret_cookies(result)
-            merged.update(response_cookies)
-            result["cookies"] = merged
-            result.pop("cookie", None)
-            result.pop("cookieHeader", None)
-        return result
+                    cls._write_response_value(result, str(secret_key), value)
+                    extracted_any = True
+        return result, extracted_any
+
+    @classmethod
+    def _write_response_value(cls, secret: dict[str, Any], target: str, value: Any) -> None:
+        """按显式目标路径写入提取值，禁止未配置规则时隐式更新 Cookie。"""
+        normalized_target = target.strip()
+        if normalized_target == "header.cookie":
+            cls._assert_cookie_header(secret)
+            if isinstance(value, (dict, list)):
+                raise ValueError("header.cookie 只能写入单个 Cookie Header 字符串")
+            # 覆盖整个 Cookie Header，用户需明确接受未包含的 Cookie 会丢失。
+            secret["headerValue"] = str(value)
+            return
+
+        if normalized_target.startswith("header.cookie."):
+            cookie_name = normalized_target[len("header.cookie."):].strip()
+            if not cookie_name:
+                raise ValueError("header.cookie.<名称> 必须填写要更新的 Cookie 名称")
+            cls._assert_cookie_header(secret)
+            if isinstance(value, (dict, list)):
+                raise ValueError("header.cookie.<名称> 只能写入单个 Cookie 值")
+            existing = str(secret.get("headerValue") or secret.get("header_value") or "")
+            # 同名项替换；原 Header 中没有该项时按配置约定静默追加。
+            secret["headerValue"] = cls._merge_cookies_into_string(existing, {cookie_name: str(value)})
+            return
+
+        if normalized_target == "cookies":
+            cls._assert_structured_cookie_target_allowed(secret)
+            if not isinstance(value, dict):
+                raise ValueError("目标字段 cookies 只能接收对象值，例如来源 cookies 或 JSON 对象")
+            # 显式配置 cookies ← cookies 表示以本次响应 Cookie 集合整体覆盖旧集合。
+            secret["cookies"] = {str(key): str(item) for key, item in value.items() if str(key).strip()}
+            return
+
+        if normalized_target.startswith("cookies."):
+            cls._assert_structured_cookie_target_allowed(secret)
+            cookie_name = normalized_target[len("cookies."):].strip()
+            if not cookie_name:
+                raise ValueError("cookies.<名称> 必须填写要更新的 Cookie 名称")
+            if isinstance(value, (dict, list)):
+                raise ValueError("cookies.<名称> 只能写入单个 Cookie 值")
+            cookies = cls._secret_cookies(secret)
+            cookies[cookie_name] = str(value)
+            secret["cookies"] = cookies
+            return
+
+        # 普通字段仍按显式字段名整体写入，例如 token、headerValue、headers。
+        secret[normalized_target] = value
+
+    @staticmethod
+    def _assert_cookie_header(secret: dict[str, Any]) -> None:
+        """确认 header.cookie 目标仅用于 Header 名称为 Cookie 的凭证。"""
+        header_name = str(secret.get("headerName") or secret.get("header_name") or "").strip()
+        if header_name.lower() != "cookie":
+            raise ValueError("header.cookie 目标仅适用于 Header 名称为 Cookie 的凭证")
+
+    @staticmethod
+    def _assert_structured_cookie_target_allowed(secret: dict[str, Any]) -> None:
+        """避免主 Cookie Header 与结构化 Cookie 同时写回，防止下次编辑出现冲突。"""
+        header_name = str(secret.get("headerName") or secret.get("header_name") or "").strip()
+        if header_name.lower() == "cookie":
+            raise ValueError(
+                "主 Header 为 Cookie 时不能写入 cookies 或 cookies.<名称>；"
+                "请使用 header.cookie 或 header.cookie.<名称> 更新 Cookie Header"
+            )
 
     @staticmethod
     def _response_cookies(response: httpx.Response) -> dict[str, str]:
@@ -267,9 +430,31 @@ class CredentialRefreshService:
     def _read_response_value(cls, payload: Any, response: httpx.Response, response_cookies: dict[str, str], source: Any):
         text = str(source or "")
         if text == "cookies" or text == "cookie.*":
-            return response_cookies
+            # 未返回标准 Set-Cookie 时不把空对象视作已提取，避免整组覆盖误清空旧 Cookie。
+            return response_cookies or None
         if text.startswith("header:"):
-            return response.headers.get(text[7:])
+            header_name = text[7:].strip()
+            raw_set_cookie_index = None
+            if header_name.lower().startswith("set-cookie[") and header_name.endswith("]"):
+                raw_set_cookie_index = header_name[len("set-cookie["):-1]
+                if not raw_set_cookie_index.isdigit() or int(raw_set_cookie_index) < 1:
+                    raise ValueError("header:set-cookie[n] 中 n 必须是从 1 开始的响应 Set-Cookie 序号")
+                header_name = "set-cookie"
+            if header_name.lower() == "set-cookie":
+                # Set-Cookie 允许出现多次，不能将多条值拼接后误写入单个 Cookie 字段。
+                values = [value.strip() for value in response.headers.get_list("set-cookie") if value.strip()]
+                if raw_set_cookie_index is not None:
+                    index = int(raw_set_cookie_index) - 1
+                    if index >= len(values):
+                        raise ValueError(f"响应 Set-Cookie 序号超出范围，当前只有 {len(values)} 条")
+                    return values[index]
+                if len(values) > 1:
+                    raise ValueError(
+                        "响应包含多个 Set-Cookie，header:set-cookie 只能读取单条原始值；"
+                        "请使用 header:set-cookie[n] 明确选择序号，或使用 cookie:<名称> 提取标准 Cookie"
+                    )
+                return values[0] if values else None
+            return response.headers.get(header_name)
         if text.startswith("cookie:"):
             return response_cookies.get(text[7:])
         if text.startswith("json:"):
@@ -280,6 +465,38 @@ class CredentialRefreshService:
                 return None
             value = value[part]
         return value
+
+    @staticmethod
+    def _merge_cookies_into_string(existing: str, new_cookies: dict[str, str]) -> str:
+        """将 Set-Cookie 键值对合并到现有 cookie 字符串中，同名 key 替换值，新 key 追加到末尾。"""
+        if not new_cookies:
+            return existing
+        # 解析现有 cookie 字符串，保持顺序
+        pairs: list[tuple[str, str]] = []
+        seen_keys: set[str] = set()
+        for part in existing.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            key, _, value = part.partition("=")
+            key = key.strip()
+            if key and key not in seen_keys:
+                pairs.append((key, value.strip()))
+                seen_keys.add(key)
+        # 合并新 cookie：同名替换，新 key 追加
+        for key, value in new_cookies.items():
+            key = key.strip()
+            if not key:
+                continue
+            if key in seen_keys:
+                for i, (k, _) in enumerate(pairs):
+                    if k == key:
+                        pairs[i] = (key, value.strip())
+                        break
+            else:
+                pairs.append((key, value.strip()))
+                seen_keys.add(key)
+        return "; ".join(f"{k}={v}" for k, v in pairs)
 
     @staticmethod
     def _apply_response_mapping(old_secret: dict[str, Any], payload: Any, mapping: Any) -> dict[str, Any]:

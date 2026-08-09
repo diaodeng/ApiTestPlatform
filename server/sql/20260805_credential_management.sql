@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS auth_credential_auth_config (
   login_url VARCHAR(1000) NOT NULL DEFAULT '', refresh_url VARCHAR(1000) NOT NULL DEFAULT '', request_method VARCHAR(16) NOT NULL DEFAULT 'POST',
   request_template JSON NULL, response_mapping JSON NULL, browser_start_url VARCHAR(1000) NOT NULL DEFAULT '', otp_type VARCHAR(32) NOT NULL DEFAULT 'none', target_host_patterns JSON NULL,
   login_method VARCHAR(16) NOT NULL DEFAULT 'POST', refresh_method VARCHAR(16) NOT NULL DEFAULT 'POST',
-  login_request_template JSON NULL, login_response_mapping JSON NULL, refresh_request_template JSON NULL, refresh_response_mapping JSON NULL,
+  login_request_template JSON NULL, login_response_mapping JSON NULL, login_success_assertions JSON NULL, refresh_request_template JSON NULL, refresh_response_mapping JSON NULL, refresh_success_assertions JSON NULL,
   update_time DATETIME NOT NULL COMMENT '更新时间', PRIMARY KEY (auth_config_id), UNIQUE KEY uk_auth_credential_auth_config (credential_id),
   CONSTRAINT fk_auth_credential_auth_config_credential FOREIGN KEY (credential_id) REFERENCES auth_credential(credential_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一凭证认证与刷新配置';

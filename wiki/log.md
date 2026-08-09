@@ -3,10 +3,31 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-08
+updated: 2026-08-09
 ---
 
 # 操作日志
+
+## [2026-08-09] INGEST-CODE | 凭证模板变量校验与 Cookie 写回边界
+
+- 触发：主 Header 为 `Cookie` 的凭证在刷新后被响应映射写入结构化 `cookies`，页面因 Cookie Header 与结构化 Cookie 冲突而无法保存；同时请求模板缺少可发现的变量插入和保存前校验。
+- 架构层：统一凭证 / 凭证编辑表单 / HTTP 刷新响应提取。
+- 更新的页面：`web/src/views/system/credential/components/CredentialDialog.vue`、`server/modules/credential/service/credential_refresh_service.py`、`server/tests/test_credential_refresh_service.py`、`web/public/docs/credential_management.md`、`web/public/docs/updates/2026-08-09-credential-template-variables-and-cookie-writeback.md`。
+- 变更传播链：表单变量下拉 -> 光标位置插入 `${secret.xxx}` -> 保存前字段可用性与映射目标校验 -> 后端刷新写回保护 -> 加密凭证快照。
+- 关键规则：保留 `${secret.cookie}` 的语义兼容；新增直接读取主 Header 值的高级 `${secret.headerValue}`（兼容历史 `header_value`）；主 Header 为 Cookie 时拒绝 `cookies` / `cookies.名称` 写回并提示改用 `header.cookie`，非 Cookie Header 保持 Header + Cookie 联合认证。
+- 验证：新增后端定向测试覆盖 Cookie Header 写回拒绝、Authorization + 结构化 Cookie 允许、`${secret.headerValue}` 渲染和历史字段兼容；刷新日志对全部请求 Header 脱敏；前端构建验证见本次交付记录。
+
+## [2026-08-09] INGEST-CODE | 凭证刷新 Cookie 模板变量修复
+
+- 触发：开发环境凭证 ID `4` 使用 `http_header` 保存 `Cookie`（`headerName=cookie`、`headerValue` 存放完整 Cookie）时，2026-08-09 09:28:11 的刷新请求日志仍显示 `headers.cookie=${secret.cookie}`。
+- 架构层：统一凭证 / HTTP 刷新服务 / 请求模板变量与安全日志。
+- 创建的页面：无。
+- 更新的页面：`flows/credential-refresh.md`、`contracts/credential-api.md`、`web/public/docs/credential_management.md`、`web/public/docs/updates/2026-08-09-credential-refresh-cookie-template.md`、`web/public/docs/updates/history.md`。
+- 创建的双向链接：0 对（既有凭证流程、数据模型与接口契约的链接保持不变）。
+- 变更传播链：加密凭证快照（`headerName` / `headerValue`） -> `CredentialRefreshService._build_template_secret` -> `${secret.cookie}` 渲染 -> HTTP 刷新请求；请求参数 -> `_mask_request_for_log` -> 脱敏刷新日志。
+- 根因与修复：模板渲染只读取密文原始字段，而该类型没有 `cookie` 字段。现在当 Header 名称为 `Cookie` 时，将 Header 值映射为 `${secret.cookie}`；已有 `cookie` 和 `cookieHeader` 字段保持优先级。
+- 验证：针对 ID `4` 的已脱敏配置执行模板渲染，确认结果不再含 `${secret.cookie}` 且值与已保存 Header 值一致；未发起真实刷新请求，避免非必要调用外部系统。请求日志会脱敏 Cookie、Token、Authorization、密码等敏感值。
+- 总共涉及页面：5。
 
 ## [2026-08-08] INGEST-CODE | 工单日志查看器列宽拖拽手柄修复
 
