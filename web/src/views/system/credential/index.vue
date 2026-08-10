@@ -112,7 +112,7 @@ const businessTypes = [
 const bindingProjections = computed(() => bindingForm.businessType === 'web_case'
   ? [{ value: 'playwright_storage', label: 'Playwright storageState' }]
   : [{ value: 'http_header', label: 'HTTP Header' }, { value: 'http_cookie', label: 'HTTP Cookie' }])
-const emptyBinding = () => ({ bindingName: '', credentialId: '', businessType: 'ticket_remote_sync', projectionType: 'http_header', targetUrl: '', targetHostPatterns: [], sharingMode: 'shared_read', writebackEnabled: false, enabled: true, remark: '' })
+const emptyBinding = () => ({ bindingId: '', bindingName: '', credentialId: '', businessType: 'ticket_remote_sync', projectionType: 'http_header', targetUrl: '', targetHostPatterns: [], sharingMode: 'shared_read', writebackEnabled: false, enabled: true, remark: '' })
 const bindingForm = reactive(emptyBinding())
 
 const credentialTypeLabel = value => credentialTypes.find(item => item.value === value)?.label || value || '-'

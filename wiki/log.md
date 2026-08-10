@@ -3,11 +3,16 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-09
+updated: 2026-08-10
 ---
 
 # 操作日志
 
+## [2026-08-10] INGEST-CODE | 统一凭证绑定新增模式修复
+
+- 修复统一凭证管理中，从“编辑绑定”切换到“新增绑定”时，表单残留旧 `bindingId` 导致保存误走更新的问题。
+- 现在“新增绑定”会强制清空主键，避免同一业务、同一投影类型的后续新增记录覆盖旧记录。
+- 同步补充了 `web/public/docs/credential_management.md` 与 `web/public/docs/updates/history.md` 的用户说明和更新记录。
 ## [2026-08-09] INGEST-CODE | 统一凭证 HTTP 刷新失败自动登录兜底（补充前端配置入口）
 
 - 触发：统一凭证的 `http_refresh` 场景在刷新失败后，需要自动切换到登录接口重新获取凭证，再用登录得到的新凭证继续刷新。

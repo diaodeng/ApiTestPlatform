@@ -6,6 +6,7 @@
 
 统一凭证管理页面只维护凭证和业务绑定，不提供日志拉取外部环境的编辑入口。日志拉取的环境地址、Origin、商家等配置继续通过系统参数维护，参数键为 `ticket.logPull.external`；其中每个环境只填写 `credentialBindingId` 引用统一凭证，不填写 Cookie、Authorization 或 API Key。
 
+> 业务绑定新增和编辑是两条独立操作；点击“新增绑定”时会清空上一次编辑留下的绑定主键，因此同一业务、同一投影类型也可以继续新增多条绑定记录。
 ## 远端工单同步
 
 远端同步配置的 `credentialBindingId` 必填。请创建 `http_api_key` 或 `http_header` 凭证，敏感字段示例为 `{"headerName":"X-API-Key","headerValue":"你的密钥"}`，认证方式选"手工"，关闭自动刷新；再创建 `ticket_remote_sync`、`http_header` 绑定。
