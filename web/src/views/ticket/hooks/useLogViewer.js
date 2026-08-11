@@ -33,13 +33,7 @@ import {
 import { useLogPrepareProgress } from './useLogPrepareProgress';
 
 export function useLogViewer(proxy, currentTicketId, options = {}) {
-  const {
-    detail,
-    detailOpen,
-    getList,
-    refreshDetail,
-    applyProjectVendorMapping,
-  } = options;
+  const { detail, detailOpen, getList, refreshDetail, applyProjectVendorMapping } = options;
 
   const logPullLoading = ref(false);
   const logPullSubmitting = ref(false);
@@ -255,10 +249,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   function submitLogPull() {
     proxy.$refs.logPullRef.validate((valid) => {
       if (!valid) return;
-      if (
-        logPullForm.value.pullMethod === 'path' &&
-        !String(logPullForm.value.path || '').trim()
-      ) {
+      if (logPullForm.value.pullMethod === 'path' && !String(logPullForm.value.path || '').trim()) {
         proxy.$modal.msgWarning('拉取方式为路径时，path 不能为空');
         return;
       }
@@ -584,7 +575,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     const recordId = row?.id;
     if (!recordId) return Promise.resolve();
     logViewerSearching.value = true;
-    return prepareWithDownloadProgress(ticketId, recordId, () => prepareTicketLogs(ticketId, recordId))
+    return prepareWithDownloadProgress(ticketId, recordId, () =>
+      prepareTicketLogs(ticketId, recordId)
+    )
       .then(() => {
         currentTicketId.value = ticketId;
         resetLogViewerState(ticketId);
@@ -642,7 +635,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   function getLogViewerDownloadProgress(row) {
     return getDownloadProgress(
       row?.ticketId || currentTicketId.value || detail?.value?.ticketId,
-      row?.id,
+      row?.id
     );
   }
 
@@ -725,7 +718,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         keywords.push(keyword.slice(0, 200));
       }
     });
-    return keywords.slice(0, 10);
+    return keywords.slice(0, 20);
   }
 
   /** 同步多高亮关键字，并维护旧展示字段。 */
@@ -741,7 +734,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     if (!selectedKeyword || !logViewerSelectionHighlightOwned.value) {
       return normalizeLogViewerHighlightKeywords(keywords);
     }
-    return normalizeLogViewerHighlightKeywords(keywords).filter((keyword) => keyword !== selectedKeyword);
+    return normalizeLogViewerHighlightKeywords(keywords).filter(
+      (keyword) => keyword !== selectedKeyword
+    );
   }
 
   /** 同步用户输入的多高亮关键字；存在选区时保留选区对应的临时高亮词。 */
