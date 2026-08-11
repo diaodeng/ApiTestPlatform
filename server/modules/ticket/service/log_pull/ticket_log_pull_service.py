@@ -1056,7 +1056,10 @@ class TicketLogPullService:
         binding_id = str(config.get("credentialBindingId") or "").strip()
         if not binding_id:
             raise ValueError("日志拉取外部接口未绑定凭证，请配置 credentialBindingId")
-        headers = CredentialResolveService.resolve_http_headers(db, binding_id, target_url)
+        try:
+            headers = CredentialResolveService.resolve_http_headers(db, binding_id, target_url)
+        except ValueError as exc:
+            raise ValueError(f"日志拉取外部接口凭证不可用：{exc}") from exc
         origin = str(config.get("origin") or "").strip()
         if origin:
             headers["Origin"] = origin
@@ -1074,7 +1077,10 @@ class TicketLogPullService:
     @classmethod
     def get_external_config_services(cls, query_db: Session) -> dict[str, Any]:
         """返回脱敏后的多环境日志拉取外部接口配置。"""
-        return {"environments": cls._get_external_config_dict(query_db)}
+        cls.ensure_param_config_rows(query_db)
+        config_row = TicketLogPullDao.get_external_config_row(query_db)
+        payload = cls._json_loads(getattr(config_row, "config_value", None), {})
+        return {"environments": cls._normalize_external_config(payload)}
 
     @classmethod
     def save_external_config_services(cls, query_db: Session, config: dict[str, Any], current_user: CurrentUserModel) -> CrudResponseModel:
@@ -1199,6 +1205,16 @@ class TicketLogPullService:
                 reason="当前记录缺少可重新拉取的原始参数",
             )
             return CrudResponseModel(is_success=False, message="当前记录缺少可重新拉取的原始参数")
+        if not str(payload.environment or "").strip():
+            cls._log_chain_step(
+                query_db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="retry-log-pull",
+                status="skipped",
+                reason="当前记录缺少环境信息，无法重新拉取",
+            )
+            return CrudResponseModel(is_success=False, message="当前记录缺少环境信息，无法重新拉取")
         cls._log_chain_step(
             query_db,
             ticket_id=record.ticket_id,
@@ -4224,22 +4240,20 @@ class TicketLogPullService:
         """
         读取日志拉取外部接口配置字典，可按环境标识返回指定环境的配置。
         :param db: 数据库会话
-        :param environment: 环境标识，为 None 时返回全量多环境配置
-        :return: 外部接口配置（指定 environment 时返回单环境配置，否则返回全量多环境配置）
+        :param environment: 环境标识，空值会直接报错，避免历史记录误用默认环境
+        :return: 指定 environment 的外部接口配置
         """
         cls.ensure_param_config_rows(db)
         config_row = TicketLogPullDao.get_external_config_row(db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
         normalized = cls._normalize_external_config(payload)
-        if environment and environment in normalized:
-            return normalized[environment]
-        if environment:
-            # 指定环境不存在，回退到第一个环境
-            first_key = next(iter(normalized.keys()), None)
-            if first_key:
-                logger.warning(f"日志拉取环境 '{environment}' 在配置中不存在，回退到环境 '{first_key}'")
-                return normalized[first_key]
-        return normalized
+        env_key = str(environment or "").strip()
+        if not env_key:
+            raise ValueError("日志拉取记录未保存环境信息，无法重新拉取")
+        if env_key in normalized:
+            return normalized[env_key]
+        available_envs = ", ".join(str(key) for key in normalized.keys()) or "无"
+        raise ValueError(f"日志拉取环境 '{env_key}' 不存在，请检查 ticket.logPull.external 配置，当前可用环境：{available_envs}")
 
     @classmethod
     def _get_environment_options(cls, db: Session) -> list[str]:
