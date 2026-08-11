@@ -300,7 +300,7 @@ export function useSyncConfig(proxy) {
       scoPatterns: [],
       versionPatterns: [],
       logPullDefaults: {
-        commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500,
+        commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500, logPullConcurrency: 2,
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
       },
@@ -872,6 +872,7 @@ export function useSyncConfig(proxy) {
       autoAiEnabled: Boolean(logPullDefaults.autoAiEnabled),
       aiAgentCode: logPullDefaults.aiAgentCode || '',
       aiProviderCode: logPullDefaults.aiProviderCode || '',
+      logPullConcurrency: Number(logPullDefaults.logPullConcurrency || 2),
     }
 
     const promptTemplates = payload.promptTemplates || {}

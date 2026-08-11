@@ -61,6 +61,7 @@ export {
   downloadTicketLogPull,
   retryTicketLogPull,
   delTicketLogPull,
+  stopTicketLogPull,
   redownloadTicketLogPull,
   getTicketLogPullContent,
   prepareTicketLogs,

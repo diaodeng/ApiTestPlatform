@@ -179,6 +179,7 @@ class TicketSyncConfigService:
                 "autoAiEnabled": False,
                 "aiAgentCode": "",
                 "aiProviderCode": "",
+                "logPullConcurrency": 2,
             },
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",

@@ -57,7 +57,8 @@ export const logPullStatusOptions = [
   { label: '解析中', value: 'processing', type: 'primary' },
   { label: '成功', value: 'success', type: 'success' },
   { label: '外部失败', value: 'failed', type: 'danger' },
-  { label: '程序异常', value: 'exception', type: 'danger' }
+  { label: '程序异常', value: 'exception', type: 'danger' },
+  { label: '已取消', value: 'cancelled', type: 'info' }
 ]
 
 export const logPullDataTypeOptions = [

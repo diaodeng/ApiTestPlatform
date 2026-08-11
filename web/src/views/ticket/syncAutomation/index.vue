@@ -634,6 +634,16 @@
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="最大并发数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.logPullConcurrency"
+                      :min="1"
+                      :max="20"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="文件上限(MB)">
                     <el-input-number
                       v-model="form.logPullDefaults.fileMaxSize"

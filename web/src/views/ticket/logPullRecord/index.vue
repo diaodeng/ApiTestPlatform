@@ -210,6 +210,7 @@
           <el-button link type="primary" icon="CopyDocument" @click="handleCopyLogPull(scope.row)" :disabled="actionLoading || activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:add']">
             复制
           </el-button>
+          <el-button link type="danger" icon="VideoPause" @click="stopLogPull(scope.row)" :disabled="actionLoading || !activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:remove']">停止</el-button>
           <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
             重新拉取
           </el-button>
@@ -452,7 +453,8 @@ import {
   listTicketLogPullRecords,
   importTicketLogPullStoreConfigs,
   redownloadTicketLogPull,
-  retryTicketLogPull
+  retryTicketLogPull,
+  stopTicketLogPull
 } from '@/api/ticket/ticket'
 import { all as listAllAgents } from '@/api/hrm/agent'
 import { allPushConfig as listAllPushConfig } from '@/api/hrm/push'
@@ -1218,6 +1220,19 @@ async function downloadLogPull(row) {
   }
 }
 
+
+function stopLogPull(row) {
+  if (!row?.id) return
+  proxy.$modal.confirm("是否确认停止日志拉取记录？停止后可重新拉取。").then(() => {
+    actionLoading.value = true
+    return stopTicketLogPull(row.id)
+  }).then(() => {
+    proxy.$modal.msgSuccess("已请求停止任务")
+    return getList()
+  }).catch(() => {}).finally(() => {
+    actionLoading.value = false
+  })
+}
 function retryLogPull(row) {
   if (!row?.id) return
   runAction(retryTicketLogPull(row.id), '已重新提交拉取任务')

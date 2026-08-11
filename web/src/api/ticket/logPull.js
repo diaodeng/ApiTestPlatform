@@ -181,6 +181,13 @@ export function delTicketLogPull(recordId) {
   });
 }
 
+export function stopTicketLogPull(recordId) {
+  return request({
+    url: `/ticket/log-pulls/${recordId}/stop`,
+    method: 'post',
+  });
+}
+
 // 重新下载日志压缩包
 export function redownloadTicketLogPull(recordId) {
   return request({
