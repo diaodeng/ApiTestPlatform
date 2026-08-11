@@ -48,6 +48,45 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
     poll_timeout_sec: int = Field(default=1800, description="日志拉取轮询超时时间，单位秒")
     download_timeout_sec: int = Field(default=300, description="压缩包下载超时时间，单位秒")
     max_content_chars: int = Field(default=500000, description="压缩入库允许的最大文本字符数，超出则失败")
+    max_extract_seconds: int = Field(default=300, description="日志查看准备阶段最大解压秒数")
+    max_extract_file_count: int = Field(default=2000, description="日志查看准备阶段最大解压文件数")
+    max_extract_total_bytes: int = Field(default=2147483648, description="日志查看准备阶段最大解压总字节数")
+    max_search_seconds: int = Field(default=30, description="日志关键字搜索最大执行秒数")
+    max_search_file_count: int = Field(default=1000, description="日志关键字搜索最大扫描文件数")
+    max_python_search_bytes: int = Field(default=268435456, description="Python降级搜索最大扫描字节数")
+    post_download_extract_enabled: bool = Field(default=False, description="日志下载完成后是否自动解压到查看目录")
+    post_download_version_extract_enabled: bool = Field(
+        default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
+    )
+    post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
+
+
+class TicketLogPullPostProcessConfigModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取下载完成后处理配置模型。
+    """
+
+    post_download_extract_enabled: bool = Field(default=False, description="日志下载完成后是否自动解压到查看目录")
+    post_download_version_extract_enabled: bool = Field(
+        default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
+    )
+    post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
+
+
+class TicketLogPullExternalEnvironmentConfigModel(TicketLogPullBaseModel):
+    """单个日志拉取外部环境配置，认证信息只允许通过凭证绑定提供。"""
+
+    insert_url: str = ""
+    page_url: str = ""
+    credential_binding_id: str = ""
+    origin: str = ""
+    vendors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class TicketLogPullExternalConfigModel(TicketLogPullBaseModel):
+    """日志拉取多环境外部接口配置。"""
+
+    environments: dict[str, TicketLogPullExternalEnvironmentConfigModel] = Field(default_factory=dict)
 
 
 class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
@@ -55,28 +94,140 @@ class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
     日志拉取门店选项模型。
     """
 
-    store_id: int = Field(description="门店ID")
-    store_code: str | None = Field(default=None, description="门店编码")
+    store_id: str = Field(description="门店org_no，作为日志拉取实际提交值")
+    store_code: str | None = Field(default=None, description="门店编码，通常与org_no一致")
+    sap_org_no: str | None = Field(default=None, description="SAP机构编号")
     store_name: str = Field(description="门店名称")
 
 
 class TicketLogPullVendorOptionModel(TicketLogPullBaseModel):
     """
-    日志拉取商家选项模型。
+    日志拉取商家参数配置选项模型。
     """
 
-    vendor_id: int = Field(description="商家ID")
-    vendor_code: str | None = Field(default=None, description="商家编码")
+    vender_no: str = Field(description="商户编号，也是门店配置关联键")
     vendor_name: str = Field(description="商家名称")
-    stores: list[TicketLogPullStoreOptionModel] = Field(default_factory=list, description="商家下门店列表")
+
+
+class TicketLogPullParameterExampleModel(TicketLogPullBaseModel):
+    """
+    日志拉取 modifyTime/path 参数示例选项。
+    """
+
+    name: str = Field(default="", description="示例名称")
+    value: str = Field(default="", description="示例值")
 
 
 class TicketLogPullVendorStoreOptionsModel(TicketLogPullBaseModel):
     """
-    日志拉取商家门店联动选项模型。
+    日志拉取商家与指定商家门店选项模型。
     """
 
+    environments: list[str] = Field(default_factory=list, description="可用环境标识列表")
+
     vendors: list[TicketLogPullVendorOptionModel] = Field(default_factory=list, description="商家列表")
+
+    stores: list[TicketLogPullStoreOptionModel] = Field(default_factory=list, description="指定商家下的门店列表")
+
+    parameter_examples: list[TicketLogPullParameterExampleModel] = Field(
+        default_factory=list,
+        description="modifyTime/path 参数示例列表",
+    )
+
+
+class TicketLogPullStoreConfigBaseModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取门店配置基础模型。
+    """
+
+    id: int | None = None
+    group_no: str = Field(default="", description="集团编号")
+    vender_no: str = Field(default="", description="商户编号")
+    region_no: str = Field(default="", description="区域编号")
+    org_no: str | None = Field(default=None, description="机构编号")
+    org_name: str | None = Field(default=None, description="机构名称")
+    sap_org_no: str | None = Field(default=None, description="SAP机构编号")
+    platform_no: str = Field(default="", description="会员渠道编号")
+    parent_org_no: str | None = Field(default=None, description="上级机构编号")
+    perm_node_id: int = Field(default=0, description="权限树节点ID")
+    org_type: int = Field(default=1, description="机构类型：1-大区 2-业态 3-区本 4-门店")
+    company_no: str = Field(default="", description="所属公司代码")
+    city_no: str = Field(default="", description="城市编号")
+    biz_type_no: str = Field(default="1", description="业态编号")
+    status: int = Field(default=1, description="状态：0-未开 1-启用 2-关闭")
+    created: datetime | None = Field(default=None, description="创建时间")
+    modifid: datetime | None = Field(default=None, description="修改时间")
+    open_date: date | None = Field(default=None, description="开业日期")
+    language_desc: str | None = Field(default="zh_HK", description="默认语言")
+
+
+@as_query
+class TicketLogPullStoreConfigQueryModel(QueryModel):
+    """
+    工单日志拉取门店配置查询模型。
+    """
+
+    group_no: str | None = Field(default=None, description="集团编号")
+    vender_no: str | None = Field(default=None, description="商户编号")
+    org_no: str | None = Field(default=None, description="机构编号")
+    sap_org_no: str | None = Field(default=None, description="SAP机构编号")
+    keyword: str | None = Field(default=None, description="机构名称或编号关键字")
+
+
+class TicketLogPullStoreConfigModel(TicketLogPullStoreConfigBaseModel):
+    """
+    工单日志拉取门店配置返回模型。
+    """
+
+    pass
+
+
+class TicketLogPullStoreImportModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取门店配置导入模型。
+    """
+
+    import_mode: str = Field(default="incremental", description="导入方式：incremental 增量，overwrite 覆盖")
+
+
+class TicketLogPullProjectVendorMapBaseModel(TicketLogPullBaseModel):
+    """
+    工单日志拉取项目商家映射基础模型。
+    """
+
+    id: int | None = None
+    project_id: int = Field(default=0, description="项目ID")
+    project_name: str = Field(default="", description="项目名称")
+    vender_no: str = Field(default="", description="商户编号")
+    created: datetime | None = Field(default=None, description="创建时间")
+    modifid: datetime | None = Field(default=None, description="修改时间")
+
+
+@as_query
+class TicketLogPullProjectVendorMapQueryModel(QueryModel):
+    """
+    工单日志拉取项目商家映射查询模型。
+    """
+
+    project_id: int | None = Field(default=None, description="项目ID")
+    keyword: str | None = Field(default=None, description="项目名称或商户编号关键字")
+
+
+class TicketLogPullProjectVendorMapModel(TicketLogPullProjectVendorMapBaseModel):
+    """
+    工单日志拉取项目商家映射返回模型。
+    """
+
+    pass
+
+
+class TicketLogPullProjectVendorMapUpsertModel(TicketLogPullProjectVendorMapBaseModel):
+    """
+    工单日志拉取项目商家映射保存模型。
+    """
+
+    project_id: int = Field(description="项目ID")
+    vender_no: str = Field(description="商户编号")
 
 
 class TicketLogPullCreateModel(TicketLogPullBaseModel):
@@ -85,8 +236,9 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     """
 
     ticket_id: int | None = Field(default=None, description="关联工单ID，可为空表示独立管理记录")
+    environment: str | None = Field(default=None, description="日志拉取环境标识，对应外部配置中的环境key")
     vendor_id: int = Field(description="外部接口 venderId")
-    store_id: int = Field(description="外部接口 storeId")
+    store_id: str = Field(description="外部接口 storeId，实际使用门店org_no")
     pos_no: int = Field(description="外部接口 posNo")
     command_data_type: int = Field(default=1, description="数据类型：1日志，2DB")
     modify_time: date | str | None = Field(default=None, description="命令内容里的修改日期")
@@ -101,6 +253,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     storage_mode: str | None = Field(default=None, description="本次任务使用的存储模式，支持 local/ftp")
     auto_ai_enabled: bool = Field(default=False, description="日志拉取成功后是否自动发起AI分析")
     ai_agent_code: str | None = Field(default=None, description="自动AI分析使用的Agent编码")
+    ai_provider_code: str | None = Field(default=None, description="自动AI分析使用的Provider编码")
     notify_config: dict[str, Any] | None = Field(default=None, description="日志拉取后的通知配置")
 
     @model_validator(mode="before")
@@ -152,10 +305,14 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
                 raise ValueError("时间点前后时长至少需要填写一侧大于 0")
         self.auto_ai_enabled = bool(self.auto_ai_enabled)
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
-        if self.auto_ai_enabled and not self.ai_agent_code:
-            raise ValueError("日志拉取后自动AI分析时必须选择Agent")
+        self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        if self.auto_ai_enabled and not (self.ai_provider_code or self.ai_agent_code):
+            raise ValueError("日志拉取后自动AI分析时必须选择Provider或Agent")
         if self.auto_ai_enabled and not self.ticket_id:
             raise ValueError("未关联工单时不能启用自动AI分析")
+        self.store_id = str(self.store_id or "").strip()
+        if not self.store_id:
+            raise ValueError("storeId 不能为空")
         return self
 
 
@@ -169,8 +326,9 @@ class TicketLogPullQueryModel(QueryModel):
     ticket_no: str | None = Field(default=None, description="工单编号")
     keyword: str | None = Field(default=None, description="关键字")
     status: str | None = Field(default=None, description="内部处理状态")
+    environment: str | None = Field(default=None, description="环境标识筛选")
     vendor_id: int | None = Field(default=None, description="商家vendorId")
-    store_id: int | None = Field(default=None, description="门店storeId")
+    store_id: str | None = Field(default=None, description="门店org_no")
     pos_no: int | None = Field(default=None, description="POS编号")
     modify_time: date | str | None = Field(default=None, description="页面配置的拉取日期")
 
@@ -255,16 +413,191 @@ class TicketLogPullContentQueryModel(TicketLogPullBaseModel):
         return self
 
 
+class TicketLogPrepareRequestModel(TicketLogPullBaseModel):
+    """
+    工单日志查看准备请求模型。
+    """
+
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+
+
+class TicketLogPrepareModel(TicketLogPullBaseModel):
+    """
+    工单日志查看准备结果模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="本次准备使用的日志拉取记录ID")
+    prepared: bool = Field(default=False, description="是否已准备完成")
+    source_path: str | None = Field(default=None, description="本地缓存的原始压缩包路径")
+    extract_path: str | None = Field(default=None, description="日志解压目录")
+    file_count: int = Field(default=0, description="识别到的日志文本文件数")
+    message: str | None = Field(default=None, description="准备结果说明")
+
+
+class TicketLogFileModel(TicketLogPullBaseModel):
+    """
+    工单日志文件列表项模型。
+    """
+
+    file: str = Field(description="相对日志文件路径")
+    size: int = Field(default=0, description="文件大小")
+    modified_at: datetime | None = Field(default=None, description="文件修改时间")
+
+
+class TicketLogContextLineModel(TicketLogPullBaseModel):
+    """
+    日志上下文单行模型。
+    """
+
+    file: str | None = Field(default=None, description="相对日志文件路径，跨文件上下文时用于标识来源")
+    line: int = Field(description="行号")
+    content: str = Field(default="", description="行内容")
+
+
+class TicketLogContextModel(TicketLogPullBaseModel):
+    """
+    日志上下文响应模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    record_id: int | None = Field(default=None, description="日志拉取记录ID")
+    file: str = Field(description="相对日志文件路径")
+    line: int = Field(description="命中行号")
+    start: int = Field(description="上下文开始行")
+    end: int = Field(description="上下文结束行")
+    has_prev: bool = Field(default=False, description="是否还有上一段")
+    has_next: bool = Field(default=False, description="是否还有下一段")
+    prev_file: str | None = Field(default=None, description="上一段建议读取文件")
+    prev_line: int | None = Field(default=None, description="上一段建议中心行")
+    next_file: str | None = Field(default=None, description="下一段建议读取文件")
+    next_line: int | None = Field(default=None, description="下一段建议中心行")
+    total_lines: int = Field(default=0, description="文件总行数")
+    lines: list[TicketLogContextLineModel] = Field(default_factory=list, description="上下文行")
+
+
+class TicketLogSearchHitModel(TicketLogPullBaseModel):
+    """
+    日志搜索命中项模型。
+    """
+
+    file: str = Field(description="相对日志文件路径")
+    line: int = Field(description="命中行号")
+    content: str = Field(default="", description="命中行内容；搜索接口返回时最多保留行首 500 个字符")
+    content_length: int = Field(default=0, description="命中行原始字符数")
+    content_truncated: bool = Field(default=False, description="搜索接口中的命中行内容是否已截断")
+    matched_keywords: list[str] = Field(default_factory=list, description="当前命中行匹配到的关键字")
+    context: TicketLogContextModel | None = Field(default=None, description="命中上下文")
+
+
+class TicketLogSearchRequestModel(TicketLogPullBaseModel):
+    """
+    日志关键字搜索请求模型。
+    """
+
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+    keyword: str | None = Field(default=None, description="搜索关键字，兼容旧单关键字入参")
+    keywords: list[str] = Field(default_factory=list, description="搜索关键字列表，支持多个固定字符串")
+    search_mode: str = Field(default="any", description="多关键字匹配模式：any 任一命中，all 同行全部命中")
+    file: str | None = Field(default=None, description="指定相对日志文件路径，空值表示全局搜索")
+    files: list[str] = Field(default_factory=list, description="指定多个相对日志文件路径，按传入顺序搜索")
+    ignore_case: bool = Field(default=False, description="是否忽略关键字大小写")
+    word_regexp: bool = Field(default=False, description="是否仅匹配完整单词")
+    context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
+    context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
+    limit: int = Field(default=500, ge=1, le=5000, description="最大返回命中数量")
+    with_context: bool = Field(default=True, description="是否直接返回上下文")
+
+    @model_validator(mode="after")
+    def normalize_search_keywords(self):
+        """
+        归一化日志搜索关键字，兼容旧 keyword 字段并限制无效输入。
+        :return: 当前模型
+        """
+        raw_keywords: list[str] = []
+        raw_keywords.extend(self.keywords or [])
+        if self.keyword:
+            raw_keywords.append(self.keyword)
+        normalized_keywords: list[str] = []
+        for item in raw_keywords:
+            keyword = str(item or "").strip()
+            if keyword and keyword not in normalized_keywords:
+                normalized_keywords.append(keyword[:200])
+        self.keywords = normalized_keywords[:20]
+        self.keyword = self.keywords[0] if self.keywords else None
+        raw_files: list[str] = []
+        if self.file:
+            raw_files.append(self.file)
+        raw_files.extend(self.files or [])
+        normalized_files: list[str] = []
+        for item in raw_files:
+            file_path = str(item or "").strip()
+            if file_path and file_path not in normalized_files:
+                normalized_files.append(file_path)
+        self.files = normalized_files[:1000]
+        self.file = self.files[0] if len(self.files) == 1 else None
+        self.search_mode = str(self.search_mode or "any").strip().lower()
+        if self.search_mode not in {"any", "all"}:
+            self.search_mode = "any"
+        if not self.keywords:
+            raise ValueError("搜索关键字不能为空")
+        return self
+
+
+class TicketLogSearchTimeRequestModel(TicketLogPullBaseModel):
+    """
+    日志时间点搜索请求模型。
+    """
+
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+    time: str = Field(description="时间关键字，例如 14:32")
+    context_before: int = Field(default=20, ge=0, le=500, description="命中行前置上下文行数")
+    context_after: int = Field(default=20, ge=0, le=500, description="命中行后置上下文行数")
+    limit: int = Field(default=500, ge=1, le=5000, description="最大返回命中数量")
+    with_context: bool = Field(default=True, description="是否直接返回上下文")
+
+
+class TicketLogErrorsRequestModel(TicketLogPullBaseModel):
+    """
+    日志异常摘要请求模型。
+    """
+
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+    limit: int = Field(default=500, ge=1, le=5000, description="最大扫描命中数量")
+
+
+class TicketLogErrorSummaryModel(TicketLogPullBaseModel):
+    """
+    日志异常摘要响应模型。
+    """
+
+    ticket_id: int = Field(description="工单ID")
+    total: int = Field(default=0, description="异常命中总数")
+    items: dict[str, int] = Field(default_factory=dict, description="异常内容计数")
+    samples: list[TicketLogSearchHitModel] = Field(default_factory=list, description="异常样例")
+
+
 class TicketLogPullSummaryModel(TicketLogPullBaseModel):
     """
     工单最新日志拉取摘要模型。
     """
 
     id: int | None = None
+    environment: str | None = Field(default=None, description="拉取时使用的环境标识")
     status: str | None = Field(default=None, description="内部处理状态")
     status_desc: str | None = Field(default=None, description="内部处理状态描述")
     is_error: bool = Field(default=False, description="是否异常")
     error_message: str | None = Field(default=None, description="异常信息")
+    vendor_id: int | None = Field(default=None, description="商家ID")
+    store_id: str | None = Field(default=None, description="门店ID")
+    pos_no: int | None = Field(default=None, description="POS编号")
+    modify_time: date | str | None = Field(default=None, description="日志拉取日期")
+    path: str | None = Field(default=None, description="日志拉取路径")
+    pull_method: str | None = Field(default=None, description="拉取方式 time/path")
     create_time: datetime | None = None
 
 
@@ -279,7 +612,7 @@ class TicketLogPullListItemModel(TicketLogPullSummaryModel):
     project_name: str | None = Field(default=None, description="项目名称")
     module_name: str | None = Field(default=None, description="模块名称")
     vendor_id: int | None = None
-    store_id: int | None = None
+    store_id: str | None = None
     pos_no: int | None = None
     command_data_type: int | None = None
     command_content: dict[str, Any] | None = None

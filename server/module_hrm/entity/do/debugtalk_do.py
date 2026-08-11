@@ -8,7 +8,7 @@ from utils.snowflake import snowIdWorker
 
 
 def _set_default_debugtalk():
-    common_str = """import json \r\nimport requests \r\n\r\nfrom loguru import logger \r\n\r\n"""
+    common_str = """import json \r\nimport httpx \r\n\r\nfrom loguru import logger \r\n\r\n"""
     before_test = "def before_test():\r\n\t'''# 默认回调-开始测试前'''\r\n\tpass\r\n\r\n"
     before_test_case = "def before_test_case(test_case):\r\n\t'''# 默认回调-用例开始执行前'''\r\n\tpass\r\n\r\n"
     before_test_step = "def before_test_step(test_step):\r\n\t'''# 默认回调-步骤开始执行前'''\r\n\tpass\r\n\r\n"

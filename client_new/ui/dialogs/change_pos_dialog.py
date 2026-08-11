@@ -1,6 +1,8 @@
 import json
 import os
 
+from loguru import logger
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -31,10 +33,6 @@ class ChangePosDialog(QDialog):
 
         self.controller = PosController()
         self.config = None
-        try:
-            self.config = PosToolConfigServer.read_pos_tool_config()
-        except Exception:
-            self.config = None
 
         self.state = PosChangeState(pos_mac=get_active_mac(), pos_ip=get_local_ip())
         self._load_last_state()
@@ -43,6 +41,7 @@ class ChangePosDialog(QDialog):
         self._init_ui()
         self._apply_state_to_ui()
         self._on_mode_change()
+        QTimer.singleShot(0, self._load_selector_config)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -50,7 +49,7 @@ class ChangePosDialog(QDialog):
         form = QFormLayout()
 
         # 三级联动
-        self.selector = EnvVendorStoreSelector(self.config)
+        self.selector = EnvVendorStoreSelector(None)
         form.addRow("环境/商家/门店", self.selector)
 
         # 模式
@@ -100,6 +99,17 @@ class ChangePosDialog(QDialog):
 
         self.controller.status_signal.connect(self._on_status)
         # self.controller.log_signal.connect(self._on_log)
+
+    def _load_selector_config(self):
+        try:
+            self.config = PosToolConfigServer.read_pos_tool_config()
+        except Exception as exc:
+            logger.warning(f"加载POS切换配置失败: {exc}")
+            self.config = None
+
+        if hasattr(self, "selector"):
+            self.selector.set_config(self.config)
+            self._apply_state_to_ui()
 
     def _on_mode_change(self):
         mode = self.switch_combo.currentData()

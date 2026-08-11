@@ -10,7 +10,12 @@ from config.get_db import init_create_table
 from config.get_redis import RedisUtil
 from exceptions.handle import handle_exception
 from middlewares.handle import handle_middleware
+from module_admin.controller.ai_config_controller import aiConfigController
+from module_admin.controller.ai_prompt_template_controller import aiPromptTemplateController
+from module_admin.controller.ai_provider_controller import aiProviderController
+from module_admin.controller.ai_task_execution_controller import aiTaskExecutionController
 from module_admin.controller.api_key_controller import apiKeyController
+from modules.credential.controller.credential_controller import credentialController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
@@ -26,8 +31,10 @@ from module_admin.controller.online_controller import onlineController
 from module_admin.controller.post_controler import postController
 from module_admin.controller.role_controller import roleController
 from module_admin.controller.server_controller import serverController
+from module_admin.controller.user_config_controller import userConfigController
 from module_admin.controller.user_controller import userController
 from module_admin.perms import register as register_admin_permission_defs
+from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_hrm.controller.agent_controller import agentController as agentManagerController
 from module_hrm.controller.api_controler import hrmApiController
 from module_hrm.controller.case_controler import caseController
@@ -53,11 +60,20 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
-from modules.ticket.controller.ticket_controller import ticketController
+from modules.ticket.controller.ticket_ai_controller import ticketAiController
+from modules.ticket.controller.ticket_config_controller import ticketConfigController
+from modules.ticket.controller.ticket_controller import ticketWebhookController
+from modules.ticket.controller.ticket_crud_controller import ticketCrudController
+from modules.ticket.controller.ticket_issue_controller import ticketIssueController
+from modules.ticket.controller.ticket_log_pull_controller import ticketLogPullController
+from modules.ticket.controller.ticket_release_controller import ticketReleaseController
+from modules.ticket.controller.ticket_sync_controller import ticketSyncController
+from modules.ticket.controller.ticket_version_controller import ticketVersionController
 from modules.ticket.perms import register as register_ticket_permission_defs
-from modules.ticket.service.ticket_ai_analysis_service import TicketAiAnalysisService
-from modules.ticket.service.ticket_log_pull_service import TicketLogPullService
-from modules.ticket.service.ticket_service import TicketService
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.collaboration.ticket_feishu_event_listener_service import TicketFeishuEventListenerService
+from modules.ticket.service.core.ticket_service import TicketService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
 from utils.log_util import logger
@@ -79,6 +95,7 @@ async def lifespan(app: FastAPI):
             TicketService.init_default_workflow(db)
             TicketLogPullService.ensure_param_config_rows(db)
             TicketAiAnalysisService.ensure_param_config_rows(db)
+            AiPromptTemplateService.ensure_default_prompt_templates(db)
             db.commit()
         TicketLogPullService.resume_pending_records()
         TicketAiAnalysisService.resume_pending_tasks()
@@ -86,6 +103,7 @@ async def lifespan(app: FastAPI):
         await RedisUtil.init_sys_dict(app.state.redis)
         await RedisUtil.init_sys_config(app.state.redis)
         await startup_handler()
+        TicketFeishuEventListenerService.start_from_config()
         metrics_thread = PushMetrics()
         metrics_thread.start()
         logger.info(f"{AppConfig.app_name}启动成功")
@@ -94,6 +112,10 @@ async def lifespan(app: FastAPI):
             metrics_thread.stop()
         except Exception:
             pass
+        try:
+            TicketFeishuEventListenerService.stop()
+        except Exception as exc:
+            logger.warning(f"飞书长连接监听停止失败: error={exc}")
         await RedisUtil.close_redis_pool(app)
 
     except Exception:
@@ -104,9 +126,9 @@ async def lifespan(app: FastAPI):
 # 初始化FastAPI对象
 app = FastAPI(
     title=AppConfig.app_name,
-    description=f'{AppConfig.app_name}接口文档',
+    description=f"{AppConfig.app_name}接口文档",
     version=AppConfig.app_version,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # 挂载子应用
@@ -119,47 +141,61 @@ handle_exception(app)
 
 # 加载路由列表
 controller_list = [
-    {'router': loginController, 'tags': ['登录模块']},
-    {'router': captchaController, 'tags': ['验证码模块']},
-    {'router': userController, 'tags': ['系统管理-用户管理']},
-    {'router': roleController, 'tags': ['系统管理-角色管理']},
-    {'router': menuController, 'tags': ['系统管理-菜单管理']},
-    {'router': deptController, 'tags': ['系统管理-部门管理']},
-    {'router': postController, 'tags': ['系统管理-岗位管理']},
-    {'router': dictController, 'tags': ['系统管理-字典管理']},
-    {'router': configController, 'tags': ['系统管理-参数管理']},
-    {'router': apiKeyController, 'tags': ['系统管理-API Key管理']},
-    {'router': noticeController, 'tags': ['系统管理-通知公告管理']},
-    {'router': logController, 'tags': ['系统管理-日志管理']},
-    {'router': onlineController, 'tags': ['系统监控-在线用户']},
-    {'router': jobController, 'tags': ['系统监控-定时任务']},
-    {'router': serverController, 'tags': ['系统监控-菜单管理']},
-    {'router': cacheController, 'tags': ['系统监控-缓存监控']},
-    {'router': commonController, 'tags': ['通用模块']},
-    {'router': projectController, 'tags': ['HRM-项目管理']},
-    {'router': debugtalkController, 'tags': ['项目管理-DebugTalk']},
-    {'router': moduleController, 'tags': ['HRM-模块管理']},
-    {'router': envController, 'tags': ['HRM-环境管理']},
-    {'router': caseController, 'tags': ['HRM-用例管理']},
-    {'router': runnerController, 'tags': ['HRM-运行管理']},
-    {'router': reportController, 'tags': ['HRM-报告管理']},
-    {'router': hrmConfigController, 'tags': ['HRM-配置管理']},
-    {'router': hrmCommonController, 'tags': ['HRM-common']},
-    {'router': hrmApiController, 'tags': ['HRM-接口管理']},
-    {'router': qtrJobController, 'tags': ['HRM-测试计划']},
-    {'router': suiteController, 'tags': ['HRM-测试套件']},
-    {'router': qtrServiceStatusController, 'tags': ['HRM-服务状态']},
-    {'router': agentController, 'tags': ['QTR-Agent管理']},
-    {'router': mockController, 'tags': ['QTR-mock管理']},
-    {'router': forwardRulesController, 'tags': ['QTR-转发规则管理']},
-    {'router': agentManagerController, 'tags': ['QTR-agent后台管理']},
-    {'router': pushController, 'tags': ['推送配置管理']},
-    {'router': toolsController, 'tags': ['工具']},
-    {'router': webCaseController, 'tags': ['HRM-Web测试管理']},
-    {'router': desktopCaseAssetController, 'tags': ['HRM-桌面测试资源']},
-    {'router': desktopCaseController, 'tags': ['HRM-桌面测试管理']},
-    {'router': ticketController, 'tags': ['工单管理']},
+    {"router": loginController, "tags": ["登录模块"]},
+    {"router": captchaController, "tags": ["验证码模块"]},
+    {"router": userController, "tags": ["系统管理-用户管理"]},
+    {"router": userConfigController, "tags": ["系统管理-用户配置"]},
+    {"router": roleController, "tags": ["系统管理-角色管理"]},
+    {"router": menuController, "tags": ["系统管理-菜单管理"]},
+    {"router": deptController, "tags": ["系统管理-部门管理"]},
+    {"router": postController, "tags": ["系统管理-岗位管理"]},
+    {"router": dictController, "tags": ["系统管理-字典管理"]},
+    {"router": configController, "tags": ["系统管理-参数管理"]},
+    {"router": aiConfigController, "tags": ["系统管理-AI配置中心"]},
+    {"router": aiProviderController, "tags": ["系统管理-AI Provider管理"]},
+    {"router": aiTaskExecutionController, "tags": ["系统管理-AI执行审计管理"]},
+    {"router": aiPromptTemplateController, "tags": ["系统管理-AI提示词管理"]},
+    {"router": apiKeyController, "tags": ["系统管理-API Key管理"]},
+    {"router": credentialController, "tags": ["系统管理-统一凭证管理"]},
+    {"router": noticeController, "tags": ["系统管理-通知公告管理"]},
+    {"router": logController, "tags": ["系统管理-日志管理"]},
+    {"router": onlineController, "tags": ["系统监控-在线用户"]},
+    {"router": jobController, "tags": ["系统监控-定时任务"]},
+    {"router": serverController, "tags": ["系统监控-菜单管理"]},
+    {"router": cacheController, "tags": ["系统监控-缓存监控"]},
+    {"router": commonController, "tags": ["通用模块"]},
+    {"router": projectController, "tags": ["HRM-项目管理"]},
+    {"router": debugtalkController, "tags": ["项目管理-DebugTalk"]},
+    {"router": moduleController, "tags": ["HRM-模块管理"]},
+    {"router": envController, "tags": ["HRM-环境管理"]},
+    {"router": caseController, "tags": ["HRM-用例管理"]},
+    {"router": runnerController, "tags": ["HRM-运行管理"]},
+    {"router": reportController, "tags": ["HRM-报告管理"]},
+    {"router": hrmConfigController, "tags": ["HRM-配置管理"]},
+    {"router": hrmCommonController, "tags": ["HRM-common"]},
+    {"router": hrmApiController, "tags": ["HRM-接口管理"]},
+    {"router": qtrJobController, "tags": ["HRM-测试计划"]},
+    {"router": suiteController, "tags": ["HRM-测试套件"]},
+    {"router": qtrServiceStatusController, "tags": ["HRM-服务状态"]},
+    {"router": agentController, "tags": ["QTR-Agent管理"]},
+    {"router": mockController, "tags": ["QTR-mock管理"]},
+    {"router": forwardRulesController, "tags": ["QTR-转发规则管理"]},
+    {"router": agentManagerController, "tags": ["QTR-agent后台管理"]},
+    {"router": pushController, "tags": ["推送配置管理"]},
+    {"router": toolsController, "tags": ["工具"]},
+    {"router": webCaseController, "tags": ["HRM-Web测试管理"]},
+    {"router": desktopCaseAssetController, "tags": ["HRM-桌面测试资源"]},
+    {"router": desktopCaseController, "tags": ["HRM-桌面测试管理"]},
+    {"router": ticketCrudController, "tags": ["工单管理"]},
+    {"router": ticketIssueController, "tags": ["工单问题归因"]},
+    {"router": ticketSyncController, "tags": ["工单同步"]},
+    {"router": ticketLogPullController, "tags": ["工单日志拉取"]},
+    {"router": ticketReleaseController, "tags": ["工单版本治理"]},
+    {"router": ticketVersionController, "tags": ["工单版本中心"]},
+    {"router": ticketAiController, "tags": ["工单AI分析"]},
+    {"router": ticketConfigController, "tags": ["工单配置"]},
+    {"router": ticketWebhookController, "tags": ["工单消息回调"]},
 ]
 
 for controller in controller_list:
-    app.include_router(router=controller.get('router'), tags=controller.get('tags'))
+    app.include_router(router=controller.get("router"), tags=controller.get("tags"))

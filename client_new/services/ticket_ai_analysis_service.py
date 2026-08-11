@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 import asyncio
+import bz2
+import gzip
+import hashlib
 import json
+import lzma
 import os
 import re
 import shutil
 import subprocess
+import tarfile
 import zipfile
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+import py7zr
 from dotenv import dotenv_values
 from loguru import logger
 import httpx
 
 from server.config import AgentConfig
+from services.ticket_ai_codex_config_service import TicketAiCodexConfigService
 from utils.common import get_client_root_dir
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
@@ -24,12 +31,44 @@ EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
 class TicketAiAnalysisService:
     """
-    client_new 侧工单 AI 分析执行服务。
+    client_new 侧工单 AI 分析执行服务，支持多种 AI Provider（Codex、Claude Code 等）。
     """
 
     DEFAULT_TIMEOUT_SEC = 3600
     DEFAULT_WORKER_COMMAND = "codex exec"
     DEFAULT_WORKER_SANDBOX = "workspace-write"
+    DEFAULT_LOG_DIGEST_MAX_CHARS = 300000
+    DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE = 80
+
+    # --- Provider 运行时配置映射 ---
+    # 每种 provider_type 对应一组 CLI 行为，新增 AI 工具时只需在此追加条目。
+    PROVIDER_WORKER_MAP: dict[str, dict[str, Any]] = {
+        "codex": {
+            "command": "codex exec",
+            "sandbox": "workspace-write",
+            "code_arg_flag": "-C",            # 代码目录参数
+            "output_mode": "file",             # 结果从文件读取
+            "output_schema_flag": "--output-schema",
+            "output_file_flag": "--output-last-message",
+            "resume_flag": "--resume",
+            "model_flag": "-m",
+            "skip_git_check_flag": "--skip-git-repo-check",
+        },
+        "claude": {
+            "command": "claude -p",
+            "sandbox": None,                   # Claude Code 无沙箱参数
+            "code_arg_flag": "--add-dir",      # 代码目录参数
+            "output_mode": "stdout",            # 结果从 stdout 解析
+            "output_schema_flag": None,         # 不支持 schema 文件
+            "output_file_flag": None,           # 不支持输出到文件
+            "resume_flag": "--resume",
+            "model_flag": "--model",
+            "skip_git_check_flag": None,
+        },
+    }
+    DEFAULT_LOG_DIGEST_CONTEXT_LINES = 3
+    DEFAULT_LOG_DIGEST_MAX_LINE_CHARS = 1200
+    TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
@@ -81,31 +120,312 @@ class TicketAiAnalysisService:
             env_values.setdefault(key, value)
         return env_values
 
+    @staticmethod
+    def _apply_env_overrides(env_values: dict[str, str], overrides: dict[str, Any] | None) -> dict[str, str]:
+        """
+        将请求下发的环境变量覆盖到 Worker 运行环境。
+        :param env_values: 原始环境变量
+        :param overrides: 覆盖项
+        :return: 合并后的环境变量
+        """
+        merged_env = dict(env_values)
+        if not isinstance(overrides, dict):
+            return merged_env
+        for key, value in overrides.items():
+            if key in (None, "") or value in (None, ""):
+                continue
+            merged_env[str(key)] = str(value)
+        return merged_env
+
+    @staticmethod
+    def _resolve_worker_api_key(
+        provider_type: str,
+        ai_home: Path | None,
+        env_values: dict[str, str],
+    ) -> tuple[str, str]:
+        """
+        解析 Worker 实际用于鉴权的 API Key，但不记录明文。
+        Codex 配置了 requires_openai_auth 时优先读取任务级 auth.json，避免仅依据
+        环境变量误判实际认证来源；其他 Provider 使用其约定的环境变量。
+        :param provider_type: 当前 Provider 类型
+        :param ai_home: 任务级配置目录
+        :param env_values: 已合并的 Worker 环境变量
+        :return: (API Key, 脱敏诊断中的来源标识)
+        """
+        if provider_type == "codex" and ai_home:
+            auth_file = ai_home / "auth.json"
+            if auth_file.exists():
+                try:
+                    auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
+                    auth_key = str((auth_data or {}).get("OPENAI_API_KEY") or "").strip()
+                    if auth_key:
+                        return auth_key, "auth.json.OPENAI_API_KEY"
+                except (OSError, json.JSONDecodeError, TypeError, AttributeError) as exc:
+                    logger.warning(f"读取任务级 Codex auth.json 失败，将回退环境变量: {exc}")
+            return str(env_values.get("OPENAI_API_KEY") or "").strip(), "OPENAI_API_KEY"
+        if provider_type == "claude":
+            return (
+                str(env_values.get("ANTHROPIC_API_KEY") or env_values.get("OPENAI_API_KEY") or "").strip(),
+                "ANTHROPIC_API_KEY/OPENAI_API_KEY",
+            )
+        return str(env_values.get("OPENAI_API_KEY") or "").strip(), "OPENAI_API_KEY"
+
+    @staticmethod
+    def _resolve_worker_base_url(
+        provider_type: str,
+        ai_home: Path | None,
+        env_values: dict[str, str],
+    ) -> str:
+        """
+        解析 Worker 实际请求的基础地址。
+        Codex 优先使用任务级 config.toml 中的 base_url，与 CLI 的配置优先级保持一致；
+        文件未配置或读取失败时才回退到环境变量。
+        :param provider_type: 当前 Provider 类型
+        :param ai_home: 任务级配置目录
+        :param env_values: 已合并的 Worker 环境变量
+        :return: 去除末尾斜杠后的基础地址，未配置时返回空字符串
+        """
+        if provider_type == "codex" and ai_home:
+            config_file = ai_home / "config.toml"
+            if config_file.exists():
+                try:
+                    config_text = config_file.read_text(encoding="utf-8")
+                    match = re.search(r'^\s*base_url\s*=\s*"([^"]+)"', config_text, flags=re.MULTILINE)
+                    if match:
+                        return match.group(1).strip().rstrip("/")
+                except OSError as exc:
+                    logger.warning(f"读取任务级 Codex config.toml 失败，将回退环境变量: {exc}")
+        env_key = "ANTHROPIC_BASE_URL" if provider_type == "claude" else "OPENAI_BASE_URL"
+        return str(env_values.get(env_key) or "").strip().rstrip("/")
+
+    @staticmethod
+    def _build_api_key_fingerprint(api_key: str) -> dict[str, Any]:
+        """
+        构造不包含明文 API Key 的鉴权指纹，用于关联问题日志。
+        :param api_key: 原始 API Key
+        :return: 是否存在、长度与 SHA-256 前 16 位组成的脱敏信息
+        """
+        normalized_key = str(api_key or "").strip()
+        return {
+            "api_key_present": bool(normalized_key),
+            "api_key_length": len(normalized_key),
+            "api_key_sha256_16": hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()[:16]
+            if normalized_key
+            else "",
+        }
+
     @classmethod
-    def _prepare_codex_home(cls, workspace_dir: Path) -> Path:
+    def _build_worker_auth_diagnostic(
+        cls,
+        *,
+        provider_type: str,
+        provider_code: str,
+        worker_model: str,
+        ai_home: Path | None,
+        env_values: dict[str, str],
+    ) -> tuple[dict[str, Any], str]:
+        """
+        生成 Worker 鉴权故障诊断上下文，不暴露任何密钥明文。
+        :param provider_type: 当前 Provider 类型
+        :param provider_code: 当前 Provider 编码
+        :param worker_model: 实际下发的模型名
+        :param ai_home: 任务级配置目录
+        :param env_values: 已合并的 Worker 环境变量
+        :return: (诊断信息, 实际用于探测的 API Key)
+        """
+        api_key, api_key_source = cls._resolve_worker_api_key(provider_type, ai_home, env_values)
+        diagnostic = {
+            "provider_type": provider_type,
+            "provider_code": provider_code or "<none>",
+            "worker_model": worker_model or "<default>",
+            "base_url": cls._resolve_worker_base_url(provider_type, ai_home, env_values) or "<none>",
+            "api_key_source": api_key_source,
+            **cls._build_api_key_fingerprint(api_key),
+        }
+        return diagnostic, api_key
+
+    @staticmethod
+    def _is_unauthorized_worker_failure(raw_stdout: str, raw_stderr: str) -> bool:
+        """
+        判断 Worker 输出是否包含需要进行鉴权探测的 401 错误。
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :return: 是否命中 401、Unauthorized 或 Invalid token 特征
+        """
+        output_text = f"{raw_stderr}\n{raw_stdout}".lower()
+        return bool(
+            re.search(
+                r"\b401\b|\bunauthorized\b|\binvalid\s+token\b",
+                output_text,
+            )
+        )
+
+    @staticmethod
+    async def _probe_codex_authentication(base_url: str, api_key: str) -> dict[str, Any]:
+        """
+        使用 GET /models 对 Codex 兼容 Provider 执行轻量鉴权探测，不调用模型推理。
+        :param base_url: Provider OpenAI 兼容基础地址
+        :param api_key: 实际请求使用的 API Key，仅用于请求头，不记录日志
+        :return: 探测状态、请求 ID 或跳过/异常原因组成的脱敏结果
+        """
+        normalized_base_url = str(base_url or "").strip().rstrip("/")
+        normalized_api_key = str(api_key or "").strip()
+        if not normalized_base_url:
+            return {"auth_probe": "skipped", "auth_probe_reason": "base_url_missing"}
+        if not normalized_api_key:
+            return {"auth_probe": "skipped", "auth_probe_reason": "api_key_missing"}
+        if not normalized_base_url.lower().startswith(("http://", "https://")):
+            return {"auth_probe": "skipped", "auth_probe_reason": "base_url_invalid"}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                response = await client.get(
+                    f"{normalized_base_url}/models",
+                    headers={"Authorization": f"Bearer {normalized_api_key}"},
+                )
+            return {
+                "auth_probe": "completed",
+                "auth_probe_http_status": response.status_code,
+                "auth_probe_request_id": response.headers.get("x-request-id")
+                or response.headers.get("request-id")
+                or "",
+            }
+        except httpx.HTTPError as exc:
+            return {
+                "auth_probe": "failed",
+                "auth_probe_error": f"{type(exc).__name__}: {str(exc)[:300]}",
+            }
+
+    @staticmethod
+    def _inject_worker_model(command: list[str], model_name: str | None) -> list[str]:
+        """
+        将 Provider 选择的模型注入 Worker 命令参数。
+        :param command: 原始 Worker 命令
+        :param model_name: 模型名称
+        :return: 注入后的 Worker 命令
+        """
+        normalized_model = str(model_name or "").strip()
+        if not normalized_model:
+            return list(command)
+        command_parts = [str(part) for part in command]
+        if "-m" in command_parts or "--model" in command_parts:
+            return command_parts
+        return [*command_parts, "-m", normalized_model]
+
+    @classmethod
+    def _prepare_codex_home(
+        cls,
+        workspace_dir: Path,
+        provider_env_overrides: dict[str, str] | None = None,
+    ) -> Path:
         """
         准备独立的 Codex home 目录。
         :param workspace_dir: 当前任务工作区
+        :param provider_env_overrides: Provider 环境变量覆盖项
         :return: Codex home 目录
         """
         source_home = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
         codex_home = workspace_dir / ".codex_home"
-        codex_home.mkdir(parents=True, exist_ok=True)
-        for file_name in ("config.toml", "config.self.toml", "auth.json", "version.json"):
-            source_file = source_home / file_name
-            target_file = codex_home / file_name
-            if source_file.exists() and not target_file.exists():
-                shutil.copy2(source_file, target_file)
-        source_env = source_home / ".env"
-        target_env = codex_home / ".env"
-        if source_env.exists() and not target_env.exists():
-            shutil.copy2(source_env, target_env)
+        overrides = provider_env_overrides or {}
+        has_provider_keys = bool(overrides.get("OPENAI_BASE_URL") or overrides.get("OPENAI_API_KEY"))
+        TicketAiCodexConfigService.copy_task_home_files(source_home, codex_home)
+        if has_provider_keys:
+            cls._patch_codex_config_for_provider(codex_home, overrides)
         return codex_home
+
+    @staticmethod
+    def _patch_codex_config_for_provider(codex_home: Path, overrides: dict[str, str]) -> None:
+        """
+        修改副本 config.toml 和 .env，使 Provider 下发的 base_url 和 api_key 生效。
+        Codex CLI 读 config.toml 中 model_providers 的 base_url 优先级高于 OPENAI_BASE_URL 环境变量，
+        读 auth.json 中的 OPENAI_API_KEY 优先级也高于环境变量，因此需要直接修改副本文件。
+        :param codex_home: Codex home 目录
+        :param overrides: Provider 环境变量覆盖项
+        :return: 无
+        """
+        base_url = str(overrides.get("OPENAI_BASE_URL") or "").strip()
+        api_key = str(overrides.get("OPENAI_API_KEY") or "").strip()
+        # 修改 config.toml 中的 base_url
+        if base_url:
+            config_file = codex_home / "config.toml"
+            if config_file.exists():
+                try:
+                    config_text = config_file.read_text(encoding="utf-8")
+                    new_config = re.sub(
+                        r'^(base_url\s*=\s*)"[^"]*"',
+                        rf'\1"{base_url}"',
+                        config_text,
+                        flags=re.MULTILINE,
+                    )
+                    if new_config != config_text:
+                        config_file.write_text(new_config, encoding="utf-8")
+                        logger.info(f"已修改 Codex config.toml base_url: {base_url}")
+                except Exception as exc:
+                    logger.warning(f"修改 Codex config.toml 失败: {exc}")
+        # 修改 .env 中的 OPENAI_API_KEY 和 OPENAI_BASE_URL
+        if base_url or api_key:
+            env_file = codex_home / ".env"
+            try:
+                lines: list[str] = []
+                if env_file.exists():
+                    lines = env_file.read_text(encoding="utf-8").splitlines()
+                updated_keys: set[str] = set()
+                new_lines: list[str] = []
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped.startswith("OPENAI_API_KEY=") and api_key:
+                        new_lines.append(f"OPENAI_API_KEY={api_key}")
+                        updated_keys.add("OPENAI_API_KEY")
+                    elif stripped.startswith("OPENAI_BASE_URL=") and base_url:
+                        new_lines.append(f"OPENAI_BASE_URL={base_url}")
+                        updated_keys.add("OPENAI_BASE_URL")
+                    else:
+                        new_lines.append(line)
+                if "OPENAI_API_KEY" not in updated_keys and api_key:
+                    new_lines.append(f"OPENAI_API_KEY={api_key}")
+                if "OPENAI_BASE_URL" not in updated_keys and base_url:
+                    new_lines.append(f"OPENAI_BASE_URL={base_url}")
+                env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                logger.info(f"已修改 Codex .env: api_key={'***' if api_key else ''}, base_url={base_url}")
+            except Exception as exc:
+                logger.warning(f"修改 Codex .env 失败: {exc}")
+        # 修改 auth.json 中的 OPENAI_API_KEY，Codex CLI 的 requires_openai_auth 从 auth.json 读取认证
+        if api_key:
+            auth_file = codex_home / "auth.json"
+            try:
+                auth_data: dict[str, Any] = {}
+                if auth_file.exists():
+                    auth_data = json.loads(auth_file.read_text(encoding="utf-8"))
+                    if not isinstance(auth_data, dict):
+                        auth_data = {}
+                auth_data["OPENAI_API_KEY"] = api_key
+                auth_file.write_text(json.dumps(auth_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                logger.info("已修改 Codex auth.json 中的 OPENAI_API_KEY")
+            except Exception as exc:
+                logger.warning(f"修改 Codex auth.json 失败: {exc}")
+
+    @classmethod
+    def _resolve_provider_type(cls, context_payload: dict[str, Any] | None) -> str:
+        """
+        从上下文解析当前请求的 Provider 类型。
+        :param context_payload: 上下文快照
+        :return: provider_type 字符串，默认 "codex"
+        """
+        raw = str((context_payload or {}).get("selectedAiProviderType") or "").strip().lower()
+        return raw if raw in cls.PROVIDER_WORKER_MAP else "codex"
+
+    @classmethod
+    def _get_provider_worker_config(cls, provider_type: str) -> dict[str, Any]:
+        """
+        获取指定 Provider 的 Worker 运行时配置。
+        :param provider_type: Provider 类型
+        :return: Worker 配置字典
+        """
+        return cls.PROVIDER_WORKER_MAP.get(provider_type, cls.PROVIDER_WORKER_MAP["codex"])
 
     @classmethod
     def _resolve_worker_command_parts(cls, command_parts: list[str]) -> list[str]:
         """
-        解析 Worker 命令为可直接执行的进程参数。
+        解析 Worker 命令为可直接执行的进程参数，并避免误用 Codex 桌面应用。
         :param command_parts: 原始命令参数
         :return: 可执行的命令参数
         """
@@ -113,20 +433,718 @@ class TicketAiAnalysisService:
         if not parts:
             parts = ["codex", "exec"]
         executable = parts[0]
-        if Path(executable).suffix:
+        if Path(executable).suffix and cls._is_codex_cli_executable(executable):
             return parts
-        resolved_executable = shutil.which(executable)
-        if not resolved_executable and Path(r"C:\nvm4w\nodejs\codex.cmd").exists():
-            resolved_executable = str(Path(r"C:\nvm4w\nodejs\codex.cmd"))
-        if not resolved_executable and Path(r"C:\nvm4w\nodejs\codex.exe").exists():
-            resolved_executable = str(Path(r"C:\nvm4w\nodejs\codex.exe"))
-        if not resolved_executable and Path(r"C:\nvm4w\nodejs\codex").exists():
-            resolved_executable = str(Path(r"C:\nvm4w\nodejs\codex"))
+        config = AgentConfig.read_config()
+        configured_cli = str(getattr(config, "ticket_ai_codex_cli_path", "") or "").strip()
+        resolved_executable = cls._resolve_codex_cli_executable(executable, configured_cli)
         if not resolved_executable:
-            raise FileNotFoundError("未找到可执行的 codex Worker，请检查 codex 是否已安装并加入 PATH")
+            raise FileNotFoundError(
+                "未找到可执行的 Codex CLI。"
+                "请安装 Codex CLI，或在 Agent 配置 ticket_ai_codex_cli_path 中填写 CLI 路径"
+            )
         if resolved_executable.lower().endswith((".cmd", ".bat")):
             return ["cmd", "/c", resolved_executable, *parts[1:]]
         return [resolved_executable, *parts[1:]]
+
+    @staticmethod
+    def _is_codex_desktop_app_path(executable: str | Path | None) -> bool:
+        """
+        判断可执行文件是否来自 OpenAI Codex 安装目录。
+        :param executable: 可执行文件路径
+        :return: 是否为 OpenAI Codex 安装目录路径
+        """
+        if not executable:
+            return False
+        normalized = str(executable).replace("/", "\\").lower()
+        return "\\appdata\\local\\programs\\openai\\codex\\" in normalized
+
+    @staticmethod
+    def _is_codex_cli_executable(executable: str | Path | None) -> bool:
+        """
+        通过 --version 判断可执行文件是否为可用的 Codex CLI。
+        :param executable: 可执行文件路径
+        :return: 是否为可执行 Codex CLI
+        """
+        if not executable:
+            return False
+        try:
+            popen_kwargs: dict[str, Any] = TicketAiAnalysisService._build_hidden_subprocess_kwargs()
+            if str(executable).lower().endswith((".cmd", ".bat")):
+                command = ["cmd", "/c", str(executable), "--version"]
+            else:
+                command = [str(executable), "--version"]
+            result = subprocess.run(
+                command,
+                text=True,
+                capture_output=True,
+                timeout=10,
+                **popen_kwargs,
+            )
+            version_text = f"{result.stdout}\n{result.stderr}".strip().lower()
+            return result.returncode == 0 and "codex-cli" in version_text
+        except Exception:
+            return False
+
+    @classmethod
+    def _resolve_codex_cli_executable(cls, executable: str, configured_cli: str | None = None) -> str | None:
+        """
+        解析 Codex CLI 可执行文件，优先使用本地配置和 Node/npm CLI，并用 --version 校验 CLI 身份。
+        :param executable: 命令名或配置的可执行文件
+        :param configured_cli: Agent 本地显式配置的 Codex CLI 路径
+        :return: Codex CLI 可执行文件路径
+        """
+        candidates: list[str | None] = [
+            configured_cli,
+            str(Path(r"C:\nvm4w\nodejs\codex.cmd")),
+            str(Path(r"C:\nvm4w\nodejs\codex.exe")),
+            str(Path(r"C:\nvm4w\nodejs\codex")),
+            str(Path.home() / "AppData" / "Roaming" / "npm" / "codex.cmd"),
+            str(Path.home() / "AppData" / "Roaming" / "npm" / "codex.exe"),
+            str(Path.home() / "AppData" / "Roaming" / "npm" / "codex"),
+            shutil.which(executable),
+        ]
+        if Path(executable).suffix:
+            candidates.insert(0, executable)
+        for candidate in candidates:
+            if not candidate:
+                continue
+            candidate_path = Path(candidate)
+            if candidate_path.exists() and cls._is_codex_cli_executable(candidate_path):
+                return str(candidate_path)
+        return None
+
+    @classmethod
+    def _resolve_claude_cli_executable(cls) -> str | None:
+        """
+        解析 Claude Code CLI 可执行文件。
+        :return: claude 可执行文件路径，未找到返回 None
+        """
+        config = AgentConfig.read_config()
+        configured_cli = str(getattr(config, "ticket_ai_claude_cli_path", "") or "").strip()
+        candidates: list[str | None] = [
+            configured_cli,
+            shutil.which("claude"),
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            candidate_path = Path(candidate)
+            if candidate_path.exists():
+                return str(candidate_path)
+        return None
+
+    @classmethod
+    def _resolve_provider_executable(cls, provider_type: str, command_parts: list[str]) -> list[str]:
+        """
+        按 provider_type 解析可执行文件并返回完整的命令行参数。
+        :param provider_type: Provider 类型
+        :param command_parts: 原始命令参数列表
+        :return: 可执行命令参数列表
+        """
+        if provider_type == "codex":
+            return cls._resolve_worker_command_parts(command_parts)
+        if provider_type == "claude":
+            parts = [str(p).strip() for p in command_parts if str(p).strip()]
+            if not parts:
+                parts = ["claude", "-p"]
+            executable = parts[0]
+            if Path(executable).suffix:
+                # 已有完整路径，直接使用
+                pass
+            else:
+                resolved = cls._resolve_claude_cli_executable()
+                if not resolved:
+                    raise FileNotFoundError(
+                        "未找到可执行的 Claude Code CLI。"
+                        "请安装 Claude Code，或在 Agent 配置 ticket_ai_claude_cli_path 中填写 CLI 路径"
+                    )
+                if resolved.lower().endswith((".cmd", ".bat")):
+                    return ["cmd", "/c", resolved, *parts[1:]]
+                parts[0] = resolved
+            return parts
+        # 兜底走 codex 逻辑
+        return cls._resolve_worker_command_parts(command_parts)
+
+    @classmethod
+    def _prepare_ai_home(
+        cls,
+        workspace_dir: Path,
+        provider_type: str,
+        provider_env_overrides: dict[str, str] | None = None,
+    ) -> Path | None:
+        """
+        为指定 Provider 准备独立的配置目录。
+        - codex: 复制 CODEX_HOME 到 .ai_home/
+        - claude: 无需额外配置（Claude Code 自动管理 .claude/），仅写 .env
+        :param workspace_dir: 任务工作区
+        :param provider_type: Provider 类型
+        :param provider_env_overrides: 环境变量覆盖项
+        :return: 配置目录路径（claude 时返回 None）
+        """
+        if provider_type == "claude":
+            cls._prepare_claude_env(workspace_dir, provider_env_overrides)
+            return None
+        return cls._prepare_codex_home(workspace_dir, provider_env_overrides)
+
+    @classmethod
+    def _prepare_claude_env(
+        cls,
+        workspace_dir: Path,
+        provider_env_overrides: dict[str, str] | None = None,
+    ) -> None:
+        """
+        为 Claude Code 准备环境：在 workspace_dir 下写入 .env 文件。
+        Claude Code 在 cwd（即 workspace_dir）下自动管理 .claude/ 会话目录。
+        :param workspace_dir: 任务工作区
+        :param provider_env_overrides: 环境变量覆盖项
+        """
+        overrides = provider_env_overrides or {}
+        env_lines: list[str] = []
+        api_key = str(overrides.get("ANTHROPIC_API_KEY") or overrides.get("OPENAI_API_KEY") or "").strip()
+        base_url = str(overrides.get("ANTHROPIC_BASE_URL") or overrides.get("OPENAI_BASE_URL") or "").strip()
+        if api_key:
+            env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
+        if base_url:
+            env_lines.append(f"ANTHROPIC_BASE_URL={base_url}")
+        if env_lines:
+            env_file = workspace_dir / ".env"
+            try:
+                existing_lines: list[str] = []
+                if env_file.exists():
+                    existing_lines = env_file.read_text(encoding="utf-8").splitlines()
+                existing_keys = {line.split("=", 1)[0] for line in existing_lines if "=" in line}
+                for line in env_lines:
+                    key = line.split("=", 1)[0]
+                    if key not in existing_keys:
+                        existing_lines.append(line)
+                env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+                logger.info(f"已为 Claude Code 写入 .env: api_key={'***' if api_key else ''}")
+            except Exception as exc:
+                logger.warning(f"写入 Claude Code .env 失败: {exc}")
+
+    @classmethod
+    def _load_worker_env(
+        cls,
+        ai_home: Path | None,
+        provider_type: str,
+    ) -> dict[str, str]:
+        """
+        加载 Worker 执行环境变量。
+        :param ai_home: 配置目录（codex），claude 时为 None
+        :param provider_type: Provider 类型
+        :return: 环境变量字典
+        """
+        if provider_type == "claude":
+            # Claude Code: 直接使用进程环境变量
+            return dict(os.environ)
+        # Codex: 读取隔离配置目录
+        env_values = cls._load_codex_env(ai_home) if ai_home else {}
+        if ai_home:
+            env_values["CODEX_HOME"] = str(ai_home)
+        return env_values
+
+    @classmethod
+    def _build_worker_command(
+        cls,
+        *,
+        provider_type: str,
+        worker_config: dict[str, Any],
+        repo_path: Path,
+        schema_file: Path | None,
+        result_file: Path | None,
+        selected_worker_model: str | None,
+    ) -> list[str]:
+        """
+        按 Provider 类型构建完整的 Worker 命令行。
+        :param provider_type: Provider 类型
+        :param worker_config: Worker 运行时配置
+        :param repo_path: 代码仓库路径
+        :param schema_file: JSON Schema 文件路径
+        :param result_file: 结果输出文件路径
+        :param selected_worker_model: 选择的模型名称
+        :return: 命令行参数列表
+        """
+        command_parts = [str(p).strip() for p in str(worker_config["command"]).split() if str(p).strip()]
+        command = cls._resolve_provider_executable(provider_type, command_parts)
+
+        # 沙箱参数（仅 codex）
+        sandbox = worker_config.get("sandbox")
+        if sandbox:
+            command.extend(["-s", str(sandbox)])
+
+        # 代码目录参数
+        code_flag = worker_config.get("code_arg_flag")
+        if code_flag:
+            command.extend([str(code_flag), str(repo_path)])
+
+        # git 检查跳过（仅 codex）
+        skip_flag = worker_config.get("skip_git_check_flag")
+        if skip_flag:
+            command.append(str(skip_flag))
+
+        # 输出 schema 文件（仅 codex）
+        schema_flag = worker_config.get("output_schema_flag")
+        if schema_flag and schema_file:
+            command.extend([str(schema_flag), str(schema_file)])
+
+        # 输出结果文件（仅 codex）
+        output_flag = worker_config.get("output_file_flag")
+        if output_flag and result_file:
+            command.extend([str(output_flag), str(result_file)])
+
+        # 模型参数
+        if selected_worker_model:
+            model_flag = worker_config.get("model_flag")
+            if model_flag and model_flag not in command:
+                command.extend([str(model_flag), str(selected_worker_model)])
+
+        return command
+
+    @classmethod
+    def _parse_worker_output(
+        cls,
+        *,
+        provider_type: str,
+        worker_config: dict[str, Any],
+        result_file: Path | None,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> dict[str, Any] | None:
+        """
+        按 Provider 类型解析 Worker 输出结果。
+        :param provider_type: Provider 类型
+        :param worker_config: Worker 运行时配置
+        :param result_file: Codex 结果文件
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :return: 解析后的结果字典，解析失败返回 None
+        """
+        result_text = ""
+        if worker_config.get("output_mode") == "file" and result_file and result_file.exists():
+            result_text = result_file.read_text(encoding="utf-8")
+        elif raw_stdout.strip():
+            result_text = raw_stdout.strip()
+        elif raw_stderr.strip():
+            result_text = raw_stderr.strip()
+
+        if not result_text.strip():
+            return None
+
+        # 尝试直接解析 JSON
+        try:
+            return json.loads(result_text)
+        except Exception:
+            pass
+
+        # Claude Code stdout 可能包含 markdown 包裹的 JSON，尝试提取
+        if provider_type == "claude":
+            return cls._extract_json_from_text(result_text)
+
+        # 尝试取最后一行 JSON
+        try:
+            return json.loads(raw_stdout.strip().splitlines()[-1])
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
+        """
+        从 Claude Code 输出文本中提取 JSON 结果块。
+        Claude Code 的 stdout 可能在 markdown 代码块中包含 JSON。
+        :param text: 原始输出文本
+        :return: 解析后的字典
+        """
+        # 尝试匹配 ```json ... ``` 代码块
+        import re as _re
+        json_block_match = _re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', text)
+        if json_block_match:
+            try:
+                return json.loads(json_block_match.group(1))
+            except Exception:
+                pass
+        # 尝试匹配纯 JSON 对象（从第一个 { 到最后一个 }）
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except Exception:
+                pass
+        return None
+
+    @classmethod
+    def _copy_session_for_resume(
+        cls,
+        workspace_dir: Path,
+        provider_type: str,
+        resume_from_workspace: str | None,
+    ) -> tuple[bool, str | list[str]]:
+        """
+        Resume 时将上一次任务的会话数据复制到当前工作区。
+        - codex: 复制 .ai_home/ 目录
+        - claude: 复制 .claude/ 目录
+        :param workspace_dir: 当前任务工作区
+        :param provider_type: Provider 类型
+        :param resume_from_workspace: 上次任务的 workspace 路径
+        :return: (是否成功复制, resume 命令行参数列表)
+        """
+        if not resume_from_workspace:
+            return False, []
+        source_ws = Path(resume_from_workspace)
+        if not source_ws.exists():
+            logger.warning(f"Resume 源工作区不存在: {resume_from_workspace}")
+            return False, []
+
+        worker_config = cls._get_provider_worker_config(provider_type)
+        resume_flag = worker_config.get("resume_flag")
+        if not resume_flag:
+            return False, []
+
+        try:
+            if provider_type == "claude":
+                # 复制 .claude/ 目录到当前 workspace
+                src_claude = source_ws / ".claude"
+                dst_claude = workspace_dir / ".claude"
+                if src_claude.exists() and not dst_claude.exists():
+                    shutil.copytree(src_claude, dst_claude)
+                    logger.info(f"已复制 Claude 会话: {src_claude} → {dst_claude}")
+                return True, [str(resume_flag)]
+            else:
+                # codex: 复制 .ai_home/ 目录
+                src_home = source_ws / ".ai_home"
+                dst_home = workspace_dir / ".ai_home"
+                if src_home.exists() and not dst_home.exists():
+                    shutil.copytree(src_home, dst_home)
+                    logger.info(f"已复制 Codex 会话: {src_home} → {dst_home}")
+                return True, [str(resume_flag)]
+        except Exception as exc:
+            logger.warning(f"复制 Resume 会话失败: provider={provider_type}, error={exc}")
+            return False, []
+
+    @staticmethod
+    def _build_hidden_subprocess_kwargs() -> dict[str, Any]:
+        """
+        构建 Windows 下隐藏子进程控制台窗口的参数。
+        :return: subprocess.run 可用的额外参数
+        """
+        if os.name != "nt":
+            return {}
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        return {
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            "startupinfo": startupinfo,
+        }
+
+    @staticmethod
+    def _sanitize_path_segment(value: str, fallback: str = "repo") -> str:
+        """
+        将文本转换为可作为目录名的安全片段。
+        :param value: 原始文本。
+        :param fallback: 文本为空时的默认片段。
+        :return: 安全目录名片段。
+        """
+        normalized = re.sub(r"[^0-9A-Za-z._-]+", "_", str(value or "").strip())
+        normalized = normalized.strip("._-")
+        return normalized[:120] or fallback
+
+    @staticmethod
+    def _normalize_branch_name(branch_name: str | None) -> str:
+        """
+        归一化分支名，兼容 refs/heads 与 origin 前缀。
+        :param branch_name: 原始分支名。
+        :return: 本地分支名。
+        """
+        normalized = str(branch_name or "").strip().replace("\\", "/")
+        for prefix in ("refs/heads/", "remotes/origin/", "origin/"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+        return normalized.strip("/")
+
+    @classmethod
+    def _run_git_command(
+        cls,
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout_sec: int = 120,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess:
+        """
+        执行 git 命令，并在失败时返回面向 Agent 的明确错误。
+        :param args: git 子命令参数。
+        :param cwd: 执行目录。
+        :param timeout_sec: 超时时间。
+        :param check: 是否校验退出码。
+        :return: git 执行结果。
+        """
+        command = ["git", *args]
+        try:
+            result = subprocess.run(
+                command,
+                text=True,
+                capture_output=True,
+                cwd=str(cwd) if cwd else None,
+                timeout=max(timeout_sec, 10),
+                **cls._build_hidden_subprocess_kwargs(),
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("未找到 git 命令，请先安装 Git 并确认 git 已加入 PATH") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"执行 git 命令超时: {' '.join(command)}") from exc
+        if check and result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(f"执行 git 命令失败: {' '.join(command)}; {detail}")
+        return result
+
+    @classmethod
+    def _get_repo_current_branch(cls, repo_path: Path) -> str:
+        """
+        读取本地仓库当前分支。
+        :param repo_path: 本地仓库或 worktree 目录。
+        :return: 当前分支名。
+        """
+        result = cls._run_git_command(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
+        branch_name = result.stdout.strip()
+        if not branch_name or branch_name == "HEAD":
+            raise RuntimeError(f"本地仓库处于 detached HEAD，无法校验分支: {repo_path}")
+        return branch_name
+
+    @classmethod
+    def _ensure_repo_branch_matches(cls, repo_path: Path, expected_branch: str) -> str:
+        """
+        校验本地仓库分支必须与工单映射分支一致。
+        :param repo_path: 本地仓库或 worktree 目录。
+        :param expected_branch: 工单映射要求的分支。
+        :return: 当前分支名。
+        """
+        expected = cls._normalize_branch_name(expected_branch)
+        if not expected:
+            raise RuntimeError("仓库映射 branchName 为空，无法校验 AI 分析代码分支")
+        if not repo_path.exists():
+            raise FileNotFoundError(f"本地仓库路径不存在: {repo_path}")
+        current = cls._get_repo_current_branch(repo_path)
+        if cls._normalize_branch_name(current) != expected:
+            raise RuntimeError(
+                "本地仓库分支与工单映射不一致，已停止 AI 分析。"
+                f"期望分支: {expected}; 当前分支: {current}; localRepoPath: {repo_path}"
+            )
+        return current
+
+    @classmethod
+    def _find_registered_worktree_by_branch(cls, repo_path: Path, expected_branch: str) -> Path | None:
+        """
+        从当前 Git 仓库已登记的 worktree 中查找指定分支目录。
+        :param repo_path: Git 仓库、bare 仓库或任意 worktree 目录。
+        :param expected_branch: 需要复用的分支名。
+        :return: 已登记且分支匹配的 worktree 路径，不存在时返回 None。
+        """
+        expected = cls._normalize_branch_name(expected_branch)
+        if not expected or not repo_path.exists():
+            return None
+
+        result = cls._run_git_command(["worktree", "list", "--porcelain"], cwd=repo_path, check=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            logger.warning(f"读取 Git worktree 列表失败，跳过已登记目录复用: repo_path={repo_path}, detail={detail}")
+            return None
+
+        current_path: Path | None = None
+        current_branch = ""
+        for raw_line in (result.stdout or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                if current_path and cls._normalize_branch_name(current_branch) == expected and current_path.exists():
+                    cls._ensure_repo_branch_matches(current_path, expected)
+                    return current_path
+                current_path = None
+                current_branch = ""
+                continue
+            if line.startswith("worktree "):
+                current_path = Path(line[len("worktree "):].strip())
+                current_branch = ""
+            elif line.startswith("branch "):
+                current_branch = line[len("branch "):].strip()
+
+        if current_path and cls._normalize_branch_name(current_branch) == expected and current_path.exists():
+            cls._ensure_repo_branch_matches(current_path, expected)
+            return current_path
+        return None
+
+    @classmethod
+    def _repo_cache_dir(cls, workspace_root: Path, repo_url: str) -> Path:
+        """
+        根据远端仓库地址生成 bare 仓库缓存目录。
+        :param workspace_root: AI 工作区根目录。
+        :param repo_url: 远端仓库地址。
+        :return: bare 仓库缓存目录。
+        """
+        safe_repo = cls._sanitize_path_segment(repo_url.replace(":", "_").replace("/", "_"), "repo")
+        return workspace_root / "_repo_cache" / f"{safe_repo}.git"
+
+    @classmethod
+    def _worktree_path(cls, workspace_root: Path, repo_url: str, branch_name: str) -> Path:
+        """
+        根据远端仓库地址和分支生成固定 worktree 目录。
+        :param workspace_root: AI 工作区根目录。
+        :param repo_url: 远端仓库地址。
+        :param branch_name: 分支名称。
+        :return: worktree 目录。
+        """
+        safe_repo = cls._sanitize_path_segment(repo_url.replace(":", "_").replace("/", "_"), "repo")
+        safe_branch = cls._sanitize_path_segment(cls._normalize_branch_name(branch_name).replace("/", "_"), "branch")
+        return workspace_root / "repo_worktrees" / safe_repo / safe_branch
+
+    @classmethod
+    def _local_worktree_path(cls, workspace_root: Path, source_repo_path: Path, branch_name: str) -> Path:
+        """
+        根据本地仓库路径和分支生成固定 worktree 目录。
+        :param workspace_root: AI 工作区根目录。
+        :param source_repo_path: 仓库映射配置的本地仓库目录。
+        :param branch_name: 分支名称。
+        :return: 本地仓库派生的 worktree 目录。
+        """
+        safe_repo = cls._sanitize_path_segment(str(source_repo_path.resolve()).replace(":", "_").replace("\\", "_"), "repo")
+        safe_branch = cls._sanitize_path_segment(cls._normalize_branch_name(branch_name).replace("/", "_"), "branch")
+        return workspace_root / "repo_worktrees" / "local" / safe_repo / safe_branch
+
+    @classmethod
+    def _ensure_local_worktree_repo(
+        cls,
+        *,
+        workspace_root: Path,
+        source_repo_path: Path,
+        branch_name: str,
+    ) -> Path:
+        """
+        基于仓库映射中的本地仓库创建分支固定 worktree，复用原仓库 Git 配置和凭据。
+        :param workspace_root: AI 工作区根目录。
+        :param source_repo_path: 仓库映射配置的本地仓库目录。
+        :param branch_name: 分支名称。
+        :return: 可用于 Codex 分析的 worktree 目录。
+        """
+        expected_branch = cls._normalize_branch_name(branch_name)
+        if not expected_branch:
+            raise RuntimeError("仓库映射 branchName 为空，无法基于本地仓库创建 worktree")
+        if not source_repo_path.exists():
+            raise FileNotFoundError(f"本地仓库路径不存在: {source_repo_path}")
+
+        worktree_path = cls._local_worktree_path(workspace_root, source_repo_path, expected_branch)
+        if worktree_path.exists():
+            cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+            return worktree_path
+
+        registered_worktree = cls._find_registered_worktree_by_branch(source_repo_path, expected_branch)
+        if registered_worktree:
+            logger.info(
+                f"复用 Git 已登记的本地派生 worktree: "
+                f"source_repo_path={source_repo_path}, branch={expected_branch}, path={registered_worktree}"
+            )
+            return registered_worktree
+
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"基于映射本地仓库创建 AI 分析固定 worktree: "
+            f"source_repo_path={source_repo_path}, branch={expected_branch}, path={worktree_path}"
+        )
+        local_branch_check = cls._run_git_command(
+            ["show-ref", "--verify", f"refs/heads/{expected_branch}"],
+            cwd=source_repo_path,
+            check=False,
+        )
+        if local_branch_check.returncode == 0:
+            cls._run_git_command(
+                ["worktree", "add", str(worktree_path), expected_branch],
+                cwd=source_repo_path,
+                timeout_sec=900,
+            )
+        else:
+            fetch_result = cls._run_git_command(
+                ["fetch", "origin", expected_branch],
+                cwd=source_repo_path,
+                timeout_sec=600,
+                check=False,
+            )
+            if fetch_result.returncode != 0:
+                detail = (fetch_result.stderr or fetch_result.stdout or "").strip()
+                raise RuntimeError(
+                    f"基于本地仓库创建 worktree 前拉取远端分支失败: "
+                    f"branch={expected_branch}, source_repo_path={source_repo_path}, detail={detail}"
+                )
+            cls._run_git_command(
+                ["worktree", "add", "-b", expected_branch, str(worktree_path), f"origin/{expected_branch}"],
+                cwd=source_repo_path,
+                timeout_sec=900,
+            )
+        cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+        return worktree_path
+
+    @classmethod
+    def _ensure_worktree_repo(
+        cls,
+        *,
+        workspace_root: Path,
+        repo_url: str,
+        branch_name: str,
+    ) -> Path:
+        """
+        准备分支固定 worktree；已有目录只校验分支，不自动 checkout。
+        :param workspace_root: AI 工作区根目录。
+        :param repo_url: 远端仓库地址。
+        :param branch_name: 分支名称。
+        :return: 可用于 Codex 分析的 worktree 目录。
+        """
+        expected_branch = cls._normalize_branch_name(branch_name)
+        if not repo_url:
+            raise RuntimeError("仓库映射 localRepoPath 为空，且 repoUrl 为空，无法自动创建 worktree")
+        if not expected_branch:
+            raise RuntimeError("仓库映射 localRepoPath 为空，且 branchName 为空，无法自动创建 worktree")
+
+        worktree_path = cls._worktree_path(workspace_root, repo_url, expected_branch)
+        if worktree_path.exists():
+            cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+            return worktree_path
+
+        cache_dir = cls._repo_cache_dir(workspace_root, repo_url)
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cache_dir.exists():
+            logger.info(f"AI 分析 worktree 缺失，开始克隆 bare 仓库: repo_url={repo_url}, cache_dir={cache_dir}")
+            cls._run_git_command(["clone", "--bare", repo_url, str(cache_dir)], timeout_sec=1800)
+        else:
+            logger.info(f"AI 分析 worktree 缺失，刷新 bare 仓库引用: cache_dir={cache_dir}, branch={expected_branch}")
+            cls._run_git_command(["fetch", "origin", expected_branch], cwd=cache_dir, timeout_sec=600, check=False)
+
+        registered_worktree = cls._find_registered_worktree_by_branch(cache_dir, expected_branch)
+        if registered_worktree:
+            logger.info(
+                f"复用 Git 已登记的远端仓库 worktree: "
+                f"repo_url={repo_url}, branch={expected_branch}, path={registered_worktree}"
+            )
+            return registered_worktree
+
+        local_branch_check = cls._run_git_command(
+            ["show-ref", "--verify", f"refs/heads/{expected_branch}"],
+            cwd=cache_dir,
+            check=False,
+        )
+        logger.info(f"创建 AI 分析固定 worktree: branch={expected_branch}, path={worktree_path}")
+        if local_branch_check.returncode == 0:
+            cls._run_git_command(
+                ["worktree", "add", str(worktree_path), expected_branch],
+                cwd=cache_dir,
+                timeout_sec=900,
+            )
+        else:
+            cls._run_git_command(
+                ["worktree", "add", "-b", expected_branch, str(worktree_path), f"origin/{expected_branch}"],
+                cwd=cache_dir,
+                timeout_sec=900,
+            )
+        cls._ensure_repo_branch_matches(worktree_path, expected_branch)
+        return worktree_path
 
     @staticmethod
     def _persist_worker_streams(workspace_dir: Path, stdout_text: str | None, stderr_text: str | None) -> None:
@@ -148,15 +1166,17 @@ class TicketAiAnalysisService:
     async def _run_worker_process(
         command: list[str],
         resolved_prompt: str,
-        repo_path: Path,
+        cwd: Path,
         env_values: dict[str, str],
         timeout_sec: int,
     ) -> subprocess.CompletedProcess:
         """
         在后台线程中执行 Worker 进程，避免阻塞 Agent 事件循环。
+        cwd 统一为 workspace_dir，各工具通过自身参数定位代码目录
+        （Codex 用 -C，Claude Code 用 --add-dir）。
         :param command: Worker 命令
         :param resolved_prompt: 发送给 Worker 的提示词
-        :param repo_path: 仓库路径
+        :param cwd: 工作目录（workspace_dir）
         :param env_values: 执行环境变量
         :param timeout_sec: 超时时间
         :return: 进程执行结果
@@ -167,9 +1187,10 @@ class TicketAiAnalysisService:
             input=resolved_prompt,
             text=True,
             capture_output=True,
-            cwd=str(repo_path),
+            cwd=str(cwd),
             env=env_values,
             timeout=max(timeout_sec, 60),
+            **TicketAiAnalysisService._build_hidden_subprocess_kwargs(),
         )
 
     @staticmethod
@@ -304,14 +1325,108 @@ class TicketAiAnalysisService:
         return target_path
 
     @staticmethod
+    def _resolve_log_cache_paths(
+        workspace_root: Path,
+        ticket_id: int,
+        log_record_id: int,
+        source_key: str,
+    ) -> tuple[Path, Path, Path]:
+        """
+        根据工单、日志记录和日志来源生成 Agent 本地固定缓存路径。
+
+        :param workspace_root: AI 工作区根目录
+        :param ticket_id: 工单ID
+        :param log_record_id: 日志拉取记录ID
+        :param source_key: 日志来源标识（本地归档路径或下载地址）
+        :return: 压缩包缓存路径、解压目录、缓存元数据路径
+        """
+        source_hash = hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:16]
+        cache_dir = (
+            workspace_root
+            / "log_cache"
+            / f"ticket_{ticket_id}"
+            / f"log_pull_{log_record_id}"
+            / source_hash
+        )
+        return cache_dir / "source_logs.zip", cache_dir / "source_logs", cache_dir / "cache_manifest.json"
+
+    @classmethod
+    def _load_log_archive_cache(
+        cls,
+        cache_manifest_path: Path,
+        source_key: str,
+        archive_path: Path,
+        extract_dir: Path,
+    ) -> list[str]:
+        """
+        校验并读取已完成的日志缓存。
+
+        :param cache_manifest_path: 缓存元数据文件路径
+        :param source_key: 本次日志来源标识
+        :param archive_path: 本次可用压缩包路径
+        :param extract_dir: 缓存解压目录
+        :return: 已缓存的解压文件相对路径；无可用缓存时返回空列表
+        """
+        manifest = cls._read_json_file(cache_manifest_path)
+        if not manifest or str(manifest.get("sourceKey") or "") != source_key:
+            return []
+        if not archive_path.is_file() or archive_path.stat().st_size <= 0 or not extract_dir.is_dir():
+            return []
+        extracted_files = [
+            str(path.relative_to(extract_dir))
+            for path in extract_dir.rglob("*")
+            if path.is_file()
+        ]
+        return extracted_files
+
+    @staticmethod
+    def _resolve_existing_local_archive(storage_path: str) -> Path | None:
+        """
+        解析 Agent 当前机器可直接访问的日志归档文件。
+
+        :param storage_path: 服务端记录的归档路径
+        :return: 存在且非空的本地归档文件；当前机器不可访问时返回 None
+        """
+        if not storage_path:
+            return None
+        try:
+            archive_path = Path(storage_path).expanduser()
+            if archive_path.is_file() and archive_path.stat().st_size > 0:
+                return archive_path
+        except OSError:
+            return None
+        return None
+
+    @staticmethod
     def _extract_archive(archive_path: Path, extract_dir: Path) -> list[str]:
         """
-        解压日志压缩包到工作区目录。
+        解压日志压缩包到工作区目录。支持 zip / 7z / tar / tar.gz / tgz / bz2 / xz / gz 等常见格式。
         :param archive_path: 压缩包路径
         :param extract_dir: 解压目录
         :return: 解压后的文件相对路径列表
         """
         extract_dir.mkdir(parents=True, exist_ok=True)
+        name = archive_path.name.lower()
+        if name.endswith(".7z"):
+            return TicketAiAnalysisService._extract_7z(archive_path, extract_dir)
+        if name.endswith(".zip"):
+            return TicketAiAnalysisService._extract_zip(archive_path, extract_dir)
+        if tarfile.is_tarfile(archive_path):
+            return TicketAiAnalysisService._extract_tar(archive_path, extract_dir)
+        if name.endswith(".gz"):
+            return TicketAiAnalysisService._extract_gz(archive_path, extract_dir)
+        if name.endswith(".bz2"):
+            return TicketAiAnalysisService._extract_bz2(archive_path, extract_dir)
+        if name.endswith(".xz"):
+            return TicketAiAnalysisService._extract_xz(archive_path, extract_dir)
+        # 兜底：尝试 py7zr（不依赖后缀的场景），再失败则走系统 7z
+        try:
+            return TicketAiAnalysisService._extract_7z(archive_path, extract_dir)
+        except Exception:
+            return TicketAiAnalysisService._extract_by_system_7z(archive_path, extract_dir)
+
+    @staticmethod
+    def _extract_zip(archive_path: Path, extract_dir: Path) -> list[str]:
         extracted_files: list[str] = []
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
             for member in zip_ref.namelist():
@@ -322,14 +1437,363 @@ class TicketAiAnalysisService:
         return extracted_files
 
     @staticmethod
+    def _extract_7z(archive_path: Path, extract_dir: Path) -> list[str]:
+        extracted_files: list[str] = []
+        with py7zr.SevenZipFile(archive_path, "r") as archive:
+            archive.extractall(path=extract_dir)
+            extracted_files = archive.getnames()
+        return [f for f in extracted_files if not f.endswith("/")]
+
+    @staticmethod
+    def _extract_tar(archive_path: Path, extract_dir: Path) -> list[str]:
+        extracted_files: list[str] = []
+        with tarfile.open(archive_path) as archive:
+            for member in archive.getmembers():
+                if member.isdir() or member.issym():
+                    continue
+                archive.extract(member, extract_dir)
+                extracted_files.append(member.name)
+        return extracted_files
+
+    @staticmethod
+    def _extract_gz(archive_path: Path, extract_dir: Path) -> list[str]:
+        output_name = archive_path.with_suffix("").name
+        output_path = extract_dir / output_name
+        with gzip.open(archive_path, "rb") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return [output_name]
+
+    @staticmethod
+    def _extract_bz2(archive_path: Path, extract_dir: Path) -> list[str]:
+        output_name = archive_path.with_suffix("").name
+        output_path = extract_dir / output_name
+        with bz2.open(archive_path, "rb") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return [output_name]
+
+    @staticmethod
+    def _extract_xz(archive_path: Path, extract_dir: Path) -> list[str]:
+        output_name = archive_path.with_suffix("").name
+        output_path = extract_dir / output_name
+        with lzma.open(archive_path, "rb") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return [output_name]
+
+    @staticmethod
+    def _extract_by_system_7z(archive_path: Path, extract_dir: Path) -> list[str]:
+        """使用系统 7z 命令解压（兜底方案，支持 rar 等 py7zr 不支持的格式）。"""
+        executable = shutil.which("7z") or shutil.which("7z.exe")
+        if not executable:
+            raise RuntimeError("当前环境未找到 7z 命令行工具，无法解压该格式压缩包")
+        process = subprocess.run(
+            [executable, "x", "-y", f"-o{extract_dir}", str(archive_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "7z 解压失败")
+        # 扫描解压后的非目录文件列表
+        extracted: list[str] = []
+        for root, _dirs, files in os.walk(extract_dir):
+            for file in files:
+                abs_path = os.path.join(root, file)
+                extracted.append(os.path.relpath(abs_path, extract_dir))
+        return extracted
+
+    @classmethod
+    def _build_log_digest_keywords(cls, ticket: dict[str, Any], context_payload: dict[str, Any]) -> list[str]:
+        """
+        从工单和日志提示中提取日志预筛选关键词。
+        :param ticket: 工单信息
+        :param context_payload: AI 上下文
+        :return: 去重后的关键词列表
+        """
+        source_log_pull = context_payload.get("sourceLogPull") if isinstance(context_payload, dict) else {}
+        log_hints = (
+            ticket.get("extraData", {}).get("log_pull_hints")
+            if isinstance(ticket.get("extraData"), dict)
+            else {}
+        ) or {}
+        text_sources = [
+            ticket.get("ticketNo"),
+            ticket.get("ticket_no"),
+            ticket.get("title"),
+            ticket.get("description"),
+            context_payload.get("extraInstruction") if isinstance(context_payload, dict) else "",
+            source_log_pull.get("contentSummary") if isinstance(source_log_pull, dict) else "",
+            log_hints.get("storeId") if isinstance(log_hints, dict) else "",
+            log_hints.get("posNo") if isinstance(log_hints, dict) else "",
+            log_hints.get("modifyTime") if isinstance(log_hints, dict) else "",
+        ]
+        default_keywords = [
+            "error",
+            "exception",
+            "fail",
+            "failed",
+            "timeout",
+            "payment",
+            "pay",
+            "nets",
+            "cash",
+            "withdrawal",
+            "duplicate",
+            "reversal",
+            "refund",
+            "receipt",
+            "terminal",
+            "ref.no",
+            "transaction",
+            "offline",
+        ]
+        candidates: list[str] = []
+        for value in text_sources:
+            text = str(value or "")
+            candidates.extend(re.findall(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,}", text))
+        candidates.extend(default_keywords)
+        seen: set[str] = set()
+        keywords: list[str] = []
+        for item in candidates:
+            normalized = str(item or "").strip().lower()
+            if len(normalized) < 3 or normalized in seen:
+                continue
+            seen.add(normalized)
+            keywords.append(normalized)
+        return keywords[:80]
+
+    @classmethod
+    def _read_log_lines(cls, file_path: Path) -> list[str]:
+        """
+        读取日志文件行，兼容常见编码并忽略坏字符。
+        :param file_path: 日志文件路径
+        :return: 日志行列表
+        """
+        for encoding in ("utf-8", "gbk", "latin-1"):
+            try:
+                return file_path.read_text(encoding=encoding, errors="ignore").splitlines()
+            except Exception:
+                continue
+        return []
+
+    @staticmethod
+    def _parse_context_datetime(value: Any) -> datetime | None:
+        """
+        解析上下文中的日志时间。
+        :param value: 时间值
+        :return: datetime，无法解析时返回 None
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(text[: len(fmt)], fmt)
+            except Exception:
+                continue
+        try:
+            return datetime.fromisoformat(text)
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_window_logs(
+        cls,
+        *,
+        extract_dir: Path,
+        extracted_files: list[str],
+        begin_time: datetime | None,
+        end_time: datetime | None,
+        max_chars: int = 800000,
+    ) -> dict[str, Any]:
+        """
+        从解压目录中按时间窗口截取日志正文。
+        :param extract_dir: 解压目录
+        :param extracted_files: 解压文件相对路径
+        :param begin_time: 开始时间
+        :param end_time: 结束时间
+        :param max_chars: 最大字符数
+        :return: 截取结果
+        """
+        content_parts: list[str] = []
+        matched_entries = 0
+        current_chars = 0
+        for relative_name in extracted_files:
+            lowered_name = str(relative_name or "").lower()
+            if ".log" not in lowered_name:
+                continue
+            file_path = extract_dir / relative_name
+            lines = cls._read_log_lines(file_path)
+            if not lines:
+                continue
+            current_lines: list[str] = []
+            current_timestamp: datetime | None = None
+
+            def flush_entry() -> None:
+                nonlocal matched_entries, current_chars
+                if not current_lines or current_timestamp is None:
+                    return
+                if begin_time and current_timestamp < begin_time:
+                    return
+                if end_time and current_timestamp > end_time:
+                    return
+                entry_text = "\n".join(current_lines)
+                if not entry_text.strip():
+                    return
+                separator_length = 2 if content_parts else 0
+                projected_length = current_chars + len(entry_text) + separator_length
+                if projected_length > max_chars:
+                    return
+                content_parts.append(entry_text)
+                matched_entries += 1
+                current_chars = projected_length
+
+            for line in lines:
+                match = cls.TIMESTAMP_PATTERN.match(line)
+                if match:
+                    flush_entry()
+                    try:
+                        current_timestamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S,%f")
+                    except Exception:
+                        current_timestamp = None
+                    current_lines = [f"[{Path(relative_name).name}]{line}"] if current_timestamp else []
+                    continue
+                if current_lines:
+                    current_lines.append(line)
+            flush_entry()
+        full_text = "\n\n".join(content_parts)
+        return {
+            "text": full_text,
+            "matchedEntries": matched_entries,
+            "charCount": len(full_text),
+            "truncated": bool(current_chars >= max_chars),
+            "beginTime": begin_time.isoformat() if begin_time else "",
+            "endTime": end_time.isoformat() if end_time else "",
+            "maxChars": max_chars,
+        }
+
+    @classmethod
+    def _build_log_digest(
+        cls,
+        *,
+        extract_dir: Path,
+        extracted_files: list[str],
+        ticket: dict[str, Any],
+        context_payload: dict[str, Any],
+        digest_path: Path,
+    ) -> dict[str, Any]:
+        """
+        从整包日志中生成受控大小的 AI 摘要，避免 Codex 默认读取全量几十 MB 日志。
+        :param extract_dir: 解压目录
+        :param extracted_files: 解压出的相对文件列表
+        :param ticket: 工单信息
+        :param context_payload: AI 上下文
+        :param digest_path: 摘要文件路径
+        :return: 摘要元数据
+        """
+        keywords = cls._build_log_digest_keywords(ticket, context_payload)
+        keyword_tuple = tuple(keywords)
+        digest_parts: list[str] = [
+            "# AI 日志预筛选摘要",
+            "",
+            "说明：本文件由 Agent 从完整日志包中按工单关键词、错误关键词和支付关键词预筛选生成。",
+            "digest 模式可优先基于本摘要分析；hybrid 模式下本摘要只作为定位索引，仍必须检索 source_logs 原始日志。",
+            "",
+            f"关键词：{', '.join(keywords[:60])}",
+            "",
+            "## 文件清单",
+        ]
+        total_size = 0
+        matched_files = 0
+        matched_lines = 0
+        for relative_name in extracted_files:
+            file_path = extract_dir / relative_name
+            if not file_path.exists() or not file_path.is_file():
+                continue
+            try:
+                total_size += file_path.stat().st_size
+                digest_parts.append(f"- {relative_name} ({file_path.stat().st_size} bytes)")
+            except Exception:
+                digest_parts.append(f"- {relative_name}")
+        digest_parts.append("")
+        digest_parts.append("## 命中片段")
+
+        for relative_name in extracted_files:
+            file_path = extract_dir / relative_name
+            if not file_path.exists() or not file_path.is_file():
+                continue
+            lowered_name = relative_name.lower()
+            if not any(marker in lowered_name for marker in (".log", "fault", "error", "request")):
+                continue
+            lines = cls._read_log_lines(file_path)
+            if not lines:
+                continue
+            file_matches = 0
+            used_line_indexes: set[int] = set()
+            file_blocks: list[str] = []
+            for index, line in enumerate(lines):
+                lowered_line = line.lower()
+                if not any(keyword in lowered_line for keyword in keyword_tuple):
+                    continue
+                start = max(0, index - cls.DEFAULT_LOG_DIGEST_CONTEXT_LINES)
+                end = min(len(lines), index + cls.DEFAULT_LOG_DIGEST_CONTEXT_LINES + 1)
+                block_lines: list[str] = []
+                for line_index in range(start, end):
+                    if line_index in used_line_indexes:
+                        continue
+                    used_line_indexes.add(line_index)
+                    line_text = lines[line_index]
+                    if len(line_text) > cls.DEFAULT_LOG_DIGEST_MAX_LINE_CHARS:
+                        line_text = f"{line_text[:cls.DEFAULT_LOG_DIGEST_MAX_LINE_CHARS]} ...<line truncated>"
+                    block_lines.append(f"{line_index + 1}: {line_text}")
+                if block_lines:
+                    file_matches += 1
+                    matched_lines += len(block_lines)
+                    file_blocks.append("\n".join(block_lines))
+                if file_matches >= cls.DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE:
+                    break
+            if not file_blocks:
+                continue
+            matched_files += 1
+            digest_parts.append("")
+            digest_parts.append(f"### {relative_name}")
+            digest_parts.extend(file_blocks)
+            digest_text = "\n".join(digest_parts)
+            if len(digest_text) >= cls.DEFAULT_LOG_DIGEST_MAX_CHARS:
+                digest_parts.append(
+                    f"\n... 摘要已达到 {cls.DEFAULT_LOG_DIGEST_MAX_CHARS} 字符上限，后续日志未继续写入 ...\n"
+                )
+                break
+
+        digest_text = "\n".join(digest_parts)
+        if len(digest_text) > cls.DEFAULT_LOG_DIGEST_MAX_CHARS:
+            digest_text = digest_text[: cls.DEFAULT_LOG_DIGEST_MAX_CHARS] + "\n... 摘要已截断 ...\n"
+        digest_path.write_text(digest_text, encoding="utf-8")
+        return {
+            "digestPath": str(digest_path),
+            "digestCharCount": len(digest_text),
+            "maxDigestChars": cls.DEFAULT_LOG_DIGEST_MAX_CHARS,
+            "keywordCount": len(keywords),
+            "matchedFiles": matched_files,
+            "matchedLines": matched_lines,
+            "sourceTotalBytes": total_size,
+        }
+
+    @staticmethod
     def _extract_stderr_context(
         stderr_text: str | None,
         keywords: tuple[str, ...] = (
+            "error:",
             "openai_error",
             "bad_response_status_code",
             "invalid_request_error",
             "stream disconnected",
             "error sending request",
+            "concurrency limit exceeded",
         ),
     ) -> str:
         """
@@ -344,15 +1808,27 @@ class TicketAiAnalysisService:
         if not lines:
             return ""
         lowered_keywords = tuple(keyword.lower() for keyword in keywords)
+        matched_windows: list[str] = []
         for idx, line in enumerate(lines):
             lower_line = line.strip().lower()
             if any(keyword in lower_line for keyword in lowered_keywords):
-                start = max(0, idx - 10)
+                start = max(0, idx - 2)
                 end = min(len(lines), idx + 11)
-                window = [re.sub(r"\s+", " ", item.strip()) for item in lines[start:end] if item.strip() not in {"{", "}", "[", "]"}]
+                window = [
+                    re.sub(r"\s+", " ", item.strip())
+                    for item in lines[start:end]
+                    if item.strip() not in {"{", "}", "[", "]"}
+                ]
                 if window:
-                    return " | ".join(window)[:4000]
-        tail_lines = [re.sub(r"\s+", " ", item.strip()) for item in lines[-20:] if item.strip() not in {"{", "}", "[", "]"}]
+                    matched_windows.extend(window)
+        if matched_windows:
+            # Codex 会把检索到的业务日志也写入 stderr，这里只返回命中的错误窗口，避免污染工单错误摘要。
+            return " | ".join(dict.fromkeys(matched_windows))[:4000]
+        tail_lines = [
+            re.sub(r"\s+", " ", item.strip())
+            for item in lines[-20:]
+            if item.strip() not in {"{", "}", "[", "]"}
+        ]
         return " | ".join(tail_lines)[:4000] if tail_lines else ""
 
     @staticmethod
@@ -370,10 +1846,32 @@ class TicketAiAnalysisService:
             lines = [line.rstrip() for line in str(raw_text).splitlines() if line.strip()]
             if not lines:
                 continue
-            tail_lines = [re.sub(r"\s+", " ", item.strip()) for item in lines[-20:] if item.strip() not in {"{", "}", "[", "]"}]
+            error_context = TicketAiAnalysisService._extract_stderr_context(str(raw_text))
+            if error_context:
+                return error_context
+            tail_lines = [
+                re.sub(r"\s+", " ", item.strip())
+                for item in lines[-20:]
+                if item.strip() not in {"{", "}", "[", "]"}
+            ]
             if tail_lines:
                 return " | ".join(tail_lines)[:4000]
         return default_message
+
+    @staticmethod
+    def _normalize_worker_failure_message(message: str) -> str:
+        """
+        将 Codex/模型侧错误归一为面向业务的失败说明。
+        :param message: 原始失败摘要
+        :return: 归一化后的失败说明
+        """
+        normalized = str(message or "").strip() or "AI Worker 未返回可解析的 JSON 结果"
+        lower_message = normalized.lower()
+        if "concurrency limit exceeded" in lower_message:
+            return f"Codex 账号并发限制，请稍后重试或更换可用账号/Provider：{normalized}"
+        if "openai_error" in lower_message or "bad_response_status_code" in lower_message:
+            return f"AI模型接口返回异常，请检查模型配置、请求上下文大小或上游服务状态：{normalized}"
+        return normalized
 
     @staticmethod
     async def _emit_event(event_sender: EventSender | None, event_type: str, task_id: int, message: str, **extra: Any) -> None:
@@ -400,6 +1898,8 @@ class TicketAiAnalysisService:
         *,
         repo_path: str | None = None,
         workspace_root: str | None = None,
+        log_analysis_mode: str = "digest",
+        source_logs_path: str | None = None,
     ) -> str:
         """
         构建分析提示词。
@@ -408,11 +1908,15 @@ class TicketAiAnalysisService:
         :param ticket: 工单信息
         :param repo_path: 实际使用的本地仓库路径。
         :param workspace_root: 实际使用的工作区根目录。
+        :param log_analysis_mode: 日志分析模式（digest/full_directory/hybrid）。
+        :param source_logs_path: 实际读取的原始日志目录。
         :return: 提示词文本
         """
-        resolved_repo_path = repo_path or mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""
+        resolved_repo_path = repo_path or mapping.get("resolvedLocalRepoPath") or mapping.get("resolved_local_repo_path")
+        resolved_repo_path = resolved_repo_path or mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""
         resolved_workspace_root = workspace_root or mapping.get("workspaceRoot") or mapping.get("workspace_root") or ""
         fallback_workspace_root = str(Path(workspace_path).parent.parent)
+        resolved_source_logs_path = source_logs_path or str(Path(workspace_path) / "source_logs")
         return f"""你是工单自动分析 Worker，请基于当前工作区中的上下文进行根因分析。
 
 当前任务目录:
@@ -423,15 +1927,26 @@ class TicketAiAnalysisService:
 - 版本: {mapping.get("versionKey") or mapping.get("version_key") or ""}
 - 仓库地址: {mapping.get("repoUrl") or mapping.get("repo_url") or ""}
 - 分支: {mapping.get("branchName") or mapping.get("branch_name") or ""}
-- 本地仓库路径: {resolved_repo_path}
+- 本地仓库路径: {mapping.get("localRepoPath") or mapping.get("local_repo_path") or ""}
+- 实际分析代码目录: {resolved_repo_path}
 - 工作区根目录: {resolved_workspace_root or fallback_workspace_root}
-- 说明: 如果 Agent 本地配置中存在仓库路径或工作区根目录，则以 Agent 本地配置为准，映射中的值仅用于兼容和审计。
+- 说明: Agent 启动 Worker 前会校验实际分析代码目录的当前分支必须等于上面的分支；如果映射未提供 localRepoPath，则会在工作区下创建固定 Git worktree 后再执行。
 
 工单要求:
 1. 只做分析，不修改代码、不提交代码。
 2. 优先阅读 {workspace_path}/ticket.json、{workspace_path}/timeline.json、{workspace_path}/logs.txt。
-3. 如果 `sourceLogPull.wholeArchiveMode` 为 true，或 {workspace_path}/logs.txt 只有说明而没有正文，请先阅读 {workspace_path}/source_logs/ 目录中的解压日志文件，再结合代码搜索、调用链、日志和历史事件分析根因。
-4. 输出严格 JSON，不要输出多余说明文本。
+3. **本次日志分析模式为 `{log_analysis_mode}`**（已写入 context.json 的 logAnalysisMode 字段）：
+   - `digest`：优先阅读 {workspace_path}/logs_ai_digest.txt，证据不足时按摘要中的文件名和行号去
+     {resolved_source_logs_path}/ 定点读取原始日志。
+   - `full_directory`：不要依赖摘要，直接读取 {resolved_source_logs_path}/；先用 rg 搜索错误关键词、
+     工单号、门店/POS、交易号和用户额外说明中的关键词，再打开命中文件上下文。
+   - `hybrid`：摘要只作为定位索引。阅读摘要后，必须查看 {workspace_path}/source_logs_manifest.json
+     或列出 {resolved_source_logs_path}/ 文件清单，并至少对 {resolved_source_logs_path}/ 执行一次
+     rg 关键词检索；最终证据尽量引用原始日志文件路径和行号，不要只引用 logs_ai_digest.txt。
+   **请严格按照上述模式执行，不要自行切换为其他模式。**
+4. 如果 `sourceLogPull.agentShouldExtractWindow` 为 true，请按 `requestedBeginTime/requestedEndTime`
+   在 {resolved_source_logs_path}/ 中筛选对应时间窗口；内存问题必须检索 MemoryError、OOM、
+   OutOfMemory、out of memory、heap、GC overhead、内存不足等关键词。
 4. 工单不是一次性分析，请结合 context.json 中的 messages、snapshots 和 similarTickets：
    - messages 是持续追问和协同排查上下文，必须优先参考最新用户追问。
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
@@ -473,11 +1988,11 @@ class TicketAiAnalysisService:
     def _resolve_ai_repo_runtime_settings(
         cls,
         mapping: dict[str, Any],
-    ) -> tuple[Path, Path]:
+    ) -> tuple[Path, Path, str]:
         """
         解析 Agent 本地 AI 仓库运行目录。
         :param mapping: 仓库映射数据。
-        :return: (工作区根目录, 本地仓库路径)
+        :return: (工作区根目录, 实际仓库路径, 当前分支)
         """
         config = AgentConfig.read_config()
         workspace_root_text = str(
@@ -493,28 +2008,47 @@ class TicketAiAnalysisService:
         else:
             workspace_root = get_client_root_dir() / "storage" / "ticket_ai_analysis"
 
-        repo_path_text = str(
-            getattr(config, "ticket_ai_local_repo_path", "")
-            or mapping.get("localRepoPath")
-            or mapping.get("local_repo_path")
-            or ""
-        ).strip()
-        if not repo_path_text:
-            raise FileNotFoundError(
-                "本地仓库路径未配置，请在 Agent 本地配置中填写 ticket_ai_local_repo_path，"
-                "或在仓库映射中维护 localRepoPath"
-            )
-        repo_path = Path(repo_path_text).expanduser()
-        if not repo_path.is_absolute():
-            repo_path = repo_path.resolve()
-        if not repo_path.exists():
-            raise FileNotFoundError(
-                "本地仓库路径不存在，请在 Agent 本地配置中填写 ticket_ai_local_repo_path，"
-                "或在仓库映射中维护 localRepoPath"
-            )
-
         workspace_root.mkdir(parents=True, exist_ok=True)
-        return workspace_root, repo_path
+        branch_name = cls._normalize_branch_name(mapping.get("branchName") or mapping.get("branch_name"))
+        repo_url = str(mapping.get("repoUrl") or mapping.get("repo_url") or "").strip()
+        repo_path_text = str(mapping.get("localRepoPath") or mapping.get("local_repo_path") or "").strip()
+
+        if repo_path_text:
+            repo_path = Path(repo_path_text).expanduser()
+            if not repo_path.is_absolute():
+                repo_path = repo_path.resolve()
+            try:
+                current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+                mapping["resolvedLocalRepoPath"] = str(repo_path)
+                mapping["resolvedBranchName"] = current_branch
+                return workspace_root, repo_path, current_branch
+            except Exception as exc:
+                if not branch_name:
+                    raise
+                logger.warning(
+                    f"AI 分析映射本地仓库不可直接使用，改用本地仓库派生 worktree: "
+                    f"local_repo_path={repo_path}, branch={branch_name}, reason={exc}"
+                )
+                repo_path = cls._ensure_local_worktree_repo(
+                    workspace_root=workspace_root,
+                    source_repo_path=repo_path,
+                    branch_name=branch_name,
+                )
+                current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+                mapping["resolvedLocalRepoPath"] = str(repo_path)
+                mapping["resolvedBranchName"] = current_branch
+                return workspace_root, repo_path, current_branch
+
+        repo_path = cls._ensure_worktree_repo(
+            workspace_root=workspace_root,
+            repo_url=repo_url,
+            branch_name=branch_name,
+        )
+        current_branch = cls._ensure_repo_branch_matches(repo_path, branch_name)
+        mapping["localRepoPath"] = str(repo_path)
+        mapping["resolvedLocalRepoPath"] = str(repo_path)
+        mapping["resolvedBranchName"] = current_branch
+        return workspace_root, repo_path, current_branch
 
     @classmethod
     async def handle_request(
@@ -536,6 +2070,9 @@ class TicketAiAnalysisService:
         timeline_payload = req_data.get("timeline") or {}
         prompt_template = str(req_data.get("promptTemplate") or req_data.get("prompt_template") or "").strip()
         schema_payload = req_data.get("resultSchema") or {}
+        provider_env_overrides = req_data.get("providerEnv") or {}
+        selected_worker_model = str(context_payload.get("selectedWorkerModel") or "").strip()
+        request_provider_code = str(context_payload.get("selectedAiProviderCode") or "").strip()
         try:
             timeout_sec = int(req_data.get("timeoutSec") or req_data.get("timeout_sec") or cls.DEFAULT_TIMEOUT_SEC)
         except Exception:
@@ -549,7 +2086,7 @@ class TicketAiAnalysisService:
                 "message": "taskId 或 ticketId 不能为空",
             }
         try:
-            workspace_root, repo_path = cls._resolve_ai_repo_runtime_settings(mapping)
+            workspace_root, repo_path, current_branch = cls._resolve_ai_repo_runtime_settings(mapping)
             workspace_dir = workspace_root / f"ticket_{ticket_id}" / f"task_{task_id}"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             schema_file = workspace_dir / "result.schema.json"
@@ -559,6 +2096,7 @@ class TicketAiAnalysisService:
             timeline_file = workspace_dir / "timeline.json"
             context_file = workspace_dir / "context.json"
             logs_file = workspace_dir / "logs.txt"
+            log_digest_file = workspace_dir / "logs_ai_digest.txt"
             source_logs_dir = workspace_dir / "source_logs"
             source_logs_zip = workspace_dir / "source_logs.zip"
             source_logs_manifest = workspace_dir / "source_logs_manifest.json"
@@ -573,16 +2111,21 @@ class TicketAiAnalysisService:
                 workspace_root=str(workspace_root),
                 workspace_path=str(workspace_dir),
                 repo_path=str(repo_path),
+                branch_name=current_branch,
             )
             try:
                 request_snapshot_file.write_text(
-                    cls._dumps(
+                cls._dumps(
                         {
                             "taskId": task_id,
                             "ticketId": ticket_id,
                             "requestType": req_data.get("requestType"),
                             "command": req_data.get("command"),
                             "payloadSize": len(cls._dumps(req_data, indent=None)),
+                            "providerCode": request_provider_code,
+                            "workerModel": selected_worker_model,
+                            "resolvedLocalRepoPath": str(repo_path),
+                            "resolvedBranchName": current_branch,
                             "createdAt": datetime.now().isoformat(),
                         }
                     ),
@@ -658,7 +2201,25 @@ class TicketAiAnalysisService:
                 logs_text = str(source_log_pull.get("text") or "")
                 command_result_url = str(source_log_pull.get("commandResultUrl") or "").strip()
                 storage_path = str(source_log_pull.get("storagePath") or "").strip()
+                try:
+                    source_log_record_id = int(source_log_pull.get("recordId") or 0)
+                except (TypeError, ValueError):
+                    source_log_record_id = 0
                 whole_archive_mode = bool(source_log_pull.get("wholeArchiveMode"))
+                log_analysis_mode = str(
+                    context_payload.get("logAnalysisMode")
+                    or source_log_pull.get("analysisMode")
+                    or "digest"
+                ).strip().lower() or "digest"
+                if log_analysis_mode not in {"digest", "full_directory", "hybrid"}:
+                    log_analysis_mode = "digest"
+                agent_should_extract_window = bool(source_log_pull.get("agentShouldExtractWindow"))
+                requested_begin_time = cls._parse_context_datetime(
+                    source_log_pull.get("requestedBeginTime") or context_payload.get("logRequestedBeginTime")
+                )
+                requested_end_time = cls._parse_context_datetime(
+                    source_log_pull.get("requestedEndTime") or context_payload.get("logRequestedEndTime")
+                )
                 extracted_files: list[str] = []
                 if logs_text:
                     logs_file.write_text(logs_text, encoding="utf-8")
@@ -670,9 +2231,13 @@ class TicketAiAnalysisService:
                             "\n".join(
                                 [
                                     "日志内容未入库，已改为整包分析模式。",
+                                    f"日志分析模式: {log_analysis_mode}",
+                                    f"AI预筛选摘要: {log_digest_file if log_analysis_mode in {'digest', 'hybrid'} else '<disabled>'}",
                                     f"压缩包地址: {archive_url or '<none>'}",
                                     f"压缩包本地路径: {source_logs_zip}",
                                     f"解压目录: {source_logs_dir}",
+                                    f"请求时间窗口: {requested_begin_time or '<none>'} ~ {requested_end_time or '<none>'}",
+                                    "请按 context.json 中的 logAnalysisMode 决定读取摘要或完整目录。",
                                 ]
                             ),
                             encoding="utf-8",
@@ -682,19 +2247,123 @@ class TicketAiAnalysisService:
                             "日志内容未入库，当前任务为时间范围模式或未配置整包分析。",
                             encoding="utf-8",
                         )
-                    if whole_archive_mode and archive_url and str(archive_url).lower().startswith(("http://", "https://")):
-                        await cls._emit_event(
-                            event_sender,
-                            "ai_analysis_status",
-                            task_id,
-                            "下载并解压整包日志",
-                            archive_url=archive_url,
-                            archive_path=str(source_logs_zip),
-                            extract_dir=str(source_logs_dir),
-                        )
-                        downloaded = cls._download_archive(str(archive_url), source_logs_zip)
-                        if downloaded:
-                            extracted_files = cls._extract_archive(downloaded, source_logs_dir)
+                    if whole_archive_mode:
+                        local_archive = cls._resolve_existing_local_archive(storage_path)
+                        source_key = ""
+                        active_archive_path: Path | None = local_archive
+                        cache_manifest_path: Path | None = None
+                        cache_hit = False
+                        if local_archive:
+                            source_key = (
+                                f"file:{local_archive.resolve()}:{local_archive.stat().st_size}:"
+                                f"{local_archive.stat().st_mtime_ns}"
+                            )
+                        elif archive_url.lower().startswith(("http://", "https://")):
+                            source_key = f"url:{archive_url}"
+
+                        if source_key and source_log_record_id:
+                            cache_archive_path, cache_extract_dir, cache_manifest_path = cls._resolve_log_cache_paths(
+                                workspace_root,
+                                ticket_id,
+                                source_log_record_id,
+                                source_key,
+                            )
+                            if not active_archive_path:
+                                active_archive_path = cache_archive_path
+                            cached_files = cls._load_log_archive_cache(
+                                cache_manifest_path,
+                                source_key,
+                                active_archive_path,
+                                cache_extract_dir,
+                            )
+                            if cached_files:
+                                source_logs_zip = active_archive_path
+                                source_logs_dir = cache_extract_dir
+                                extracted_files = cached_files
+                                cache_hit = True
+                                await cls._emit_event(
+                                    event_sender,
+                                    "ai_analysis_status",
+                                    task_id,
+                                    "复用本地整包日志缓存",
+                                    log_record_id=source_log_record_id,
+                                    archive_path=str(source_logs_zip),
+                                    extract_dir=str(source_logs_dir),
+                                    extracted_file_count=len(extracted_files),
+                                )
+
+                        if not cache_hit and active_archive_path:
+                            if local_archive:
+                                source_logs_zip = local_archive
+                                await cls._emit_event(
+                                    event_sender,
+                                    "ai_analysis_status",
+                                    task_id,
+                                    "使用本地归档并解压整包日志",
+                                    log_record_id=source_log_record_id or None,
+                                    archive_path=str(local_archive),
+                                )
+                            else:
+                                source_logs_zip = active_archive_path
+                                await cls._emit_event(
+                                    event_sender,
+                                    "ai_analysis_status",
+                                    task_id,
+                                    "下载并解压整包日志",
+                                    archive_url=archive_url,
+                                    archive_path=str(source_logs_zip),
+                                    extract_dir=str(source_logs_dir),
+                                )
+                                active_archive_path = cls._download_archive(archive_url, source_logs_zip)
+                            if active_archive_path:
+                                if cache_manifest_path:
+                                    source_logs_dir = cache_manifest_path.parent / "source_logs"
+                                extracted_files = cls._extract_archive(active_archive_path, source_logs_dir)
+                                if cache_manifest_path:
+                                    cache_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                                    cache_manifest_path.write_text(
+                                        cls._dumps(
+                                            {
+                                                "sourceKey": source_key,
+                                                "archivePath": str(active_archive_path),
+                                                "extractDir": str(source_logs_dir),
+                                                "extractedFiles": extracted_files,
+                                                "cachedAt": datetime.now().isoformat(),
+                                            }
+                                        ),
+                                        encoding="utf-8",
+                                    )
+
+                        digest_payload: dict[str, Any] = {}
+                        window_payload: dict[str, Any] = {}
+                        if extracted_files:
+                            if agent_should_extract_window and (requested_begin_time or requested_end_time):
+                                window_payload = cls._extract_window_logs(
+                                    extract_dir=source_logs_dir,
+                                    extracted_files=extracted_files,
+                                    begin_time=requested_begin_time,
+                                    end_time=requested_end_time,
+                                )
+                                window_text = str(window_payload.get("text") or "")
+                                logs_file.write_text(
+                                    window_text
+                                    or "\n".join(
+                                        [
+                                            "Agent 已按请求时间窗口截取日志，但未命中日志条目。",
+                                            f"解压目录: {source_logs_dir}",
+                                            f"请求时间窗口: {requested_begin_time or '<none>'} ~ {requested_end_time or '<none>'}",
+                                        ]
+                                    ),
+                                    encoding="utf-8",
+                                )
+                            if log_analysis_mode in {"digest", "hybrid"}:
+                                digest_payload = cls._build_log_digest(
+                                    extract_dir=source_logs_dir,
+                                    extracted_files=extracted_files,
+                                    ticket=ticket,
+                                    context_payload=context_payload,
+                                    digest_path=log_digest_file,
+                                )
                         source_logs_manifest.write_text(
                             cls._dumps(
                                 {
@@ -702,13 +2371,22 @@ class TicketAiAnalysisService:
                                     "archivePath": str(source_logs_zip),
                                     "extractDir": str(source_logs_dir),
                                     "extractedFiles": extracted_files,
+                                    "cacheHit": cache_hit,
+                                    "logAnalysisMode": log_analysis_mode,
+                                    "aiDigest": digest_payload,
+                                    "windowExtract": window_payload,
                                 }
                             ),
                             encoding="utf-8",
                         )
                 schema_file.write_text(cls._dumps(schema_payload), encoding="utf-8")
 
-                resolved_prompt = prompt_template.replace("{workspace_path}", str(workspace_dir))
+                mapping["resolvedLocalRepoPath"] = str(repo_path)
+                mapping["resolvedBranchName"] = current_branch
+                resolved_prompt = (
+                    prompt_template.replace("{workspace_path}", str(workspace_dir))
+                    .replace("{source_logs_path}", str(source_logs_dir))
+                )
                 if not resolved_prompt:
                     resolved_prompt = cls._build_prompt(
                         str(workspace_dir),
@@ -716,26 +2394,38 @@ class TicketAiAnalysisService:
                         ticket,
                         repo_path=str(repo_path),
                         workspace_root=str(workspace_root),
+                        log_analysis_mode=log_analysis_mode,
+                        source_logs_path=str(source_logs_dir),
                     )
                 prompt_file.write_text(resolved_prompt, encoding="utf-8")
 
-                command = cls._resolve_worker_command_parts(
-                    [
-                        *cls.DEFAULT_WORKER_COMMAND.split(),
-                        "-s",
-                        cls.DEFAULT_WORKER_SANDBOX,
-                        "-C",
-                        str(repo_path),
-                        "--skip-git-repo-check",
-                        "--output-schema",
-                        str(schema_file),
-                        "--output-last-message",
-                        str(result_file),
-                    ]
+                # --- 按 Provider 类型构建命令和准备环境 ---
+                provider_type = cls._resolve_provider_type(context_payload)
+                worker_config = cls._get_provider_worker_config(provider_type)
+
+                # Resume 支持：同工单同 Provider 时复制上次会话数据
+                resume_flags: list[str] = []
+                resume_from_workspace = str(req_data.get("resumeFromWorkspacePath") or "").strip()
+                resume_requested = bool(req_data.get("resume"))
+                if resume_requested and resume_from_workspace:
+                    _, resume_flags = cls._copy_session_for_resume(
+                        workspace_dir, provider_type, resume_from_workspace
+                    )
+
+                command = cls._build_worker_command(
+                    provider_type=provider_type,
+                    worker_config=worker_config,
+                    repo_path=repo_path,
+                    schema_file=schema_file,
+                    result_file=result_file,
+                    selected_worker_model=selected_worker_model,
                 )
-                codex_home = cls._prepare_codex_home(workspace_dir)
-                env_values = cls._load_codex_env(codex_home)
-                env_values["CODEX_HOME"] = str(codex_home)
+                if resume_flags:
+                    command.extend(resume_flags)
+
+                ai_home = cls._prepare_ai_home(workspace_dir, provider_type, provider_env_overrides)
+                env_values = cls._load_worker_env(ai_home, provider_type)
+                env_values = cls._apply_env_overrides(env_values, provider_env_overrides)
 
                 await cls._emit_event(
                     event_sender,
@@ -743,17 +2433,27 @@ class TicketAiAnalysisService:
                     task_id,
                     "开始执行 Worker",
                     command_line=" ".join(command),
+                    provider_type=provider_type,
                     repo_path=str(repo_path),
+                    branch_name=current_branch,
                     workspace_root=str(workspace_root),
                     workspace_path=str(workspace_dir),
-                    codex_home=str(codex_home),
+                    provider_code=request_provider_code or "<none>",
+                    worker_model=selected_worker_model or "<default>",
                 )
                 worker_started_at = time.monotonic()
-                process = await cls._run_worker_process(command, resolved_prompt, repo_path, env_values, timeout_sec)
+                process = await cls._run_worker_process(command, resolved_prompt, workspace_dir, env_values, timeout_sec)
                 worker_elapsed = round(time.monotonic() - worker_started_at, 3)
                 raw_stdout = process.stdout or ""
                 raw_stderr = process.stderr or ""
                 cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
+                worker_auth_diagnostic, worker_api_key = cls._build_worker_auth_diagnostic(
+                    provider_type=provider_type,
+                    provider_code=request_provider_code,
+                    worker_model=selected_worker_model,
+                    ai_home=ai_home,
+                    env_values=env_values,
+                )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_step",
@@ -766,32 +2466,48 @@ class TicketAiAnalysisService:
                     stderr_context=cls._extract_stderr_context(raw_stderr),
                 )
 
-                result_text = ""
-                if result_file.exists():
-                    result_text = result_file.read_text(encoding="utf-8")
-                elif raw_stdout.strip():
-                    result_text = raw_stdout.strip().splitlines()[-1]
-                elif raw_stderr.strip():
-                    result_text = raw_stderr.strip()
+                parsed_result = cls._parse_worker_output(
+                    provider_type=provider_type,
+                    worker_config=worker_config,
+                    result_file=result_file,
+                    raw_stdout=raw_stdout,
+                    raw_stderr=raw_stderr,
+                )
 
-                parsed_result: dict[str, Any] | None = None
-                if result_text.strip():
-                    try:
-                        parsed_result = json.loads(result_text)
-                    except Exception:
-                        try:
-                            parsed_result = json.loads(raw_stdout.strip().splitlines()[-1])
-                        except Exception:
-                            parsed_result = None
                 if not parsed_result:
                     failure_message = (
                         cls._extract_stderr_context(raw_stderr)
                         or cls._extract_stderr_context(raw_stdout)
                         or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
                     )
-                    if "openai_error" in failure_message or "bad_response_status_code" in failure_message:
-                        failure_message = f"AI模型接口返回异常，请检查模型配置、请求上下文大小或上游服务状态：{failure_message}"
-                    await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
+                    failure_message = cls._normalize_worker_failure_message(failure_message)
+                    if provider_type == "codex" and cls._is_unauthorized_worker_failure(raw_stdout, raw_stderr):
+                        auth_probe = await cls._probe_codex_authentication(
+                            str(worker_auth_diagnostic.get("base_url") or ""),
+                            worker_api_key,
+                        )
+                        worker_auth_diagnostic.update(auth_probe)
+                        logger.warning(
+                            f"AI分析Agent任务[{task_id}] Worker 鉴权失败诊断: {worker_auth_diagnostic}"
+                        )
+                        await cls._emit_event(
+                            event_sender,
+                            "ai_analysis_step",
+                            task_id,
+                            "Worker 401 后鉴权探测完成",
+                            auth_diagnostic=worker_auth_diagnostic,
+                        )
+                    else:
+                        logger.warning(
+                            f"AI分析Agent任务[{task_id}] Worker 执行失败诊断: {worker_auth_diagnostic}"
+                        )
+                    await cls._emit_event(
+                        event_sender,
+                        "ai_analysis_error",
+                        task_id,
+                        failure_message,
+                        auth_diagnostic=worker_auth_diagnostic,
+                    )
                     return {
                         "request_type": req_data.get("requestType"),
                         "command": req_data.get("command"),
@@ -803,8 +2519,10 @@ class TicketAiAnalysisService:
                             "workspace_path": str(workspace_dir),
                             "result_path": str(result_file),
                             "command_line": " ".join(command),
-                            "stdout": raw_stdout,
-                            "stderr": raw_stderr,
+                            "stdout_path": str(workspace_dir / "worker.stdout.txt"),
+                            "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                            "stderr_context": cls._extract_stderr_context(raw_stderr),
+                            "auth_diagnostic": worker_auth_diagnostic,
                         },
                     }
 
@@ -824,7 +2542,7 @@ class TicketAiAnalysisService:
                     "message": "AI 分析完成",
                     "result": {
                         "analysis_result": normalized_result,
-                        "raw_output": result_text or raw_stdout,
+                        "raw_output": raw_stdout or raw_stderr,
                         "workspace_path": str(workspace_dir),
                         "result_path": str(result_file),
                         "command_line": " ".join(command),

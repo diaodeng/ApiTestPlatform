@@ -102,3 +102,11 @@ export function terminateRunningJob(celeryTaskId) {
     data: { celeryTaskId }
   })
 }
+
+// 检查进程模式 Celery Worker 是否在线
+export function checkWorker() {
+  return request({
+    url: '/monitor/job/worker-check',
+    method: 'get'
+  })
+}

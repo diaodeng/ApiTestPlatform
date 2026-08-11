@@ -91,26 +91,6 @@
                     >刷新</el-button
                 >
             </el-col>
-            <el-col :span="1.5">
-                <el-button
-                    type="info"
-                    plain
-                    icon="Setting"
-                    @click="openRuntimeProfileDialog"
-                    v-hasPermi="['hrm:webCase:edit']"
-                    >Cookie配置</el-button
-                >
-            </el-col>
-            <el-col :span="2">
-                <el-button
-                    type="info"
-                    plain
-                    icon="Lock"
-                    @click="openBrowserSessionDialog"
-                    v-hasPermi="['hrm:webCase:persistContext']"
-                    >浏览器Session</el-button
-                >
-            </el-col>
         </el-row>
 
         <el-table
@@ -464,22 +444,6 @@ function openRunHistory(row) {
  */
 function openRecordingDialog() {
     emit("open-recording-dialog");
-}
-
-/**
- * 打开运行时配置弹窗。
- * @returns {void}
- */
-function openRuntimeProfileDialog() {
-    emit("open-runtime-profile-dialog");
-}
-
-/**
- * 打开浏览器 Session 弹窗。
- * @returns {void}
- */
-function openBrowserSessionDialog() {
-    emit("open-browser-session-dialog");
 }
 
 /**

@@ -11,28 +11,17 @@ export function useRunManager(options) {
         loading,
         activeTab,
         runTabRef,
-        runtimeProfiles,
-        browserSessions,
+        webCredentialBindingOptions,
         syncCaseOptions,
         refreshRunTab,
-        openBrowserSessionDialog,
-        openRuntimeProfileDialog,
         normalizeCaseOption,
         normalizeIdValue,
-        normalizeStateSourceType,
         normalizeManualLoginWaitSec,
         normalizeLocatorIndexMode,
-        resolveStateSourceTypeByIds,
         parseBooleanFlag,
         isPlainObject,
         cloneData,
-        isSameId,
         safeJsonStringify,
-        profileSupportsWeb,
-        isRuntimeProfileScopeMatch,
-        isBrowserSessionBrowserMatch,
-        formatRuntimeProfileLabel,
-        formatBrowserSessionLabel,
         getCaseName,
         getRunRowFailureReason,
         shouldStopRunDetailPoll,
@@ -54,9 +43,7 @@ export function useRunManager(options) {
         headless: true,
         closeBrowserOnFinish: true,
         immediateLocatorIndexMode: false,
-        stateSourceType: "none",
-        browserSessionId: undefined,
-        runtimeProfileId: undefined,
+        credentialBindingId: undefined,
         persistContextEnabled: false,
         persistContextAutoSyncSession: false,
         manualLoginEnabled: false,
@@ -67,35 +54,6 @@ export function useRunManager(options) {
     });
 
     let runDetailTimer = null;
-
-    const runScopeProjectId = computed(() => selectedCase.value?.projectId);
-    const runScopeModuleId = computed(() => selectedCase.value?.moduleId);
-
-    const availableRuntimeProfilesForRun = computed(() =>
-        runtimeProfiles.value.filter(
-            (item) =>
-                item.enabled !== false &&
-                profileSupportsWeb(item) &&
-                isRuntimeProfileScopeMatch(
-                    item,
-                    runScopeProjectId.value,
-                    runScopeModuleId.value,
-                ),
-        ),
-    );
-
-    const availableBrowserSessionsForRun = computed(() =>
-        browserSessions.value.filter(
-            (item) =>
-                item.enabled !== false &&
-                isRuntimeProfileScopeMatch(
-                    item,
-                    runScopeProjectId.value,
-                    runScopeModuleId.value,
-                ) &&
-                isBrowserSessionBrowserMatch(item, runForm.value.browserName),
-        ),
-    );
 
     const runDetailTitle = computed(() => {
         if (!runDetail.value) return "执行详情";
@@ -140,19 +98,13 @@ export function useRunManager(options) {
         const runtimeOptions = isPlainObject(resultPayload.runtimeOptions)
             ? resultPayload.runtimeOptions
             : {};
-        const browserSessionId = normalizeIdValue(
-            runtimeDebug.browserSessionId ??
-                runtimeDebug.browser_session_id ??
-                runtimeOptions.browserSessionId ??
-                runtimeOptions.browser_session_id,
+        const credentialBindingId = normalizeIdValue(
+            runtimeDebug.credentialBindingId ??
+                runtimeDebug.credential_binding_id ??
+                runtimeOptions.credentialBindingId ??
+                runtimeOptions.credential_binding_id,
         );
-        const runtimeProfileId = normalizeIdValue(
-            runtimeDebug.runtimeProfileId ??
-                runtimeDebug.runtime_profile_id ??
-                runtimeOptions.runtimeProfileId ??
-                runtimeOptions.runtime_profile_id,
-        );
-        return resolveStateSourceTypeByIds(browserSessionId, runtimeProfileId);
+        return credentialBindingId ? "credential" : "none";
     });
 
     const runDetailFailureMessage = computed(() => {
@@ -219,31 +171,9 @@ export function useRunManager(options) {
         )
             ? cloneData(row.runtimeSettings || row.runtime_settings)
             : {};
-        const browserSessionId = normalizeIdValue(
-            runtimeSettings.browserSessionId ??
-                runtimeSettings.browser_session_id ??
-                runtimeSettings.persistContextSessionId ??
-                runtimeSettings.persist_context_session_id ??
-                runtimeSettings.sessionProfileId ??
-                runtimeSettings.session_profile_id,
+        const credentialBindingId = normalizeIdValue(
+            runtimeSettings.credentialBindingId ?? runtimeSettings.credential_binding_id,
         );
-        const runtimeProfileId = normalizeIdValue(
-            runtimeSettings.runtimeProfileId ??
-                runtimeSettings.runtime_profile_id ??
-                runtimeSettings.cookieProfileId ??
-                runtimeSettings.cookie_profile_id,
-        );
-        const preferredStateSourceType = normalizeStateSourceType(
-            runtimeSettings.stateSourceType ?? runtimeSettings.state_source_type,
-        );
-        const inferredStateSourceType = resolveStateSourceTypeByIds(
-            browserSessionId,
-            runtimeProfileId,
-        );
-        const stateSourceType =
-            preferredStateSourceType === "none"
-                ? inferredStateSourceType
-                : preferredStateSourceType;
         const stepTimeoutCandidate = Number(
             runtimeSettings.stepTimeoutMs ??
                 runtimeSettings.step_timeout_ms ??
@@ -312,11 +242,8 @@ export function useRunManager(options) {
             headless: row?.headless ?? true,
             closeBrowserOnFinish,
             immediateLocatorIndexMode: locatorIndexMode === "always",
-            stateSourceType,
-            browserSessionId,
-            runtimeProfileId,
-            persistContextEnabled:
-                stateSourceType !== "none" && Boolean(persistContextEnabled),
+            credentialBindingId,
+            persistContextEnabled: credentialBindingId ? Boolean(persistContextEnabled) : false,
             persistContextAutoSyncSession,
             manualLoginEnabled,
             manualLoginRequireConfirm: manualLoginEnabled
@@ -511,19 +438,10 @@ export function useRunManager(options) {
             runForm.value.manualLoginWaitSec,
             120,
         );
-        const stateSourceType = normalizeStateSourceType(
-            runForm.value.stateSourceType,
-        );
-        const selectedBrowserSessionId =
-            stateSourceType === "session"
-                ? normalizeIdValue(runForm.value.browserSessionId)
-                : undefined;
-        const selectedRuntimeProfileId =
-            stateSourceType === "cookie"
-                ? normalizeIdValue(runForm.value.runtimeProfileId)
-                : undefined;
+        const selectedCredentialBindingId = normalizeIdValue(runForm.value.credentialBindingId);
+        const stateSourceType = selectedCredentialBindingId ? "credential" : "none";
         const persistContextEnabled = Boolean(
-            stateSourceType !== "none" && runForm.value.persistContextEnabled,
+            Boolean(selectedCredentialBindingId && runForm.value.persistContextEnabled),
         );
         const persistContextAutoSyncSession = Boolean(
             stateSourceType !== "none" &&
@@ -566,8 +484,7 @@ export function useRunManager(options) {
                     headless: runForm.value.headless,
                     closeBrowserOnFinish: runForm.value.closeBrowserOnFinish,
                     stateSourceType,
-                    browserSessionId: selectedBrowserSessionId,
-                    runtimeProfileId: selectedRuntimeProfileId,
+                    credentialBindingId: selectedCredentialBindingId,
                     persistContextEnabled,
                     persistContextAutoSyncSession,
                     manualLoginEnabled: enableManualForCurrent,
@@ -648,48 +565,6 @@ export function useRunManager(options) {
         }
     }
 
-    watch(
-        () => runForm.value.stateSourceType,
-        (stateType) => {
-            const normalized = normalizeStateSourceType(stateType);
-            if (normalized !== stateType) {
-                runForm.value.stateSourceType = normalized;
-                return;
-            }
-            if (normalized !== "session") {
-                runForm.value.browserSessionId = undefined;
-            }
-            if (normalized !== "cookie") {
-                runForm.value.runtimeProfileId = undefined;
-            }
-            if (normalized === "none") {
-                runForm.value.persistContextEnabled = false;
-                runForm.value.persistContextAutoSyncSession = false;
-            } else {
-                runForm.value.persistContextEnabled = true;
-                runForm.value.persistContextAutoSyncSession = true;
-            }
-        },
-    );
-
-    watch(availableBrowserSessionsForRun, (sessions) => {
-        if (runForm.value.stateSourceType !== "session") return;
-        const selectedSessionId = normalizeIdValue(runForm.value.browserSessionId);
-        if (!selectedSessionId) return;
-        if (!sessions.some((item) => isSameId(item.sessionId, selectedSessionId))) {
-            runForm.value.browserSessionId = undefined;
-        }
-    });
-
-    watch(availableRuntimeProfilesForRun, (profiles) => {
-        if (runForm.value.stateSourceType !== "cookie") return;
-        const selectedProfileId = normalizeIdValue(runForm.value.runtimeProfileId);
-        if (!selectedProfileId) return;
-        if (!profiles.some((item) => isSameId(item.profileId, selectedProfileId))) {
-            runForm.value.runtimeProfileId = undefined;
-        }
-    });
-
     onBeforeUnmount(() => {
         stopRunDetailPoll();
     });
@@ -703,8 +578,7 @@ export function useRunManager(options) {
         runDetailTab,
         runAdvancedPanels,
         runForm,
-        availableRuntimeProfilesForRun,
-        availableBrowserSessionsForRun,
+        webCredentialBindingOptions,
         runDetailTitle,
         runTargetLabel,
         runStepResults,
@@ -712,10 +586,6 @@ export function useRunManager(options) {
         runCookieApplySummary,
         runCookieApplySummaryType,
         runStepsJsonText,
-        openBrowserSessionDialog,
-        openRuntimeProfileDialog,
-        formatRuntimeProfileLabel,
-        formatBrowserSessionLabel,
         openRunDialog,
         openBatchRunDialog,
         openRunHistory,

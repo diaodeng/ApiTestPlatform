@@ -190,101 +190,19 @@
                         inactive-text="学习"
                     />
                 </el-form-item>
-                <el-form-item label="状态来源">
-                    <el-radio-group v-model="replayForm.stateSourceType">
-                        <el-radio-button value="none">不使用</el-radio-button>
-                        <el-radio-button
-                            value="session"
-                            v-hasPermi="['hrm:webCase:persistContext']"
-                            >浏览器Session</el-radio-button
-                        >
-                        <el-radio-button value="cookie"
-                            >Cookie配置</el-radio-button
-                        >
-                    </el-radio-group>
+                <el-form-item label="凭证绑定">
+                    <el-select v-model="replayForm.credentialBindingId" clearable filterable style="width: 100%" placeholder="可选：选择 Web 浏览器凭证绑定">
+                        <el-option v-for="item in webCredentialBindingOptions" :key="item.bindingId" :label="`${item.bindingName} / ${item.credentialName}`" :value="item.bindingId" />
+                    </el-select>
                 </el-form-item>
-                <el-form-item
-                    v-if="replayForm.stateSourceType === 'session'"
-                    label="浏览器Session"
-                    v-hasPermi="['hrm:webCase:persistContext']"
-                >
-                    <el-row :gutter="10" style="width: 100%">
-                        <el-col :span="18">
-                            <el-select
-                                v-model="replayForm.browserSessionId"
-                                clearable
-                                filterable
-                                style="width: 100%"
-                                placeholder="可选：选择浏览器Session"
-                            >
-                                <el-option
-                                    v-for="item in availableBrowserSessionsForReplay"
-                                    :key="item.sessionId"
-                                    :label="formatBrowserSessionLabel(item)"
-                                    :value="item.sessionId"
-                                />
-                            </el-select>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-button
-                                style="width: 100%"
-                                @click="openBrowserSessionDialog"
-                                >管理Session</el-button
-                            >
-                        </el-col>
-                    </el-row>
-                </el-form-item>
-                <el-form-item
-                    v-if="replayForm.stateSourceType === 'cookie'"
-                    label="Cookie配置"
-                >
-                    <el-row :gutter="10" style="width: 100%">
-                        <el-col :span="18">
-                            <el-select
-                                v-model="replayForm.runtimeProfileId"
-                                clearable
-                                filterable
-                                style="width: 100%"
-                                placeholder="可选：选择Cookie配置"
-                            >
-                                <el-option
-                                    v-for="item in availableRuntimeProfilesForReplay"
-                                    :key="item.profileId"
-                                    :label="formatRuntimeProfileLabel(item)"
-                                    :value="item.profileId"
-                                />
-                            </el-select>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-button
-                                style="width: 100%"
-                                @click="openRuntimeProfileDialog"
-                                >管理Cookie</el-button
-                            >
-                        </el-col>
-                    </el-row>
-                </el-form-item>
-                <el-row v-if="replayForm.stateSourceType !== 'none'">
+                <el-row v-if="replayForm.credentialBindingId">
                     <el-col :span="12">
                         <el-form-item
-                            label="保留浏览器状态"
+                            label="本地浏览器缓存"
                             v-hasPermi="['hrm:webCase:persistContext']"
                         >
                             <el-switch
                                 v-model="replayForm.persistContextEnabled"
-                            />
-                        </el-form-item>
-                    </el-col>
-                    <el-col :span="12">
-                        <el-form-item
-                            label="自动同步状态"
-                            v-hasPermi="['hrm:webCase:persistContext']"
-                        >
-                            <el-switch
-                                v-model="
-                                    replayForm.persistContextAutoSyncSession
-                                "
-                                :disabled="!replayForm.persistContextEnabled"
                             />
                         </el-form-item>
                     </el-col>
@@ -405,12 +323,7 @@ const {
     replayForm,
     selectedReplayLabel,
     agentOptions,
-    availableBrowserSessionsForReplay,
-    formatBrowserSessionLabel,
-    openBrowserSessionDialog,
-    availableRuntimeProfilesForReplay,
-    formatRuntimeProfileLabel,
-    openRuntimeProfileDialog,
+    webCredentialBindingOptions,
     submitReplay,
     showReplayResultDialog,
     replayResultTitle,

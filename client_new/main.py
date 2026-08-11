@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 from multiprocessing import freeze_support
+from datetime import datetime
 from pathlib import Path
 
 _FAULT_LOG_FILE = None
@@ -57,6 +58,9 @@ def _install_global_exception_handlers():
             "a",
             encoding="utf-8",
             buffering=1,
+        )
+        _FAULT_LOG_FILE.write(
+            f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] faulthandler enabled\n"
         )
         faulthandler.enable(file=_FAULT_LOG_FILE, all_threads=True)
     except Exception as e:

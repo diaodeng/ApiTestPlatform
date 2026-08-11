@@ -1,5 +1,5 @@
 from loguru import logger
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -282,8 +282,20 @@ class PosPage(QWidget):
         dlg.exec()
 
     def open_change_pos_dialog(self, pos_path: str = ""):
+        if getattr(self, "_change_pos_dialog", None) is not None:
+            try:
+                self._change_pos_dialog.close()
+            except Exception:
+                pass
         dlg = ChangePosDialog(self, pos_path=pos_path)
-        dlg.exec()
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        def _clear_dialog(*_args):
+            self._change_pos_dialog = None
+
+        dlg.finished.connect(_clear_dialog)
+        self._change_pos_dialog = dlg
+        dlg.open()
 
     def open_local_env_dialog(self, pos_path: str):
         dlg = LocalEnvDialog(pos_path=pos_path, parent=self)

@@ -1,141 +1,159 @@
-# 工单外部同步与内网拉取设计
+# 工单同步自动化配置说明
 
-## 目标
+## 入口
 
-为双环境部署补齐一套通用同步链路：
+- 菜单：工单管理 → 工单同步配置
+- 路由：`/ticket/sync-automation`
 
-- 公网环境接收外部工单系统推送。
-- 内网环境按消费者标识拉取“未拉取或有新 revision”的工单。
-- 同一工单支持多次更新并再次下发，不再依赖单一布尔值判断“是否已同步”。
-- 拉取后可按规则自动识别项目、模块、商家、门店、POS/SCO 编号，并串联日志拉取与 AI 分析。
+## 页面目标
 
-## 核心结论
+管理"外部同步入库"后的自动化行为，三类数据源：
 
-- 当前已经可以实现。
-- “是否已被拉取”不再用单一布尔值，而是用 `revision + consumer.delivered_revision` 判断。
-- 自动识别、相似工单检索、自动拉日志、自动 AI 的执行状态会回写到 `extraData.external_sync.sync_state.automation`，方便定位卡在哪一步。
-- 识别规则尽量做成参数配置，当前版本采用“映射规则 + 正则 + 默认参数”的通用方案，避免把某个工单系统的话术写死在代码里。
+- 第三方系统直接调用 `/ticket/sync/external` 推送工单
+- 内网系统调用 `/ticket/sync/pending` 拉取外网工单
+- 拉取后回写 `/ticket/sync/ack` 的交付状态
 
-## 新增接口
+手动新增/编辑工单的"创建后拉日志"不在这里配置，走工单新增页。轻量翻译和知识提炼的配置走 **AI 配置中心**。
 
-### `POST /ticket/sync/external`
+---
 
-用途：
+## 一、基础开关
 
-- 外部工单系统推送或更新工单。
-- 以 `ticketNo` 为幂等键，已存在则更新，不存在则创建。
-- 每次推送都会递增 `external_sync.revision`。
+### 1.1 同步基础开关
 
-关键入参：
+| 配置项 | 说明 |
+|--------|------|
+| `autoRunOnSync` | 外部同步入库后是否进入自动化链路 |
+| `autoTranslateOnSync` | 第三方直推场景下是否自动翻译工单描述 |
+| `defaultPullLimit` | 内网拉取未同步工单时的默认数量 |
 
-- `ticketNo`
-- `title`
-- `description`
-- `source.system`
-- `source.recordId`
-- `rawPayload`
-- `automation`
+### 1.2 发布状态
 
-### `GET /ticket/sync/pending`
+- 外部推送首先写入 `publish_ready=false`，后台 AI/自动化结束后恢复为可发布。
+- `/ticket/sync/pending` 拉取前检查是否有活动 AI 任务；无活动任务时自动恢复 `publish_ready=true`。
+- 拉取时写入 `status=pulled` 和租约，30 分钟内不重复返回；超时未回执允许重试。
+- `/ticket/sync/ack` 只有 `delivered/success/succeeded` 推进交付版本；`failed` 不阻塞下次拉取。
 
-用途：
+---
 
-- 内网系统按 `consumer` 拉取待同步工单。
-- 只返回当前 `revision` 大于该消费者已交付 revision 的工单。
-- 拉取成功后会把该消费者的交付 revision 写回工单 `extraData.external_sync.sync_state.consumers`。
-- 只会返回带有 `external_sync.revision` 的同步工单，不会把普通人工工单误算进来。
+## 二、远端同步连接
 
-关键查询参数：
+| 配置项 | 说明 |
+|--------|------|
+| `remoteSync.enabled` | 是否允许远端拉取任务执行。**不是启动定时任务的按钮**，只控制任务是否放行。关闭时页面不强制校验 `pullUrl/ackUrl/consumer` 必填 |
+| `remoteSync.pullUrl` | 拉取未同步工单的地址 |
+| `remoteSync.ackUrl` | 回写交付结果的地址 |
+| `remoteSync.consumer` | 消费者标识 |
+| `remoteSync.includeClosed` | 拉取时是否包含已关闭工单 |
+| `remoteSync.autoTranslateOnPull` | 仅控制内网定时拉取链路是否自动翻译（与第三方直推独立控制） |
+| `remoteSync.sourceSystem` | 内网拉取后写入的外部系统标识 |
+| `credentialBindingId` | 远端同步的凭证绑定 ID（必填） |
 
-- `consumer`
-- `limit`
-- `includeClosed`
+---
 
-### `POST /ticket/sync/ack`
+## 三、识别规则
 
-用途：
+用于外部同步时将外部字段映射到系统内部字段：
 
-- 可选回执接口。
-- 内网系统可把“已处理/处理失败/部分成功”等结果回写到消费者状态，便于公网环境追踪。
+| 配置项 | 说明 |
+|--------|------|
+| `projectMappings` | 项目映射规则 |
+| `moduleMappings` | 模块映射规则 |
+| `vendorMappings` | 商家映射规则 |
+| `storeMappings` | 门店映射规则 |
+| `statusMappings` | 状态映射规则 |
+| `assigneeMappings` | 指派人映射规则 |
+| `posPatterns` | POS 编号匹配模式 |
+| `scoPatterns` | SCO 匹配模式 |
+| `versionPatterns` | 版本号匹配模式 |
+| `externalSyncBitable` | 外部推送按 recordId 查询飞书多维表格补充人员信息 |
 
-## 同步状态模型
+### 业务码匹配
 
-状态信息统一落在 `ticket.extra_data.external_sync`：
+外部映射支持通过 `project_code` / `module_code` 匹配本地项目/模块，兼容顺序：
+1. 先看外部字段 `ticketVender` / `ticketModle` 对应的映射
+2. 未命中时通过 `projectCode/moduleCode` 匹配
+3. 仍未命中且携带当前环境 ID 时，按 `projectId/moduleId` 兜底
 
-- `revision`: 当前同步版本，每次外部推送递增。
-- `sourceSystem` / `sourceRecordId` / `sourceRecordUrl`: 来源标识。
-- `lastImportedAt`: 最近一次导入时间。
-- `sync_state.status`: 最近一次交付状态。
-- `sync_state.last_consumer`: 最近拉取消费者。
-- `sync_state.last_batch_id`: 最近一批次 ID。
-- `sync_state.consumers.{consumer}.delivered_revision`: 指定消费者已交付到的 revision。
-- `sync_state.automation`: 自动识别与自动化链路状态。
+---
 
-这套结构可以解决两个问题：
+## 四、日志拉取默认值
 
-- 工单被拉过一次后，如果外部又更新了内容，内网仍然能再次拉到。
-- 支持未来一个公网环境被多个内网消费者分别拉取。
+`logPullDefaults` 配置外部同步后自动拉日志的默认参数（已加宽显示）。
 
-## 自动化链路
+---
 
-执行位置：
+## 五、自动化关注范围
 
-- 自动化发生在“接收这条工单数据的一侧”。
-- 如果公网环境只是外部入口，而真正要识别归属、拉日志、跑 AI 的是内网环境，那么内网环境在拉到数据后再调用 `POST /ticket/sync/external` 入站即可复用同一套自动化逻辑。
-- 这样公网和内网都可以共用统一的“入站同步接口”，而不是为不同部署形态再拆两套实现。
+`ticket.sync.automation.automationScope` 可按系统模块控制同步后的自动化范围：
 
-当前版本的自动化以“可配置规则 + 正则”为主，不直接写死工单系统话术：
+- 按模块 ID、模块 Code、模块名称关键字配置
+- 范围外工单仍入库并更新快照和状态，但不执行标题 AI、翻译、AI 提取、AI 分类、自动拉日志/AI 分析、向量刷新和自动群推送
+- 工单统计页默认选择"关注范围"，可切换"全部数据"
 
-- 规则配置键：`ticket.sync.automation`
-- 支持维护：
-  - `projectMappings`
-  - `moduleMappings`
-  - `vendorMappings`
-  - `storeMappings`
-  - `posPatterns`
-  - `scoPatterns`
-  - `versionPatterns`
-  - `logPullDefaults`
-  - `promptTemplates`
+---
 
-自动化步骤：
+## 六、通知推送配置
 
-1. 识别项目、模块、商家、门店、POS/SCO、版本号。
-2. 检索相似工单。
-3. 若日志参数足够完整，则自动创建日志拉取任务。
-4. 若启用自动 AI，则优先通过“日志拉取成功后自动 AI”链路继续执行。
+### 6.1 群推送
 
-## 失败记录
+| 配置项 | 说明 |
+|--------|------|
+| `groupPush.autoPushCondition` | 自动推送条件表达式，手动发送不受此限制 |
 
-自动化状态写入 `extraData.external_sync.sync_state.automation`：
+### 6.2 个人催办提醒
 
-- `status`
-- `current_step`
-- `last_error`
-- `steps.identify`
-- `steps.similar_ticket`
-- `steps.log_pull`
-- `steps.ai_analysis`
+- 按飞书多维表格中的人员维度统计未处理工单并发送提醒
+- 可手动触发或通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行
+- 统计数据源可选 `bitable` 或 `local`
 
-日志拉取和 AI 分析的详细失败原因仍以原有表为准：
+### 6.3 汇总统计通知
 
-- 日志拉取看 `ticket_log_pull_record`
-- AI 分析看 `ticket_ai_analysis_task`
+- 页面支持手动触发或定时任务执行
+- 统计数据源可选 `local` 或 `bitable`
+- 可选开启 AI 解读生成摘要
 
-## 当前边界
+### 6.4 自定义统计方案
 
-当前版本已经支持：
+- 在"自定义统计"页签创建统计方案
+- 手动执行可选"仅预览"或"按方案通知"
+- 定时执行使用 `module_task.scheduler_maintenance.ticket_custom_statistics_report`
 
-- revision 化同步状态
-- 外部推送 / 内网拉取 / 可选回执
-- 规则化识别
-- 自动串联日志拉取与 AI 分析状态
+---
 
-当前版本暂未支持：
+## 七、AI 分类统一配置
 
-- 真正的通用 LLM 字段识别
-- 前端同步状态专门面板
-- 拉取失败自动重放
-- 基于 `source.system + source.recordId` 的全局去重主键，当前主幂等键仍然是 `ticketNo`
+工单同步配置页提供场景开关 `ticket.sync.automation.aiClassification`：
 
-如果后续要接 AI 识别，优先在 `ticket.sync.automation.promptTemplates` 基础上扩展，不建议再把规则写回代码里。
+- 控制外部同步、远端拉取、手动创建场景是否执行分类
+- 选择 Provider 编码和提示词编码（Provider 和提示词正文在 AI Provider 管理和 AI 提示词管理维护）
+- 配置状态变更后是否触发重新分类
+
+配置项 `ticket.ai.category.classify.provider.code` 和 `ticket.ai.category.classify.prompt.code` 作为当分类配置中 Provider/提示词为空时的兜底。
+
+---
+
+## 八、常见问题
+
+### Q1: remoteSync.enabled 关闭后有什么影响？
+
+任务执行前检查该开关，关闭时任务不会实际拉取。页面不再强制校验 `pullUrl/ackUrl/consumer` 必填，可以单独保存其他配置项。
+
+### Q2: 如何只关闭内网拉取的翻译？
+
+修改 `remoteSync.autoTranslateOnPull`，不要改 `autoTranslateOnSync`（影响第三方直推）。
+
+### Q3: 手动新增工单的自动化怎么配置？
+
+手动新增/编辑的"创建后拉日志"和"自动翻译"在工单新增页配置，非本页范围。
+
+### Q4: 如何配置凭证？
+
+远端同步的 `credentialBindingId` 必填。在统一凭证管理中创建 `http_api_key` 或 `http_header` 凭证，再创建 `ticket_remote_sync` 类型的业务绑定。
+
+---
+
+## 相关文档
+
+- [统一凭证管理](credential_management.md)
+- [工单日志查看器使用说明](ticket_log_viewer.md)

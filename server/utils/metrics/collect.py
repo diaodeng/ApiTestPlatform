@@ -2,7 +2,7 @@ import os
 import threading
 import time
 
-import requests
+import httpx
 from loguru import logger
 
 from config.env import MetricsConfig
@@ -51,8 +51,8 @@ class PushDataToServer(threading.Thread):
         metrics_data = "\n".join(self.data_lines)
 
         # print("推送的数据示例：\n", metrics_data)
-        response = requests.post(self.vm_url,
-                                 data=metrics_data,
+        response = httpx.post(self.vm_url,
+                                 content=metrics_data,
                                  auth=(MetricsConfig.vm_user, MetricsConfig.vm_password),
                                  headers=headers,
                                  verify=False)

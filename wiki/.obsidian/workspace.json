@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "entities/services/new-client-services.md",
+                "file": "purpose.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "new-client-services"
+              "title": "purpose"
             }
           }
         ]
@@ -185,13 +185,19 @@
   },
   "active": "4c7ec8a52d7767e3",
   "lastOpenFiles": [
-    "index.md",
-    "concepts/module-landscape.md",
+    "overview.md",
+    "schema.md",
+    "log.md",
+    "entities/components/new-client-bootstrap.md",
+    "未命名.base",
+    "flows/ticket-external-sync-flow.md",
     "entities/services/ticket-domain.md",
+    "concepts/module-landscape.md",
     "flows/ticket-workflow-routing.md",
+    "index.md",
+    "entities/services/new-client-services.md",
     "entities/data-models/ticket-core-models.md",
     "entities/components/web-shell.md",
-    "log.md",
     "entities/services/hrm-domain.md",
     "entities/components/new-client-runtime.md",
     "entities/enums/ticket-enums.md",
@@ -199,17 +205,12 @@
     "entities/data-models/task-core-models.md",
     "entities/data-models/hrm-core-models.md",
     "entities/data-models/admin-core-models.md",
-    "entities/services/new-client-services.md",
     "entities/components/new-client-shell.md",
     "entities/services/legacy-client-features.md",
     "entities/components/legacy-client-runtime.md",
     "entities/components/legacy-client-shell.md",
     "entities/services/web-feature-domains.md",
     "entities/services/task-scheduler-domain.md",
-    "entities/services/qtr-domain.md",
-    "entities/services/admin-domain.md",
-    "entities/components/server-infrastructure.md",
-    "entities/components/new-client-bootstrap.md",
-    "entities/components/legacy-client-bootstrap.md"
+    "entities/services/qtr-domain.md"
   ]
 }

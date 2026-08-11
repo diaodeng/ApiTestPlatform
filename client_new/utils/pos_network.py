@@ -196,17 +196,46 @@ def pos_init(pos_path: str, version: str = "", group: str = "") -> PosParamsMode
                 f"获取pos初始配置（pos/init）失败: {resp.status_code}"
             )
         content = resp.json()
-        logger.info(
-            f"获取pos初始配置（pos/init）结果： {json.dumps(content, ensure_ascii=False)}"
-        )
+        _log_pos_init_result(content, len(resp.content))
         if content["code"] != "0000":
             raise PosHandleException(
-                f"从网络获取pos/init失败: {json.dumps(content, ensure_ascii=False)}"
+                f"从网络获取pos/init失败: {_build_pos_init_result_summary(content, len(resp.content))}"
             )
         res_data = content.get("data", {})
         res_model = PosParamsModel.model_validate(res_data)
         res_model.is_local = False
         return res_model
+
+
+def _log_pos_init_result(content: dict, response_size: int) -> None:
+    """
+    记录 POS 初始化接口的安全摘要，避免超大配置和敏感字段进入客户端日志。
+
+    :param content: pos/init 接口解析后的响应数据。
+    :param response_size: 原始 HTTP 响应字节数，用于判断响应规模。
+    """
+    logger.info(
+        f"获取pos初始配置（pos/init）结果摘要: {_build_pos_init_result_summary(content, response_size)}"
+    )
+
+
+def _build_pos_init_result_summary(content: dict, response_size: int) -> str:
+    """
+    构造不包含配置正文和敏感字段的 POS 初始化结果摘要。
+
+    :param content: pos/init 接口解析后的响应数据。
+    :param response_size: 原始 HTTP 响应字节数，用于判断响应规模。
+    :return: 可安全记录或作为异常消息返回的结果摘要。
+    """
+    data = content.get("data") if isinstance(content, dict) else None
+    data = data if isinstance(data, dict) else {}
+    code = content.get("code") if isinstance(content, dict) else "-"
+    success = content.get("success") if isinstance(content, dict) else "-"
+    return (
+        f"code={code}, success={success}, venderNo={data.get('venderNo', '-')}, "
+        f"orgNo={data.get('orgNo', '-')}, posId={data.get('posId', '-')}, "
+        f"posType={data.get('posType', '-')}, responseBytes={response_size}"
+    )
 
 
 if __name__ == "__main__":
@@ -241,12 +270,10 @@ if __name__ == "__main__":
                 f"获取pos初始配置（pos/init）失败: {resp.status_code}"
             )
         content = resp.json()
-        logger.info(
-            f"获取pos初始配置（pos/init）结果： {json.dumps(content, ensure_ascii=False)}"
-        )
+        _log_pos_init_result(content, len(resp.content))
         if content["code"] != "0000":
             raise PosHandleException(
-                f"从网络获取pos/init失败: {json.dumps(content, ensure_ascii=False)}"
+                f"从网络获取pos/init失败: {_build_pos_init_result_summary(content, len(resp.content))}"
             )
         res_data = content.get("data", {})
         res_model = PosParamsModel.model_validate(res_data)

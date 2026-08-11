@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 
 
 class _FileTailThread(QThread):
+    MAX_EMITTED_LINE_LENGTH = 16 * 1024
+
     line_read = Signal(str)
     status = Signal(str)
 
@@ -58,12 +60,28 @@ class _FileTailThread(QThread):
                             for line in content.splitlines():
                                 line = line.strip()
                                 if line:
-                                    self.line_read.emit(line)
+                                    self.line_read.emit(self._truncate_line(line))
 
                 self.msleep(int(self.poll_interval * 1000))
             except Exception as e:
                 self.status.emit(f"文件监控异常: {e}")
                 self.msleep(1000)
+
+    def _truncate_line(self, line: str) -> str:
+        """
+        截断发送到 UI 的超长日志行，避免 QTextEdit 处理大响应正文。
+
+        :param line: 从日志文件读取的一行原始文本。
+        :return: 可安全传递到 UI 线程的日志文本。
+        """
+        if len(line) <= self.MAX_EMITTED_LINE_LENGTH:
+            return line
+
+        omitted = len(line) - self.MAX_EMITTED_LINE_LENGTH
+        return (
+            f"{line[:self.MAX_EMITTED_LINE_LENGTH]}"
+            f" ... [日志单行过长，已截断 {omitted} 个字符]"
+        )
 
 
 class LogViewPage(QWidget):

@@ -1,11 +1,23 @@
 import asyncio
+import json
+import time
+from datetime import date, datetime, timedelta
+from datetime import time as datetime_time
 from typing import Any
 
 from config.database import SessionLocal
 from module_hrm.entity.vo.report_vo import ReportDelModel
 from module_hrm.service.report_service import ReportService
+from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
-from modules.ticket.service.ticket_sync_service import TicketSyncService
+from modules.ticket.service.stats.ticket_custom_statistics_service import TicketCustomStatisticsService
+from modules.ticket.service.stats.ticket_statistics_snapshot_service import TicketStatisticsSnapshotService
+from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicStatsService
+from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
+from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
+from modules.credential.service.credential_refresh_service import CredentialRefreshService
+from modules.ticket.util.ticket_statistics_time_util import TicketStatisticsTimeUtil
 from utils.log_util import logger
 
 from .task_register import register_job
@@ -19,7 +31,8 @@ def _build_remote_sync_override(
     pull_url: str | None = None,
     ack_url: str | None = None,
     source_system: str | None = None,
-    headers: dict[str, Any] | None = None,
+    credential_binding_id: str | None = None,
+    origin: str | None = None,
 ) -> dict[str, Any]:
     """
     组装远端工单同步覆盖配置。
@@ -30,7 +43,8 @@ def _build_remote_sync_override(
     :param pull_url: 拉取地址。
     :param ack_url: 回写地址。
     :param source_system: 远端系统标识。
-    :param headers: 额外请求头。
+    :param credential_binding_id: 远端同步凭证绑定 ID。
+    :param origin: 可选的非敏感 Origin 请求头。
     :return: 覆盖配置字典。
     """
     override: dict[str, Any] = {}
@@ -47,11 +61,109 @@ def _build_remote_sync_override(
         remote_sync["ackUrl"] = ack_url
     if source_system is not None:
         remote_sync["sourceSystem"] = source_system
-    if headers:
-        remote_sync["headers"] = headers
+    if credential_binding_id is not None:
+        remote_sync["credentialBindingId"] = credential_binding_id
+    if origin is not None:
+        remote_sync["origin"] = origin
     if remote_sync:
         override["remoteSync"] = remote_sync
     return override
+
+
+def _build_person_reminder_config_override(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    从定时任务参数中提取人员催办覆盖配置。
+
+    :param kwargs: 定时任务关键字参数。
+    :return: 非空覆盖配置；为空的字段由全局同步参数配置兜底。
+    """
+    nested_config = kwargs.pop("personReminder", None)
+    if nested_config is None:
+        nested_config = kwargs.pop("person_reminder", None)
+    source_config = dict(nested_config) if isinstance(nested_config, dict) else {}
+    for key, value in kwargs.items():
+        if value is not None and str(value).strip() != "":
+            source_config[key] = value
+    field_aliases = {
+        "appToken": ("appToken", "app_token"),
+        "tableId": ("tableId", "table_id"),
+        "viewId": ("viewId", "view_id", "view"),
+        "filterFormula": ("filterFormula", "filter_formula", "feishuFilter", "feishu_filter", "filter"),
+        "personField": ("personField", "person_field", "personFieldName", "person_field_name"),
+        "timeField": ("timeField", "time_field", "timeFieldName", "time_field_name"),
+        "dataSource": ("dataSource", "data_source"),
+        "pageSize": ("pageSize", "page_size"),
+    }
+    override: dict[str, Any] = {}
+    for target_key, aliases in field_aliases.items():
+        for alias in aliases:
+            if alias in source_config:
+                value = source_config.get(alias)
+                if value is not None and str(value).strip() != "":
+                    override[target_key] = value
+                break
+    return override
+
+
+def _build_bitable_pull_config_override(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    从定时任务参数中提取飞书多维表格主动拉取覆盖配置。
+
+    :param kwargs: 定时任务关键字参数。
+    :return: 非空覆盖配置。
+    """
+    nested_config = kwargs.pop("bitablePull", None)
+    if nested_config is None:
+        nested_config = kwargs.pop("bitable_pull", None)
+    source_config = dict(nested_config) if isinstance(nested_config, dict) else {}
+    for key, value in kwargs.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and str(value).strip() == "":
+            continue
+        source_config[key] = value
+    field_aliases = {
+        "enabled": ("enabled",),
+        "appId": ("appId", "app_id"),
+        "appSecret": ("appSecret", "app_secret"),
+        "appToken": ("appToken", "app_token"),
+        "tableId": ("tableId", "table_id"),
+        "viewId": ("viewId", "view_id", "view"),
+        "pageSize": ("pageSize", "page_size"),
+        "filterFormula": ("filterFormula", "filter_formula", "filter"),
+        "sourceSystem": ("sourceSystem", "source_system"),
+        "ticketNoField": ("ticketNoField", "ticket_no_field"),
+        "updatedAtField": ("updatedAtField", "updated_at_field"),
+        "sortField": ("sortField", "sort_field"),
+        "includeRecordUrl": ("includeRecordUrl", "include_record_url"),
+        "createdAfter": ("createdAfter", "created_after", "startTime", "start_time", "beginTime", "begin_time"),
+        "createdBefore": ("createdBefore", "created_before", "endTime", "end_time"),
+        "forceSync": ("forceSync", "force_sync"),
+        "autoAppendTimeFilter": ("autoAppendTimeFilter", "auto_append_time_filter"),
+        "fieldMappings": ("fieldMappings", "field_mappings"),
+        "automation": ("automation",),
+    }
+    override: dict[str, Any] = {}
+    for target_key, aliases in field_aliases.items():
+        for alias in aliases:
+            if alias in source_config:
+                override[target_key] = source_config.get(alias)
+                break
+    return override
+
+
+def _pop_keyword_override(kwargs: dict[str, Any], *aliases: str) -> list[str] | str | None:
+    """
+    从定时任务参数中提取可合并的关键词配置。
+
+    :param kwargs: 定时任务关键字参数。
+    :param aliases: 允许的参数别名。
+    :return: 原始关键词配置；未传入时返回 None。
+    """
+    for alias in aliases:
+        if alias in kwargs:
+            return kwargs.pop(alias)
+    return None
 
 
 @register_job("module_task.scheduler_maintenance.cleanup_test_reports")
@@ -109,7 +221,8 @@ def pull_public_ticket_sync(
     pull_url: str | None = None,
     ack_url: str | None = None,
     source_system: str | None = None,
-    headers: dict[str, Any] | None = None,
+    credential_binding_id: str | None = None,
+    origin: str | None = None,
     **kwargs,
 ):
     """
@@ -121,7 +234,8 @@ def pull_public_ticket_sync(
     :param pull_url: 拉取地址覆盖值。
     :param ack_url: 回写地址覆盖值。
     :param source_system: 远端系统标识覆盖值。
-    :param headers: 请求头覆盖值。
+    :param credential_binding_id: 凭证绑定覆盖值。
+    :param origin: 非敏感 Origin 覆盖值。
     :return: 同步结果摘要。
     """
     task_id = int(kwargs.pop("_task_id", 0) or 0)
@@ -134,16 +248,613 @@ def pull_public_ticket_sync(
         pull_url=pull_url if pull_url is not None else kwargs.pop("pullUrl", None),
         ack_url=ack_url if ack_url is not None else kwargs.pop("ackUrl", None),
         source_system=source_system if source_system is not None else kwargs.pop("sourceSystem", None),
-        headers=headers if headers is not None else kwargs.pop("headers", None),
+        credential_binding_id=credential_binding_id if credential_binding_id is not None else kwargs.pop("credentialBindingId", None),
+        origin=origin if origin is not None else kwargs.pop("origin", None),
     )
     with SessionLocal() as db:
-        result = TicketSyncService.sync_remote_pending_tickets(db, current_user=None, remote_sync_override=override)
+        result = TicketRemoteSyncService.sync_remote_pending_tickets(
+            db,
+            current_user=None,
+            remote_sync_override=override,
+        )
     logger.info(
-        "远端工单拉取任务执行完成 | consumer={}, pulled={}, synced={}, failed={}, acked={}",
-        result.get("consumer"),
-        result.get("pulledCount"),
-        result.get("syncedCount"),
-        result.get("failedCount"),
-        result.get("ackedCount"),
+        f"远端工单拉取任务执行完成 | consumer={result.get('consumer')}, "
+        f"pulled={result.get('pulledCount')}, synced={result.get('syncedCount')}, "
+        f"skipped={result.get('skippedCount')}, failed={result.get('failedCount')}, "
+        f"acked={result.get('ackedCount')}"
     )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync")
+def pull_feishu_bitable_ticket_sync(
+    *args,
+    **kwargs,
+):
+    """
+    飞书多维表格工单主动拉取定时任务。
+
+    :param kwargs: 支持 bitablePull 嵌套对象或平铺字段覆盖 appToken/tableId/viewId/
+        filterFormula/pageSize/fieldMappings/createdAfter。
+    :return: 执行结果摘要。
+    """
+    start_time = time.time()
+    logger.info(f"任务module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync开始执行:{start_time}")
+
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    override = _build_bitable_pull_config_override(kwargs)
+    with SessionLocal() as db:
+        result = TicketBitablePullService.run_bitable_pull_services(
+            db,
+            trigger_source="scheduler",
+            current_user=None,
+            bitable_pull_override=override,
+        )
+    logger.info(
+        f"飞书多维表格主动拉取任务执行完成 | record_count={result.get('recordCount')} "
+        f"synced={result.get('syncedCount')} skipped={result.get('skippedCount')} "
+        f"failed={result.get('failedCount')} override_keys={list(override.keys())}"
+    )
+    logger.info(
+        f"任务module_task.scheduler_maintenance.pull_feishu_bitable_ticket_sync执行耗时："
+        f"{time.time() - start_time}"
+    )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_person_overdue_reminder")
+def ticket_person_overdue_reminder(
+    *args,
+    user_id: int | None = None,
+    email: str | None = None,
+    **kwargs,
+):
+    """
+    工单人维度催办定时任务。
+
+    :param user_id: 可选用户ID，传入后仅提醒该用户。
+    :param email: 可选邮箱，传入后仅提醒该邮箱对应用户。
+    :param kwargs: 支持 appToken/tableId/viewId/filterFormula/personField/timeField 等任务级覆盖配置。
+    :return: 执行结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    resolved_user_id = user_id if user_id is not None else kwargs.pop("userId", None)
+    resolved_emails = email if email is not None else kwargs.pop("email", [])
+    is_all_raw = kwargs.pop("isAll", False)
+    is_all = (
+        str(is_all_raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+        if isinstance(is_all_raw, str)
+        else bool(is_all_raw)
+    )
+    person_config_override = _build_person_reminder_config_override(kwargs)
+    if is_all:
+        with SessionLocal() as db:
+            result = TicketSyncNotificationJobService.run_person_reminder_services(
+                db,
+                trigger_source="scheduler",
+                is_all=is_all,
+                person_config_override=person_config_override,
+            )
+        logger.info(
+            f"工单人维度全员催办任务执行完成 | sent_people={result.get('sentPeople')} "
+            f"sent_push_count={result.get('sentPushCount')} skipped={result.get('skipped')} "
+            f"override_keys={list(person_config_override.keys())}"
+        )
+        return result
+
+
+    try:
+        if resolved_emails and isinstance(resolved_emails, str):
+            parsed_emails = json.loads(resolved_emails)
+            resolved_emails = parsed_emails if isinstance(parsed_emails, list) else [parsed_emails]
+    except Exception:
+        resolved_emails = [resolved_emails]
+    if not isinstance(resolved_emails, list):
+        resolved_emails = [resolved_emails] if resolved_emails else []
+
+    normalized_user_id = None
+    try:
+        if resolved_user_id not in (None, ""):
+            normalized_user_id = int(resolved_user_id)
+    except Exception:
+        normalized_user_id = None
+    if normalized_user_id and not resolved_emails:
+        resolved_emails = [None]
+    result = {"skipped": True, "skipReason": "未指定用户或邮箱"}
+    for resolved_email in resolved_emails:
+        with SessionLocal() as db:
+            result = TicketSyncNotificationJobService.run_person_reminder_services(
+                db,
+                trigger_source="scheduler",
+                user_id=normalized_user_id,
+                email=str(resolved_email or "").strip() or None,
+                person_config_override=person_config_override,
+            )
+        logger.info(
+            f"工单人维度催办任务执行完成 | user_id={resolved_user_id or '-'} "
+            f"email={resolved_email or '-'} sent_people={result.get('sentPeople')} "
+            f"sent_push_count={result.get('sentPushCount')} skipped={result.get('skipped')} "
+            f"override_keys={list(person_config_override.keys())}"
+        )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_summary_report")
+def ticket_summary_report(
+    *args,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    **kwargs,
+):
+    """
+    工单汇总统计通知定时任务。
+
+    :param start_time: 可选统计开始时间，支持日期时间字符串。
+    :param end_time: 可选统计结束时间，支持日期时间字符串。
+    :return: 执行结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    resolved_start_time = start_time if start_time is not None else kwargs.pop("startTime", None)
+    resolved_end_time = end_time if end_time is not None else kwargs.pop("endTime", None)
+
+    with SessionLocal() as db:
+        result = TicketSyncNotificationJobService.run_summary_report_services(
+            db,
+            trigger_source="scheduler",
+            start_time=resolved_start_time,
+            end_time=resolved_end_time,
+        )
+    logger.info(
+        "工单汇总统计通知任务执行完成 | start_time={} end_time={} push_success={} chat_success={} skipped={}",
+        resolved_start_time or "-",
+        resolved_end_time or "-",
+        result.get("pushSuccessCount"),
+        result.get("chatSuccessCount"),
+        result.get("skipped"),
+    )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.refresh_credentials")
+def refresh_credentials(*args, **kwargs):
+    """统一凭证定时刷新任务，仅刷新已开启自动刷新的 HTTP 凭证。"""
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    with SessionLocal() as db:
+        result = CredentialRefreshService.refresh_due_credentials(db)
+    logger.info(
+        f"统一凭证刷新任务执行完成 | checked={result['checked']} refreshed={result['refreshed']} "
+        f"skipped={result['skipped']} failed={result['failed']}"
+    )
+    return result
+
+
+@register_job("module_task.scheduler_maintenance.ticket_custom_statistics_report")
+def ticket_custom_statistics_report(
+    *args,
+    profile_codes: list[str] | str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    **kwargs,
+):
+    """
+    执行当前系统工单自定义统计并按方案通知。
+
+    :param profile_codes: 统计方案编码列表或逗号分隔字符串；留空执行全部启用方案。
+    :param start_time: 可选统一开始时间，必须与 end_time 成对传入。
+    :param end_time: 可选统一结束时间，必须与 start_time 成对传入。
+    :return: 不包含分组明细的执行摘要，避免统计结果写入任务日志。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    raw_codes = profile_codes if profile_codes is not None else kwargs.pop("profileCodes", None)
+    resolved_codes = (
+        [item.strip() for item in raw_codes.split(",") if item.strip()]
+        if isinstance(raw_codes, str)
+        else [str(item).strip() for item in raw_codes or [] if str(item).strip()]
+    )
+    resolved_start_time = start_time if start_time is not None else kwargs.pop("startTime", None)
+    resolved_end_time = end_time if end_time is not None else kwargs.pop("endTime", None)
+    with SessionLocal() as db:
+        results = TicketCustomStatisticsService.run_profiles(
+            db,
+            trigger_source="scheduler",
+            profile_codes=resolved_codes or None,
+            start_time=TicketCustomStatisticsService.parse_config_datetime(resolved_start_time),
+            end_time=TicketCustomStatisticsService.parse_config_datetime(resolved_end_time),
+            send=True,
+        )
+    summary = {
+        "profileCount": len(results),
+        "profiles": [
+            {
+                "profileCode": item.get("profileCode"),
+                "totalCount": item.get("totalCount"),
+                "notification": item.get("notification"),
+            }
+            for item in results
+        ],
+    }
+    logger.info(
+        f"自定义工单统计任务执行完成: profiles={len(results)}, "
+        f"profile_codes={resolved_codes or 'all'}, start_time={resolved_start_time or '-'}, "
+        f"end_time={resolved_end_time or '-'}"
+    )
+    return summary
+
+
+@register_job("module_task.scheduler_maintenance.ticket_daily_statistics_snapshot")
+def ticket_daily_statistics_snapshot(
+    *args,
+    statistics_date: str | None = None,
+    begin_date: str | None = None,
+    end_date: str | None = None,
+    **kwargs,
+):
+    """
+    工单每日统计快照任务，支持三种调用模式：
+    1. 默认模式（不传参）：统计昨天的快照数据。
+    2. 单日模式（传 statistics_date）：统计指定日期的快照数据。
+    3. 范围模式（传 begin_date + end_date）：逐日统计指定日期范围内的快照数据。
+
+    :param statistics_date: 单日日期，格式 YYYY-MM-DD；与 begin_date/end_date 互斥。
+    :param begin_date: 范围开始日期（含），格式 YYYY-MM-DD。
+    :param end_date: 范围结束日期（含），格式 YYYY-MM-DD。
+    :return: 单日模式返回单日执行摘要；范围模式返回汇总（处理天数、总 leaf 数）。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    # 范围模式：逐日循环生成快照
+    if begin_date and end_date:
+        return _run_snapshot_range(task_id, begin_date, end_date)
+
+    # 单日模式：统计指定日期
+    if statistics_date:
+        return _run_snapshot_single(statistics_date)
+
+    # 默认模式：统计昨天
+    return _run_snapshot_single((date.today() - timedelta(days=1)).isoformat())
+
+
+@register_job("module_task.scheduler_maintenance.ticket_business_week_statistics_snapshot")
+def ticket_business_week_statistics_snapshot(
+    *args,
+    period_start_time: str | None = None,
+    business_week_start: str | None = None,
+    begin_time: str | None = None,
+    end_time: str | None = None,
+    **kwargs,
+):
+    """
+    工单业务周统计快照任务，支持默认上一完整业务周、单个业务周和范围补跑。
+
+    :param period_start_time: 单个业务周开始时间，格式 YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DD。
+    :param business_week_start: period_start_time 的别名。
+    :param begin_time: 范围补跑开始时间，按 7 天步进。
+    :param end_time: 范围补跑结束时间，按 7 天步进。
+    :return: 单个业务周或范围补跑摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    resolved_start = period_start_time or business_week_start or kwargs.pop("periodStartTime", None)
+    resolved_begin = begin_time or kwargs.pop("beginTime", None)
+    resolved_end = end_time or kwargs.pop("endTime", None)
+    if resolved_begin and resolved_end:
+        return _run_business_week_snapshot_range(task_id, resolved_begin, resolved_end)
+    if resolved_start:
+        return _run_business_week_snapshot_single(resolved_start)
+    return _run_business_week_snapshot_single(None)
+
+
+def _run_snapshot_single(date_str: str) -> dict[str, Any]:
+    """
+    执行单日快照生成。
+
+    :param date_str: 目标日期字符串，格式 YYYY-MM-DD。
+    :return: 快照执行结果摘要。
+    """
+    target_date = date.fromisoformat(date_str)
+    logger.info(f"工单每日统计快照任务开始执行 | target_date={target_date}")
+    with SessionLocal() as db:
+        result = TicketStatisticsSnapshotService.build_daily_snapshot(db, target_date)
+    logger.info(
+        f"工单每日统计快照任务执行完成 | statistics_date={result.get('statisticsDate')}, "
+        f"submitted_count={result.get('submitted_count')}, processed_count={result.get('processed_count')}"
+    )
+    return result
+
+
+def _run_snapshot_range(task_id: int, begin_date: str, end_date: str) -> dict[str, Any]:
+    """
+    按日期范围逐日生成快照，每天独立 commit，某天失败不影响其他天。
+
+    :param task_id: 任务 ID，用于检查终止标记。
+    :param begin_date: 范围开始日期字符串，格式 YYYY-MM-DD。
+    :param end_date: 范围结束日期字符串，格式 YYYY-MM-DD。
+    :return: 范围执行汇总。
+    """
+    current = date.fromisoformat(begin_date)
+    end = date.fromisoformat(end_date)
+    total_days = 0
+    total_leaf = 0
+    failed_days: list[str] = []
+    logger.info(f"工单每日统计快照任务开始范围执行 | begin_date={begin_date}, end_date={end_date}")
+    while current <= end:
+        # 检查任务终止标记
+        if task_id and is_task_stop_requested(task_id):
+            logger.info(f"工单每日统计快照范围任务已手动终止 | 已处理天数={total_days}, 当前日期={current}")
+            raise TaskStopRequestedError("任务已手动终止")
+        try:
+            logger.info(f"工单每日统计快照范围执行中 | current_date={current}")
+            with SessionLocal() as db:
+                result = TicketStatisticsSnapshotService.build_daily_snapshot(db, current)
+            total_days += 1
+            total_leaf += result.get("leafCount", 0)
+        except TaskStopRequestedError:
+            raise
+        except Exception as e:
+            # 某天失败记录异常，继续下一天
+            logger.error(f"工单每日统计快照范围执行失败 | current_date={current}, error={e}")
+            failed_days.append(current.isoformat())
+        current += timedelta(days=1)
+    summary = {
+        "mode": "range",
+        "begin_date": begin_date,
+        "end_date": end_date,
+        "total_days": total_days,
+        "total_leaf_count": total_leaf,
+        "failed_days": failed_days,
+    }
+    logger.info(
+        f"工单每日统计快照范围任务执行完成 | total_days={total_days}, "
+        f"total_leaf_count={total_leaf}, failed_days={failed_days}"
+    )
+    return summary
+
+
+def _parse_business_week_start(value: str | None, config: dict[str, Any] | None = None) -> datetime | None:
+    """
+    解析业务周开始时间，日期字符串会使用业务周配置中的开始时刻。
+
+    :param value: 时间字符串。
+    :param config: 业务周配置，日期字符串补齐时刻时使用。
+    :return: datetime；空值返回 None。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        active_config = TicketStatisticsTimeUtil.normalize_config(config)
+        return datetime.combine(
+            date.fromisoformat(text),
+            datetime_time.fromisoformat(active_config["businessWeekStartTime"]),
+        )
+
+
+def _run_business_week_snapshot_single(period_start_time: str | None) -> dict[str, Any]:
+    """
+    执行单个业务周快照生成。
+
+    :param period_start_time: 业务周开始时间字符串；为空时由服务取上一完整业务周。
+    :return: 快照执行结果摘要。
+    """
+    with SessionLocal() as db:
+        config = TicketStatisticsTimeUtil.get_config(db)
+        start_time = _parse_business_week_start(period_start_time, config)
+        logger.info(f"工单业务周统计快照任务开始执行 | period_start_time={start_time or 'previous_completed'}")
+        result = TicketStatisticsSnapshotService.build_business_week_snapshot(db, start_time, config)
+    logger.info(
+        f"工单业务周统计快照任务执行完成 | period_start={result.get('periodStartTime')}, "
+        f"submitted_count={result.get('submitted_count')}, processed_count={result.get('processed_count')}"
+    )
+    return result
+
+
+def _run_business_week_snapshot_range(task_id: int, begin_time: str, end_time: str) -> dict[str, Any]:
+    """
+    按业务周开始时间范围逐周生成快照，每周独立 commit，某周失败不影响其他周。
+
+    :param task_id: 任务 ID，用于检查终止标记。
+    :param begin_time: 范围开始时间字符串。
+    :param end_time: 范围结束时间字符串。
+    :return: 范围执行汇总。
+    """
+    with SessionLocal() as db:
+        config = TicketStatisticsTimeUtil.get_config(db)
+    current = _parse_business_week_start(begin_time, config)
+    end = _parse_business_week_start(end_time, config)
+    if current is None or end is None:
+        raise ValueError("begin_time 和 end_time 不能为空")
+    total_weeks = 0
+    total_leaf = 0
+    failed_weeks: list[str] = []
+    logger.info(f"工单业务周统计快照任务开始范围执行 | begin_time={begin_time}, end_time={end_time}")
+    while current <= end:
+        if task_id and is_task_stop_requested(task_id):
+            logger.info(f"工单业务周统计快照范围任务已手动终止 | 已处理周数={total_weeks}, 当前开始={current}")
+            raise TaskStopRequestedError("任务已手动终止")
+        try:
+            logger.info(f"工单业务周统计快照范围执行中 | period_start_time={current}")
+            with SessionLocal() as db:
+                result = TicketStatisticsSnapshotService.build_business_week_snapshot(db, current)
+            total_weeks += 1
+            total_leaf += int(result.get("leafCount") or 0)
+        except TaskStopRequestedError:
+            raise
+        except Exception as e:
+            logger.error(f"工单业务周统计快照范围执行失败 | period_start_time={current}, error={e}")
+            failed_weeks.append(current.strftime("%Y-%m-%d %H:%M:%S"))
+        current += timedelta(days=7)
+    summary = {
+        "mode": "business_week_range",
+        "begin_time": begin_time,
+        "end_time": end_time,
+        "total_weeks": total_weeks,
+        "total_leaf_count": total_leaf,
+        "failed_weeks": failed_weeks,
+    }
+    logger.info(
+        f"工单业务周统计快照范围任务执行完成 | total_weeks={total_weeks}, "
+        f"total_leaf_count={total_leaf}, failed_weeks={failed_weeks}"
+    )
+    return summary
+
+
+@register_job("module_task.scheduler_maintenance.ticket_topic_stats_report")
+def ticket_topic_stats_report(
+    *args,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    sources: list[dict[str, Any]] | None = None,
+    app_id: str | None = None,
+    app_secret: str | None = None,
+    receive_chat_ids: list[str] | str | None = None,
+    send: bool | None = None,
+    keyword: str = "TRunner",
+    category_mode: str | None = None,
+    ai_provider_code: str | None = None,
+    ai_prompt_code: str | None = None,
+    ai_prompt_content: str | None = None,
+    coupon_keywords: list[str] | str | None = None,
+    stamp_keywords: list[str] | str | None = None,
+    member_keywords: list[str] | str | None = None,
+    promo_keywords: list[str] | str | None = None,
+    closed_keywords: list[str] | str | None = None,
+    conclusion_keywords: list[str] | str | None = None,
+    page_size: int | None = None,
+    **kwargs,
+):
+    """
+    专题工单会话状态统计定时任务。
+
+    :param start_date: 统计开始日期，格式 YYYY-MM-DD；为空时取上海时区当天。
+    :param end_date: 统计结束日期，格式 YYYY-MM-DD；为空时取上海时区当天。
+    :param sources: 飞书群来源列表，每项包含 name、chatId/chat_id、priority。
+    :param app_id: 飞书应用 app_id。
+    :param app_secret: 飞书应用 app_secret。
+    :param receive_chat_ids: 发送统计卡片的群 chat_id 列表；为空时默认发到 sources 中配置的群。
+    :param send: 是否发送飞书卡片。
+    :param keyword: 卡片副标题关键字。
+    :param category_mode: 分类模式，keywords 保留关键词模式，ai 启用 AI 自动分类。
+    :param ai_provider_code: AI 分类 Provider 编码。
+    :param ai_prompt_code: AI 分类提示词编码。
+    :param ai_prompt_content: AI 分类提示词正文，优先级高于提示词编码。
+    :param coupon_keywords: “券”分类补充关键词。
+    :param stamp_keywords: “印花”分类补充关键词。
+    :param member_keywords: “会员”分类补充关键词。
+    :param promo_keywords: “促销”分类补充关键词。
+    :param closed_keywords: “有结论”中的关闭类补充关键词。
+    :param conclusion_keywords: “有结论”中的结论类补充关键词。
+    :param page_size: 单页拉取消息数量。
+    :return: 统计结果摘要。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+
+    resolved_sources = sources if sources is not None else kwargs.pop("sources", None)
+    resolved_start_date = start_date if start_date is not None else kwargs.pop("startDate", None)
+    resolved_end_date = end_date if end_date is not None else kwargs.pop("endDate", None)
+    resolved_app_id = app_id if app_id is not None else kwargs.pop("appId", None)
+    resolved_app_secret = app_secret if app_secret is not None else kwargs.pop("appSecret", None)
+    resolved_receive_chat_ids = receive_chat_ids if receive_chat_ids is not None else (
+        kwargs.pop("receiveChatIds", None) or kwargs.pop("appChatIds", None)
+    )
+    resolved_send = bool(send if send is not None else kwargs.pop("send", False))
+    resolved_keyword = keyword if keyword is not None else kwargs.pop("keyword", "TRunner")
+    resolved_category_mode = category_mode if category_mode is not None else kwargs.pop("categoryMode", None)
+    resolved_ai_provider_code = ai_provider_code if ai_provider_code is not None else kwargs.pop("aiProviderCode", None)
+    resolved_ai_prompt_code = ai_prompt_code if ai_prompt_code is not None else kwargs.pop("aiPromptCode", None)
+    resolved_ai_prompt_content = (
+        ai_prompt_content if ai_prompt_content is not None else kwargs.pop("aiPromptContent", None)
+    )
+    resolved_coupon_keywords = coupon_keywords if coupon_keywords is not None else _pop_keyword_override(
+        kwargs, "couponKeywords", "coupon_keywords"
+    )
+    resolved_stamp_keywords = stamp_keywords if stamp_keywords is not None else _pop_keyword_override(
+        kwargs, "stampKeywords", "stamp_keywords"
+    )
+    resolved_member_keywords = member_keywords if member_keywords is not None else _pop_keyword_override(
+        kwargs, "memberKeywords", "member_keywords"
+    )
+    resolved_promo_keywords = promo_keywords if promo_keywords is not None else _pop_keyword_override(
+        kwargs, "promoKeywords", "promo_keywords"
+    )
+    resolved_closed_keywords = closed_keywords if closed_keywords is not None else _pop_keyword_override(
+        kwargs, "closedKeywords", "closed_keywords"
+    )
+    resolved_conclusion_keywords = conclusion_keywords if conclusion_keywords is not None else _pop_keyword_override(
+        kwargs, "conclusionKeywords", "conclusion_keywords"
+    )
+    resolved_page_size = page_size if page_size is not None else kwargs.pop("pageSize", 50)
+
+    logger.info(
+        f"专题工单会话状态统计任务开始 | start_date={resolved_start_date or '-'} "
+        f"end_date={resolved_end_date or '-'} source_count={len(resolved_sources or [])} "
+        f"send={resolved_send} keyword={resolved_keyword or '-'} category_mode={resolved_category_mode or 'keywords'}"
+    )
+    owner_user_id = None
+    try:
+        with SessionLocal() as db:
+            if task_id:
+                task_row = db.query(CeleryPeriodicTask).filter(CeleryPeriodicTask.task_id == task_id).first()
+                owner_user_id = int(getattr(task_row, "owner_user_id", 0) or 0) or None
+            resolved_ai_provider_code, resolved_ai_prompt_code, resolved_ai_prompt_content = (
+                TicketTopicStatsService.resolve_ai_classify_config(
+                    db,
+                    ai_provider_code=resolved_ai_provider_code,
+                    ai_prompt_code=resolved_ai_prompt_code,
+                    ai_prompt_content=resolved_ai_prompt_content,
+                    user_id=owner_user_id,
+                )
+            )
+            result = TicketTopicStatsService.run_topic_stats(
+                db=db,
+                start_date=resolved_start_date,
+                end_date=resolved_end_date,
+                sources=resolved_sources,
+                app_id=resolved_app_id,
+                app_secret=resolved_app_secret,
+                receive_chat_ids=resolved_receive_chat_ids,
+                send=resolved_send,
+                keyword=str(resolved_keyword or "TRunner"),
+                category_mode=str(resolved_category_mode or "keywords"),
+                ai_provider_code=resolved_ai_provider_code,
+                ai_prompt_code=resolved_ai_prompt_code,
+                ai_prompt_content=resolved_ai_prompt_content,
+                coupon_keywords=resolved_coupon_keywords,
+                stamp_keywords=resolved_stamp_keywords,
+                member_keywords=resolved_member_keywords,
+                promo_keywords=resolved_promo_keywords,
+                closed_keywords=resolved_closed_keywords,
+                conclusion_keywords=resolved_conclusion_keywords,
+                page_size=int(resolved_page_size or 50),
+            )
+    except Exception as exc:
+        logger.exception(f"专题工单会话状态统计任务执行失败: error={exc}")
+        raise
+    logger.info(
+        f"专题工单会话状态统计任务完成 | total={result['summary']['total']} "
+        f"status={result['summary']['status']} category={result['summary']['category']}"
+    )
+    return {
+        "range": result.get("range"),
+        "summary": result.get("summary"),
+        "sent": bool(result.get("response")),
+        "response": result.get("response"),
+    }

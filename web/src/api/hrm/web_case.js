@@ -98,68 +98,6 @@ export function delWebRun(webCaseRunIds) {
   })
 }
 
-export function listWebRuntimeProfile(query) {
-  return webCaseRequest({
-    url: '/hrm/web-case/runtime-profile/list',
-    method: 'get',
-    params: query
-  })
-}
-
-export function addWebRuntimeProfile(data) {
-  return webCaseRequest({
-    url: '/hrm/web-case/runtime-profile',
-    method: 'post',
-    data
-  })
-}
-
-export function updateWebRuntimeProfile(data) {
-  return webCaseRequest({
-    url: '/hrm/web-case/runtime-profile',
-    method: 'put',
-    data
-  })
-}
-
-export function delWebRuntimeProfile(profileId) {
-  return webCaseRequest({
-    url: '/hrm/web-case/runtime-profile/' + profileId,
-    method: 'delete'
-  })
-}
-
-export function listWebBrowserSession(query) {
-  return webCaseRequest({
-    url: '/hrm/web-case/browser-session/list',
-    method: 'get',
-    params: query
-  })
-}
-
-export function addWebBrowserSession(data) {
-  return webCaseRequest({
-    url: '/hrm/web-case/browser-session',
-    method: 'post',
-    data
-  })
-}
-
-export function updateWebBrowserSession(data) {
-  return webCaseRequest({
-    url: '/hrm/web-case/browser-session',
-    method: 'put',
-    data
-  })
-}
-
-export function delWebBrowserSession(sessionId) {
-  return webCaseRequest({
-    url: '/hrm/web-case/browser-session/' + sessionId,
-    method: 'delete'
-  })
-}
-
 export function getWebRun(webCaseRunId) {
   return webCaseRequest({
     url: '/hrm/web-case/run/' + webCaseRunId,
@@ -230,6 +168,10 @@ export function stopWebRecording(data) {
     method: 'post',
     data
   })
+}
+
+export function createCredentialFromWebRecording(recordingId, data) {
+  return request({ url: `/hrm/web-case/recording/${recordingId}/credential`, method: 'post', data })
 }
 
 export function delWebRecording(recordingIds) {

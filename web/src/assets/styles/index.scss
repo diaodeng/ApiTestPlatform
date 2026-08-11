@@ -125,6 +125,8 @@ aside {
 .app-container {
   padding: 10px;
   width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }

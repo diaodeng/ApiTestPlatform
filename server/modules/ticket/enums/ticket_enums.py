@@ -95,6 +95,7 @@ class TicketLogPullStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     EXCEPTION = "exception"
+    CANCELLED = "cancelled"
 
 
 class TicketLogDataType(int, Enum):

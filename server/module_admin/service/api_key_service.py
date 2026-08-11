@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from common.permission.registry import get_all_menus
+from config.database import SessionLocal
 from module_admin.dao.api_key_dao import ApiKeyDao
 from module_admin.dao.user_dao import UserDao
 from module_admin.entity.vo.api_key_vo import (
@@ -17,6 +18,7 @@ from module_admin.entity.vo.api_key_vo import (
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from utils.api_key_util import ApiKeyUtil
+from utils.log_util import logger
 from utils.page_util import PageResponseModel
 from utils.pwd_util import PwdUtil
 
@@ -70,7 +72,10 @@ class ApiKeyService:
         return cls.build_api_key_model(api_key_info)
 
     @classmethod
-    def get_api_key_permission_options_services(cls, current_user: CurrentUserModel) -> list[ApiKeyPermissionOptionModel]:
+    def get_api_key_permission_options_services(
+        cls,
+        current_user: CurrentUserModel,
+    ) -> list[ApiKeyPermissionOptionModel]:
         """
         获取当前登录用户可分配给API Key的权限选项
         :param current_user: 当前登录用户对象
@@ -153,7 +158,11 @@ class ApiKeyService:
             return CrudResponseModel(
                 is_success=True,
                 message="新增成功",
-                result=ApiKeySecretModel(apiKeyId=db_api_key.api_key_id, keyName=db_api_key.key_name, apiKey=raw_api_key),
+                result=ApiKeySecretModel(
+                    apiKeyId=db_api_key.api_key_id,
+                    keyName=db_api_key.key_name,
+                    apiKey=raw_api_key,
+                ),
             )
         except Exception as exc:
             query_db.rollback()
@@ -291,8 +300,8 @@ class ApiKeyService:
 
         try:
             key_code = ApiKeyUtil.extract_key_code(api_key)
-        except ValueError:
-            raise AuthException(data="", message="API Key不合法")
+        except ValueError as exc:
+            raise AuthException(data="", message="API Key不合法") from exc
 
         api_key_info = ApiKeyDao.get_api_key_by_key_code(query_db, key_code)
         if not api_key_info or not ApiKeyUtil.verify_api_key(api_key, api_key_info.key_hash):
@@ -303,15 +312,33 @@ class ApiKeyService:
             error_message = "API Key已失效" if expire_reason == "manual" else "API Key已过期"
             raise AuthException(data="", message=error_message)
 
-        ApiKeyDao.edit_api_key_dao(
-            query_db,
-            api_key_info.api_key_id,
-            {
-                "last_used_ip": request_ip or "",
-                "last_used_time": datetime.now(),
-            },
-        )
+        cls.update_api_key_usage_audit(api_key_info.api_key_id, request_ip)
         return api_key_info
+
+    @classmethod
+    def update_api_key_usage_audit(cls, api_key_id: int, request_ip: str | None = None) -> None:
+        """
+        更新API Key最后使用审计信息，失败时只记录日志，不影响鉴权和业务接口。
+        :param api_key_id: API Key主键
+        :param request_ip: 当前请求IP
+        :return: 无
+        """
+        audit_db = SessionLocal()
+        try:
+            ApiKeyDao.edit_api_key_dao(
+                audit_db,
+                api_key_id,
+                {
+                    "last_used_ip": request_ip or "",
+                    "last_used_time": datetime.now(),
+                },
+            )
+            audit_db.commit()
+        except Exception as exc:
+            audit_db.rollback()
+            logger.warning(f"API Key最后使用审计更新失败，已忽略: api_key_id={api_key_id}, error={exc}")
+        finally:
+            audit_db.close()
 
     @classmethod
     def build_api_key_model(cls, api_key_info) -> ApiKeyModel:

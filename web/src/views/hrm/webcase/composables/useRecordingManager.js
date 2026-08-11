@@ -11,8 +11,7 @@ export function useRecordingManager(options) {
         ElMessageBox,
         loading,
         activeTab,
-        runtimeProfiles,
-        browserSessions,
+        webCredentialBindingOptions,
         allCaseOptions,
         caseSelectOptions,
         runDetail,
@@ -20,25 +19,16 @@ export function useRecordingManager(options) {
         refreshRecordingTab,
         refreshCaseTab,
         loadAllCaseOptions,
-        openBrowserSessionDialog,
-        openRuntimeProfileDialog,
         handleEdit,
         cloneData,
         isPlainObject,
         isSameId,
         normalizeIdValue,
-        normalizeStateSourceType,
-        resolveStateSourceTypeByIds,
         parseBooleanFlag,
         normalizeManualLoginWaitSec,
         normalizeOptionalPositiveInt,
         normalizeLocatorIndexMode,
         safeJsonStringify,
-        profileSupportsWeb,
-        isRuntimeProfileScopeMatch,
-        isBrowserSessionBrowserMatch,
-        formatRuntimeProfileLabel,
-        formatBrowserSessionLabel,
         getCaseName,
         getActionLabel,
         describeStepTarget,
@@ -54,7 +44,6 @@ export function useRecordingManager(options) {
         getRecordingSummaryPayload,
         mergeCaseOptions,
         confirmAndContinueRecordingManualLogin,
-        loadBrowserSessions,
         searchCaseOptions,
         handleCaseSelectVisibleChange,
         moduleOptions,
@@ -65,6 +54,7 @@ export function useRecordingManager(options) {
         saveWebRecordingAsCase,
         applyWebRecording,
         replayWebRecording,
+        createCredentialFromWebRecording,
     } = options;
 
     const selectedCase = ref(null);
@@ -106,9 +96,9 @@ export function useRecordingManager(options) {
         browserName: "chromium",
         headless: false,
         startUrl: "",
-        stateSourceType: "none",
-        browserSessionId: undefined,
-        runtimeProfileId: undefined,
+        credentialBindingId: undefined,
+        saveCredentialAfterRecording: false,
+        credentialName: "",
         persistContextEnabled: false,
         persistContextAutoSyncSession: false,
         manualLoginEnabled: false,
@@ -131,9 +121,7 @@ export function useRecordingManager(options) {
         headless: false,
         closeBrowserOnFinish: true,
         immediateLocatorIndexMode: false,
-        stateSourceType: "none",
-        browserSessionId: undefined,
-        runtimeProfileId: undefined,
+        credentialBindingId: undefined,
         persistContextEnabled: false,
         persistContextAutoSyncSession: false,
     });
@@ -150,35 +138,6 @@ export function useRecordingManager(options) {
         );
     });
 
-    const recordingScopeProjectId = computed(() => selectedCase.value?.projectId);
-    const recordingScopeModuleId = computed(() => selectedCase.value?.moduleId);
-
-    const availableRuntimeProfilesForRecording = computed(() =>
-        runtimeProfiles.value.filter(
-            (item) =>
-                item.enabled !== false &&
-                profileSupportsWeb(item) &&
-                isRuntimeProfileScopeMatch(
-                    item,
-                    recordingScopeProjectId.value,
-                    recordingScopeModuleId.value,
-                ),
-        ),
-    );
-
-    const availableBrowserSessionsForRecording = computed(() =>
-        browserSessions.value.filter(
-            (item) =>
-                item.enabled !== false &&
-                isRuntimeProfileScopeMatch(
-                    item,
-                    recordingScopeProjectId.value,
-                    recordingScopeModuleId.value,
-                ) &&
-                isBrowserSessionBrowserMatch(item, recordingForm.value.browserName),
-        ),
-    );
-
     const replayLinkedCase = computed(() => {
         const replayRecording = selectedRecording.value;
         const replayCaseId = normalizeIdValue(replayRecording?.webCaseId);
@@ -191,35 +150,6 @@ export function useRecordingManager(options) {
             ).find((item) => isSameId(item.webCaseId, replayCaseId)) || null
         );
     });
-
-    const replayScopeProjectId = computed(() => replayLinkedCase.value?.projectId);
-    const replayScopeModuleId = computed(() => replayLinkedCase.value?.moduleId);
-
-    const availableRuntimeProfilesForReplay = computed(() =>
-        runtimeProfiles.value.filter(
-            (item) =>
-                item.enabled !== false &&
-                profileSupportsWeb(item) &&
-                isRuntimeProfileScopeMatch(
-                    item,
-                    replayScopeProjectId.value,
-                    replayScopeModuleId.value,
-                ),
-        ),
-    );
-
-    const availableBrowserSessionsForReplay = computed(() =>
-        browserSessions.value.filter(
-            (item) =>
-                item.enabled !== false &&
-                isRuntimeProfileScopeMatch(
-                    item,
-                    replayScopeProjectId.value,
-                    replayScopeModuleId.value,
-                ) &&
-                isBrowserSessionBrowserMatch(item, replayForm.value.browserName),
-        ),
-    );
 
     const recordingLinkedCaseLabel = computed(() => {
         if (!recordingForm.value.webCaseId) return "独立录制";
@@ -448,31 +378,9 @@ export function useRecordingManager(options) {
         )
             ? cloneData(row.runtimeSettings || row.runtime_settings)
             : {};
-        const browserSessionId = normalizeIdValue(
-            runtimeSettings.browserSessionId ??
-                runtimeSettings.browser_session_id ??
-                runtimeSettings.persistContextSessionId ??
-                runtimeSettings.persist_context_session_id ??
-                runtimeSettings.sessionProfileId ??
-                runtimeSettings.session_profile_id,
+        const credentialBindingId = normalizeIdValue(
+            runtimeSettings.credentialBindingId ?? runtimeSettings.credential_binding_id,
         );
-        const runtimeProfileId = normalizeIdValue(
-            runtimeSettings.runtimeProfileId ??
-                runtimeSettings.runtime_profile_id ??
-                runtimeSettings.cookieProfileId ??
-                runtimeSettings.cookie_profile_id,
-        );
-        const preferredStateSourceType = normalizeStateSourceType(
-            runtimeSettings.stateSourceType ?? runtimeSettings.state_source_type,
-        );
-        const inferredStateSourceType = resolveStateSourceTypeByIds(
-            browserSessionId,
-            runtimeProfileId,
-        );
-        const stateSourceType =
-            preferredStateSourceType === "none"
-                ? inferredStateSourceType
-                : preferredStateSourceType;
         const manualLoginEnabled = parseBooleanFlag(
             runtimeSettings.manualLoginEnabled ??
                 runtimeSettings.manual_login_enabled ??
@@ -536,11 +444,8 @@ export function useRecordingManager(options) {
             browserName: row?.browserName || "chromium",
             headless: false,
             startUrl: row?.startUrl || "",
-            stateSourceType,
-            browserSessionId,
-            runtimeProfileId,
-            persistContextEnabled:
-                stateSourceType !== "none" && Boolean(persistContextEnabled),
+            credentialBindingId,
+            persistContextEnabled: Boolean(credentialBindingId && persistContextEnabled),
             persistContextAutoSyncSession,
             manualLoginEnabled,
             manualLoginRequireConfirm: manualLoginEnabled
@@ -604,7 +509,6 @@ export function useRecordingManager(options) {
         syncVisibleRecordingDetail(detail);
         if (shouldStopRecordingPoll(detail)) {
             stopRecordingPoll();
-            loadBrowserSessions().catch(() => {});
         }
     }
 
@@ -639,25 +543,12 @@ export function useRecordingManager(options) {
             recordingForm.value.manualLoginWaitSec,
             120,
         );
-        const stateSourceType = normalizeStateSourceType(
-            recordingForm.value.stateSourceType,
-        );
-        const selectedBrowserSessionId =
-            stateSourceType === "session"
-                ? normalizeIdValue(recordingForm.value.browserSessionId)
-                : undefined;
-        const selectedRuntimeProfileId =
-            stateSourceType === "cookie"
-                ? normalizeIdValue(recordingForm.value.runtimeProfileId)
-                : undefined;
+        const credentialBindingId = normalizeIdValue(recordingForm.value.credentialBindingId);
         const persistContextEnabled = Boolean(
-            stateSourceType !== "none" &&
-                recordingForm.value.persistContextEnabled,
+            credentialBindingId && recordingForm.value.persistContextEnabled,
         );
         const persistContextAutoSyncSession = Boolean(
-            stateSourceType !== "none" &&
-                persistContextEnabled &&
-                recordingForm.value.persistContextAutoSyncSession,
+            persistContextEnabled && recordingForm.value.persistContextAutoSyncSession,
         );
         const windowMaximize = Boolean(recordingForm.value.windowMaximize);
         const hasWindowWidthInput =
@@ -697,9 +588,7 @@ export function useRecordingManager(options) {
                 browserName: recordingForm.value.browserName,
                 headless: recordingForm.value.headless,
                 startUrl: recordingForm.value.startUrl,
-                stateSourceType,
-                browserSessionId: selectedBrowserSessionId,
-                runtimeProfileId: selectedRuntimeProfileId,
+                credentialBindingId,
                 persistContextEnabled,
                 persistContextAutoSyncSession,
                 manualLoginEnabled,
@@ -759,7 +648,9 @@ export function useRecordingManager(options) {
             ElMessage.success(response.msg || "已发送停止录制指令");
             refreshRecording();
             refreshRecordingTab();
-            loadBrowserSessions().catch(() => {});
+            if (recordingForm.value.saveCredentialAfterRecording) {
+                window.setTimeout(() => createCredentialFromWebRecording(recordingForm.value.recordingId, { credentialName: recordingForm.value.credentialName || `录制凭证-${recordingForm.value.recordingId}`, bindingName: recordingForm.value.credentialName || `录制凭证-${recordingForm.value.recordingId}`, targetUrl: recordingForm.value.startUrl }).then(() => ElMessage.success("已从录制登录状态创建统一凭证")).catch((error) => ElMessage.warning(error?.msg || "录制尚未上报最终状态，请稍后在录制详情中重试保存凭证")), 3000);
+            }
         });
     }
 
@@ -1074,32 +965,9 @@ export function useRecordingManager(options) {
                           recordingOptions.runtime_options,
                   )
                 : {};
-            const browserSessionId = normalizeIdValue(
-                runtimeSettings.browserSessionId ??
-                    runtimeSettings.browser_session_id ??
-                    runtimeSettings.persistContextSessionId ??
-                    runtimeSettings.persist_context_session_id ??
-                    runtimeSettings.sessionProfileId ??
-                    runtimeSettings.session_profile_id,
+            const credentialBindingId = normalizeIdValue(
+                runtimeSettings.credentialBindingId ?? runtimeSettings.credential_binding_id,
             );
-            const runtimeProfileId = normalizeIdValue(
-                runtimeSettings.runtimeProfileId ??
-                    runtimeSettings.runtime_profile_id ??
-                    runtimeSettings.cookieProfileId ??
-                    runtimeSettings.cookie_profile_id,
-            );
-            const preferredStateSourceType = normalizeStateSourceType(
-                runtimeSettings.stateSourceType ??
-                    runtimeSettings.state_source_type,
-            );
-            const inferredStateSourceType = resolveStateSourceTypeByIds(
-                browserSessionId,
-                runtimeProfileId,
-            );
-            const stateSourceType =
-                preferredStateSourceType === "none"
-                    ? inferredStateSourceType
-                    : preferredStateSourceType;
             const persistContextEnabled = parseBooleanFlag(
                 runtimeSettings.persistContextEnabled ??
                     runtimeSettings.persist_context_enabled ??
@@ -1132,11 +1000,8 @@ export function useRecordingManager(options) {
                 headless: detail.headless ?? false,
                 closeBrowserOnFinish: true,
                 immediateLocatorIndexMode: locatorIndexMode === "always",
-                stateSourceType,
-                browserSessionId,
-                runtimeProfileId,
-                persistContextEnabled:
-                    stateSourceType !== "none" && Boolean(persistContextEnabled),
+                credentialBindingId,
+                persistContextEnabled: Boolean(credentialBindingId && persistContextEnabled),
                 persistContextAutoSyncSession,
             };
             showReplayDialog.value = true;
@@ -1157,24 +1022,12 @@ export function useRecordingManager(options) {
             return;
         }
 
-        const stateSourceType = normalizeStateSourceType(
-            replayForm.value.stateSourceType,
-        );
-        const selectedBrowserSessionId =
-            stateSourceType === "session"
-                ? normalizeIdValue(replayForm.value.browserSessionId)
-                : undefined;
-        const selectedRuntimeProfileId =
-            stateSourceType === "cookie"
-                ? normalizeIdValue(replayForm.value.runtimeProfileId)
-                : undefined;
+        const credentialBindingId = normalizeIdValue(replayForm.value.credentialBindingId);
         const persistContextEnabled = Boolean(
-            stateSourceType !== "none" && replayForm.value.persistContextEnabled,
+            credentialBindingId && replayForm.value.persistContextEnabled,
         );
         const persistContextAutoSyncSession = Boolean(
-            stateSourceType !== "none" &&
-                persistContextEnabled &&
-                replayForm.value.persistContextAutoSyncSession,
+            persistContextEnabled && replayForm.value.persistContextAutoSyncSession,
         );
         const runtimeOverrides = {
             locatorIndexMode: replayForm.value.immediateLocatorIndexMode
@@ -1189,9 +1042,7 @@ export function useRecordingManager(options) {
             browserName: replayForm.value.browserName,
             headless: replayForm.value.headless,
             closeBrowserOnFinish: replayForm.value.closeBrowserOnFinish,
-            stateSourceType,
-            browserSessionId: selectedBrowserSessionId,
-            runtimeProfileId: selectedRuntimeProfileId,
+            credentialBindingId,
             persistContextEnabled,
             persistContextAutoSyncSession,
             runtimeOverrides,
@@ -1221,94 +1072,6 @@ export function useRecordingManager(options) {
         },
     );
 
-    watch(
-        () => recordingForm.value.stateSourceType,
-        (stateType) => {
-            const normalized = normalizeStateSourceType(stateType);
-            if (normalized !== stateType) {
-                recordingForm.value.stateSourceType = normalized;
-                return;
-            }
-            if (normalized !== "session") {
-                recordingForm.value.browserSessionId = undefined;
-            }
-            if (normalized !== "cookie") {
-                recordingForm.value.runtimeProfileId = undefined;
-            }
-            if (normalized === "none") {
-                recordingForm.value.persistContextEnabled = false;
-                recordingForm.value.persistContextAutoSyncSession = false;
-            } else {
-                recordingForm.value.persistContextEnabled = true;
-                recordingForm.value.persistContextAutoSyncSession = true;
-            }
-        },
-    );
-
-    watch(
-        () => replayForm.value.stateSourceType,
-        (stateType) => {
-            const normalized = normalizeStateSourceType(stateType);
-            if (normalized !== stateType) {
-                replayForm.value.stateSourceType = normalized;
-                return;
-            }
-            if (normalized !== "session") {
-                replayForm.value.browserSessionId = undefined;
-            }
-            if (normalized !== "cookie") {
-                replayForm.value.runtimeProfileId = undefined;
-            }
-            if (normalized === "none") {
-                replayForm.value.persistContextEnabled = false;
-                replayForm.value.persistContextAutoSyncSession = false;
-            } else {
-                replayForm.value.persistContextEnabled = true;
-                replayForm.value.persistContextAutoSyncSession = true;
-            }
-        },
-    );
-
-    watch(availableBrowserSessionsForRecording, (sessions) => {
-        if (recordingForm.value.stateSourceType !== "session") return;
-        const selectedSessionId = normalizeIdValue(
-            recordingForm.value.browserSessionId,
-        );
-        if (!selectedSessionId) return;
-        if (!sessions.some((item) => isSameId(item.sessionId, selectedSessionId))) {
-            recordingForm.value.browserSessionId = undefined;
-        }
-    });
-
-    watch(availableBrowserSessionsForReplay, (sessions) => {
-        if (replayForm.value.stateSourceType !== "session") return;
-        const selectedSessionId = normalizeIdValue(replayForm.value.browserSessionId);
-        if (!selectedSessionId) return;
-        if (!sessions.some((item) => isSameId(item.sessionId, selectedSessionId))) {
-            replayForm.value.browserSessionId = undefined;
-        }
-    });
-
-    watch(availableRuntimeProfilesForRecording, (profiles) => {
-        if (recordingForm.value.stateSourceType !== "cookie") return;
-        const selectedProfileId = normalizeIdValue(
-            recordingForm.value.runtimeProfileId,
-        );
-        if (!selectedProfileId) return;
-        if (!profiles.some((item) => isSameId(item.profileId, selectedProfileId))) {
-            recordingForm.value.runtimeProfileId = undefined;
-        }
-    });
-
-    watch(availableRuntimeProfilesForReplay, (profiles) => {
-        if (replayForm.value.stateSourceType !== "cookie") return;
-        const selectedProfileId = normalizeIdValue(replayForm.value.runtimeProfileId);
-        if (!selectedProfileId) return;
-        if (!profiles.some((item) => isSameId(item.profileId, selectedProfileId))) {
-            replayForm.value.runtimeProfileId = undefined;
-        }
-    });
-
     onBeforeUnmount(() => {
         stopRecordingPoll();
         stopRecordingDetailPoll();
@@ -1331,10 +1094,7 @@ export function useRecordingManager(options) {
         recordingForm,
         replayForm,
         filteredRecordingActionModules,
-        availableRuntimeProfilesForRecording,
-        availableBrowserSessionsForRecording,
-        availableRuntimeProfilesForReplay,
-        availableBrowserSessionsForReplay,
+        webCredentialBindingOptions,
         recordingLinkedCaseLabel,
         recordingDialogTitle,
         recordingDetailTitle,
@@ -1356,10 +1116,6 @@ export function useRecordingManager(options) {
         recordingDetailText,
         liveRecordingSteps,
         handleDeleteLiveRecordingStep,
-        openBrowserSessionDialog,
-        openRuntimeProfileDialog,
-        formatRuntimeProfileLabel,
-        formatBrowserSessionLabel,
         searchCaseOptions,
         handleCaseSelectVisibleChange,
         caseSelectOptions,
