@@ -1229,7 +1229,9 @@ function stopLogPull(row) {
   }).then(() => {
     proxy.$modal.msgSuccess("已请求停止任务")
     return getList()
-  }).catch(() => {}).finally(() => {
+  }).catch(error => {
+    proxy.$modal.msgError(error?.msg || error?.message || "停止日志拉取任务失败")
+  }).finally(() => {
     actionLoading.value = false
   })
 }

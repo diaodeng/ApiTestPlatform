@@ -257,7 +257,9 @@ graph TD
 - 日志拉取列表和详情页支持 `重新拉取`、`重新下载`、`重新截取` 三类记录级动作：重拉基于原始参数新建任务，重下恢复原始压缩包到原位置，重截按当前查看时间范围更新当前记录的入库内容。
 - 重新拉取优先恢复原始时间模式参数；历史记录若缺少点位参数，允许回退到已保存的开始/结束范围继续提交；若历史记录未配置日志截取范围，不会显式传空范围字段，避免被模型误判为时间范围填写不完整。
 - 重新拉取参数恢复兼容 `command_content` 为字典或 JSON 字符串，以及驼峰/下划线字段名差异；但仍要求至少能恢复 `modifyTime` 或 `path`，否则不提交不完整外部命令。
-- 服务重启时不会自动恢复日志拉取或 AI 分析任务；启动只会把残留的 active 记录清理为失败，避免任务在重启后再次开始。
+- 服务重启时日志拉取任务按状态分别处理：下载/解析中断（线程丢失）的记录清理为失败；已提交申请等待轮询（submitting/polling）和待执行（created）的记录保留，由后台周期任务接管继续探测，不再全部清成失败。AI 分析任务仍不会自动恢复。
+- 日志拉取轮询已改为后台任务查询：提交申请与轮询探测解耦，`_poll_external_result` 阻塞轮询（原最长占线程 1800s）已删除。创建记录后线程池只做瞬时提交申请，提交成功写入 `poll_deadline_at`（= now + pollTimeoutSec）；Celery 周期任务 `module_task.scheduler_maintenance.scan_log_pull_records`（每 30 秒，随服务启动幂等注册到 `celery_periodic_task`）批量扫描：created 兜底提交、submitting/polling 单次探测（命中可下载投递下载解析、外部失败标记失败）、超过 `poll_deadline_at` 标记「轮询外部平台超时」失败。任务提交与轮询探测不再受线程池并发数限制，仅下载/解析阶段复用线程池。
+- 日志拉取停止采用协作式取消：`POST /ticket/log-pulls/{record_id}/stop` 将进行中记录置为 `CANCELLED`（保留已有进度）；周期任务跳过 CANCELLED 记录，下载/解析阶段在下载前、解析前检查 CANCELLED 则清理临时文件直接返回；停止后的记录可重新拉取。
 - 手动终止 Celery 定时任务时会先保留运行态并写入停止请求，避免运行中的任务从列表中瞬间消失；任务函数需要读取停止标记后才会真正退出。
 - 工单 AI 分析已接入 Codex CLI：新增仓库映射表 `ticket_ai_repo_mapping`、分析任务表 `ticket_ai_analysis_task`，分析结果写回 `ticket.ai_analysis` 并同步更新 RCA/事件。
 - 工单二阶段闭环新增消息流 `ticket_message` 和 ACR 快照 `ticket_snapshot`：评论、追问、AI 回复、开发/测试补充会进入消息流；AI 分析、RCA 保存、状态闭环或手工操作会生成快照版本。

@@ -858,6 +858,37 @@ async def retry_ticket_log_pull(
 
 
 @ticketLogPullController.post(
+    "/log-pulls/{record_id}/stop",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:remove"))],
+)
+async def stop_ticket_log_pull(
+    request: Request,
+    record_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    停止日志拉取记录接口（协作式取消，在下次检查点生效，保留已有进度）。
+    :param request: 请求对象
+    :param record_id: 日志拉取记录ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户，用于写入审计信息
+    :return: 停止结果
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketLogPullService.stop_log_pull_services,
+            query_db,
+            record_id,
+            current_user,
+        )
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.post(
     "/log-pulls/{record_id}/redownload",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:add"))],
 )

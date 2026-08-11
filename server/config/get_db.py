@@ -64,6 +64,7 @@ async def init_create_table():
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
     _ensure_ticket_log_pull_ticket_id_nullable()
+    _ensure_ticket_log_pull_record_poll_deadline_column()
     _ensure_celery_periodic_task_execution_mode_column()
     _ensure_hrm_project_business_code_column()
     _ensure_hrm_module_business_code_column()
@@ -151,6 +152,45 @@ def _ensure_ticket_log_pull_ticket_id_nullable():
             )
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_log_pull_record.ticket_id 字段失败: {exc}")
+
+
+def _ensure_ticket_log_pull_record_poll_deadline_column():
+    """
+    为 ticket_log_pull_record 补齐 poll_deadline_at 字段，兼容旧库。
+    """
+    if DATABASE_BACKEND != "mysql":
+        return
+
+    try:
+        with engine.begin() as connection:
+            result = (
+                connection.execute(
+                    text(
+                        """
+                        SELECT COLUMN_NAME
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'ticket_log_pull_record'
+                          AND COLUMN_NAME = 'poll_deadline_at'
+                        """
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if result:
+                return
+            logger.info("检测到 ticket_log_pull_record 缺少 poll_deadline_at 列，自动补齐")
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE ticket_log_pull_record
+                    ADD COLUMN poll_deadline_at DATETIME NULL COMMENT '轮询截止时间'
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket_log_pull_record.poll_deadline_at 字段失败: {exc}")
 
 
 def _ensure_celery_periodic_task_execution_mode_column():
