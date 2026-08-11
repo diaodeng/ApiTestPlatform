@@ -113,7 +113,7 @@ erDiagram
 - `Ticket.current_assignee_*` 继续表示当前处理人；新增 `Ticket.first_line_assignee_*` 表示一线接单人员，`Ticket.internal_owner_*` 表示内部模块/工单负责人，三者语义分离，避免一个字段同时承载多种职责。
 - `Ticket.merchant_name` 继续作为兼容字段保存项目名称，保证旧前端字段 `merchantName` 和历史数据可平滑读取。
 - `WorkflowTransition.allowed_roles` 现承载扩展 JSON，内部包含 `roles`、`assignee`、`notification` 三类配置。
-- `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。
+- `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。`poll_deadline_at` 在提交外部申请成功时写入（= now + pollTimeoutSec），供后台周期任务做轮询超时判定；`last_polled_at` 为最近一次探测时间。
 - `ticket.logPull.storage` 除保存归档目录、FTP、轮询和下载配置外，还保存日志查看运行保护阈值：`maxContentChars` 控制入库文本字符数，`maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes` 控制日志查看准备解压，`maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes` 控制日志搜索和 Python 降级扫描。
 - 日志上下文行索引会记录文件编码；上下文读取前会重新探测文件编码，若与索引缓存不一致则重建索引，确保搜索结果和详情区对 UTF-8、GB18030 等中文日志使用一致解码。
 - `TicketLogSearchRequestModel` 支持 `keywords` 与 `searchMode`，并继续兼容旧 `keyword`；模型会去重、截断最多 20 个搜索关键字，每个关键字最多 200 字符。日志高亮关键字也已同步放宽到前端最多 20 个，并按关键字轮换不同颜色。`TicketLogSearchHitModel` 增加 `matchedKeywords`，标识当前命中行包含哪些搜索关键字；`/ticket/logs/search` 的 `content` 默认只返回行首 500 个字符，并通过 `contentLength/contentTruncated` 说明原始长度和截断状态，完整内容仍从上下文接口按文件和行号读取。

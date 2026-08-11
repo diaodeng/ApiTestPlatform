@@ -52,7 +52,7 @@ mindmap
 ## 本次关注项
 
 - `TicketEventType` 新增 `NOTIFY_PENDING`，用于在状态流转后记录“待通知”的占位事件。
-- `TicketLogPullStatus` 继续覆盖 `created -> success/failed/exception` 全链路状态，供工单列表和详情页直接展示。
+- `TicketLogPullStatus` 继续覆盖 `created -> submitting/polling/downloading/processing -> success/failed/exception/cancelled` 全链路状态，供工单列表和详情页直接展示；`cancelled` 为用户手动停止（协作式取消），保留已有进度且可重新拉取。
 - 前端 `ticketProcessStatusOptions` 在 AI 状态外新增日志拉取过程状态：`log_pull_created`、`log_pull_running`、`log_pull_submitting`、`log_pull_polling`、`log_pull_downloading`、`log_pull_processing`，后端列表查询按这些编码过滤最新日志拉取状态。
 - `TicketAiAnalysisStatus` 用于 AI 分析任务流转，覆盖 `created -> running -> success/failed/canceled`。
 - 统计枚举不再写死为 Python Enum，而是通过 `ticket.sync.automation.statClassification` 配置：`issueTypes`、`rootCauseTypes`、`solutionTypes`、`resolutions`、`problemPatterns`。前端同步配置页负责可视化维护，后端负责归一化和默认值兜底。

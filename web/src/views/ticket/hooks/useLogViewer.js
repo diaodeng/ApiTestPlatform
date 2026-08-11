@@ -14,6 +14,7 @@ import {
   listTicketLogPulls,
   retryTicketLogPull,
   redownloadTicketLogPull,
+  stopTicketLogPull,
   prepareTicketLogs,
   searchTicketLogs,
   getTicketLogContext,
@@ -52,7 +53,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   const logPullAutoRefreshing = ref(false);
   let logPullRefreshTimer = null;
   const selectedLogPullRecord = ref(null);
-  const activeLogPullStatuses = ['pending', 'processing', 'polling'];
+  const activeLogPullStatuses = ['created', 'submitting', 'polling', 'downloading', 'processing'];
   const logPullQuery = ref({ pageNum: 1, pageSize: 20 });
 
   const logPullForm = ref(createDefaultLogPullForm());
@@ -374,6 +375,32 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       return;
     }
     runLogPullAction(retryTicketLogPull(row.id), '已重新提交拉取任务');
+  }
+
+  function stopLogPull(row) {
+    if (!row?.id) return;
+    if (!activeLogPullStatuses.includes(String(row.status || '').toLowerCase())) {
+      proxy.$modal.msgWarning('当前日志拉取任务不在执行中，无需停止');
+      return;
+    }
+    proxy.$modal
+      .confirm(`是否确认停止日志拉取记录 #${row.id}？停止后可重新拉取。`)
+      .then(() => {
+        logPullActionLoading.value = true;
+        return stopTicketLogPull(row.id);
+      })
+      .then(() => {
+        proxy.$modal.msgSuccess('已请求停止任务');
+        return Promise.all([
+          loadLogPullList(true),
+          typeof refreshDetail === 'function' ? refreshDetail() : Promise.resolve(),
+          typeof getList === 'function' ? getList() : Promise.resolve(),
+        ]);
+      })
+      .catch(() => {})
+      .finally(() => {
+        logPullActionLoading.value = false;
+      });
   }
 
   function handleCopyLogPull(row) {
@@ -957,6 +984,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     runLogPullAction,
     deleteLogPull,
     retryLogPull,
+    stopLogPull,
     redownloadLogPull,
     handleCopyLogPull,
     openBrowserDownload,
