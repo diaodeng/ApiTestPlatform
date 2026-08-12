@@ -14,7 +14,7 @@ updated: 2026-08-11
 - 架构层：工单日志拉取服务（提交/探测/下载三阶段拆分）、Celery 周期任务、数据模型、控制器、前端日志拉取 Tab。
 - 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/modules/ticket/controller/ticket_log_pull_controller.py`、`server/modules/ticket/entity/do/ticket_log_pull_do.py`（新增 `poll_deadline_at`）、`server/config/get_db.py`（兼容列升级）、`server/module_task/scheduler_maintenance.py`（新增 `scan_log_pull_records` 周期任务）、`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/views/ticket/logPullRecord/index.vue`、`web/public/docs/ticket_log_pull.md`。
 - 变更传播链：创建记录投递线程池快速提交申请（写 `poll_deadline_at`）→ Celery 周期任务每 30 秒批量扫描（created 兜底提交 / submitting\polling 超时失败 / 单次探测命中则投递下载）→ 下载解析阶段含协作式取消检查点 → 停止接口置 `CANCELLED`。
-- 关键规则：任务提交与轮询探测不再受并发数限制；`CANCELLED` 记录被周期任务跳过；下载/解析中断（线程丢失）重启清理为失败，轮询中记录由周期任务接管。
+- 关键规则：任务提交与轮询探测不再受并发数限制；周期任务 `scan_log_pull_records` 只做 `@register_job` 注册，**不在启动时自动写入 `celery_periodic_task`**，需在「系统监控-定时任务」手动配置（与项目其他定时任务一致）；`CANCELLED` 记录被周期任务跳过；下载/解析中断（线程丢失）重启清理为失败，轮询中记录由周期任务接管。
 - 验证：`py_compile` 语法检查通过；ruff 静态检查确认本次改动未引入新错误（剩余 12 个均为原有代码问题）；本地起服务全链路验证待 uv/依赖环境与外部平台可达后执行。
 
 ## [2026-08-10] INGEST-CODE | 统一凭证绑定新增模式修复

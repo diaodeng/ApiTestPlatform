@@ -33,6 +33,6 @@
 
 ## 注意
 
-- 需要保证 Celery beat/worker 运行且周期任务已注册启用（服务启动时 `_ensure_scan_job_row` 幂等插入 `celery_periodic_task` 行，可到「系统监控-定时任务」查看「日志拉取周期扫描」）
+- **周期任务需手动配置**（与项目其他定时任务一致，不在启动时自动注册）：到「系统监控-定时任务」新增任务，任务键选择 `module_task.scheduler_maintenance.scan_log_pull_records`，调度类型 interval、间隔 30 秒、队列 sys、执行方式 thread、允许并发关；若未配置，轮询中的记录不会被探测
 - 若 Celery 未运行，任务提交仍成功但状态停留在 polling，不会被探测
 - 旧的 `_poll_external_result` 阻塞轮询逻辑已删除，不再占用线程
