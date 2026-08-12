@@ -30,7 +30,6 @@ from sqlalchemy.orm import Session
 from config.database import SessionLocal
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
-from module_task.celery_job_models import CeleryPeriodicTask
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.entity.do.ticket_do import TicketEvent
@@ -1054,6 +1053,9 @@ class TicketLogPullService:
         :param db: 数据库会话
         :return: 无
         """
+        # 延迟导入，避免 module_task 包（__init__ 会加载 scheduler_maintenance）反向依赖本模块形成循环导入
+        from module_task.celery_job_models import CeleryPeriodicTask
+
         task_key = "module_task.scheduler_maintenance.scan_log_pull_records"
         existing = db.query(CeleryPeriodicTask).filter(CeleryPeriodicTask.task_key == task_key).first()
         if existing:
