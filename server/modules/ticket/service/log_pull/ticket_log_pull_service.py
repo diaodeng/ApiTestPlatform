@@ -42,6 +42,8 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentModel,
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
+    TicketLogPullEnvironmentOptionModel,
+    TicketLogPullEnvResolveResultModel,
     TicketLogPullListItemModel,
     TicketLogPullPostProcessConfigModel,
     TicketLogPullProjectVendorMapModel,
@@ -453,39 +455,98 @@ class TicketLogPullService:
     @classmethod
     def _normalize_external_config(cls, raw_config: Any) -> dict[str, Any]:
         """
-        归一化日志拉取外部接口配置，兼容单环境与多环境两种格式。
+        归一化日志拉取外部接口配置，兼容旧单环境、旧多环境和新分组三种格式。
 
         旧格式（单环境）:
           {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...", "origin": "...", "vendors": [...]}
-        新格式（多环境）:
-          {"env1": {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...", "origin": "...", "vendors": [...]},
+          → 升级为新分组格式 {"default": {label:"默认环境", items:{default:{... vendorFilter:"*"}}}}
+
+        旧格式（多环境）:
+          {"env1": {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...",
+           "origin": "...", "vendors": [...]},
+           "env2": {...}}
+          → 升级为新分组格式，每个环境一个独立分组，vendorFilter 设为 "*"
+
+        新分组格式:
+          {"env1": {"label": "...", "items": {"sub1": {... vendorFilter:[...]}, ...}, "defaultItem": "..."},
            "env2": {...}}
 
         :param raw_config: 原始配置对象
-        :return: 标准化后的多环境外部接口配置
+        :return: 标准化后的分组格式外部接口配置
         """
         config = dict(raw_config or {}) if isinstance(raw_config, dict) else {}
         if not config:
             return cls._default_external_config()
 
-        # 检测是否为旧格式（顶层包含 insertUrl 或 pageUrl）
+        # 检测是否为旧格式（顶层包含 insertUrl 或 pageUrl，且没有 items 字段的旧多环境特征）
         if "insertUrl" in config or "pageUrl" in config:
-            return {"default": cls._normalize_single_env_config(config)}
+            # 旧单环境格式 → 升级为一个默认分组
+            return {
+                "default": {
+                    "label": "默认环境",
+                    "items": {
+                        "default": cls._normalize_env_item_config(config, vendor_filter=["*"]),
+                    },
+                    "defaultItem": "default",
+                }
+            }
 
-        # 新格式：逐环境归一化
-        normalized: dict[str, Any] = {}
+        # 判断是旧多环境格式还是新分组格式：检查第一个值是否包含 "items" 字段
+        first_value = next(iter(config.values()), None)
+        is_group_format = isinstance(first_value, dict) and "items" in first_value
+
+        if is_group_format:
+            # 新分组格式：逐组归一化
+            normalized_groups: dict[str, Any] = {}
+            for group_key, group_config in config.items():
+                if not isinstance(group_config, dict):
+                    continue
+                normalized_groups[group_key] = cls._normalize_env_group_config(group_config)
+            return normalized_groups or cls._default_external_config()
+
+        # 旧多环境格式：逐个环境升级为独立分组
+        normalized_groups: dict[str, Any] = {}
         for env_key, env_config in config.items():
             if not isinstance(env_config, dict):
                 continue
-            normalized[env_key] = cls._normalize_single_env_config(env_config)
-        return normalized or cls._default_external_config()
+            normalized_item = cls._normalize_env_item_config(env_config, vendor_filter=["*"])
+            normalized_groups[env_key] = {
+                "label": str(env_key),
+                "items": {env_key: normalized_item},
+                "defaultItem": env_key,
+            }
+        return normalized_groups or cls._default_external_config()
 
     @classmethod
-    def _normalize_single_env_config(cls, config: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_env_group_config(cls, config: dict[str, Any]) -> dict[str, Any]:
         """
-        归一化单个环境的配置。
-        :param config: 单个环境的原始配置字典
-        :return: 标准化后的单环境配置
+        归一化单个环境分组配置。
+        :param config: 原始分组配置字典
+        :return: 标准化后的分组配置
+        """
+        normalized: dict[str, Any] = {
+            "label": str(config.get("label") or "").strip(),
+            "items": {},
+            "defaultItem": str(config.get("defaultItem") or "").strip() or None,
+        }
+        items = config.get("items") if isinstance(config.get("items"), dict) else {}
+        for item_key, item_config in items.items():
+            if not isinstance(item_config, dict):
+                continue
+            normalized["items"][str(item_key)] = cls._normalize_env_item_config(item_config)
+        if not normalized["label"]:
+            normalized["label"] = "未命名分组"
+        return normalized
+
+    @classmethod
+    def _normalize_env_item_config(
+        cls, config: dict[str, Any], vendor_filter: list[str] | None = None
+    ) -> dict[str, Any]:
+        """
+        归一化单个子环境配置。
+        :param config: 原始子环境配置字典
+        :param vendor_filter: 覆盖默认 vendorFilter 的值，None 表示从 config 读取
+        :return: 标准化后的子环境配置
         """
         defaults = {
             "insertUrl": cls.DEFAULT_INSERT_URL,
@@ -493,17 +554,28 @@ class TicketLogPullService:
             "credentialBindingId": "",
             "origin": "https://erp.rta-os.com",
         }
-        env_config = {
-            **defaults,
-            **config,
-        }
-        env_config["insertUrl"] = str(env_config.get("insertUrl") or defaults["insertUrl"]).strip()
-        env_config["pageUrl"] = str(env_config.get("pageUrl") or defaults["pageUrl"]).strip()
-        env_config.pop("headers", None)
-        env_config["credentialBindingId"] = str(env_config.get("credentialBindingId") or "").strip()
-        env_config["origin"] = str(env_config.get("origin") or "").strip()
-        env_config["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
-        return env_config
+        item_config = {**defaults, **config}
+        item_config["label"] = str(item_config.get("label") or "").strip()
+        item_config["insertUrl"] = str(item_config.get("insertUrl") or defaults["insertUrl"]).strip()
+        item_config["pageUrl"] = str(item_config.get("pageUrl") or defaults["pageUrl"]).strip()
+        item_config.pop("headers", None)
+        item_config["credentialBindingId"] = str(item_config.get("credentialBindingId") or "").strip()
+        item_config["origin"] = str(item_config.get("origin") or "").strip()
+
+        if vendor_filter is not None:
+            item_config["vendorFilter"] = vendor_filter
+        else:
+            raw_filter = item_config.get("vendorFilter")
+            if isinstance(raw_filter, str) and raw_filter.strip() == "*":
+                item_config["vendorFilter"] = ["*"]
+            elif isinstance(raw_filter, list):
+                item_config["vendorFilter"] = [str(v or "").strip() for v in raw_filter if str(v or "").strip()]
+                if not item_config["vendorFilter"]:
+                    item_config["vendorFilter"] = ["*"]
+            else:
+                item_config["vendorFilter"] = ["*"]
+
+        return item_config
 
     @classmethod
     def _normalize_vendor_store_options(cls, raw_vendors: Any) -> list[dict[str, Any]]:
@@ -1076,18 +1148,23 @@ class TicketLogPullService:
 
     @classmethod
     def get_external_config_services(cls, query_db: Session) -> dict[str, Any]:
-        """返回脱敏后的多环境日志拉取外部接口配置。"""
+        """返回分组格式的日志拉取外部接口配置，同时兼容旧 environments 接口。"""
         cls.ensure_param_config_rows(query_db)
         config_row = TicketLogPullDao.get_external_config_row(query_db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
-        return {"environments": cls._normalize_external_config(payload)}
+        return {"groups": cls._normalize_external_config(payload)}
 
     @classmethod
-    def save_external_config_services(cls, query_db: Session, config: dict[str, Any], current_user: CurrentUserModel) -> CrudResponseModel:
-        """保存日志拉取外部接口配置，归一化时会移除任何旧内联认证 Header。"""
-        normalized = cls._normalize_external_config(config.get("environments") if isinstance(config, dict) else {})
+    def save_external_config_services(
+        cls, query_db: Session, config: dict[str, Any], current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """保存日志拉取外部接口配置（分组格式），归一化时会移除任何旧内联认证 Header。"""
+        raw_groups = config.get("groups") if isinstance(config, dict) else {}
+        normalized = cls._normalize_external_config(raw_groups)
         try:
-            TicketLogPullDao.save_external_config_row(query_db, config_value=cls._json_dumps(normalized), user_name=current_user.user.user_name)
+            TicketLogPullDao.save_external_config_row(
+                query_db, config_value=cls._json_dumps(normalized), user_name=current_user.user.user_name
+            )
             query_db.commit()
             return CrudResponseModel(is_success=True, message="日志拉取外部接口配置已保存")
         except Exception:
@@ -4371,10 +4448,19 @@ class TicketLogPullService:
     @classmethod
     def _get_external_config_dict(cls, db: Session, environment: str | None = None) -> dict[str, Any]:
         """
-        读取日志拉取外部接口配置字典，可按环境标识返回指定环境的配置。
+        读取日志拉取外部接口配置字典，支持 group:item 格式和旧单环境 key 格式。
+
+        新格式（推荐）：environment = "uat:uat2"
+          从 groups["uat"]["items"]["uat2"] 获取配置
+
+        旧格式（兼容）：environment = "uat2"
+          升级后的 normalized 中 key 已是分组名，尝试：
+          1. 直接 key 匹配分组 → 使用 defaultItem 或第一个子环境
+          2. 遍历所有分组的子环境查找 key
+
         :param db: 数据库会话
         :param environment: 环境标识，空值会直接报错，避免历史记录误用默认环境
-        :return: 指定 environment 的外部接口配置
+        :return: 指定 environment 的外部接口配置（单环境dict，包含 insertUrl/pageUrl/credentialBindingId/origin）
         """
         cls.ensure_param_config_rows(db)
         config_row = TicketLogPullDao.get_external_config_row(db)
@@ -4383,23 +4469,119 @@ class TicketLogPullService:
         env_key = str(environment or "").strip()
         if not env_key:
             raise ValueError("日志拉取记录未保存环境信息，无法重新拉取")
+
+        # 尝试 group:item 格式拆分
+        if ":" in env_key:
+            group_key, item_key = env_key.split(":", 1)
+            group_config = normalized.get(group_key)
+            if not isinstance(group_config, dict):
+                raise ValueError(
+                    f"日志拉取环境分组 '{group_key}' 不存在，"
+                    f"当前可用分组：{', '.join(str(k) for k in normalized.keys()) or '无'}"
+                )
+            items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+            item_config = items.get(item_key)
+            if not isinstance(item_config, dict):
+                available_items = ", ".join(str(k) for k in items.keys()) or "无"
+                raise ValueError(
+                    f"日志拉取子环境 '{item_key}' 在分组 '{group_key}' 中不存在，"
+                    f"当前可用子环境：{available_items}"
+                )
+            return dict(item_config)
+
+        # 旧格式兼容：直接 key 匹配
         if env_key in normalized:
-            return normalized[env_key]
+            group_config = normalized.get(env_key)
+            if not isinstance(group_config, dict):
+                raise ValueError(f"日志拉取环境 '{env_key}' 配置无效")
+            # 如果该分组配置包含 items，使用 defaultItem 或第一个子环境
+            items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+            if items:
+                # 是分组格式，取 defaultItem 或第一个子环境
+                default_item = str(group_config.get("defaultItem") or "").strip()
+                if default_item and default_item in items:
+                    return dict(items[default_item])
+                first_key = next(iter(items.keys()))
+                return dict(items[first_key])
+            # 旧单环境配置（已升级但直接key匹配到了分组），item没有items字段时应直接返回该分组
+            # 这种情况在升级后的格式中不存在，但作为兼容兜底
+            return dict(group_config)
+
+        # 旧格式兼容：直接 key 在旧多环境格式中查找（未升级前的配置）
+        # 遍历所有分组及其子环境查找匹配
+        for group_config in normalized.values():
+            if not isinstance(group_config, dict):
+                continue
+            items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+            if env_key in items:
+                return dict(items[env_key])
+
         available_envs = ", ".join(str(key) for key in normalized.keys()) or "无"
-        raise ValueError(f"日志拉取环境 '{env_key}' 不存在，请检查 ticket.logPull.external 配置，当前可用环境：{available_envs}")
+        raise ValueError(
+            f"日志拉取环境 '{env_key}' 不存在，请检查 ticket.logPull.external 配置，"
+            f"当前可用环境：{available_envs}"
+        )
 
     @classmethod
-    def _get_environment_options(cls, db: Session) -> list[str]:
+    def _get_environment_options(cls, db: Session) -> list[TicketLogPullEnvironmentOptionModel]:
         """
-        获取所有可用环境标识列表。
+        获取所有可用环境分组选项列表。
         :param db: 数据库会话
-        :return: 环境 key 列表
+        :return: 环境分组选项列表
         """
         cls.ensure_param_config_rows(db)
         config_row = TicketLogPullDao.get_external_config_row(db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
         normalized = cls._normalize_external_config(payload)
-        return list(normalized.keys())
+        options: list[TicketLogPullEnvironmentOptionModel] = []
+        for group_key, group_config in normalized.items():
+            label = str(group_config.get("label") or group_key)
+            options.append(TicketLogPullEnvironmentOptionModel(key=group_key, label=label))
+        return options
+
+    @classmethod
+    def resolve_env_item_services(
+        cls, db: Session, group_key: str, vender_no: str
+    ) -> list[TicketLogPullEnvResolveResultModel]:
+        """
+        根据环境分组和商家编号，解析出所有匹配的子环境列表。
+        :param db: 数据库会话
+        :param group_key: 环境分组 key，如 "uat"
+        :param vender_no: 商家编号
+        :return: 匹配到的子环境列表，可能为空
+        """
+        cls.ensure_param_config_rows(db)
+        config_row = TicketLogPullDao.get_external_config_row(db)
+        payload = cls._json_loads(getattr(config_row, "config_value", None), {})
+        normalized = cls._normalize_external_config(payload)
+        resolved_group_key = str(group_key or "").strip()
+        resolved_vender_no = str(vender_no or "").strip()
+        if not resolved_group_key:
+            raise ValueError("环境分组 key 不能为空")
+        if not resolved_vender_no:
+            raise ValueError("商家编号不能为空")
+        group_config = normalized.get(resolved_group_key)
+        if not isinstance(group_config, dict):
+            raise ValueError(f"环境分组 '{resolved_group_key}' 不存在，请检查 ticket.logPull.external 配置")
+        items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+        results: list[TicketLogPullEnvResolveResultModel] = []
+        for item_key, item_config in items.items():
+            if not isinstance(item_config, dict):
+                continue
+            vendor_filter = item_config.get("vendorFilter")
+            if isinstance(vendor_filter, list) and (
+                "*" in vendor_filter or resolved_vender_no in vendor_filter
+            ):
+                results.append(
+                    TicketLogPullEnvResolveResultModel(
+                        group_key=resolved_group_key,
+                        group_label=str(group_config.get("label") or resolved_group_key),
+                        item_key=str(item_key),
+                        item_label=str(item_config.get("label") or item_key),
+                        credential_binding_id=str(item_config.get("credentialBindingId") or "").strip(),
+                    )
+                )
+        return results
 
     @classmethod
     def _add_ticket_event(

@@ -4,8 +4,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from config.get_db import get_db
@@ -38,17 +38,36 @@ from utils.response_util import ResponseUtil
 ticketLogPullController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
 
 
-@ticketLogPullController.get("/log-pull/external-config", dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))])
+@ticketLogPullController.get(
+    "/log-pull/external-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
+)
 async def get_ticket_log_pull_external_config(request: Request, query_db: Session = Depends(get_db)):
     """获取日志拉取外部环境配置，不包含任何凭证明文。"""
-    return ResponseUtil.success(data=await run_in_threadpool(TicketLogPullService.get_external_config_services, query_db))
+    return ResponseUtil.success(
+        data=await run_in_threadpool(TicketLogPullService.get_external_config_services, query_db)
+    )
 
 
-@ticketLogPullController.put("/log-pull/external-config", dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))])
-async def save_ticket_log_pull_external_config(request: Request, config: TicketLogPullExternalConfigModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
-    """保存日志拉取外部环境配置。"""
-    result = await run_in_threadpool(TicketLogPullService.save_external_config_services, query_db, config.model_dump(by_alias=True), current_user)
-    return ResponseUtil.success(msg=result.message) if result.is_success else ResponseUtil.failure(msg=result.message)
+@ticketLogPullController.put(
+    "/log-pull/external-config",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
+)
+async def save_ticket_log_pull_external_config(
+    request: Request,
+    config: TicketLogPullExternalConfigModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """保存日志拉取外部环境配置（分组格式，兼容旧 environments 入参）。"""
+    result = await run_in_threadpool(
+        TicketLogPullService.save_external_config_services, query_db, config.model_dump(by_alias=True), current_user
+    )
+    return (
+        ResponseUtil.success(msg=result.message)
+        if result.is_success
+        else ResponseUtil.failure(msg=result.message)
+    )
 
 
 def _report_ticket_log_prepare_download_progress(
@@ -124,6 +143,32 @@ async def get_ticket_log_pull_vendor_store_options(
     try:
         result = TicketLogPullService.get_vendor_store_options_services(query_db, vender_no=vender_no)
         return ResponseUtil.success(data=result.model_dump(by_alias=True))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
+    "/log-pull/resolve-env-item",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def resolve_ticket_log_pull_env_item(
+    request: Request,
+    group_key: str | None = None,
+    vender_no: str | None = None,
+    query_db: Session = Depends(get_db),
+):
+    """
+    根据环境分组和商家编号，解析出匹配的子环境列表。
+    :param request: 请求对象
+    :param group_key: 环境分组 key，如 prod/uat
+    :param vender_no: 商家编号
+    :param query_db: 数据库会话
+    :return: 匹配到的子环境列表
+    """
+    try:
+        result = TicketLogPullService.resolve_env_item_services(query_db, group_key=group_key, vender_no=vender_no)
+        return ResponseUtil.success(data=[r.model_dump(by_alias=True) for r in result])
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

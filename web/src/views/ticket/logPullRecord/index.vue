@@ -23,7 +23,7 @@
       </el-form-item>
       <el-form-item label="环境" prop="environment">
         <el-select v-model="queryParams.environment" placeholder="全部环境" clearable style="width: 160px">
-          <el-option v-for="item in environmentOptions" :key="item" :label="item" :value="item" />
+          <el-option v-for="item in environmentOptions" :key="item.key" :label="item.label" :value="item.key" />
         </el-select>
       </el-form-item>
       <el-form-item label="状态" prop="status">
@@ -549,6 +549,7 @@ function createDefaultForm() {
   return {
     ticketId: undefined,
     environment: '',
+    resolvedItemKey: undefined,
     vendorId: undefined,
     storeId: undefined,
     posNo: undefined,
@@ -986,13 +987,24 @@ function submitCreateForm() {
       proxy.$modal.msgWarning('启用自动AI分析时必须选择Provider或Agent')
       return
     }
+    // 校验环境匹配：有环境但未匹配到子环境时警告
+    const envKey = String(createForm.value.environment || '').trim()
+    const resolvedKey = String(createForm.value.resolvedItemKey || '').trim()
+    if (envKey && createForm.value.vendorId && !resolvedKey) {
+      proxy.$modal.msgWarning('请先选择环境对应的子环境')
+      return
+    }
 
     submitting.value = true
     const payload = {
       ...createForm.value,
       ticketId: createForm.value.ticketId || null,
+      // 环境字段拼接为 group:item 格式存储
+      environment: envKey && resolvedKey ? `${envKey}:${resolvedKey}` : (envKey || undefined),
       notifyConfig: normalizeLogPullNotifyConfig(createForm.value.notifyConfig)
     }
+    // 删除前端中间字段，不往后端传
+    delete payload.resolvedItemKey
     if (payload.pullMethod === 'path') {
       delete payload.modifyTime
     } else {

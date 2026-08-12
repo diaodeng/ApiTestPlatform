@@ -10,11 +10,50 @@
         >
           <el-option
             v-for="item in environmentOptions"
-            :key="item"
-            :label="item"
-            :value="item"
+            :key="item.key"
+            :label="item.label"
+            :value="item.key"
           />
         </el-select>
+      </el-form-item>
+    </el-col>
+    <!-- 环境-商家匹配结果提示 -->
+    <el-col v-if="showEnvironment && model.vendorId && model.environment" :span="24">
+      <el-form-item label="" :prop="getProp('resolvedItemKey')">
+        <div v-if="envResolveLoading" class="env-resolve-loading">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>正在匹配子环境...</span>
+        </div>
+        <template v-else-if="envResolveMatchItems.length === 0">
+          <el-alert
+            title="该商家在当前环境下未匹配到任何子环境配置"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+        </template>
+        <template v-else-if="envResolveMatchItems.length === 1">
+          <el-alert
+            :title="`已匹配：${envResolveMatchItems[0].groupLabel} / ${envResolveMatchItems[0].itemLabel}`"
+            type="success"
+            :closable="false"
+            show-icon
+          />
+        </template>
+        <template v-else>
+          <div class="env-resolve-multi">
+            <span class="env-resolve-label">多个子环境匹配，请选择：</span>
+            <el-radio-group v-model="selectedEnvItemKey" @change="handleEnvItemSelect">
+              <el-radio
+                v-for="item in envResolveMatchItems"
+                :key="item.itemKey"
+                :value="item.itemKey"
+              >
+                {{ item.itemLabel }}
+              </el-radio>
+            </el-radio-group>
+          </div>
+        </template>
       </el-form-item>
     </el-col>
     <el-col :span="24">
@@ -253,7 +292,7 @@
 </template>
 
 <script setup>
-import { getTicketLogPullVendorStoreOptions } from '@/api/ticket/ticket'
+import { getTicketLogPullVendorStoreOptions, resolveLogPullEnvItem } from '@/api/ticket/ticket'
 
 const props = defineProps({
   agentOptions: {
@@ -312,6 +351,12 @@ const fetchedStoreOptions = ref([])
 const activeStoreVenderNo = ref('')
 const storeFilterKeyword = ref('')
 let storeOptionsRequestSeq = 0
+
+// 环境分组匹配相关状态
+const envResolveLoading = ref(false)
+const envResolveMatchItems = ref([])
+const selectedEnvItemKey = ref('')
+let envResolveRequestSeq = 0
 
 const parameterExampleOptions = computed(() => props.parameterExamples
   .map(item => {
@@ -409,6 +454,14 @@ function syncStoreSelection() {
 
 function handleEnvironmentChange(value) {
   model.value.environment = value
+  // 切换环境后重置匹配状态
+  envResolveMatchItems.value = []
+  selectedEnvItemKey.value = ''
+  model.value.resolvedItemKey = undefined
+  // 如果有商家，重新匹配
+  if (model.value.vendorId) {
+    resolveEnvItemForVendor()
+  }
 }
 
 function handleStoreFilter(keyword) {
@@ -418,6 +471,61 @@ function handleStoreFilter(keyword) {
 function handleVendorChange() {
   model.value.storeId = undefined
   storeFilterKeyword.value = ''
+  // 清空匹配状态
+  envResolveMatchItems.value = []
+  selectedEnvItemKey.value = ''
+  model.value.resolvedItemKey = undefined
+  // 如果有环境分组，重新匹配
+  if (model.value.environment && model.value.vendorId) {
+    resolveEnvItemForVendor()
+  }
+}
+
+/**
+ * 根据当前环境和商家编号，调用后端接口解析匹配的子环境列表。
+ */
+function resolveEnvItemForVendor() {
+  const groupKey = String(model.value.environment || '').trim()
+  const venderNo = String(model.value.vendorId || '').trim()
+  if (!groupKey || !venderNo) {
+    return
+  }
+  const requestSeq = ++envResolveRequestSeq
+  envResolveLoading.value = true
+  envResolveMatchItems.value = []
+  selectedEnvItemKey.value = ''
+  model.value.resolvedItemKey = undefined
+  resolveLogPullEnvItem(groupKey, venderNo).then(response => {
+    if (requestSeq !== envResolveRequestSeq) {
+      return
+    }
+    const items = Array.isArray(response?.data) ? response.data : []
+    envResolveMatchItems.value = items
+    if (items.length === 1) {
+      // 单匹配：自动选中
+      selectedEnvItemKey.value = items[0].itemKey
+      model.value.resolvedItemKey = items[0].itemKey
+    } else if (items.length > 1) {
+      // 多匹配：需要用户手动选择
+      // 保持 selectedEnvItemKey 为空，等待用户选择
+    }
+  }).catch(() => {
+    if (requestSeq !== envResolveRequestSeq) {
+      return
+    }
+    envResolveMatchItems.value = []
+  }).finally(() => {
+    if (requestSeq === envResolveRequestSeq) {
+      envResolveLoading.value = false
+    }
+  })
+}
+
+/**
+ * 用户在多匹配时手动选择子环境。
+ */
+function handleEnvItemSelect(itemKey) {
+  model.value.resolvedItemKey = itemKey
 }
 
 function handleParameterExampleChange(value) {
@@ -476,6 +584,10 @@ watch(
     loadStoreOptions(vendorId).then(() => {
       syncStoreSelection()
     })
+    // 商家变化后重新匹配子环境
+    if (model.value?.environment && vendorId) {
+      resolveEnvItemForVendor()
+    }
   },
   { immediate: true }
 )
@@ -484,7 +596,8 @@ watch(
   () => [props.environmentOptions, model.value?.environment],
   ([envOptions, currentEnv]) => {
     if (Array.isArray(envOptions) && envOptions.length && !currentEnv) {
-      model.value.environment = envOptions[0]
+      // environmentOptions 现在是 {key, label} 对象数组
+      model.value.environment = envOptions[0].key
     }
   },
   { immediate: true }
@@ -540,5 +653,24 @@ watch(
 
 .time-range-inline :deep(.el-input-number) {
   width: 140px;
+}
+
+.env-resolve-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.env-resolve-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.env-resolve-label {
+  font-size: 13px;
+  color: #606266;
 }
 </style>

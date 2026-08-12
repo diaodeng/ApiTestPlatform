@@ -2832,6 +2832,161 @@
             />
           </el-card>
         </el-tab-pane>
+        <el-tab-pane label="外部接口">
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>日志拉取外部接口配置</span>
+                <el-tag type="warning" effect="plain">环境分组 + 子环境 + 商家映射</el-tag>
+              </div>
+            </template>
+            <el-alert
+              class="mb16"
+              title="配置说明"
+              type="info"
+              :closable="false"
+              show-icon
+              description="每个环境分组（如 prod、uat）下可配置多个子环境，每个子环境绑定独立凭证。商家选择后根据 vendorFilter 自动匹配子环境；「*」表示覆盖所有商家。未匹配到时可指定默认子环境兜底。"
+            />
+            <div v-loading="logPullExternalLoading" class="env-groups-container">
+              <el-empty v-if="!logPullExternalGroupKeys.length && !logPullExternalLoading" description="暂无环境分组配置，请新增" />
+              <div v-for="groupKey in logPullExternalGroupKeys" :key="groupKey" class="env-group-card">
+                <div class="env-group-header">
+                  <el-input
+                    :model-value="logPullExternalGroups[groupKey].label"
+                    placeholder="分组名称，如 生产环境"
+                    style="width: 260px"
+                    @update:model-value="val => logPullExternalUpdateGroupLabel(groupKey, val)"
+                  />
+                  <el-tag type="info" size="small" class="ml8">{{ groupKey }}</el-tag>
+                  <div class="env-group-actions">
+                    <el-button type="danger" link icon="Delete" @click="logPullExternalRemoveGroup(groupKey)">删除分组</el-button>
+                  </div>
+                </div>
+                <el-table :data="Object.entries(logPullExternalGroups[groupKey].items)" border size="small" class="env-items-table">
+                  <el-table-column label="子环境 key" width="130">
+                    <template #default="{ row }">
+                      <el-tag size="small">{{ row[0] }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" width="150">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].label"
+                        placeholder="UAT1"
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'label', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="insertUrl" min-width="200">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].insertUrl"
+                        placeholder="https://..."
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'insertUrl', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="pageUrl" min-width="200">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].pageUrl"
+                        placeholder="https://..."
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'pageUrl', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="凭证绑定" width="220">
+                    <template #default="{ row }">
+                      <el-select
+                        :model-value="row[1].credentialBindingId"
+                        placeholder="选择凭证绑定"
+                        filterable
+                        clearable
+                        size="small"
+                        style="width: 100%"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'credentialBindingId', val)"
+                      >
+                        <el-option
+                          v-for="opt in logPullExternalCredentialBindingOptions"
+                          :key="opt.bindingId"
+                          :label="opt.label"
+                          :value="String(opt.bindingId)"
+                        />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="origin" min-width="200">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].origin"
+                        placeholder="https://..."
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'origin', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="商家范围" width="280">
+                    <template #default="{ row }">
+                      <el-select
+                        :model-value="row[1].vendorFilter"
+                        multiple
+                        filterable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="选择商家（* 表示全部）"
+                        size="small"
+                        style="width: 100%"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'vendorFilter', val)"
+                      >
+                        <el-option label="★ 全部商家" value="*" />
+                        <el-option
+                          v-for="opt in logPullExternalVendorFilterOptions"
+                          :key="opt.value"
+                          :label="opt.label"
+                          :value="opt.value"
+                          :disabled="row[1].vendorFilter.includes('*')"
+                        />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="70" align="center">
+                    <template #default="{ row }">
+                      <el-button link type="danger" icon="Delete" size="small" @click="logPullExternalRemoveEnvItem(groupKey, row[0])" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div class="env-group-footer">
+                  <el-button type="primary" link icon="Plus" @click="logPullExternalAddEnvItem(groupKey)">新增子环境</el-button>
+                  <el-form-item label="默认子环境" label-width="100px" class="env-default-item">
+                    <el-select
+                      :model-value="logPullExternalGroups[groupKey].defaultItem"
+                      placeholder="商家未匹配时兜底"
+                      clearable
+                      size="small"
+                      style="width: 200px"
+                      @update:model-value="val => logPullExternalUpdateGroupDefaultItem(groupKey, val)"
+                    >
+                      <el-option
+                        v-for="itemKey in logPullExternalGetItemKeysForGroup(groupKey)"
+                        :key="itemKey"
+                        :label="`${logPullExternalGroups[groupKey].items[itemKey]?.label || itemKey} (${itemKey})`"
+                        :value="itemKey"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </div>
+              </div>
+            </div>
+            <div class="mt16">
+              <el-button type="primary" icon="Plus" @click="logPullExternalAddGroup">新增环境分组</el-button>
+              <el-button type="success" :loading="logPullExternalSaving" @click="logPullExternalHandleSave" class="ml8">保存外部接口配置</el-button>
+            </div>
+          </el-card>
+        </el-tab-pane>
       </el-tabs>
     </el-container>
 
@@ -2864,6 +3019,7 @@
   import { listAiPromptTemplateOptions } from '@/api/system/aiprompt';
   import { all as listAllAgents } from '@/api/hrm/agent';
   import { useSyncConfig } from './hooks/useSyncConfig';
+  import { useLogPullExternalConfig } from './hooks/useLogPullExternalConfig';
 
   const { proxy } = getCurrentInstance();
 
@@ -2908,6 +3064,34 @@
     addCustomStatisticsGroup,
     addCustomStatisticsCondition,
   } = useSyncConfig(proxy);
+
+  // 日志拉取外部接口（环境分组+子环境+商家映射）配置管理
+  const {
+    loading: logPullExternalLoading,
+    saving: logPullExternalSaving,
+    groups: logPullExternalGroups,
+    groupKeys: logPullExternalGroupKeys,
+    vendorFilterOptions: logPullExternalVendorFilterOptions,
+    credentialBindingOptions: logPullExternalCredentialBindingOptions,
+    loadConfig: logPullExternalLoadConfig,
+    addGroup: logPullExternalAddGroup,
+    removeGroup: logPullExternalRemoveGroup,
+    addEnvItem: logPullExternalAddEnvItem,
+    removeEnvItem: logPullExternalRemoveEnvItem,
+    updateGroupLabel: logPullExternalUpdateGroupLabel,
+    updateItemConfig: logPullExternalUpdateItemConfig,
+    handleSave: logPullExternalHandleSave,
+    getItemKeysForGroup: logPullExternalGetItemKeysForGroup,
+  } = useLogPullExternalConfig(proxy);
+
+  /**
+   * 更新分组的 defaultItem。
+   */
+  function logPullExternalUpdateGroupDefaultItem(groupKey, val) {
+    if (logPullExternalGroups[groupKey]) {
+      logPullExternalGroups[groupKey].defaultItem = val || null;
+    }
+  }
   const allStatisticFieldOptions = [
     { value: 'issueTypeId', label: '工单类型' }, { value: 'isProblem', label: '是否问题' },
     { value: 'status', label: '工单状态' }, { value: 'source', label: '来源' },
@@ -3425,6 +3609,7 @@
     loadAiOptions();
     loadWorkflowStatuses();
     handleLoadAutoCategoryStats();
+    logPullExternalLoadConfig();
   });
 </script>
 
@@ -3665,5 +3850,51 @@
     font-size: 12px;
     color: var(--el-color-warning-dark-2);
     line-height: 1.5;
+  }
+
+  /* 日志拉取外部接口配置样式 */
+  .env-groups-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .env-group-card {
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 8px;
+    padding: 16px;
+    background: var(--el-bg-color);
+  }
+
+  .env-group-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .env-group-actions {
+    margin-left: auto;
+  }
+
+  .env-items-table {
+    margin-bottom: 0;
+  }
+
+  .env-group-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--el-border-color-lighter);
+  }
+
+  .env-default-item {
+    margin-bottom: 0;
+  }
+
+  .env-default-item :deep(.el-form-item__label) {
+    font-weight: normal;
+    color: var(--el-text-color-regular);
   }
 </style>
