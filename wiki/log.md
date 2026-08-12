@@ -8,6 +8,17 @@ updated: 2026-08-11
 
 # 操作日志
 
+## [2026-08-12] FIX | rg 日志搜索文件数过多导致 execve 参数过长应用重启
+
+- 触发：日志搜索 `_search_by_rg_keywords` 将所有 193 个文件路径拼接为 rg 命令行参数，导致 `subprocess.Popen` 底层 `execve` 参数列表超长抛 `OSError`，未被现有异常处理器捕获，uvicorn worker 崩溃重启。
+- 修复：
+  - 新增 `RG_MAX_FILE_ARGS = 50` 常量，控制 rg 单次命令行文件数上限。
+  - `_search_by_rg_keywords` 拆分为入口方法 + `_search_by_rg_keywords_single`（单批搜索）+ `_search_by_rg_keywords_batched`（分批搜索）。
+  - 文件数 > 50 时自动按 50 个一批拆分，每批独立执行 rg 管道、合并去重，命中数达上限后跳过剩余批次。
+  - 新增 `OSError` 异常捕获，兜底降级为 Python 搜索。
+- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_service.py`。
+- 验证：ruff 静态检查通过。
+
 ## [2026-08-11] INGEST-CODE | 日志拉取轮询改后台任务查询 + 停止功能落地
 
 - 触发：日志拉取原实现中 `_poll_external_result` 在后台线程池（`max_workers=2`）内同步阻塞轮询外部平台，单条任务最长占用线程 1800s，批量提交时任务排队受并发限制；前端已有「停止」按钮但后端无 `/stop` 路由（404），`CANCELLED` 枚举无消费。
