@@ -6,6 +6,12 @@ title: 更新历史
 
 ## 2026-08 月（4 天，11 项变更）
 
+### 工单 AI 分析执行器可配置（Codex / Claude Code）
+- AI Provider 新增 `preferredExecutor` 默认执行器字段；工单 AI 分析支持 `codex` 与 `claude_code` 两种执行器。
+- 发起 AI 分析弹窗新增“执行器”下拉，选项按当前 Provider 的兼容执行器收敛，并按默认执行器回填，用户可覆盖。
+- Claude Code 以 `claude -p --output-format json --json-schema` 非交互模式执行，采用 `plan` 只读权限与 `Read,Grep,Glob,Bash(rg *)` 工具白名单，结果从 stdout 的 `structured_output` 解析。
+- Provider 选项接口在分析场景不再硬编码 `executor=codex`，后端按分析执行器集合过滤，仅支持 Claude Code 的 Provider 也能出现在候选中。
+
 ### 凭证绑定新增模式修复
 - 修复统一凭证管理里从“编辑绑定”切换到“新增绑定”时，表单残留旧绑定主键导致后续保存误走更新的问题。
 - 现在新增绑定会始终创建新记录，同一业务、同一投影类型可以继续保留多条绑定。

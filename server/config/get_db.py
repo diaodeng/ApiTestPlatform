@@ -70,6 +70,7 @@ async def init_create_table():
     _ensure_hrm_module_business_code_column()
     _ensure_ticket_role_columns()
     _ensure_ticket_classification_columns()
+    _ensure_ai_provider_preferred_executor_column()
     _ensure_user_config_unique_index()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
@@ -451,6 +452,55 @@ def _ensure_ticket_classification_columns():
                 connection.execute(text(f"ALTER TABLE ticket ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket 分类统计字段失败: {exc}")
+
+
+def _ensure_ai_provider_preferred_executor_column():
+    """
+    为 sys_ai_provider 补齐 preferred_executor 字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                row = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'sys_ai_provider'
+                              AND COLUMN_NAME = 'preferred_executor'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row:
+                    return
+                logger.info("检测到 sys_ai_provider 缺少 preferred_executor，自动补齐")
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE sys_ai_provider
+                        ADD COLUMN preferred_executor VARCHAR(64) NULL COMMENT 'Provider默认执行器'
+                        """
+                    )
+                )
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(sys_ai_provider)")).mappings().all()
+            if any(str(item.get("name") or "") == "preferred_executor" for item in rows):
+                return
+            logger.info("检测到 sqlite sys_ai_provider 缺少 preferred_executor，自动补齐")
+            connection.execute(
+                text("ALTER TABLE sys_ai_provider ADD COLUMN preferred_executor VARCHAR(64)")
+            )
+    except Exception as exc:
+        logger.warning(f"检查或升级 sys_ai_provider.preferred_executor 字段失败: {exc}")
 
 
 def _ensure_user_config_unique_index():

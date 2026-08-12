@@ -66,6 +66,7 @@ export function buildTicketAiPreferenceDefaults(detail, fallbackPromptTemplateCo
   const hasManualAgentCode = hasOwn(preference, 'agentCode')
   const hasManualProviderCode = hasOwn(preference, 'aiProviderCode')
   const hasManualPromptTemplateCodes = hasOwn(preference, 'promptTemplateCodes')
+  const hasManualExecutor = hasOwn(preference, 'executor')
 
   return {
     agentCode: hasManualAgentCode
@@ -84,6 +85,12 @@ export function buildTicketAiPreferenceDefaults(detail, fallbackPromptTemplateCo
           latestAnalysis.aiProviderCode ||
           latestContext.selectedAiProviderCode
       ),
+    executor: hasManualExecutor
+      ? normalizeText(preference.executor)
+      : normalizeText(
+        config.executor ||
+          latestContext.selectedExecutor
+      ),
     promptTemplateCodes: hasManualPromptTemplateCodes
       ? normalizePromptCodes(preference.promptTemplateCodes)
       : (
@@ -95,6 +102,7 @@ export function buildTicketAiPreferenceDefaults(detail, fallbackPromptTemplateCo
       ),
     hasManualAgentCode,
     hasManualProviderCode,
+    hasManualExecutor,
     hasManualPromptTemplateCodes
   }
 }
@@ -110,6 +118,9 @@ export function saveTicketAiPreferencePatch(patch = {}) {
   }
   if (hasOwn(preference, 'aiProviderCode')) {
     preference.aiProviderCode = normalizeText(preference.aiProviderCode)
+  }
+  if (hasOwn(preference, 'executor')) {
+    preference.executor = normalizeText(preference.executor)
   }
   if (hasOwn(preference, 'promptTemplateCodes')) {
     preference.promptTemplateCodes = normalizePromptCodes(preference.promptTemplateCodes)

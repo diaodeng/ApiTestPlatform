@@ -20,6 +20,12 @@ class SysAiProvider(Base):
     api_protocol = Column(String(64, collation="utf8_general_ci"), nullable=False, comment="API调用协议")
     supported_usages = Column(JSON, nullable=False, comment="允许的业务用途")
     supported_executors = Column(JSON, nullable=False, comment="兼容的执行器")
+    preferred_executor = Column(
+        String(64, collation="utf8_general_ci"),
+        nullable=True,
+        default="",
+        comment="Provider默认执行器；当supported_executors包含多项时用于确定默认值",
+    )
     preferred_agent_code = Column(
         String(64, collation="utf8_general_ci"),
         nullable=True,

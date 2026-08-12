@@ -152,8 +152,20 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="兼容执行器" prop="supportedExecutors">
-              <el-select v-model="form.supportedExecutors" multiple placeholder="请选择执行器" style="width: 100%">
+              <el-select v-model="form.supportedExecutors" multiple placeholder="请选择执行器" style="width: 100%" @change="handleSupportedExecutorsChange">
                 <el-option v-for="item in executorOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="默认执行器" prop="preferredExecutor">
+              <el-select v-model="form.preferredExecutor" placeholder="可选，默认取首个兼容执行器" clearable style="width: 100%">
+                <el-option
+                  v-for="item in analysisExecutorOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
               </el-select>
             </el-form-item>
           </el-col>
@@ -268,6 +280,15 @@ const testLoading = ref(false)
 const connectionConfigText = ref('')
 const workerEnvText = ref('')
 
+// 工单 AI 分析场景允许的执行器编码，用于过滤默认执行器下拉。
+const ANALYSIS_EXECUTOR_VALUES = ['codex', 'claude_code']
+const analysisExecutorOptions = computed(() => {
+  const selected = Array.isArray(form.value.supportedExecutors) ? form.value.supportedExecutors : []
+  return executorOptions.value.filter(
+    (item) => ANALYSIS_EXECUTOR_VALUES.includes(item.value) && selected.includes(item.value)
+  )
+})
+
 const data = reactive({
   queryParams: {
     pageNum: 1,
@@ -349,6 +370,7 @@ function resetForm() {
     apiProtocol: 'openai_chat_completions',
     supportedUsages: ['ticket_light_text', 'provider_model_discovery'],
     supportedExecutors: ['direct_http'],
+    preferredExecutor: '',
     defaultModel: '',
     preferredAgentCode: '',
     providerLevel: 0,
@@ -361,6 +383,14 @@ function resetForm() {
   connectionConfigText.value = ''
   workerEnvText.value = ''
   proxy.resetForm('providerRef')
+}
+
+// 切换兼容执行器时，若默认执行器不再可选则清空，避免提交非法组合。
+function handleSupportedExecutorsChange() {
+  const selected = Array.isArray(form.value.supportedExecutors) ? form.value.supportedExecutors : []
+  if (form.value.preferredExecutor && !selected.includes(form.value.preferredExecutor)) {
+    form.value.preferredExecutor = ''
+  }
 }
 
 function handleQuery() {

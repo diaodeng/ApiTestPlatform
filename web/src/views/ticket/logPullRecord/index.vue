@@ -739,7 +739,7 @@ function submitStoreConfigImport() {
 }
 
 function loadProviderOptions() {
-  return listAiProviderOptions({ usage: 'ticket_analysis_worker', executor: 'codex' }).then(response => {
+  return listAiProviderOptions({ usage: 'ticket_analysis_worker' }).then(response => {
     providerOptions.value = response.data || []
   })
 }

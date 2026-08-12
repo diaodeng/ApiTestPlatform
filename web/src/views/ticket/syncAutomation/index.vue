@@ -3245,7 +3245,7 @@
       .catch(() => {
         agentOptions.value = [];
       });
-    listAiProviderOptions({ usage: 'ticket_analysis_worker', executor: 'codex' })
+    listAiProviderOptions({ usage: 'ticket_analysis_worker' })
       .then((response) => {
         analysisProviderOptions.value = Array.isArray(response.data) ? response.data : [];
       })
