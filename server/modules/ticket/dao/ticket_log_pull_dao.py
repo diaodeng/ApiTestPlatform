@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import date, datetime
 
 from loguru import logger
-from sqlalchemy import Date, cast, func, nullsfirst, or_
+from sqlalchemy import Date, cast, func, or_
 from sqlalchemy.orm import Session, defer
 
 from module_admin.entity.do.config_do import SysConfig
@@ -241,7 +241,7 @@ class TicketLogPullDao:
                     | (TicketLogPullRecord.poll_deadline_at > datetime.now())
                 ),
             )
-            .order_by(nullsfirst(TicketLogPullRecord.last_polled_at.asc()), TicketLogPullRecord.id.asc())
+            .order_by(TicketLogPullRecord.last_polled_at.asc(), TicketLogPullRecord.id.asc())
         )
         if limit and limit > 0:
             query = query.limit(limit)
