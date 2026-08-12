@@ -1043,50 +1043,6 @@ class TicketLogPullService:
                 user_name="system",
                 remark='工单日志拉取商家配置，格式：[{"venderNo": "商户编号", "vendorName": "商家名称"}]',
             )
-        cls._ensure_scan_job_row(query_db)
-
-    @classmethod
-    def _ensure_scan_job_row(cls, db: Session) -> None:
-        """
-        幂等确保日志拉取周期扫描任务在 celery_periodic_task 中存在。
-        周期任务负责提交待提交申请、探测外部平台结果并处理轮询超时。
-        :param db: 数据库会话
-        :return: 无
-        """
-        # 延迟导入，避免 module_task 包（__init__ 会加载 scheduler_maintenance）反向依赖本模块形成循环导入
-        from module_task.celery_job_models import CeleryPeriodicTask
-
-        task_key = "module_task.scheduler_maintenance.scan_log_pull_records"
-        existing = db.query(CeleryPeriodicTask).filter(CeleryPeriodicTask.task_key == task_key).first()
-        if existing:
-            return
-        now = datetime.now()
-        db.add(
-            CeleryPeriodicTask(
-                owner_type="sys",
-                task_name="日志拉取周期扫描",
-                task_key=task_key,
-                queue_name="sys",
-                execution_mode="thread",
-                schedule_type="interval",
-                cron_expression="",
-                interval_every=30,
-                interval_period="seconds",
-                task_args_json="[]",
-                task_kwargs_json="{}",
-                enabled=True,
-                allow_concurrent=False,
-                lock_ttl_seconds=3600,
-                timezone="Asia/Shanghai",
-                create_by="system",
-                create_time=now,
-                update_by="system",
-                update_time=now,
-                remark="每 30 秒扫描日志拉取记录：提交待提交申请、单次探测外部平台结果、标记轮询超时失败。",
-            )
-        )
-        db.commit()
-        logger.info("已创建日志拉取周期扫描任务: %s", task_key)
 
     @classmethod
     def _build_external_request_headers(cls, db: Session, config: dict[str, Any], target_url: str) -> dict[str, str]:
