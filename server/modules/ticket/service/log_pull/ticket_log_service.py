@@ -302,10 +302,7 @@ class LogService:
             return hits
 
         executable = (
-            shutil.which("rg")
-            or shutil.which("rg.exe")
-            or shutil.which("ripgrep")
-            or shutil.which("ripgrep.exe")
+            shutil.which("rg") or shutil.which("rg.exe") or shutil.which("ripgrep") or shutil.which("ripgrep.exe")
         )
         if not executable:
             cls._log_search_execution(
@@ -503,10 +500,7 @@ class LogService:
             return hits
 
         executable = (
-            shutil.which("rg")
-            or shutil.which("rg.exe")
-            or shutil.which("ripgrep")
-            or shutil.which("ripgrep.exe")
+            shutil.which("rg") or shutil.which("rg.exe") or shutil.which("ripgrep") or shutil.which("ripgrep.exe")
         )
         if not executable:
             logger.warning(f"未找到 rg/ripgrep，多关键字日志搜索降级为 Python，ticket_id={ticket_id}")
@@ -849,8 +843,7 @@ class LogService:
             stdout_text = cls._run_rg_pipeline(commands, extract_dir, max_seconds)
         except subprocess.TimeoutExpired:
             logger.warning(
-                f"rg 日志搜索达到保护超时，日志搜索降级为 Python，"
-                f"ticket_id={ticket_id}，record_id={record_id}"
+                f"rg 日志搜索达到保护超时，日志搜索降级为 Python，ticket_id={ticket_id}，record_id={record_id}"
             )
             cls._log_search_execution(
                 tool="python",
@@ -1302,7 +1295,7 @@ class LogService:
             keyword = str(item or "").strip()
             if keyword and keyword not in result:
                 result.append(keyword[:200])
-        return result[:10]
+        return result[:20]
 
     @staticmethod
     def _match_keywords(
