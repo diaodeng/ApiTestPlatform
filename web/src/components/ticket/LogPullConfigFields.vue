@@ -597,6 +597,10 @@ watch(
     if (Array.isArray(envOptions) && envOptions.length && !currentEnv) {
       // environmentOptions 现在是 {key, label} 对象数组
       model.value.environment = envOptions[0].key
+      // 环境自动填充后，如果已有商家，立即触发匹配，避免 vendorId watch 先于 environment 设置导致跳过匹配
+      if (model.value?.vendorId) {
+        resolveEnvItemForVendor()
+      }
     }
   },
   { immediate: true }

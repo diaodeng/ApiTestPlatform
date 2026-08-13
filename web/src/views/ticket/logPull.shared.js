@@ -215,7 +215,9 @@ export function formatLogPullParameter(row) {
  */
 export function applyLogPullRecordToForm(form, row) {
   if (!form || !row) return;
-  form.environment = row.environment || '';
+  // 数据库存储格式为 groupKey:itemKey（如 "PROD:PROD"），下拉框只需要 groupKey 部分
+  const rawEnv = String(row.environment || '').trim();
+  form.environment = rawEnv.includes(':') ? rawEnv.split(':')[0] : rawEnv;
   form.vendorId = row.vendorId !== undefined ? row.vendorId : undefined;
   form.storeId = row.storeId || undefined;
   form.posNo = row.posNo !== undefined ? row.posNo : undefined;
