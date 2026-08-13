@@ -72,6 +72,32 @@ export function getTicketLogPullVendorStoreOptions(venderNo) {
   });
 }
 
+// 根据环境分组和商家编号解析匹配的子环境列表
+export function resolveLogPullEnvItem(groupKey, venderNo) {
+  return request({
+    url: '/ticket/log-pull/resolve-env-item',
+    method: 'get',
+    params: { group_key: groupKey, vender_no: venderNo },
+  });
+}
+
+// 查询日志拉取外部接口配置（分组格式）
+export function getLogPullExternalConfig() {
+  return request({
+    url: '/ticket/log-pull/external-config',
+    method: 'get',
+  });
+}
+
+// 保存日志拉取外部接口配置（分组格式）
+export function saveLogPullExternalConfig(data) {
+  return request({
+    url: '/ticket/log-pull/external-config',
+    method: 'put',
+    data,
+  });
+}
+
 // 下载门店配置导入模板
 export function downloadTicketLogPullStoreConfigTemplate() {
   return request({

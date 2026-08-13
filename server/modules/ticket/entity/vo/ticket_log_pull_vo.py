@@ -44,6 +44,7 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
         default_factory=TicketLogPullStorageFtpConfigModel, description="FTP配置"
     )
     effective_local_directory: str | None = Field(default=None, description="生效的本地保存目录")
+    max_workers: int = Field(default=2, description="日志拉取线程池最大并发数，范围1-20")
     poll_interval_sec: int = Field(default=20, description="轮询外部接口间隔秒数")
     poll_timeout_sec: int = Field(default=1800, description="日志拉取轮询超时时间，单位秒")
     download_timeout_sec: int = Field(default=300, description="压缩包下载超时时间，单位秒")
@@ -73,8 +74,46 @@ class TicketLogPullPostProcessConfigModel(TicketLogPullBaseModel):
     post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
 
 
+class TicketLogPullEnvItemModel(TicketLogPullBaseModel):
+    """单个子环境的外部接口配置，包含接口地址、凭证绑定和商家过滤范围。"""
+
+    label: str = Field(default="", description="子环境展示名称")
+    insert_url: str = ""
+    page_url: str = ""
+    credential_binding_id: str = ""
+    origin: str = ""
+    vendor_filter: list[str] = Field(
+        default_factory=list,
+        description="该子环境覆盖的商家 venderNo 列表，['*'] 表示全部商家",
+    )
+
+
+class TicketLogPullEnvGroupModel(TicketLogPullBaseModel):
+    """环境分组配置，包含多个子环境及默认子环境标识。"""
+
+    label: str = Field(default="", description="环境分组展示名称，如 生产环境、UAT环境")
+    items: dict[str, TicketLogPullEnvItemModel] = Field(
+        default_factory=dict,
+        description="子环境映射，key 为子环境标识",
+    )
+    default_item: str | None = Field(default=None, description="商家未匹配到任何子环境时的兜底子环境 key，为空则报错")
+
+
+class TicketLogPullExternalConfigModel(TicketLogPullBaseModel):
+    """日志拉取多环境外部接口配置（兼容旧多环境格式）。"""
+
+    environments: dict[str, TicketLogPullExternalEnvironmentConfigModel] = Field(
+        default_factory=dict,
+        description="旧格式多环境配置，向后兼容",
+    )
+    groups: dict[str, TicketLogPullEnvGroupModel] = Field(
+        default_factory=dict,
+        description="新格式环境分组配置",
+    )
+
+
 class TicketLogPullExternalEnvironmentConfigModel(TicketLogPullBaseModel):
-    """单个日志拉取外部环境配置，认证信息只允许通过凭证绑定提供。"""
+    """单个日志拉取外部环境配置（旧格式），认证信息只允许通过凭证绑定提供。"""
 
     insert_url: str = ""
     page_url: str = ""
@@ -83,10 +122,21 @@ class TicketLogPullExternalEnvironmentConfigModel(TicketLogPullBaseModel):
     vendors: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class TicketLogPullExternalConfigModel(TicketLogPullBaseModel):
-    """日志拉取多环境外部接口配置。"""
+class TicketLogPullEnvResolveResultModel(TicketLogPullBaseModel):
+    """根据环境分组和商家编号解析出的子环境匹配结果。"""
 
-    environments: dict[str, TicketLogPullExternalEnvironmentConfigModel] = Field(default_factory=dict)
+    group_key: str = Field(description="环境分组 key")
+    group_label: str = Field(default="", description="环境分组展示名称")
+    item_key: str = Field(description="匹配到的子环境 key")
+    item_label: str = Field(default="", description="子环境展示名称")
+    credential_binding_id: str = Field(default="", description="子环境关联的凭证绑定ID")
+
+
+class TicketLogPullEnvironmentOptionModel(TicketLogPullBaseModel):
+    """环境分组选项，用于前端下拉框展示。"""
+
+    key: str = Field(description="环境分组 key")
+    label: str = Field(description="环境分组展示名称")
 
 
 class TicketLogPullStoreOptionModel(TicketLogPullBaseModel):
@@ -123,7 +173,10 @@ class TicketLogPullVendorStoreOptionsModel(TicketLogPullBaseModel):
     日志拉取商家与指定商家门店选项模型。
     """
 
-    environments: list[str] = Field(default_factory=list, description="可用环境标识列表")
+    environments: list[TicketLogPullEnvironmentOptionModel] = Field(
+        default_factory=list,
+        description="可用环境分组列表",
+    )
 
     vendors: list[TicketLogPullVendorOptionModel] = Field(default_factory=list, description="商家列表")
 

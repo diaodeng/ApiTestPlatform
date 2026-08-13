@@ -15,13 +15,18 @@
 ## 支持的配置项
 - `providerCode`：Provider 编码，作为唯一标识。
 - `providerName`：Provider 显示名称。
-- `providerType`：Provider 类型，例如 `openai`、`llm`、`azure_openai`、`ollama`、`custom`。
-- `agentCode`：绑定的 Agent 编码，可选。
-- `modelName`：默认模型名称。
+- `platformCode`：所属平台，例如 `openai`、`openai_compatible`、`azure_openai`、`anthropic`、`ollama`、`custom`。
+- `apiProtocol`：API 调用协议，例如 `openai_chat_completions`、`anthropic_messages`。
+- `supportedUsages`：允许的业务用途，例如工单轻量AI、工单AI分析、工单向量化、模型目录发现。
+- `supportedExecutors`：兼容的执行器，例如服务端直连、Codex Worker、Claude Code Worker。
+- `preferredExecutor`：默认执行器。当 Provider 的兼容执行器同时包含多个工单分析执行器（Codex / Claude Code）时，用于确定发起工单 AI 分析时的默认执行器；留空时默认取首个兼容执行器。
+- `preferredAgentCode`：首选 Agent 编码，可选，用于分析任务默认回填对应 Agent。
+- `defaultModel`：默认模型名称。
 - `providerLevel`：Provider 等级，用于区分优先级或分层管理。
 - `baseUrl`：API 基础地址。
 - `apiKey`：密钥，服务端加密存储。
-- `extraConfig`：扩展环境变量，服务端会在 Worker 执行时一并注入。
+- `connectionConfig`：协议连接扩展配置（JSON）。
+- `workerEnv`：扩展环境变量，服务端会在 Worker 执行时一并注入。
 - `enabled`：是否启用。
 
 ## 生效方式
@@ -36,6 +41,8 @@
 - Provider 未启用时，提交任务会直接拒绝。
 - Provider 与 Agent 都为空时，不允许启用自动 AI。
 - Provider 优先级高于默认系统参数，但仍保留 Agent 兜底逻辑。
+- 工单 AI 分析只使用 `ticket_analysis_worker` 用途的 Provider，执行器可选 `codex`（Codex Worker）或 `claude_code`（Claude Code Worker）；发起分析弹窗会按 Provider 的 `supportedExecutors` 收敛可选执行器，并按 `preferredExecutor` 回填默认值。
+- Claude Code Worker 以 `claude -p` 非交互模式执行，采用只读权限模式（`plan`）与工具白名单（`Read,Grep,Glob,Bash(rg *)`）保证“只分析不改代码”。
 
 ## 变更说明
 - 该能力已经接入工单 AI 分析、消息发起 AI、日志拉取自动 AI 三条链路。

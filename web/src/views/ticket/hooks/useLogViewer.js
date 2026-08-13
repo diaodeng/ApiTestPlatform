@@ -271,8 +271,14 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         proxy.$modal.msgWarning('启用自动AI分析时，请先选择Provider或Agent');
         return;
       }
+      const envKey = String(logPullForm.value.environment || '').trim()
+      const resolvedKey = String(logPullForm.value.resolvedItemKey || '').trim()
+      if (envKey && logPullForm.value.vendorId && !resolvedKey) {
+        proxy.$modal.msgWarning('请先选择环境对应的子环境')
+        return
+      }
       const payload = {
-        environment: String(logPullForm.value.environment || '').trim() || undefined,
+        environment: envKey && resolvedKey ? `${envKey}:${resolvedKey}` : (envKey || undefined),
         vendorId: logPullForm.value.vendorId,
         storeId: logPullForm.value.storeId,
         posNo: logPullForm.value.posNo,

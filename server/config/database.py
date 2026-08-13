@@ -10,6 +10,15 @@ from sqlalchemy.pool import StaticPool
 
 from config.env import DataBaseConfig
 
+# OceanBase（MySQL 兼容模式）不支持 NULLS FIRST / NULLS LAST 语法，
+# 强制禁用 MySQL 方言编译器中的相应标志，避免生成不支持的关键字。
+try:
+    from sqlalchemy.dialects.mysql.base import MySQLCompiler
+
+    MySQLCompiler.supports_nulls_first = False
+    MySQLCompiler.supports_nulls_last = False
+except ImportError:
+    pass
 
 DATABASE_BACKEND = (DataBaseConfig.db_type or "mysql").strip().lower()
 

@@ -28,6 +28,7 @@ export function createDefaultLogPullNotifyConfig() {
 export function createDefaultLogPullForm() {
   return {
     environment: '',
+    resolvedItemKey: undefined,
     vendorId: undefined,
     storeId: undefined,
     posNo: undefined,

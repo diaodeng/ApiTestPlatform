@@ -51,6 +51,11 @@ class AiProviderCapabilityService:
         "anthropic_messages",
         "ollama_chat",
     }
+    # 工单 AI 分析场景允许的执行器，按顺序作为 Provider 候选与默认值回退顺序。
+    ANALYSIS_WORKER_EXECUTORS = ("codex", "claude_code")
+    # Claude Code Worker 在“只分析不改代码”场景下的权限模式与工具白名单。
+    CLAUDE_CODE_PERMISSION_MODE = "plan"
+    CLAUDE_CODE_ALLOWED_TOOLS = "Read,Grep,Glob,Bash(rg *)"
 
     @classmethod
     def normalize_values(cls, values: Iterable[str] | None) -> list[str]:
@@ -65,6 +70,34 @@ class AiProviderCapabilityService:
             if value and value not in normalized:
                 normalized.append(value)
         return normalized
+
+    @classmethod
+    def resolve_analysis_executor_options(cls, provider) -> list[str]:
+        """
+        返回 Provider 在工单 AI 分析场景下可选执行器列表。
+        按 ANALYSIS_WORKER_EXECUTORS 的固定顺序与 provider.supported_executors 取交集，
+        既保留约定顺序又只返回 Provider 实际支持的执行器。
+        :param provider: Provider 数据库对象
+        :return: 可选执行器列表，可能为空
+        """
+        supported = set(cls.normalize_values(getattr(provider, "supported_executors", None)))
+        return [executor for executor in cls.ANALYSIS_WORKER_EXECUTORS if executor in supported]
+
+    @classmethod
+    def resolve_preferred_executor(cls, provider) -> str | None:
+        """
+        解析 Provider 在工单 AI 分析场景下的默认执行器。
+        优先返回配置的 preferred_executor，未配置时回退到支持列表首个执行器。
+        :param provider: Provider 数据库对象
+        :return: 默认执行器编码，无可选执行器时返回 None
+        """
+        options = cls.resolve_analysis_executor_options(provider)
+        if not options:
+            return None
+        preferred = str(getattr(provider, "preferred_executor", "") or "").strip()
+        if preferred in options:
+            return preferred
+        return options[0]
 
     @classmethod
     def validate_provider_contract(

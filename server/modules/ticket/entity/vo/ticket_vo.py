@@ -501,6 +501,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
+    executor: str | None = Field(default=None, description="执行AI分析的执行器，如 codex/claude_code")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     resume: bool = Field(default=False, description="是否复用上次 AI 分析会话继续分析")
     extra_instruction: str | None = Field(default="", description="本次分析的额外说明")
@@ -527,6 +528,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         """
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        self.executor = str(self.executor or "").strip() or None
         self.log_analysis_mode = str(self.log_analysis_mode or "").strip() or None
         self.log_window_missing_strategy = str(self.log_window_missing_strategy or "").strip() or None
         self.extra_instruction = str(self.extra_instruction or "").strip()
