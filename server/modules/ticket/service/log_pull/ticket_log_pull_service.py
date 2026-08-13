@@ -1097,7 +1097,12 @@ class TicketLogPullService:
                 user_name="system",
             )
         # 每次初始化后按当前存储配置校准线程池并发数，覆盖默认值与历史配置。
-        cls.apply_executor_max_workers(cls._get_storage_config_dict(query_db).get("maxWorkers", 2))
+        # 注意：这里直接读取存储行并归一化，不能复用 _get_storage_config_dict，
+        # 否则其内部会再次调用 ensure_param_config_rows 导致无限递归。
+        storage_row = TicketLogPullDao.get_storage_config_row(query_db)
+        storage_payload = cls._json_loads(getattr(storage_row, "config_value", None), {})
+        max_workers = cls._normalize_storage_config(storage_payload).get("maxWorkers", 2)
+        cls.apply_executor_max_workers(max_workers)
         if not TicketLogPullDao.get_external_config_row(query_db):
             TicketLogPullDao.save_external_config_row(
                 query_db,
