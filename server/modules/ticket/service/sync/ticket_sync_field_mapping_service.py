@@ -2,6 +2,9 @@
 工单字段映射与人员解析服务：外部字段到内部字段的映射匹配、项目/模块/供应商/门店/状态解析、人员分配识别。
 从 TicketSyncService 中提取。
 """
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func
@@ -14,6 +17,31 @@ from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullProjectVend
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.enums.ticket_enums import TicketStatus
 from modules.ticket.util.sync_util import SyncUtil
+
+
+@dataclass(frozen=True)
+class ModuleMappingResult:
+    """
+    模块映射匹配结果，包含映射规则和最终解析信息。
+    用于同步入库时原子写入 module_id/module_code/module_name 三个字段。
+    """
+
+    mapping_matched: bool = False
+    """是否命中映射规则。"""
+    mapped_module_id: int | None = None
+    """映射规则中配置的 moduleId。"""
+    mapped_module_code: str = ""
+    """映射规则中配置的 moduleCode。"""
+    mapped_module_name: str = ""
+    """映射规则中配置的 moduleName。"""
+    resolved_module_id: int | None = None
+    """最终查到 hrm_module 表的模块 ID。"""
+    resolved_module_code: str = ""
+    """最终查到 hrm_module 表的模块 Code。"""
+    resolved_module_name: str = ""
+    """最终查到 hrm_module 表的模块名称。"""
+    matched_by: str = ""
+    """匹配方式：mapping_moduleId/mapping_moduleCode/mapping_moduleName/direct_code/direct_name。"""
 
 
 class TicketSyncFieldMappingService:
@@ -434,52 +462,160 @@ class TicketSyncFieldMappingService:
         ticket_modle: str,
         project_id: int | None,
         module_mappings: list[dict[str, Any]],
-    ) -> HrmModule | None:
+    ) -> ModuleMappingResult:
         """
-        按 ticketModle 匹配所属模块。
+        按 ticketModle 匹配所属模块，返回完整的映射匹配结果。
+
+        匹配优先级：
+        1. 在 moduleMappings 中按关键字匹配（支持 projectId 项目隔离）
+        2. 命中映射后按 moduleId → moduleCode → moduleName 查 hrm_module 表
+        3. 映射未命中时直接用 module_code / module_name 精确匹配 hrm_module 表
+
         :param db: 数据库会话
         :param ticket_modle: 外部模块字段
         :param project_id: 已匹配项目ID
         :param module_mappings: 模块映射配置
-        :return: 模块对象
+        :return: ModuleMappingResult，包含映射规则和最终解析信息
         """
         module_text = str(ticket_modle or "").strip()
         if not module_text:
-            return None
-        matched_mapping = cls.match_mapping_contains(module_text, module_mappings)
-        module_id = SyncUtil.safe_int(
+            return ModuleMappingResult()
+
+        # 第一步：在 moduleMappings 中按关键字匹配，支持 projectId 项目隔离
+        matched_mapping = cls._match_module_mapping_with_project(
+            module_text, module_mappings, project_id
+        )
+        mapping_matched = matched_mapping is not None
+
+        mapped_module_id = SyncUtil.safe_int(
             (matched_mapping or {}).get("moduleId")
             or (matched_mapping or {}).get("module_id")
         )
-        module_code = str(
+        mapped_module_code = str(
             (matched_mapping or {}).get("moduleCode")
             or (matched_mapping or {}).get("module_code")
             or ""
         ).strip()
-        module_name = str(
+        mapped_module_name = str(
             (matched_mapping or {}).get("moduleName")
             or (matched_mapping or {}).get("module_name")
             or ""
         ).strip()
+
+        # 第二步：命中映射 → 按 moduleId → moduleCode → moduleName 查 hrm_module 表
+        if mapping_matched:
+            query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
+            if project_id:
+                query = query.filter(HrmModule.project_id == project_id)
+
+            resolved = None
+            matched_by = ""
+            if mapped_module_id:
+                resolved = query.filter(HrmModule.module_id == mapped_module_id).first()
+                if resolved:
+                    matched_by = "mapping_moduleId"
+            if not resolved and mapped_module_code:
+                resolved = query.filter(
+                    func.lower(HrmModule.module_code) == mapped_module_code.lower()
+                ).first()
+                if resolved:
+                    matched_by = "mapping_moduleCode"
+            if not resolved and mapped_module_name:
+                resolved = query.filter(
+                    func.lower(HrmModule.module_name) == mapped_module_name.lower()
+                ).first()
+                if resolved:
+                    matched_by = "mapping_moduleName"
+
+            if resolved:
+                return ModuleMappingResult(
+                    mapping_matched=True,
+                    mapped_module_id=mapped_module_id,
+                    mapped_module_code=mapped_module_code,
+                    mapped_module_name=mapped_module_name,
+                    resolved_module_id=resolved.module_id,
+                    resolved_module_code=str(resolved.module_code or "").strip(),
+                    resolved_module_name=str(resolved.module_name or "").strip(),
+                    matched_by=matched_by,
+                )
+            # 映射命中但查不到记录 → 返回映射规则值，resolved_* 为空
+            return ModuleMappingResult(
+                mapping_matched=True,
+                mapped_module_id=mapped_module_id,
+                mapped_module_code=mapped_module_code,
+                mapped_module_name=mapped_module_name,
+                resolved_module_id=None,
+                resolved_module_code="",
+                resolved_module_name="",
+                matched_by="mapping_unresolved",
+            )
+
+        # 第三步：映射未命中 → 直接用 module_code / module_name 精确匹配 hrm_module 表
         query = db.query(HrmModule).filter(HrmModule.status == QtrDataStatusEnum.normal.value)
         if project_id:
             query = query.filter(HrmModule.project_id == project_id)
-        if module_id:
-            module = query.filter(HrmModule.module_id == module_id).first()
-            if module:
-                return module
-        if module_code:
-            module = query.filter(func.lower(HrmModule.module_code) == module_code.lower()).first()
-            if module:
-                return module
-        if module_name:
-            module = query.filter(func.lower(HrmModule.module_name) == module_name.lower()).first()
-            if module:
-                return module
-        module = query.filter(func.lower(HrmModule.module_code) == module_text.lower()).first()
-        if module:
-            return module
-        return query.filter(func.lower(HrmModule.module_name) == module_text.lower()).first()
+
+        resolved = query.filter(
+            func.lower(HrmModule.module_code) == module_text.lower()
+        ).first()
+        if resolved:
+            return ModuleMappingResult(
+                mapping_matched=False,
+                resolved_module_id=resolved.module_id,
+                resolved_module_code=str(resolved.module_code or "").strip(),
+                resolved_module_name=str(resolved.module_name or "").strip(),
+                matched_by="direct_code",
+            )
+
+        resolved = query.filter(
+            func.lower(HrmModule.module_name) == module_text.lower()
+        ).first()
+        if resolved:
+            return ModuleMappingResult(
+                mapping_matched=False,
+                resolved_module_id=resolved.module_id,
+                resolved_module_code=str(resolved.module_code or "").strip(),
+                resolved_module_name=str(resolved.module_name or "").strip(),
+                matched_by="direct_name",
+            )
+
+        # 完全未命中
+        return ModuleMappingResult(matched_by="unmatched")
+
+    @classmethod
+    def _match_module_mapping_with_project(
+        cls,
+        module_text: str,
+        module_mappings: list[dict[str, Any]],
+        project_id: int | None,
+    ) -> dict[str, Any] | None:
+        """
+        按关键字匹配 moduleMappings，支持 projectId 项目隔离校验。
+
+        如果映射条目设置了 projectId，则要求与上下文 project_id 匹配才命中；
+        没有设置 projectId 的条目向后兼容（不做项目校验）。
+
+        :param module_text: 外部模块文本
+        :param module_mappings: 模块映射配置列表
+        :param project_id: 上下文项目ID
+        :return: 命中的映射条目，无命中返回 None
+        """
+        target = str(module_text or "").strip()
+        if not target or not isinstance(module_mappings, list):
+            return None
+        for mapping in module_mappings:
+            if not isinstance(mapping, dict):
+                continue
+            # projectId 项目隔离校验：映射条目有 projectId 时要求匹配
+            mapping_project_id = SyncUtil.safe_int(
+                mapping.get("projectId") or mapping.get("project_id")
+            )
+            if mapping_project_id is not None and mapping_project_id != project_id:
+                continue
+            keywords = cls.mapping_keywords(mapping)
+            if any(keyword and keyword in target for keyword in keywords):
+                return mapping
+        return None
 
     @classmethod
     def resolve_status_by_external_value(

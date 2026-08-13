@@ -401,6 +401,24 @@ class TicketSyncService:
             sync_object.extra_data,
             scope_decision,
         )
+
+        # 模块映射审计写入 extra_data
+        module_result = (detected or {}).get("moduleMappingResult") if isinstance(detected, dict) else None
+        if module_result is not None:
+            if not isinstance(sync_extra_data, dict):
+                sync_extra_data = {}
+            sync_extra_data["module_mapping"] = {
+                "mappingMatched": module_result.mapping_matched,
+                "mappedModuleId": module_result.mapped_module_id,
+                "mappedModuleCode": module_result.mapped_module_code,
+                "mappedModuleName": module_result.mapped_module_name,
+                "resolvedModuleId": module_result.resolved_module_id,
+                "resolvedModuleCode": module_result.resolved_module_code,
+                "resolvedModuleName": module_result.resolved_module_name,
+                "matchedBy": module_result.matched_by,
+                "matchedAt": SyncUtil.now_iso(),
+            }
+
         sync_object = sync_object.model_copy(update={"extra_data": sync_extra_data})
         logger.info(
             f"外部工单同步自动化范围判定: ticket_no={sync_object.ticket_no}, scene={sync_scene}, "

@@ -34,7 +34,7 @@ export function useSyncConfig(proxy) {
     },
     {
       key: 'moduleMappings', label: '模块映射',
-      description: '示例：[{"keywords":["订单服务","order-service"],"moduleId":2001,"moduleName":"订单模块"}]',
+      description: '示例：[{"keywords":["订单服务","order-service"],"moduleCode":"order","moduleId":2001,"moduleName":"订单模块","projectId":1001}]',
       rows: 6,
     },
     {

@@ -18,7 +18,10 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.enums.ticket_enums import TicketStatus
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
-from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.sync.ticket_sync_field_mapping_service import (
+    ModuleMappingResult,
+    TicketSyncFieldMappingService,
+)
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import user_id as _user_id
@@ -343,51 +346,71 @@ class TicketSyncPayloadService:
         if raw_project_name and not str(payload.get("merchant_name") or "").strip():
             payload["merchant_name"] = raw_project_name
 
-        if module_id:
-            module_query = db.query(HrmModule).filter(
-                HrmModule.module_id == module_id,
-                HrmModule.status == QtrDataStatusEnum.normal.value,
+        # 模块写入：使用 detected 中的 ModuleMappingResult 原子写入三个字段
+        module_result = (detected or {}).get("moduleMappingResult") if isinstance(detected, dict) else None
+        if isinstance(module_result, ModuleMappingResult) and (
+            module_result.mapping_matched or module_result.resolved_module_id
+        ):
+            # 映射命中：优先 resolved（查到记录），其次 mapped（映射规则值）
+            if module_result.resolved_module_id is not None:
+                payload["module_id"] = module_result.resolved_module_id
+                payload["module_code"] = module_result.resolved_module_code
+                payload["module_name"] = module_result.resolved_module_name
+            elif module_result.mapping_matched:
+                payload["module_id"] = module_result.mapped_module_id
+                payload["module_code"] = module_result.mapped_module_code
+                payload["module_name"] = module_result.mapped_module_name
+        else:
+            # 映射未命中，走原有兜底逻辑
+            if module_id:
+                module_query = db.query(HrmModule).filter(
+                    HrmModule.module_id == module_id,
+                    HrmModule.status == QtrDataStatusEnum.normal.value,
+                )
+                if payload.get("project_id"):
+                    module_query = module_query.filter(HrmModule.project_id == payload.get("project_id"))
+                module = module_query.first()
+                if module:
+                    payload["module_id"] = module.module_id
+                    payload["module_code"] = str(module.module_code or "").strip()
+                    payload["module_name"] = module.module_name
+                else:
+                    module_id = None
+            module_name_fallback = (
+                str((detected or {}).get("moduleName") or "").strip()
+                or str(sync_object.module_name or "").strip()
+                or str(external_fields.get("ticketModle") or "").strip()
+                or (str(ticket.module_name or "").strip() if ticket else "")
             )
-            if payload.get("project_id"):
-                module_query = module_query.filter(HrmModule.project_id == payload.get("project_id"))
-            module = module_query.first()
-            if module:
-                payload["module_id"] = module.module_id
-                payload["module_name"] = module.module_name
-            else:
-                module_id = None
-        module_name_fallback = (
-            str((detected or {}).get("moduleName") or "").strip()
-            or str(sync_object.module_name or "").strip()
-            or str(external_fields.get("ticketModle") or "").strip()
-            or (str(ticket.module_name or "").strip() if ticket else "")
-        )
-        incoming_module_name = (
-            str((detected or {}).get("moduleName") or "").strip()
-            or str(sync_object.module_name or "").strip()
-            or str(external_fields.get("ticketModle") or "").strip()
-        )
-        incoming_module_value = TicketSyncFieldMappingService.has_incoming_module_value(sync_object, detected)
-        if is_remote_pull and not incoming_module_name:
-            incoming_module_value = False
-        if not module_id and incoming_module_value:
-            payload["module_id"] = None
-            payload["module_name"] = incoming_module_name
-        elif not module_id and ticket:
-            payload["module_id"] = ticket.module_id
-            payload["module_name"] = ticket.module_name
-        elif not module_id:
-            payload["module_name"] = (
-                sync_object.module_name
-                or str((detected or {}).get("moduleName") or "").strip()
-                or ""
+            incoming_module_name = (
+                str((detected or {}).get("moduleName") or "").strip()
+                or str(sync_object.module_name or "").strip()
+                or str(external_fields.get("ticketModle") or "").strip()
             )
-        if module_name_fallback and not str(payload.get("module_name") or "").strip():
-            payload["module_name"] = module_name_fallback
-        if module_name_fallback:
-            meta_source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
-            meta_source["moduleName"] = module_name_fallback
-            meta["source"] = meta_source
+            incoming_module_value = TicketSyncFieldMappingService.has_incoming_module_value(sync_object, detected)
+            if is_remote_pull and not incoming_module_name:
+                incoming_module_value = False
+            if not module_id and incoming_module_value:
+                payload["module_id"] = None
+                payload["module_code"] = ""
+                payload["module_name"] = incoming_module_name
+            elif not module_id and ticket:
+                payload["module_id"] = ticket.module_id
+                payload["module_code"] = str(getattr(ticket, "module_code", "") or "").strip()
+                payload["module_name"] = ticket.module_name
+            elif not module_id:
+                payload["module_code"] = ""
+                payload["module_name"] = (
+                    sync_object.module_name
+                    or str((detected or {}).get("moduleName") or "").strip()
+                    or ""
+                )
+            if not str(payload.get("module_name") or "").strip():
+                payload["module_name"] = module_name_fallback
+            if module_name_fallback:
+                meta_source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+                meta_source["moduleName"] = module_name_fallback
+                meta["source"] = meta_source
 
         payload = cls.merge_external_text_fields(payload, detected or {}, sync_object)
         if is_remote_pull and resolved_assignee_name and not resolved_assignee_id:

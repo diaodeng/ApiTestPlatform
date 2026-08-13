@@ -56,6 +56,7 @@ from modules.ticket.service.core.ticket_processing_metric_service import TicketP
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import (
     user_id as _user_id,
 )
@@ -2534,6 +2535,11 @@ class TicketService:
     def get_module_options_services(cls, query_db: Session, project_id: int | None = None) -> list[dict[str, Any]]:
         """
         获取工单可选测试模块列表。
+
+        从两个来源合并去重：
+        1. hrm_module 表中所有启用的模块
+        2. 同步配置 moduleMappings 中配置的 moduleCode（仅存在于映射中的也返回）
+
         :param query_db: 数据库会话
         :param project_id: 目标项目ID；为空时返回全部有效模块
         :return: 模块选项列表
@@ -2549,16 +2555,42 @@ class TicketService:
                 continue
             seen_module_ids.add(module.module_id)
             unique_modules.append(module)
-        return [
-            {
+
+        # 从 hrm_module 表构建结果
+        seen_codes: set[str] = set()
+        result = []
+        for module in unique_modules:
+            code = str(module.module_code or "").strip()
+            if code:
+                seen_codes.add(code)
+            result.append({
                 "moduleId": module.module_id,
                 "moduleName": module.module_name,
-                "moduleCode": str(module.module_code or "").strip(),
+                "moduleCode": code,
                 "projectId": module.project_id,
                 "label": module.module_name,
-            }
-            for module in unique_modules
-        ]
+            })
+
+        # 从同步配置 moduleMappings 中提取额外的 moduleCode
+        try:
+            config = TicketSyncConfigService.load_sync_config(query_db)
+            for mapping in config.get("moduleMappings") or []:
+                if not isinstance(mapping, dict):
+                    continue
+                code = str(mapping.get("moduleCode") or mapping.get("module_code") or "").strip()
+                if code and code not in seen_codes:
+                    seen_codes.add(code)
+                    result.append({
+                        "moduleId": None,
+                        "moduleName": code,
+                        "moduleCode": code,
+                        "projectId": SyncUtil.safe_int(mapping.get("projectId") or mapping.get("project_id")),
+                        "label": code,
+                    })
+        except Exception:
+            pass
+
+        return result
 
     @classmethod
     def create_knowledge(
