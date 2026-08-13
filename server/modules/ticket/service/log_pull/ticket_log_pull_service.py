@@ -91,6 +91,7 @@ class TicketLogPullService:
     }
     TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
     _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ticket-log-pull")
+    _executor_max_workers = 2
     _executor_lock = threading.Lock()
     _active_record_ids: set[int] = set()
     VERSION_PATTERN = re.compile(
@@ -354,6 +355,7 @@ class TicketLogPullService:
                 "encoding": "utf-8",
             },
             "effectiveLocalDirectory": str(cls.DEFAULT_LOCAL_DIR.resolve()),
+            "maxWorkers": 2,
             "pollIntervalSec": 20,
             "pollTimeoutSec": 1800,
             "downloadTimeoutSec": 300,
@@ -430,6 +432,9 @@ class TicketLogPullService:
             "mode": mode,
             "ftp": {**defaults["ftp"], **ftp_config},
         }
+        normalized["maxWorkers"] = min(
+            max(cls._parse_positive_int(normalized.get("maxWorkers"), 2), 1), 20
+        )
         normalized["pollIntervalSec"] = max(cls._parse_positive_int(normalized.get("pollIntervalSec"), 20), 3)
         normalized["pollTimeoutSec"] = max(cls._parse_positive_int(normalized.get("pollTimeoutSec"), 1800), 60)
         normalized["downloadTimeoutSec"] = max(cls._parse_positive_int(normalized.get("downloadTimeoutSec"), 300), 30)
@@ -1091,6 +1096,8 @@ class TicketLogPullService:
                 config_value=cls._json_dumps(payload),
                 user_name="system",
             )
+        # 每次初始化后按当前存储配置校准线程池并发数，覆盖默认值与历史配置。
+        cls.apply_executor_max_workers(cls._get_storage_config_dict(query_db).get("maxWorkers", 2))
         if not TicketLogPullDao.get_external_config_row(query_db):
             TicketLogPullDao.save_external_config_row(
                 query_db,
@@ -1191,6 +1198,8 @@ class TicketLogPullService:
                 user_name=cls._user_name(current_user),
             )
             query_db.commit()
+            # 并发数属于运行态资源，保存后立即按最新配置调整线程池。
+            cls.apply_executor_max_workers(payload.get("maxWorkers", 2))
             return CrudResponseModel(is_success=True, message="日志拉取存储配置已保存")
         except Exception:
             query_db.rollback()
@@ -2219,7 +2228,34 @@ class TicketLogPullService:
             if record_id in cls._active_record_ids:
                 return
             cls._active_record_ids.add(record_id)
-        cls._executor.submit(cls._run_record, record_id)
+            executor = cls._executor
+        executor.submit(cls._run_record, record_id)
+
+    @classmethod
+    def apply_executor_max_workers(cls, max_workers: int) -> bool:
+        """
+        按配置动态调整日志拉取线程池并发数。
+        ThreadPoolExecutor 创建后无法修改 max_workers，因此并发数变化时重建线程池；
+        已在运行的任务由旧线程池继续执行完毕，新任务投递到新线程池，二者共享 _active_record_ids 去重。
+        :param max_workers: 新的最大并发数
+        :return: 是否发生了线程池重建
+        """
+        normalized = min(max(cls._parse_positive_int(max_workers, 2), 1), 20)
+        with cls._executor_lock:
+            if normalized == cls._executor_max_workers:
+                return False
+            old_executor = cls._executor
+            cls._executor = ThreadPoolExecutor(
+                max_workers=normalized, thread_name_prefix="ticket-log-pull"
+            )
+            cls._executor_max_workers = normalized
+        # 旧线程池不再接收新任务，触发其在线程空闲时自动回收资源。
+        old_executor.shutdown(wait=False, cancel_futures=False)
+        logger.info(
+            f"日志拉取线程池并发数已调整: {cls._executor_max_workers} "
+            f"(旧线程池已停止接收新任务，运行中任务继续执行)"
+        )
+        return True
 
     @classmethod
     def resume_pending_records(cls) -> None:

@@ -179,7 +179,6 @@ class TicketSyncConfigService:
                 "autoAiEnabled": False,
                 "aiAgentCode": "",
                 "aiProviderCode": "",
-                "logPullConcurrency": 2,
             },
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
@@ -1299,6 +1298,8 @@ class TicketSyncConfigService:
         merged["externalFieldModel"] = cls.normalize_external_field_model_config(merged.get("externalFieldModel"))
         if not isinstance(merged.get("logPullDefaults"), dict):
             merged["logPullDefaults"] = cls.default_sync_config()["logPullDefaults"]
+        # 最大并发数已迁移到日志拉取存储配置（maxWorkers），这里剔除历史遗留字段，避免两处配置不一致。
+        merged["logPullDefaults"].pop("logPullConcurrency", None)
         if not isinstance(merged.get("promptTemplates"), dict):
             merged["promptTemplates"] = cls.default_sync_config()["promptTemplates"]
         merged["statClassification"] = cls.normalize_stat_classification_config(merged.get("statClassification"))

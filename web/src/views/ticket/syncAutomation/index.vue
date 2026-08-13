@@ -50,51 +50,6 @@
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
-                <span>日志拉取后处理</span>
-                <el-tag type="warning" effect="plain">下载完成后</el-tag>
-              </div>
-            </template>
-            <el-form :model="form.logPullPostProcess" label-width="170px">
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="8">
-                  <el-form-item label="下载完成后解压">
-                    <el-switch
-                      v-model="form.logPullPostProcess.postDownloadExtractEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="8">
-                  <el-form-item label="下载完成后提取版本">
-                    <el-switch
-                      v-model="form.logPullPostProcess.postDownloadVersionExtractEnabled"
-                      :disabled="!form.logPullPostProcess.postDownloadExtractEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="8">
-                  <el-form-item label="下载完成后生成索引">
-                    <el-switch
-                      v-model="form.logPullPostProcess.postDownloadIndexEnabled"
-                      :disabled="!form.logPullPostProcess.postDownloadExtractEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
-          </el-card>
-
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
                 <span>多维表格公共配置</span>
                 <el-tag type="info" effect="plain">公共覆盖基座</el-tag>
               </div>
@@ -607,139 +562,6 @@
                       :rows="6"
                       placeholder="可用变量：${person_name} ${overdue_count} ${threshold_minutes} ${rows_markdown} ${now_time} ${email}"
                     />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
-          </el-card>
-
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>拉日志默认值</span>
-                <el-tag type="info" effect="plain">拉取配置</el-tag>
-              </div>
-            </template>
-
-            <el-form ref="pullFormRef" :model="form.logPullDefaults" label-width="150px">
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="命令类型">
-                    <el-input-number
-                      v-model="form.logPullDefaults.commandDataType"
-                      :min="1"
-                      :max="10"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="最大并发数">
-                    <el-input-number
-                      v-model="form.logPullDefaults.logPullConcurrency"
-                      :min="1"
-                      :max="20"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="文件上限(MB)">
-                    <el-input-number
-                      v-model="form.logPullDefaults.fileMaxSize"
-                      :min="1"
-                      :max="2000"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="压缩包上限(MB)">
-                    <el-input-number
-                      v-model="form.logPullDefaults.zipMaxSize"
-                      :min="1"
-                      :max="2000"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="存储方式">
-                    <el-select
-                      v-model="form.logPullDefaults.storageMode"
-                      placeholder="请选择"
-                      style="width: 100%"
-                    >
-                      <el-option label="本地" value="local" />
-                      <el-option label="FTP" value="ftp" />
-                      <el-option label="对象存储" value="oss" />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="前置分钟数">
-                    <el-input-number
-                      v-model="form.logPullDefaults.rangeBeforeMinutes"
-                      :min="0"
-                      :max="120"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="后置分钟数">
-                    <el-input-number
-                      v-model="form.logPullDefaults.rangeAfterMinutes"
-                      :min="0"
-                      :max="120"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="自动 AI 分析">
-                    <el-switch
-                      v-model="form.logPullDefaults.autoAiEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="Agent 编码">
-                    <el-select
-                      v-model="form.logPullDefaults.aiAgentCode"
-                      placeholder="留空则走默认 Agent"
-                      filterable
-                      clearable
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in agentOptions"
-                        :key="item.agentCode"
-                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
-                        :value="item.agentCode"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-form-item label="Provider 编码">
-                    <el-select
-                      v-model="form.logPullDefaults.aiProviderCode"
-                      placeholder="留空则走默认 Provider"
-                      filterable
-                      clearable
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in analysisProviderOptions"
-                        :key="item.providerCode"
-                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? '- ' + item.defaultModel : ''}`"
-                        :value="item.providerCode"
-                      />
-                    </el-select>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -2832,7 +2654,313 @@
             />
           </el-card>
         </el-tab-pane>
-        <el-tab-pane label="外部接口">
+        <el-tab-pane label="日志拉取配置">
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>拉日志默认值</span>
+                <el-tag type="info" effect="plain">提交参数默认值</el-tag>
+              </div>
+            </template>
+            <el-form :model="form.logPullDefaults" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="命令类型">
+                    <el-input-number
+                      v-model="form.logPullDefaults.commandDataType"
+                      :min="1"
+                      :max="10"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="文件上限(MB)">
+                    <el-input-number
+                      v-model="form.logPullDefaults.fileMaxSize"
+                      :min="1"
+                      :max="2000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="压缩包上限(MB)">
+                    <el-input-number
+                      v-model="form.logPullDefaults.zipMaxSize"
+                      :min="1"
+                      :max="2000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="存储方式">
+                    <el-select
+                      v-model="form.logPullDefaults.storageMode"
+                      placeholder="请选择"
+                      style="width: 100%"
+                    >
+                      <el-option label="本地" value="local" />
+                      <el-option label="FTP" value="ftp" />
+                      <el-option label="对象存储" value="oss" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="前置分钟数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.rangeBeforeMinutes"
+                      :min="0"
+                      :max="120"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="后置分钟数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.rangeAfterMinutes"
+                      :min="0"
+                      :max="120"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="自动 AI 分析">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoAiEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Agent 编码">
+                    <el-select
+                      v-model="form.logPullDefaults.aiAgentCode"
+                      placeholder="留空则走默认 Agent"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in agentOptions"
+                        :key="item.agentCode"
+                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                        :value="item.agentCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="Provider 编码">
+                    <el-select
+                      v-model="form.logPullDefaults.aiProviderCode"
+                      placeholder="留空则走默认 Provider"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in analysisProviderOptions"
+                        :key="item.providerCode"
+                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? '- ' + item.defaultModel : ''}`"
+                        :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>存储与资源限制</span>
+                <el-tag type="warning" effect="plain">运行态护栏</el-tag>
+              </div>
+            </template>
+            <el-form :model="logPullStorage" label-width="170px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="最大并发数">
+                    <el-input-number
+                      v-model="logPullStorage.maxWorkers"
+                      :min="1"
+                      :max="20"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="轮询间隔(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.pollIntervalSec"
+                      :min="3"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="轮询超时(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.pollTimeoutSec"
+                      :min="60"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="下载超时(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.downloadTimeoutSec"
+                      :min="30"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="入库字符上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxContentChars"
+                      :min="10000"
+                      :step="10000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="解压时限(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.maxExtractSeconds"
+                      :min="30"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="解压文件数上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxExtractFileCount"
+                      :min="100"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="解压总字节上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxExtractTotalBytes"
+                      :min="10485760"
+                      :step="10485760"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索时限(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchSeconds"
+                      :min="3"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索文件数上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchFileCount"
+                      :min="10"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="降级搜索字节上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxPythonSearchBytes"
+                      :min="10485760"
+                      :step="10485760"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="存储方式">
+                    <el-select
+                      v-model="logPullStorage.mode"
+                      placeholder="请选择"
+                      style="width: 100%"
+                    >
+                      <el-option label="本地" value="local" />
+                      <el-option label="FTP" value="ftp" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12" v-if="logPullStorage.mode === 'local'">
+                  <el-form-item label="本地保存目录">
+                    <el-input v-model="logPullStorage.localDirectory" placeholder="留空则使用默认目录" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24" v-if="logPullStorage.mode === 'ftp'">
+                  <el-form-item label="FTP 配置">
+                    <div class="ftp-config-grid">
+                      <el-input v-model="logPullStorage.ftp.host" placeholder="主机" class="ftp-item" />
+                      <el-input-number v-model="logPullStorage.ftp.port" :min="1" placeholder="端口" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.username" placeholder="用户名" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.password" type="password" show-password placeholder="密码" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.baseDir" placeholder="基础目录" class="ftp-item" />
+                      <el-input-number v-model="logPullStorage.ftp.timeoutSec" :min="1" placeholder="超时秒数" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.encoding" placeholder="编码" class="ftp-item" />
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-divider content-position="left">下载完成后处理</el-divider>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后解压">
+                    <el-switch
+                      v-model="logPullStorage.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后提取版本">
+                    <el-switch
+                      v-model="logPullStorage.postDownloadVersionExtractEnabled"
+                      :disabled="!logPullStorage.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后生成索引">
+                    <el-switch
+                      v-model="logPullStorage.postDownloadIndexEnabled"
+                      :disabled="!logPullStorage.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+            <div class="mt16">
+              <el-button type="success" :loading="logPullStorageSaving" @click="logPullStorageHandleSave">保存存储与资源限制</el-button>
+            </div>
+          </el-card>
+
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
@@ -3020,6 +3148,7 @@
   import { all as listAllAgents } from '@/api/hrm/agent';
   import { useSyncConfig } from './hooks/useSyncConfig';
   import { useLogPullExternalConfig } from './hooks/useLogPullExternalConfig';
+  import { useLogPullStorageConfig } from './hooks/useLogPullStorageConfig';
 
   const { proxy } = getCurrentInstance();
 
@@ -3083,6 +3212,15 @@
     handleSave: logPullExternalHandleSave,
     getItemKeysForGroup: logPullExternalGetItemKeysForGroup,
   } = useLogPullExternalConfig(proxy);
+
+  // 日志拉取存储与资源限制配置管理
+  const {
+    loading: logPullStorageLoading,
+    saving: logPullStorageSaving,
+    storage: logPullStorage,
+    loadConfig: logPullStorageLoadConfig,
+    handleSave: logPullStorageHandleSave,
+  } = useLogPullStorageConfig(proxy);
 
   /**
    * 更新分组的 defaultItem。
@@ -3610,6 +3748,7 @@
     loadWorkflowStatuses();
     handleLoadAutoCategoryStats();
     logPullExternalLoadConfig();
+    logPullStorageLoadConfig();
   });
 </script>
 
@@ -3896,5 +4035,12 @@
   .env-default-item :deep(.el-form-item__label) {
     font-weight: normal;
     color: var(--el-text-color-regular);
+  }
+
+  .ftp-config-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    width: 100%;
   }
 </style>

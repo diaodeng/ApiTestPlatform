@@ -62,18 +62,50 @@
 
 ## 配置项
 
-| 配置位置 | 配置项 | 说明 | 默认值 |
-|----------|--------|------|--------|
-| 日志拉取 → 存储配置 | pollIntervalSec | 轮询探测间隔秒数 | 20 |
-| 日志拉取 → 存储配置 | pollTimeoutSec | 轮询超时秒数（超过则标记失败） | 1800 |
-| 工单同步配置 → 拉日志默认值 | commandDataType | 默认数据类型（1=日志, 2=DB） | 1 |
-| 工单同步配置 → 拉日志默认值 | fileMaxSize | 单文件最大大小(MB) | 500 |
-| 工单同步配置 → 拉日志默认值 | storageMode | 默认存储方式(local/ftp) | local |
-| 工单同步配置 → 外部接口 Tab | 环境分组配置 | 多环境+子环境+商家映射+凭证绑定 | - |
+日志拉取相关配置统一收纳在 **工单同步自动化 → 日志拉取配置** Tab 下，按作用域分为三组卡片：**拉日志默认值**、**存储与资源限制**、**日志拉取外部接口配置**。
+
+### 拉日志默认值（提交参数默认值）
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| commandDataType | 默认数据类型（1=日志, 2=DB） | 1 |
+| fileMaxSize | 单文件最大大小(MB) | 500 |
+| zipMaxSize | 压缩包最大大小(MB) | 500 |
+| storageMode | 默认存储方式(local/ftp) | local |
+| rangeBeforeMinutes | 时间点前回溯分钟数 | 10 |
+| rangeAfterMinutes | 时间点后延伸分钟数 | 10 |
+| autoAiEnabled | 拉取成功后是否自动发起 AI 分析 | 关 |
+| aiAgentCode / aiProviderCode | 自动 AI 分析使用的 Agent/Provider | 空 |
+
+### 存储与资源限制（运行态护栏）
+
+| 配置项 | 说明 | 默认值 | 范围 |
+|--------|------|--------|------|
+| maxWorkers | 日志拉取线程池最大并发数，保存后即时生效 | 2 | 1~20 |
+| pollIntervalSec | 轮询探测间隔秒数 | 20 | ≥3 |
+| pollTimeoutSec | 轮询超时秒数（超过则标记失败） | 1800 | ≥60 |
+| downloadTimeoutSec | 单次 HTTP 下载超时秒数 | 300 | ≥30 |
+| maxContentChars | 入库文本最大字符数，超出则失败 | 500000 | ≥10000 |
+| maxExtractSeconds | 解压阶段最大耗时秒数 | 300 | ≥30 |
+| maxExtractFileCount | 解压阶段最大文件数 | 2000 | ≥100 |
+| maxExtractTotalBytes | 解压阶段最大总字节数 | 2147483648 | ≥10MB |
+| maxSearchSeconds | 日志关键字搜索最大耗时秒数 | 30 | ≥3 |
+| maxSearchFileCount | 日志搜索最大扫描文件数 | 1000 | ≥10 |
+| maxPythonSearchBytes | Python 降级搜索最大扫描字节数 | 268435456 | ≥10MB |
+| mode / localDirectory / ftp | 归档存储方式与目录/FTP 连接 | local | - |
+| postDownloadExtractEnabled | 下载完成后自动解压到查看目录 | 关 | - |
+| postDownloadVersionExtractEnabled | 解压后自动提取版本号 | 关 | - |
+| postDownloadIndexEnabled | 解压后自动生成日志行索引 | 关 | - |
 
 ### 外部接口配置（环境分组）
 
-日志拉取的外部接口配置采用**环境分组 → 子环境 → 商家映射**三层模型，入口位于 **工单同步自动化 → 外部接口** Tab。
+| 配置位置 | 配置项 | 说明 |
+|----------|--------|------|
+| 日志拉取配置 → 外部接口 | 环境分组配置 | 多环境+子环境+商家映射+凭证绑定 |
+
+### 外部接口配置（环境分组）
+
+日志拉取的外部接口配置采用**环境分组 → 子环境 → 商家映射**三层模型，入口位于 **工单同步自动化 → 日志拉取配置** Tab 的「日志拉取外部接口配置」卡片。
 
 **配置项说明：**
 

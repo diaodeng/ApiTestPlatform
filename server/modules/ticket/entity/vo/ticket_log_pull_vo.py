@@ -44,6 +44,7 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
         default_factory=TicketLogPullStorageFtpConfigModel, description="FTP配置"
     )
     effective_local_directory: str | None = Field(default=None, description="生效的本地保存目录")
+    max_workers: int = Field(default=2, description="日志拉取线程池最大并发数，范围1-20")
     poll_interval_sec: int = Field(default=20, description="轮询外部接口间隔秒数")
     poll_timeout_sec: int = Field(default=1800, description="日志拉取轮询超时时间，单位秒")
     download_timeout_sec: int = Field(default=300, description="压缩包下载超时时间，单位秒")
