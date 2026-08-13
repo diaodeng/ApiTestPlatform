@@ -453,12 +453,11 @@ function syncStoreSelection() {
 }
 
 function handleEnvironmentChange(value) {
-  model.value.environment = value
-  // 切换环境后重置匹配状态
+  // 确保 environment 始终为字符串，避免 element-plus 回传对象导致 [object Object]
+  model.value.environment = typeof value === 'object' ? String(value?.key || '') : String(value || '')
   envResolveMatchItems.value = []
   selectedEnvItemKey.value = ''
   model.value.resolvedItemKey = undefined
-  // 如果有商家，重新匹配
   if (model.value.vendorId) {
     resolveEnvItemForVendor()
   }
