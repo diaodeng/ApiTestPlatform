@@ -4,7 +4,11 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（4 天，11 项变更）
+## 2026-08 月（5 天，12 项变更）
+
+### 工单模块映射修复脚本
+- 新增一次性数据修复脚本 `server/scripts/sync_ticket_module_mapping.py`：按「工单同步配置」的 `moduleMappings` 将 `ticket.module_name`（现有模块名）与模块映射配置匹配，解析出正确模块后更新 `ticket.module_id`/`module_code`，不改 `module_name`。
+- 工单有 `project_id` 时按 `(project_id + module_code)` 等组合在 `hrm_module` 内解析避免跨项目同 code 串模块；无项目时按全局唯一条件解析。脚本先预览确认后再执行，支持 `limit` 参数小范围验证。
 
 ### 日志拉取配置合并与并发数生效
 - 「工单同步配置 → 外部接口」Tab 更名为「日志拉取配置」，统一收纳日志拉取三类配置：拉日志默认值、存储与资源限制、外部接口环境分组。
