@@ -2,6 +2,7 @@
 工单字段映射与人员解析服务：外部字段到内部字段的映射匹配、项目/模块/供应商/门店/状态解析、人员分配识别。
 从 TicketSyncService 中提取。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -89,11 +90,7 @@ class TicketSyncFieldMappingService:
             or ""
         ).strip()
         # AI提取的门店作为兜底，优先级：raw_payload > mapping_payload > AI提取
-        ai_extract_payload = (
-            extra_data.get("_ai_extract")
-            if isinstance(extra_data.get("_ai_extract"), dict)
-            else {}
-        )
+        ai_extract_payload = extra_data.get("_ai_extract") if isinstance(extra_data.get("_ai_extract"), dict) else {}
         ai_store = str(ai_extract_payload.get("store") or "").strip() if isinstance(ai_extract_payload, dict) else ""
         ticket_store = str(
             SyncUtil.payload_field_value(
@@ -375,7 +372,7 @@ class TicketSyncFieldMappingService:
             if not isinstance(mapping, dict):
                 continue
             keywords = cls.mapping_keywords(mapping)
-            if any(keyword and keyword in target for keyword in keywords):
+            if target in keywords:
                 return mapping
         return None
 
@@ -400,20 +397,10 @@ class TicketSyncFieldMappingService:
         matched_mapping = cls.match_mapping_contains(vendor_text, project_mappings)
         if isinstance(matched_mapping, dict):
             project_id = SyncUtil.safe_int(
-                matched_mapping.get("projectId")
-                or matched_mapping.get("project_id")
-                or matched_mapping.get("id")
+                matched_mapping.get("projectId") or matched_mapping.get("project_id") or matched_mapping.get("id")
             )
-            project_code = str(
-                matched_mapping.get("projectCode")
-                or matched_mapping.get("project_code")
-                or ""
-            ).strip()
-            project_name = str(
-                matched_mapping.get("projectName")
-                or matched_mapping.get("project_name")
-                or ""
-            ).strip()
+            project_code = str(matched_mapping.get("projectCode") or matched_mapping.get("project_code") or "").strip()
+            project_name = str(matched_mapping.get("projectName") or matched_mapping.get("project_name") or "").strip()
             query = db.query(HrmProject).filter(
                 HrmProject.status == QtrDataStatusEnum.normal.value,
                 HrmProject.del_flag == "0",
@@ -482,24 +469,17 @@ class TicketSyncFieldMappingService:
             return ModuleMappingResult()
 
         # 第一步：在 moduleMappings 中按关键字匹配，支持 projectId 项目隔离
-        matched_mapping = cls._match_module_mapping_with_project(
-            module_text, module_mappings, project_id
-        )
+        matched_mapping = cls._match_module_mapping_with_project(module_text, module_mappings, project_id)
         mapping_matched = matched_mapping is not None
 
         mapped_module_id = SyncUtil.safe_int(
-            (matched_mapping or {}).get("moduleId")
-            or (matched_mapping or {}).get("module_id")
+            (matched_mapping or {}).get("moduleId") or (matched_mapping or {}).get("module_id")
         )
         mapped_module_code = str(
-            (matched_mapping or {}).get("moduleCode")
-            or (matched_mapping or {}).get("module_code")
-            or ""
+            (matched_mapping or {}).get("moduleCode") or (matched_mapping or {}).get("module_code") or ""
         ).strip()
         mapped_module_name = str(
-            (matched_mapping or {}).get("moduleName")
-            or (matched_mapping or {}).get("module_name")
-            or ""
+            (matched_mapping or {}).get("moduleName") or (matched_mapping or {}).get("module_name") or ""
         ).strip()
 
         # 第二步：命中映射 → 按 moduleId → moduleCode → moduleName 查 hrm_module 表
@@ -515,15 +495,11 @@ class TicketSyncFieldMappingService:
                 if resolved:
                     matched_by = "mapping_moduleId"
             if not resolved and mapped_module_code:
-                resolved = query.filter(
-                    func.lower(HrmModule.module_code) == mapped_module_code.lower()
-                ).first()
+                resolved = query.filter(func.lower(HrmModule.module_code) == mapped_module_code.lower()).first()
                 if resolved:
                     matched_by = "mapping_moduleCode"
             if not resolved and mapped_module_name:
-                resolved = query.filter(
-                    func.lower(HrmModule.module_name) == mapped_module_name.lower()
-                ).first()
+                resolved = query.filter(func.lower(HrmModule.module_name) == mapped_module_name.lower()).first()
                 if resolved:
                     matched_by = "mapping_moduleName"
 
@@ -555,9 +531,7 @@ class TicketSyncFieldMappingService:
         if project_id:
             query = query.filter(HrmModule.project_id == project_id)
 
-        resolved = query.filter(
-            func.lower(HrmModule.module_code) == module_text.lower()
-        ).first()
+        resolved = query.filter(func.lower(HrmModule.module_code) == module_text.lower()).first()
         if resolved:
             return ModuleMappingResult(
                 mapping_matched=False,
@@ -567,9 +541,7 @@ class TicketSyncFieldMappingService:
                 matched_by="direct_code",
             )
 
-        resolved = query.filter(
-            func.lower(HrmModule.module_name) == module_text.lower()
-        ).first()
+        resolved = query.filter(func.lower(HrmModule.module_name) == module_text.lower()).first()
         if resolved:
             return ModuleMappingResult(
                 mapping_matched=False,
@@ -607,13 +579,11 @@ class TicketSyncFieldMappingService:
             if not isinstance(mapping, dict):
                 continue
             # projectId 项目隔离校验：映射条目有 projectId 时要求匹配
-            mapping_project_id = SyncUtil.safe_int(
-                mapping.get("projectId") or mapping.get("project_id")
-            )
+            mapping_project_id = SyncUtil.safe_int(mapping.get("projectId") or mapping.get("project_id"))
             if mapping_project_id is not None and mapping_project_id != project_id:
                 continue
             keywords = cls.mapping_keywords(mapping)
-            if any(keyword and keyword in target for keyword in keywords):
+            if target in keywords:
                 return mapping
         return None
 
@@ -679,9 +649,7 @@ class TicketSyncFieldMappingService:
         matched_mapping = cls.match_mapping_contains(vendor_text, vendor_mappings)
         if isinstance(matched_mapping, dict):
             vendor_id = SyncUtil.safe_int(
-                matched_mapping.get("vendorId")
-                or matched_mapping.get("vendor_id")
-                or matched_mapping.get("id")
+                matched_mapping.get("vendorId") or matched_mapping.get("vendor_id") or matched_mapping.get("id")
             )
             vendor_name = str(matched_mapping.get("vendorName") or matched_mapping.get("vendor_name") or "").strip()
             if vendor_id:
