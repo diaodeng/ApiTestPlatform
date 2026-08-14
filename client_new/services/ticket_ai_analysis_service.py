@@ -703,7 +703,9 @@ class TicketAiAnalysisService:
         if schema_flag and schema_file:
             if provider_type == "claude" and schema_file.exists():
                 schema_text = schema_file.read_text(encoding="utf-8").strip()
-                command.extend([str(schema_flag), schema_text])
+                # 压缩为单行 JSON，避免多行文本通过 cmd /c 传递时被 shell 截断
+                minified = json.dumps(json.loads(schema_text), ensure_ascii=False)
+                command.extend([str(schema_flag), minified])
             else:
                 command.extend([str(schema_flag), str(schema_file)])
 

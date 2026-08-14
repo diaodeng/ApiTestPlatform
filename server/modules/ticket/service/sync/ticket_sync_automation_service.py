@@ -24,7 +24,10 @@ from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysi
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
-from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
+from modules.ticket.service.sync.ticket_sync_field_mapping_service import (
+    ModuleMappingResult,
+    TicketSyncFieldMappingService,
+)
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
@@ -174,37 +177,76 @@ class TicketSyncAutomationService:
                 .first()
             )
 
-        module = None
+        # 模块解析：使用 ModuleMappingResult 统一处理映射和查表
+        module_result = None  # type: ModuleMappingResult | None
         if apply_external_mappings:
-            module = TicketSyncFieldMappingService.resolve_module_by_ticket_modle(
+            module_result = TicketSyncFieldMappingService.resolve_module_by_ticket_modle(
                 db,
                 ticket_modle=ticket_modle,
                 project_id=getattr(project, "project_id", None),
                 module_mappings=config.get("moduleMappings") or [],
             )
-        if not module and str(sync_object.module_code or "").strip():
-            module_query = db.query(HrmModule).filter(
-                func.lower(HrmModule.module_code) == str(sync_object.module_code).strip().lower(),
-                HrmModule.status == QtrDataStatusEnum.normal.value,
-            )
-            if getattr(project, "project_id", None):
-                module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
-            module = module_query.first()
-        if not module and apply_external_mappings and str(sync_object.module_name or "").strip():
-            module = TicketSyncFieldMappingService.resolve_module_by_ticket_modle(
-                db,
-                ticket_modle=str(sync_object.module_name or "").strip(),
-                project_id=getattr(project, "project_id", None),
-                module_mappings=config.get("moduleMappings") or [],
-            )
-        if apply_external_mappings and not module and sync_object.module_id:
-            module_query = db.query(HrmModule).filter(
-                HrmModule.module_id == sync_object.module_id,
-                HrmModule.status == QtrDataStatusEnum.normal.value,
-            )
-            if getattr(project, "project_id", None):
-                module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
-            module = module_query.first()
+        # 映射未命中或未查到记录时，尝试直接用 module_code 查表
+        if not module_result or (not module_result.mapping_matched and not module_result.resolved_module_id):
+            if str(sync_object.module_code or "").strip():
+                module_query = db.query(HrmModule).filter(
+                    func.lower(HrmModule.module_code) == str(sync_object.module_code).strip().lower(),
+                    HrmModule.status == QtrDataStatusEnum.normal.value,
+                )
+                if getattr(project, "project_id", None):
+                    module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
+                resolved = module_query.first()
+                if resolved:
+                    module_result = ModuleMappingResult(
+                        resolved_module_id=resolved.module_id,
+                        resolved_module_code=str(resolved.module_code or "").strip(),
+                        resolved_module_name=str(resolved.module_name or "").strip(),
+                        matched_by="direct_code",
+                    )
+        # 仍未命中，尝试用 module_name 走映射
+        if not module_result or (not module_result.mapping_matched and not module_result.resolved_module_id):
+            if apply_external_mappings and str(sync_object.module_name or "").strip():
+                module_result = TicketSyncFieldMappingService.resolve_module_by_ticket_modle(
+                    db,
+                    ticket_modle=str(sync_object.module_name or "").strip(),
+                    project_id=getattr(project, "project_id", None),
+                    module_mappings=config.get("moduleMappings") or [],
+                )
+        # 仍未命中，尝试用 module_id 直接查表
+        if not module_result or (not module_result.mapping_matched and not module_result.resolved_module_id):
+            if apply_external_mappings and sync_object.module_id:
+                module_query = db.query(HrmModule).filter(
+                    HrmModule.module_id == sync_object.module_id,
+                    HrmModule.status == QtrDataStatusEnum.normal.value,
+                )
+                if getattr(project, "project_id", None):
+                    module_query = module_query.filter(HrmModule.project_id == getattr(project, "project_id", None))
+                resolved = module_query.first()
+                if resolved:
+                    module_result = ModuleMappingResult(
+                        resolved_module_id=resolved.module_id,
+                        resolved_module_code=str(resolved.module_code or "").strip(),
+                        resolved_module_name=str(resolved.module_name or "").strip(),
+                        matched_by="direct_id",
+                    )
+
+        # 从 ModuleMappingResult 提取最终模块字段值
+        # 优先级：resolved（查到记录）> mapped（映射规则）> 空
+        module_id_val = (
+            module_result.resolved_module_id
+            if module_result and module_result.resolved_module_id is not None
+            else (module_result.mapped_module_id if module_result and module_result.mapping_matched else None)
+        )
+        module_code_val = (
+            module_result.resolved_module_code
+            if module_result and module_result.resolved_module_code
+            else (module_result.mapped_module_code if module_result else "")
+        )
+        module_name_val = (
+            module_result.resolved_module_name
+            if module_result and module_result.resolved_module_name
+            else (module_result.mapped_module_name if module_result else "")
+        )
 
         if apply_external_mappings:
             vendor_id, vendor_name = TicketSyncFieldMappingService.resolve_vendor_by_ticket_vender(
@@ -359,15 +401,11 @@ class TicketSyncAutomationService:
                 or ""
             ),
             "projectCode": getattr(project, "project_code", "") or sync_object.project_code or "",
-            "moduleId": getattr(module, "module_id", None)
-            or (sync_object.module_id if apply_external_mappings else None),
-            "moduleName": (
-                getattr(module, "module_name", "")
-                or sync_object.module_name
-                or (ticket_modle if apply_external_mappings else "")
-                or ""
-            ),
-            "moduleCode": getattr(module, "module_code", "") or sync_object.module_code or "",
+            "moduleId": module_id_val,
+            "moduleName": module_name_val or sync_object.module_name
+            or (ticket_modle if apply_external_mappings else "") or "",
+            "moduleCode": module_code_val or sync_object.module_code or "",
+            "moduleMappingResult": module_result,  # 附加完整的映射匹配结果，供后续审计写入
             "vendorId": vendor_id,
             "vendorName": vendor_name,
             "storeId": store_id,
@@ -495,17 +533,33 @@ class TicketSyncAutomationService:
             cls.mark_automation_step(meta, step="identify", status="success", detail=detected)
             update_data: dict[str, Any] = {}
             detected_project_id = SyncUtil.safe_int(detected.get("projectId"))
-            detected_module_id = SyncUtil.safe_int(detected.get("moduleId"))
             detected_project_name = str(detected.get("projectName") or "").strip()
-            detected_module_name = str(detected.get("moduleName") or "").strip()
 
             if detected_project_id and detected_project_id != ticket.project_id:
                 update_data["project_id"] = detected_project_id
             if detected_project_name and detected_project_name != str(ticket.merchant_name or "").strip():
                 update_data["merchant_name"] = detected_project_name
-            if detected_module_id and detected_module_id != ticket.module_id:
+
+            # 模块字段原子更新：module_id/module_code/module_name 任一变化则三个一起更新
+            detected_module_id = SyncUtil.safe_int(detected.get("moduleId"))
+            detected_module_code = str(detected.get("moduleCode") or "").strip()
+            detected_module_name = str(detected.get("moduleName") or "").strip()
+
+            current_module_id = ticket.module_id
+            current_module_code = str(getattr(ticket, "module_code", "") or "").strip()
+            current_module_name = str(ticket.module_name or "").strip()
+
+            module_changed = False
+            if detected_module_id is not None and detected_module_id != current_module_id:
+                module_changed = True
+            if detected_module_code and detected_module_code != current_module_code:
+                module_changed = True
+            if detected_module_name and detected_module_name != current_module_name:
+                module_changed = True
+
+            if module_changed:
                 update_data["module_id"] = detected_module_id
-            if detected_module_name and detected_module_name != str(ticket.module_name or "").strip():
+                update_data["module_code"] = detected_module_code
                 update_data["module_name"] = detected_module_name
 
             if update_data:
