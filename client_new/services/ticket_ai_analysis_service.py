@@ -59,11 +59,18 @@ class TicketAiAnalysisService:
             "sandbox": None,                   # Claude Code 无沙箱参数
             "code_arg_flag": "--add-dir",      # 代码目录参数
             "output_mode": "stdout",            # 结果从 stdout 解析
-            "output_schema_flag": None,         # 不支持 schema 文件
+            "output_schema_flag": "--json-schema",  # 结构化输出 schema（传 JSON 字符串，非文件）
             "output_file_flag": None,           # 不支持输出到文件
             "resume_flag": "--resume",
             "model_flag": "--model",
             "skip_git_check_flag": None,
+            "output_format_flag": "--output-format",  # 非交互输出的格式参数
+            "output_format": "json",                   # 输出为单行 JSON，便于解析 structured_output
+            "permission_mode_flag": "--permission-mode",
+            "permission_mode": "plan",                 # 只分析不改代码的只读权限模式
+            "allowed_tools_flag": "--allowedTools",
+            "allowed_tools": "Read,Grep,Glob,Bash(rg *)",
+            "stdin_placeholder": "-",                  # prompt 从 stdin 读取的占位符
         },
     }
     DEFAULT_LOG_DIGEST_CONTEXT_LINES = 3
@@ -407,9 +414,17 @@ class TicketAiAnalysisService:
     def _resolve_provider_type(cls, context_payload: dict[str, Any] | None) -> str:
         """
         从上下文解析当前请求的 Provider 类型。
+        优先读取 selectedExecutor（服务端下发的执行器编码），
+        兼容历史 selectedAiProviderType 字段，均回退为 "codex"。
         :param context_payload: 上下文快照
         :return: provider_type 字符串，默认 "codex"
         """
+        executor = str((context_payload or {}).get("selectedExecutor") or "").strip().lower()
+        # 服务端执行器编码 claude_code 映射到本地运行时类型 claude
+        if executor == "claude_code":
+            executor = "claude"
+        if executor in cls.PROVIDER_WORKER_MAP:
+            return executor
         raw = str((context_payload or {}).get("selectedAiProviderType") or "").strip().lower()
         return raw if raw in cls.PROVIDER_WORKER_MAP else "codex"
 
@@ -683,21 +698,50 @@ class TicketAiAnalysisService:
         if skip_flag:
             command.append(str(skip_flag))
 
-        # 输出 schema 文件（仅 codex）
+        # 输出 schema（codex 传文件路径，claude 传 JSON 字符串）
         schema_flag = worker_config.get("output_schema_flag")
         if schema_flag and schema_file:
-            command.extend([str(schema_flag), str(schema_file)])
+            if provider_type == "claude" and schema_file.exists():
+                schema_text = schema_file.read_text(encoding="utf-8").strip()
+                # 压缩为单行 JSON，避免多行文本通过 cmd /c 传递时被 shell 截断
+                minified = json.dumps(json.loads(schema_text), ensure_ascii=False)
+                command.extend([str(schema_flag), minified])
+            else:
+                command.extend([str(schema_flag), str(schema_file)])
 
         # 输出结果文件（仅 codex）
         output_flag = worker_config.get("output_file_flag")
         if output_flag and result_file:
             command.extend([str(output_flag), str(result_file)])
 
+        # 输出格式（仅 claude：--output-format json）
+        output_format_flag = worker_config.get("output_format_flag")
+        output_format = worker_config.get("output_format")
+        if output_format_flag and output_format:
+            command.extend([str(output_format_flag), str(output_format)])
+
+        # 权限模式（仅 claude）
+        permission_flag = worker_config.get("permission_mode_flag")
+        permission_mode = worker_config.get("permission_mode")
+        if permission_flag and permission_mode:
+            command.extend([str(permission_flag), str(permission_mode)])
+
+        # 工具白名单（仅 claude）
+        allowed_tools_flag = worker_config.get("allowed_tools_flag")
+        allowed_tools = worker_config.get("allowed_tools")
+        if allowed_tools_flag and allowed_tools:
+            command.extend([str(allowed_tools_flag), str(allowed_tools)])
+
         # 模型参数
         if selected_worker_model:
             model_flag = worker_config.get("model_flag")
             if model_flag and model_flag not in command:
                 command.extend([str(model_flag), str(selected_worker_model)])
+
+        # stdin 占位符（claude 使用 "-" 从 stdin 读取 prompt）
+        stdin_placeholder = worker_config.get("stdin_placeholder")
+        if stdin_placeholder and stdin_placeholder not in command:
+            command.append(str(stdin_placeholder))
 
         return command
 
@@ -730,6 +774,23 @@ class TicketAiAnalysisService:
 
         if not result_text.strip():
             return None
+
+        # Claude Code 使用 --output-format json 时，stdout 是单行 JSON，
+        # 其中 structured_output 是已解析好的 dict，result 是模型最终文本。
+        if provider_type == "claude":
+            claude_payload = cls._extract_json_from_text(result_text)
+            if isinstance(claude_payload, dict):
+                structured = claude_payload.get("structured_output")
+                if isinstance(structured, dict):
+                    return structured
+                raw_result = claude_payload.get("result")
+                if isinstance(raw_result, str):
+                    parsed = cls._extract_json_from_text(raw_result)
+                    if parsed is not None:
+                        return parsed
+                if claude_payload.get("is_error"):
+                    return None
+                return claude_payload
 
         # 尝试直接解析 JSON
         try:

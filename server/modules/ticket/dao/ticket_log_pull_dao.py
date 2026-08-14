@@ -217,6 +217,87 @@ class TicketLogPullDao:
         )
 
     @classmethod
+    def list_polling_records(cls, db: Session, statuses: Iterable[str], limit: int = 200) -> list[TicketLogPullRecord]:
+        """
+        查询等待外部平台结果的日志拉取记录（未超时），供后台周期任务批量探测。
+        :param db: 数据库会话
+        :param statuses: 待探测状态列表（如 submitting/polling）
+        :param limit: 单次扫描上限
+        :return: 记录列表，按最近轮询时间升序
+        """
+        status_list = [status for status in statuses if status]
+        if not status_list:
+            return []
+        query = (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(
+                TicketLogPullRecord.status.in_(status_list),
+                (
+                    TicketLogPullRecord.poll_deadline_at.is_(None)
+                    | (TicketLogPullRecord.poll_deadline_at > datetime.now())
+                ),
+            )
+            .order_by(TicketLogPullRecord.last_polled_at.asc(), TicketLogPullRecord.id.asc())
+        )
+        if limit and limit > 0:
+            query = query.limit(limit)
+        return query.all()
+
+    @classmethod
+    def list_created_records(cls, db: Session, limit: int = 100) -> list[TicketLogPullRecord]:
+        """
+        查询已创建但尚未提交外部申请的日志拉取记录，供后台周期任务兜底提交。
+        :param db: 数据库会话
+        :param limit: 单次扫描上限
+        :return: 记录列表，按创建时间升序
+        """
+        query = (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(TicketLogPullRecord.status == "created")
+            .order_by(TicketLogPullRecord.create_time.asc(), TicketLogPullRecord.id.asc())
+        )
+        if limit and limit > 0:
+            query = query.limit(limit)
+        return query.all()
+
+    @classmethod
+    def list_expired_polling_records(
+        cls, db: Session, now: datetime, statuses: Iterable[str]
+    ) -> list[TicketLogPullRecord]:
+        """
+        查询已超过轮询截止时间的日志拉取记录，供后台周期任务标记超时失败。
+        :param db: 数据库会话
+        :param now: 当前时间
+        :param statuses: 待探测状态列表（如 submitting/polling）
+        :return: 记录列表
+        """
+        status_list = [status for status in statuses if status]
+        if not status_list:
+            return []
+        return (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(
+                TicketLogPullRecord.status.in_(status_list),
+                TicketLogPullRecord.poll_deadline_at.isnot(None),
+                TicketLogPullRecord.poll_deadline_at < now,
+            )
+            .order_by(TicketLogPullRecord.create_time.asc(), TicketLogPullRecord.id.asc())
+            .all()
+        )
+
+    @classmethod
     def get_storage_config_row(cls, db: Session) -> SysConfig | None:
         """
         获取日志拉取存储配置记录。

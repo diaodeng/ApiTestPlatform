@@ -8,6 +8,26 @@ updated: 2026-08-11
 
 # 操作日志
 
+## [2026-08-12] FIX | rg 日志搜索文件数过多导致 execve 参数过长应用重启
+
+- 触发：日志搜索 `_search_by_rg_keywords` 将所有 193 个文件路径拼接为 rg 命令行参数，导致 `subprocess.Popen` 底层 `execve` 参数列表超长抛 `OSError`，未被现有异常处理器捕获，uvicorn worker 崩溃重启。
+- 修复：
+  - 新增 `RG_MAX_FILE_ARGS = 50` 常量，控制 rg 单次命令行文件数上限。
+  - `_search_by_rg_keywords` 拆分为入口方法 + `_search_by_rg_keywords_single`（单批搜索）+ `_search_by_rg_keywords_batched`（分批搜索）。
+  - 文件数 > 50 时自动按 50 个一批拆分，每批独立执行 rg 管道、合并去重，命中数达上限后跳过剩余批次。
+  - 新增 `OSError` 异常捕获，兜底降级为 Python 搜索。
+- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_service.py`。
+- 验证：ruff 静态检查通过。
+
+## [2026-08-11] INGEST-CODE | 日志拉取轮询改后台任务查询 + 停止功能落地
+
+- 触发：日志拉取原实现中 `_poll_external_result` 在后台线程池（`max_workers=2`）内同步阻塞轮询外部平台，单条任务最长占用线程 1800s，批量提交时任务排队受并发限制；前端已有「停止」按钮但后端无 `/stop` 路由（404），`CANCELLED` 枚举无消费。
+- 架构层：工单日志拉取服务（提交/探测/下载三阶段拆分）、Celery 周期任务、数据模型、控制器、前端日志拉取 Tab。
+- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/modules/ticket/controller/ticket_log_pull_controller.py`、`server/modules/ticket/entity/do/ticket_log_pull_do.py`（新增 `poll_deadline_at`）、`server/config/get_db.py`（兼容列升级）、`server/module_task/scheduler_maintenance.py`（新增 `scan_log_pull_records` 周期任务）、`web/src/views/ticket/components/detail-tabs/TicketDetailLogPullTab.vue`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/views/ticket/logPullRecord/index.vue`、`web/public/docs/ticket_log_pull.md`。
+- 变更传播链：创建记录投递线程池快速提交申请（写 `poll_deadline_at`）→ Celery 周期任务每 30 秒批量扫描（created 兜底提交 / submitting\polling 超时失败 / 单次探测命中则投递下载）→ 下载解析阶段含协作式取消检查点 → 停止接口置 `CANCELLED`。
+- 关键规则：任务提交与轮询探测不再受并发数限制；周期任务 `scan_log_pull_records` 只做 `@register_job` 注册，**不在启动时自动写入 `celery_periodic_task`**，需在「系统监控-定时任务」手动配置（与项目其他定时任务一致）；`CANCELLED` 记录被周期任务跳过；下载/解析中断（线程丢失）重启清理为失败，轮询中记录由周期任务接管。
+- 验证：`py_compile` 语法检查通过；ruff 静态检查确认本次改动未引入新错误（剩余 12 个均为原有代码问题）；本地起服务全链路验证待 uv/依赖环境与外部平台可达后执行。
+
 ## [2026-08-10] INGEST-CODE | 统一凭证绑定新增模式修复
 
 - 修复统一凭证管理中，从“编辑绑定”切换到“新增绑定”时，表单残留旧 `bindingId` 导致保存误走更新的问题。

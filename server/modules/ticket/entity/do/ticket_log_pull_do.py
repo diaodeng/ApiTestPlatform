@@ -43,6 +43,7 @@ class TicketLogPullRecord(Base):
     command_result_url: Mapped[str | None] = mapped_column(String(1000), nullable=True, comment="外部返回压缩包地址")
     source_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="外部命令创建时间")
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="最近轮询时间")
+    poll_deadline_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="轮询截止时间")
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="处理完成时间")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="created", comment="内部处理状态")
     status_desc: Mapped[str] = mapped_column(String(100), nullable=False, default="待提交", comment="内部状态说明")

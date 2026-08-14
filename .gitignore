@@ -25,6 +25,9 @@ server/caches
 server/case_data
 logs
 
+.gitnexus
+.claude
+.zcode
 
 web/vite.config.js.timestamp*.mjs
 pyrightconfig.json

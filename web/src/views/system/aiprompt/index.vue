@@ -217,7 +217,7 @@ function resetForm() {
 
 function getPromptProviderUsage(category) {
   return ['analysis', 'common'].includes(String(category || '').trim())
-    ? { usage: 'ticket_analysis_worker', executor: 'codex' }
+    ? { usage: 'ticket_analysis_worker' }
     : { usage: 'ticket_light_text', executor: 'direct_http' }
 }
 

@@ -74,6 +74,8 @@
     loadAnalysisPromptOptions,
     getTicketAutomationLogPullConfig,
     resolveAiAnalysisProviderAgent,
+    resolveAiAnalysisExecutorOptions,
+    resolveAiAnalysisDefaultExecutor,
     resolveDefaultAiPromptTemplateCodesFromDetail,
     loadDetailVersionOptions,
     loadProjectOptions,
@@ -130,6 +132,7 @@
     logPullRecordId: undefined,
     agentCode: '',
     aiProviderCode: '',
+    executor: '',
     forceRefresh: false,
     logAnalysisMode: 'hybrid',
     logTimeMode: 'none',
@@ -155,6 +158,14 @@
   }
 
   /**
+   * 根据 Provider 支持列表回填 AI 分析执行器。
+   * 优先取默认执行器，未配置时取首个分析执行器。
+   */
+  function applyAiAnalysisProviderExecutor(providerCode) {
+    aiAnalysisTaskForm.value.executor = resolveAiAnalysisDefaultExecutor(providerCode) || '';
+  }
+
+  /**
    * 记录发起 AI 分析弹窗中用户手动选择的 Agent。
    */
   function handleAiAnalysisAgentChange(agentCode) {
@@ -162,13 +173,22 @@
   }
 
   /**
+   * 记录发起 AI 分析弹窗中用户手动选择的执行器。
+   */
+  function handleAiAnalysisExecutorChange(executor) {
+    saveTicketAiPreferencePatch({ executor });
+  }
+
+  /**
    * 处理 AI 分析 Provider 变更，保持与备份分支一致的 Agent 自动带入行为。
    */
   function handleAiAnalysisProviderChange(providerCode) {
     applyAiAnalysisProviderAgent(providerCode);
+    applyAiAnalysisProviderExecutor(providerCode);
     saveTicketAiPreferencePatch({
       aiProviderCode: providerCode,
       agentCode: aiAnalysisTaskForm.value.agentCode,
+      executor: aiAnalysisTaskForm.value.executor,
     });
   }
 
@@ -242,6 +262,15 @@
   function resolveDefaultVersionId() {
     return detail.value.affectedVersionId || detailVersionOptions.value[0]?.value || undefined;
   }
+
+  // 分析执行器下拉选项：仅当前 Provider 支持的分析执行器，附带可读标签。
+  const executorLabelMap = { codex: 'Codex Worker', claude_code: 'Claude Code Worker' };
+  const aiAnalysisExecutorOptions = computed(() =>
+    resolveAiAnalysisExecutorOptions(aiAnalysisTaskForm.value.aiProviderCode).map((value) => ({
+      value,
+      label: executorLabelMap[value] || value,
+    }))
+  );
 
   function handleAiRepoMappingProjectChange(projectId) {
     aiRepoMappingForm.value.versionId = undefined;
@@ -694,6 +723,10 @@
     if (!aiDefaults.hasManualAgentCode) {
       applyAiAnalysisProviderAgent(aiAnalysisTaskForm.value.aiProviderCode);
     }
+    aiAnalysisTaskForm.value.executor = aiDefaults.executor || '';
+    if (!aiDefaults.hasManualExecutor && !aiAnalysisTaskForm.value.executor) {
+      applyAiAnalysisProviderExecutor(aiAnalysisTaskForm.value.aiProviderCode);
+    }
     aiAnalysisTaskForm.value.forceRefresh = false;
     aiAnalysisTaskForm.value.logAnalysisMode =
       logPullConfig.logAnalysisMode || logPullConfig.log_analysis_mode || 'hybrid';
@@ -802,6 +835,7 @@
         logPullRecordId: aiAnalysisTaskForm.value.logPullRecordId || undefined,
         agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
         aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
+        executor: aiAnalysisTaskForm.value.executor || undefined,
         forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
         logAnalysisMode: aiAnalysisTaskForm.value.logAnalysisMode || 'hybrid',
         extraInstruction: aiAnalysisTaskForm.value.extraInstruction || undefined,
@@ -1307,6 +1341,24 @@
             :value="item.providerCode"
           />
         </el-select>
+      </el-form-item>
+      <el-form-item label="执行器">
+        <el-select
+          v-model="aiAnalysisTaskForm.executor"
+          placeholder="可选，默认取 Provider 配置的执行器"
+          filterable
+          clearable
+          style="width: 100%"
+          @change="handleAiAnalysisExecutorChange"
+        >
+          <el-option
+            v-for="item in aiAnalysisExecutorOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+        <div class="form-item-tip">仅展示当前 Provider 支持的分析执行器；不选择时按 Provider 默认执行器执行。</div>
       </el-form-item>
       <el-form-item label="分析日志">
         <el-select

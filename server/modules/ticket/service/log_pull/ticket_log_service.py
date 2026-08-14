@@ -45,6 +45,8 @@ class LogService:
     LINE_INDEX_ENCODING_VERSION = 2
     SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
     CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
+    # rg 单次命令行文件数上限，超过后自动分批执行，避免 execve 参数过长导致进程启动失败
+    RG_MAX_FILE_ARGS = 50
 
     @classmethod
     def prepare(
@@ -804,10 +806,94 @@ class LogService:
         :param search_started_at: 搜索开始时间戳
         :return: 搜索命中列表
         """
+        max_seconds = cls._config_int(runtime_config, "maxSearchSeconds", 30)
+        if len(target_files) > cls.RG_MAX_FILE_ARGS:
+            return cls._search_by_rg_keywords_batched(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                executable=executable,
+                extract_dir=extract_dir,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                file_path=file_path,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+                search_started_at=search_started_at,
+                max_seconds=max_seconds,
+            )
+        return cls._search_by_rg_keywords_single(
+            ticket_id=ticket_id,
+            keywords=keywords,
+            search_mode=search_mode,
+            executable=executable,
+            extract_dir=extract_dir,
+            context_before=context_before,
+            context_after=context_after,
+            limit=limit,
+            with_context=with_context,
+            record_id=record_id,
+            runtime_config=runtime_config,
+            target_files=target_files,
+            file_path=file_path,
+            ignore_case=ignore_case,
+            word_regexp=word_regexp,
+            search_started_at=search_started_at,
+            max_seconds=max_seconds,
+        )
+
+    @classmethod
+    def _search_by_rg_keywords_single(
+        cls,
+        *,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        executable: str,
+        extract_dir: Path,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        runtime_config: dict[str, Any],
+        target_files: list[str],
+        file_path: str | None = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+        search_started_at: float | None = None,
+        max_seconds: int = 30,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        单批 rg 搜索：将文件列表一次性交给 rg，适用于文件数不超过 RG_MAX_FILE_ARGS 的场景。
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param search_mode: 匹配模式
+        :param executable: rg 可执行文件路径
+        :param extract_dir: 日志解压目录
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param runtime_config: 运行保护配置
+        :param target_files: 搜索文件列表
+        :param file_path: 指定文件范围
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :param search_started_at: 搜索开始时间戳
+        :param max_seconds: 管道最大执行秒数
+        :return: 搜索命中列表
+        """
         hits: list[TicketLogSearchHitModel] = []
         seen_keys: set[tuple[str, int]] = set()
-        max_seconds = cls._config_int(runtime_config, "maxSearchSeconds", 30)
         first_keyword = keywords[0]
+        # 构建 rg 第一段命令：从指定文件中搜索关键字
         first_command = [
             executable,
             "-n",
@@ -828,6 +914,7 @@ class LogService:
                 first_command.extend(["-e", keyword])
         first_command.extend(["--", *target_files])
 
+        # 构建完整的 rg 管道命令链
         commands = [first_command]
         if search_mode == "all":
             for index, keyword in enumerate(keywords[1:], start=1):
@@ -961,7 +1048,49 @@ class LogService:
             if search_started_at is not None:
                 cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
             return fallback_hits
+        except OSError as exc:
+            logger.warning(
+                f"rg 日志搜索系统错误，日志搜索降级为 Python，ticket_id={ticket_id}，reason={exc}"
+            )
+            cls._log_search_execution(
+                tool="python",
+                ticket_id=ticket_id,
+                record_id=record_id,
+                extract_dir=extract_dir,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                file_path=file_path,
+                target_file_count=len(target_files),
+                args={
+                    "reason": "rg_os_error",
+                    "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
+                    "ignoreCase": ignore_case,
+                    "wordRegexp": word_regexp,
+                },
+            )
+            fallback_hits = cls._search_by_python_keywords(
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                runtime_config=runtime_config,
+                target_files=target_files,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+            )
+            if search_started_at is not None:
+                cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
+            return fallback_hits
 
+        # 解析 rg 输出，去重并收集命中
         for raw_line in stdout_text.splitlines():
             if len(hits) >= limit:
                 break
@@ -983,6 +1112,117 @@ class LogService:
             seen_keys.add(unique_key)
         if search_started_at is not None:
             cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+        return hits
+
+    @classmethod
+    def _search_by_rg_keywords_batched(
+        cls,
+        *,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        executable: str,
+        extract_dir: Path,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        runtime_config: dict[str, Any],
+        target_files: list[str],
+        file_path: str | None = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+        search_started_at: float | None = None,
+        max_seconds: int = 30,
+    ) -> list[TicketLogSearchHitModel]:
+        """
+        分批 rg 搜索：将文件列表按 RG_MAX_FILE_ARGS 拆分，每批独立执行后合并去重，适用于文件数过多的场景。
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param search_mode: 匹配模式
+        :param executable: rg 可执行文件路径
+        :param extract_dir: 日志解压目录
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param runtime_config: 运行保护配置
+        :param target_files: 搜索文件列表
+        :param file_path: 指定文件范围
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :param search_started_at: 搜索开始时间戳
+        :param max_seconds: 管道最大执行秒数
+        :return: 搜索命中列表
+        """
+        total_files = len(target_files)
+        batch_size = cls.RG_MAX_FILE_ARGS
+        batch_count = (total_files + batch_size - 1) // batch_size
+        logger.info(
+            f"rg 日志搜索文件数过多({total_files})，按 {batch_size} 个文件分批执行，共 {batch_count} 批，"
+            f"ticket_id={ticket_id}，record_id={record_id}"
+        )
+
+        hits: list[TicketLogSearchHitModel] = []
+        seen_keys: set[tuple[str, int]] = set()
+
+        for batch_index in range(batch_count):
+            if len(hits) >= limit:
+                logger.info(
+                    f"rg 分批搜索已收集到足够的命中数({len(hits)}>={limit})，跳过剩余批次，"
+                    f"batch={batch_index + 1}/{batch_count}，ticket_id={ticket_id}，record_id={record_id}"
+                )
+                break
+            batch_files = target_files[batch_index * batch_size : (batch_index + 1) * batch_size]
+            remaining_limit = limit - len(hits)
+            logger.info(
+                f"rg 分批搜索执行第 {batch_index + 1}/{batch_count} 批，文件数={len(batch_files)}，"
+                f"剩余配额={remaining_limit}，ticket_id={ticket_id}，record_id={record_id}"
+            )
+            try:
+                batch_hits = cls._search_by_rg_keywords_single(
+                    ticket_id=ticket_id,
+                    keywords=keywords,
+                    search_mode=search_mode,
+                    executable=executable,
+                    extract_dir=extract_dir,
+                    context_before=context_before,
+                    context_after=context_after,
+                    limit=remaining_limit,
+                    with_context=with_context,
+                    record_id=record_id,
+                    runtime_config=runtime_config,
+                    target_files=batch_files,
+                    file_path=file_path,
+                    ignore_case=ignore_case,
+                    word_regexp=word_regexp,
+                    # 分批时不重复记录 search_completed，由外层统一记录
+                    search_started_at=None,
+                    max_seconds=max_seconds,
+                )
+            except Exception:
+                logger.exception(
+                    f"rg 分批搜索第 {batch_index + 1}/{batch_count} 批异常，跳过本批，"
+                    f"ticket_id={ticket_id}，record_id={record_id}"
+                )
+                continue
+            for hit in batch_hits:
+                unique_key = (hit.file, hit.line)
+                if unique_key in seen_keys:
+                    continue
+                if len(hits) >= limit:
+                    break
+                hits.append(hit)
+                seen_keys.add(unique_key)
+
+        if search_started_at is not None:
+            cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+        logger.info(
+            f"rg 分批搜索完成，共 {batch_count} 批，命中 {len(hits)} 条，"
+            f"ticket_id={ticket_id}，record_id={record_id}"
+        )
         return hits
 
     @classmethod

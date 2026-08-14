@@ -54,6 +54,7 @@ class Ticket(Base):
     project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="所属项目ID")
     merchant_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="所属商家")
     module_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="所属模块ID")
+    module_code: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="所属模块业务码")
     module_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="所属模块名称")
     category_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="问题分类ID")
     category_name: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="问题分类名称")

@@ -4,7 +4,22 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（4 天，11 项变更）
+## 2026-08 月（5 天，12 项变更）
+
+### 工单模块映射修复脚本
+- 新增一次性数据修复脚本 `server/scripts/sync_ticket_module_mapping.py`：按「工单同步配置」的 `moduleMappings` 将 `ticket.module_name`（现有模块名）与模块映射配置匹配，解析出正确模块后更新 `ticket.module_id`/`module_code`，不改 `module_name`。
+- 工单有 `project_id` 时按 `(project_id + module_code)` 等组合在 `hrm_module` 内解析避免跨项目同 code 串模块；无项目时按全局唯一条件解析。脚本先预览确认后再执行，支持 `limit` 参数小范围验证。
+
+### 日志拉取配置合并与并发数生效
+- 「工单同步配置 → 外部接口」Tab 更名为「日志拉取配置」，统一收纳日志拉取三类配置：拉日志默认值、存储与资源限制、外部接口环境分组。
+- 原「公共配置」页的「拉日志默认值」卡片与「日志拉取后处理」卡片迁移到新 Tab；「存储与资源限制」新增页面承载此前无入口的轮询/下载/入库/搜索护栏配置。
+- 最大并发数从同步配置的 `logPullDefaults.logPullConcurrency` 迁移到存储配置的 `maxWorkers`，并真正生效：保存后按新值重建日志拉取线程池（1~20），修复此前线程池硬编码为 2、前端配置无效的问题。
+
+### 工单 AI 分析执行器可配置（Codex / Claude Code）
+- AI Provider 新增 `preferredExecutor` 默认执行器字段；工单 AI 分析支持 `codex` 与 `claude_code` 两种执行器。
+- 发起 AI 分析弹窗新增“执行器”下拉，选项按当前 Provider 的兼容执行器收敛，并按默认执行器回填，用户可覆盖。
+- Claude Code 以 `claude -p --output-format json --json-schema` 非交互模式执行，采用 `plan` 只读权限与 `Read,Grep,Glob,Bash(rg *)` 工具白名单，结果从 stdout 的 `structured_output` 解析。
+- Provider 选项接口在分析场景不再硬编码 `executor=codex`，后端按分析执行器集合过滤，仅支持 Claude Code 的 Provider 也能出现在候选中。
 
 ### 凭证绑定新增模式修复
 - 修复统一凭证管理里从“编辑绑定”切换到“新增绑定”时，表单残留旧绑定主键导致后续保存误走更新的问题。

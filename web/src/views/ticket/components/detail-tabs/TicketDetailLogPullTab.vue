@@ -135,6 +135,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
     submitLogPull,
     deleteLogPull,
     retryLogPull,
+    stopLogPull,
     redownloadLogPull,
     handleCopyLogPull,
     getLogPullOriginalDownloadUrl,
@@ -571,7 +572,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="操作" width="380">
+    <el-table-column label="操作" width="450">
       <template #default="scope">
         <el-button-group>
           <el-tooltip
@@ -624,6 +625,16 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
             v-hasPermi="['ticket:logpull:add']"
           >
             重新下载
+          </el-button>
+          <el-button
+            link
+            type="danger"
+            icon="VideoPause"
+            @click="stopLogPull(scope.row)"
+            :disabled="logPullActionLoading || !activeLogPullStatuses.includes(scope.row.status)"
+            v-hasPermi="['ticket:logpull:remove']"
+          >
+            停止
           </el-button>
           <el-button
             link

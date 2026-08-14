@@ -97,7 +97,9 @@ export function useOptions() {
 
   // === Provider / Agent / Prompt 选项 ===
   function loadProviderOptions() {
-    return listAiProviderOptions({ usage: 'ticket_analysis_worker', executor: 'codex' }).then((response) => {
+    // 工单 AI 分析场景不再固定 executor，后端会按分析执行器集合（codex/claude_code）过滤，
+    // 使仅支持 claude_code 的 Provider 也能出现在候选列表中。
+    return listAiProviderOptions({ usage: 'ticket_analysis_worker' }).then((response) => {
       providerOptions.value = response.data || [];
     });
   }
@@ -129,6 +131,33 @@ export function useOptions() {
     const provider = findAiProviderOption(providerCode);
     const providerAgentCode = String(provider?.preferredAgentCode || '').trim();
     return providerAgentCode || null;
+  }
+
+  /**
+   * 解析工单 AI 分析场景下 Provider 的可选执行器列表。
+   * 仅返回分析类执行器（codex/claude_code）且当前 Provider 已勾选支持的项。
+   * @param {string} providerCode Provider 编码
+   * @returns {string[]} 可选执行器编码列表
+   */
+  function resolveAiAnalysisExecutorOptions(providerCode) {
+    const provider = findAiProviderOption(providerCode);
+    const supported = Array.isArray(provider?.supportedExecutors) ? provider.supportedExecutors : [];
+    const order = ['codex', 'claude_code'];
+    return order.filter((executor) => supported.includes(executor));
+  }
+
+  /**
+   * 解析工单 AI 分析场景下 Provider 的默认执行器。
+   * 优先取 preferredExecutor，未配置时取支持列表首个分析执行器。
+   * @param {string} providerCode Provider 编码
+   * @returns {string|null} 默认执行器编码
+   */
+  function resolveAiAnalysisDefaultExecutor(providerCode) {
+    const provider = findAiProviderOption(providerCode);
+    const options = resolveAiAnalysisExecutorOptions(providerCode);
+    if (!options.length) return null;
+    const preferred = String(provider?.preferredExecutor || '').trim();
+    return options.includes(preferred) ? preferred : options[0];
   }
 
   function resolveDefaultAiPromptTemplateCodesFromDetail(detail) {
@@ -360,6 +389,8 @@ export function useOptions() {
     getTicketAutomationLogPullConfig,
     findAiProviderOption,
     resolveAiAnalysisProviderAgent,
+    resolveAiAnalysisExecutorOptions,
+    resolveAiAnalysisDefaultExecutor,
     resolveDefaultAiPromptTemplateCodesFromDetail,
     // version functions
     loadDetailVersionOptions,

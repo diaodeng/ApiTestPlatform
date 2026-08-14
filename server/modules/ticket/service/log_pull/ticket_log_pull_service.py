@@ -42,6 +42,8 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullContentModel,
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
+    TicketLogPullEnvironmentOptionModel,
+    TicketLogPullEnvResolveResultModel,
     TicketLogPullListItemModel,
     TicketLogPullPostProcessConfigModel,
     TicketLogPullProjectVendorMapModel,
@@ -89,6 +91,7 @@ class TicketLogPullService:
     }
     TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
     _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ticket-log-pull")
+    _executor_max_workers = 2
     _executor_lock = threading.Lock()
     _active_record_ids: set[int] = set()
     VERSION_PATTERN = re.compile(
@@ -352,6 +355,7 @@ class TicketLogPullService:
                 "encoding": "utf-8",
             },
             "effectiveLocalDirectory": str(cls.DEFAULT_LOCAL_DIR.resolve()),
+            "maxWorkers": 2,
             "pollIntervalSec": 20,
             "pollTimeoutSec": 1800,
             "downloadTimeoutSec": 300,
@@ -428,6 +432,9 @@ class TicketLogPullService:
             "mode": mode,
             "ftp": {**defaults["ftp"], **ftp_config},
         }
+        normalized["maxWorkers"] = min(
+            max(cls._parse_positive_int(normalized.get("maxWorkers"), 2), 1), 20
+        )
         normalized["pollIntervalSec"] = max(cls._parse_positive_int(normalized.get("pollIntervalSec"), 20), 3)
         normalized["pollTimeoutSec"] = max(cls._parse_positive_int(normalized.get("pollTimeoutSec"), 1800), 60)
         normalized["downloadTimeoutSec"] = max(cls._parse_positive_int(normalized.get("downloadTimeoutSec"), 300), 30)
@@ -453,39 +460,98 @@ class TicketLogPullService:
     @classmethod
     def _normalize_external_config(cls, raw_config: Any) -> dict[str, Any]:
         """
-        归一化日志拉取外部接口配置，兼容单环境与多环境两种格式。
+        归一化日志拉取外部接口配置，兼容旧单环境、旧多环境和新分组三种格式。
 
         旧格式（单环境）:
           {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...", "origin": "...", "vendors": [...]}
-        新格式（多环境）:
-          {"env1": {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...", "origin": "...", "vendors": [...]},
+          → 升级为新分组格式 {"default": {label:"默认环境", items:{default:{... vendorFilter:"*"}}}}
+
+        旧格式（多环境）:
+          {"env1": {"insertUrl": "...", "pageUrl": "...", "credentialBindingId": "...",
+           "origin": "...", "vendors": [...]},
+           "env2": {...}}
+          → 升级为新分组格式，每个环境一个独立分组，vendorFilter 设为 "*"
+
+        新分组格式:
+          {"env1": {"label": "...", "items": {"sub1": {... vendorFilter:[...]}, ...}, "defaultItem": "..."},
            "env2": {...}}
 
         :param raw_config: 原始配置对象
-        :return: 标准化后的多环境外部接口配置
+        :return: 标准化后的分组格式外部接口配置
         """
         config = dict(raw_config or {}) if isinstance(raw_config, dict) else {}
         if not config:
             return cls._default_external_config()
 
-        # 检测是否为旧格式（顶层包含 insertUrl 或 pageUrl）
+        # 检测是否为旧格式（顶层包含 insertUrl 或 pageUrl，且没有 items 字段的旧多环境特征）
         if "insertUrl" in config or "pageUrl" in config:
-            return {"default": cls._normalize_single_env_config(config)}
+            # 旧单环境格式 → 升级为一个默认分组
+            return {
+                "default": {
+                    "label": "默认环境",
+                    "items": {
+                        "default": cls._normalize_env_item_config(config, vendor_filter=["*"]),
+                    },
+                    "defaultItem": "default",
+                }
+            }
 
-        # 新格式：逐环境归一化
-        normalized: dict[str, Any] = {}
+        # 判断是旧多环境格式还是新分组格式：检查第一个值是否包含 "items" 字段
+        first_value = next(iter(config.values()), None)
+        is_group_format = isinstance(first_value, dict) and "items" in first_value
+
+        if is_group_format:
+            # 新分组格式：逐组归一化
+            normalized_groups: dict[str, Any] = {}
+            for group_key, group_config in config.items():
+                if not isinstance(group_config, dict):
+                    continue
+                normalized_groups[group_key] = cls._normalize_env_group_config(group_config)
+            return normalized_groups or cls._default_external_config()
+
+        # 旧多环境格式：逐个环境升级为独立分组
+        normalized_groups: dict[str, Any] = {}
         for env_key, env_config in config.items():
             if not isinstance(env_config, dict):
                 continue
-            normalized[env_key] = cls._normalize_single_env_config(env_config)
-        return normalized or cls._default_external_config()
+            normalized_item = cls._normalize_env_item_config(env_config, vendor_filter=["*"])
+            normalized_groups[env_key] = {
+                "label": str(env_key),
+                "items": {env_key: normalized_item},
+                "defaultItem": env_key,
+            }
+        return normalized_groups or cls._default_external_config()
 
     @classmethod
-    def _normalize_single_env_config(cls, config: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_env_group_config(cls, config: dict[str, Any]) -> dict[str, Any]:
         """
-        归一化单个环境的配置。
-        :param config: 单个环境的原始配置字典
-        :return: 标准化后的单环境配置
+        归一化单个环境分组配置。
+        :param config: 原始分组配置字典
+        :return: 标准化后的分组配置
+        """
+        normalized: dict[str, Any] = {
+            "label": str(config.get("label") or "").strip(),
+            "items": {},
+            "defaultItem": str(config.get("defaultItem") or "").strip() or None,
+        }
+        items = config.get("items") if isinstance(config.get("items"), dict) else {}
+        for item_key, item_config in items.items():
+            if not isinstance(item_config, dict):
+                continue
+            normalized["items"][str(item_key)] = cls._normalize_env_item_config(item_config)
+        if not normalized["label"]:
+            normalized["label"] = "未命名分组"
+        return normalized
+
+    @classmethod
+    def _normalize_env_item_config(
+        cls, config: dict[str, Any], vendor_filter: list[str] | None = None
+    ) -> dict[str, Any]:
+        """
+        归一化单个子环境配置。
+        :param config: 原始子环境配置字典
+        :param vendor_filter: 覆盖默认 vendorFilter 的值，None 表示从 config 读取
+        :return: 标准化后的子环境配置
         """
         defaults = {
             "insertUrl": cls.DEFAULT_INSERT_URL,
@@ -493,17 +559,28 @@ class TicketLogPullService:
             "credentialBindingId": "",
             "origin": "https://erp.rta-os.com",
         }
-        env_config = {
-            **defaults,
-            **config,
-        }
-        env_config["insertUrl"] = str(env_config.get("insertUrl") or defaults["insertUrl"]).strip()
-        env_config["pageUrl"] = str(env_config.get("pageUrl") or defaults["pageUrl"]).strip()
-        env_config.pop("headers", None)
-        env_config["credentialBindingId"] = str(env_config.get("credentialBindingId") or "").strip()
-        env_config["origin"] = str(env_config.get("origin") or "").strip()
-        env_config["vendors"] = cls._normalize_vendor_store_options(config.get("vendors"))
-        return env_config
+        item_config = {**defaults, **config}
+        item_config["label"] = str(item_config.get("label") or "").strip()
+        item_config["insertUrl"] = str(item_config.get("insertUrl") or defaults["insertUrl"]).strip()
+        item_config["pageUrl"] = str(item_config.get("pageUrl") or defaults["pageUrl"]).strip()
+        item_config.pop("headers", None)
+        item_config["credentialBindingId"] = str(item_config.get("credentialBindingId") or "").strip()
+        item_config["origin"] = str(item_config.get("origin") or "").strip()
+
+        if vendor_filter is not None:
+            item_config["vendorFilter"] = vendor_filter
+        else:
+            raw_filter = item_config.get("vendorFilter")
+            if isinstance(raw_filter, str) and raw_filter.strip() == "*":
+                item_config["vendorFilter"] = ["*"]
+            elif isinstance(raw_filter, list):
+                item_config["vendorFilter"] = [str(v or "").strip() for v in raw_filter if str(v or "").strip()]
+                if not item_config["vendorFilter"]:
+                    item_config["vendorFilter"] = ["*"]
+            else:
+                item_config["vendorFilter"] = ["*"]
+
+        return item_config
 
     @classmethod
     def _normalize_vendor_store_options(cls, raw_vendors: Any) -> list[dict[str, Any]]:
@@ -1019,6 +1096,13 @@ class TicketLogPullService:
                 config_value=cls._json_dumps(payload),
                 user_name="system",
             )
+        # 每次初始化后按当前存储配置校准线程池并发数，覆盖默认值与历史配置。
+        # 注意：这里直接读取存储行并归一化，不能复用 _get_storage_config_dict，
+        # 否则其内部会再次调用 ensure_param_config_rows 导致无限递归。
+        storage_row = TicketLogPullDao.get_storage_config_row(query_db)
+        storage_payload = cls._json_loads(getattr(storage_row, "config_value", None), {})
+        max_workers = cls._normalize_storage_config(storage_payload).get("maxWorkers", 2)
+        cls.apply_executor_max_workers(max_workers)
         if not TicketLogPullDao.get_external_config_row(query_db):
             TicketLogPullDao.save_external_config_row(
                 query_db,
@@ -1076,18 +1160,23 @@ class TicketLogPullService:
 
     @classmethod
     def get_external_config_services(cls, query_db: Session) -> dict[str, Any]:
-        """返回脱敏后的多环境日志拉取外部接口配置。"""
+        """返回分组格式的日志拉取外部接口配置，同时兼容旧 environments 接口。"""
         cls.ensure_param_config_rows(query_db)
         config_row = TicketLogPullDao.get_external_config_row(query_db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
-        return {"environments": cls._normalize_external_config(payload)}
+        return {"groups": cls._normalize_external_config(payload)}
 
     @classmethod
-    def save_external_config_services(cls, query_db: Session, config: dict[str, Any], current_user: CurrentUserModel) -> CrudResponseModel:
-        """保存日志拉取外部接口配置，归一化时会移除任何旧内联认证 Header。"""
-        normalized = cls._normalize_external_config(config.get("environments") if isinstance(config, dict) else {})
+    def save_external_config_services(
+        cls, query_db: Session, config: dict[str, Any], current_user: CurrentUserModel
+    ) -> CrudResponseModel:
+        """保存日志拉取外部接口配置（分组格式），归一化时会移除任何旧内联认证 Header。"""
+        raw_groups = config.get("groups") if isinstance(config, dict) else {}
+        normalized = cls._normalize_external_config(raw_groups)
         try:
-            TicketLogPullDao.save_external_config_row(query_db, config_value=cls._json_dumps(normalized), user_name=current_user.user.user_name)
+            TicketLogPullDao.save_external_config_row(
+                query_db, config_value=cls._json_dumps(normalized), user_name=current_user.user.user_name
+            )
             query_db.commit()
             return CrudResponseModel(is_success=True, message="日志拉取外部接口配置已保存")
         except Exception:
@@ -1114,6 +1203,8 @@ class TicketLogPullService:
                 user_name=cls._user_name(current_user),
             )
             query_db.commit()
+            # 并发数属于运行态资源，保存后立即按最新配置调整线程池。
+            cls.apply_executor_max_workers(payload.get("maxWorkers", 2))
             return CrudResponseModel(is_success=True, message="日志拉取存储配置已保存")
         except Exception:
             query_db.rollback()
@@ -2134,7 +2225,7 @@ class TicketLogPullService:
     @classmethod
     def queue_record(cls, record_id: int) -> None:
         """
-        将日志拉取记录放入后台线程池执行。
+        将日志拉取记录放入后台线程池执行（提交申请或下载解析阶段）。
         :param record_id: 记录ID
         :return: 无
         """
@@ -2142,46 +2233,90 @@ class TicketLogPullService:
             if record_id in cls._active_record_ids:
                 return
             cls._active_record_ids.add(record_id)
-        cls._executor.submit(cls._run_record, record_id)
+            executor = cls._executor
+        executor.submit(cls._run_record, record_id)
+
+    @classmethod
+    def apply_executor_max_workers(cls, max_workers: int) -> bool:
+        """
+        按配置动态调整日志拉取线程池并发数。
+        ThreadPoolExecutor 创建后无法修改 max_workers，因此并发数变化时重建线程池；
+        已在运行的任务由旧线程池继续执行完毕，新任务投递到新线程池，二者共享 _active_record_ids 去重。
+        :param max_workers: 新的最大并发数
+        :return: 是否发生了线程池重建
+        """
+        normalized = min(max(cls._parse_positive_int(max_workers, 2), 1), 20)
+        with cls._executor_lock:
+            if normalized == cls._executor_max_workers:
+                return False
+            old_executor = cls._executor
+            cls._executor = ThreadPoolExecutor(
+                max_workers=normalized, thread_name_prefix="ticket-log-pull"
+            )
+            cls._executor_max_workers = normalized
+        # 旧线程池不再接收新任务，触发其在线程空闲时自动回收资源。
+        old_executor.shutdown(wait=False, cancel_futures=False)
+        logger.info(
+            f"日志拉取线程池并发数已调整: {cls._executor_max_workers} "
+            f"(旧线程池已停止接收新任务，运行中任务继续执行)"
+        )
+        return True
 
     @classmethod
     def resume_pending_records(cls) -> None:
         """
-        服务启动后清理未完成的日志拉取记录。
+        服务启动后处理未完成的日志拉取记录。
+        下载/解析中断（线程丢失）的记录清理为失败；已提交申请等待结果的记录保留，由后台周期任务接管继续探测。
         :return: 无
         """
         with SessionLocal() as db:
             records = TicketLogPullDao.list_recoverable_records(db, cls.ACTIVE_STATUSES)
             now = datetime.now()
             for record in records:
-                cls._fail_record(
-                    db,
-                    record.id,
-                    status=TicketLogPullStatus.FAILED.value,
-                    status_desc="服务重启前任务未完成，已清理为失败",
-                    error_message="服务重启前任务未完成，已清理为失败",
-                )
-                cls._add_ticket_event(
-                    db,
-                    ticket_id=record.ticket_id,
-                    operator_id=None,
-                    operator_name="system",
-                    content="日志拉取任务因服务重启清理为失败",
-                    event_data={"record_id": record.id, "status": record.status, "cleaned_at": now.isoformat()},
-                )
+                if record.status in {
+                    TicketLogPullStatus.DOWNLOADING.value,
+                    TicketLogPullStatus.PROCESSING.value,
+                }:
+                    cls._fail_record(
+                        db,
+                        record.id,
+                        status=TicketLogPullStatus.FAILED.value,
+                        status_desc="服务重启前下载/解析中断，已清理为失败，可重新拉取",
+                        error_message="服务重启前下载/解析中断，已清理为失败，可重新拉取",
+                    )
+                    cls._add_ticket_event(
+                        db,
+                        ticket_id=record.ticket_id,
+                        operator_id=None,
+                        operator_name="system",
+                        content="日志拉取任务因服务重启中断清理为失败",
+                        event_data={"record_id": record.id, "status": record.status, "cleaned_at": now.isoformat()},
+                    )
             if records:
                 db.commit()
 
     @classmethod
     def _run_record(cls, record_id: int) -> None:
         """
-        在线程池中执行单条日志拉取记录。
+        在线程池中执行单条日志拉取记录，按当前状态调度到对应的处理阶段。
         :param record_id: 记录ID
         :return: 无
         """
         try:
             with SessionLocal() as db:
-                cls._process_record(db, record_id)
+                record = TicketLogPullDao.get_record_by_id(db, record_id)
+                if not record:
+                    return
+                if record.status in {
+                    TicketLogPullStatus.CREATED.value,
+                    TicketLogPullStatus.SUBMITTING.value,
+                }:
+                    cls._process_submit(db, record_id)
+                elif record.status in {
+                    TicketLogPullStatus.DOWNLOADING.value,
+                    TicketLogPullStatus.PROCESSING.value,
+                }:
+                    cls._process_download(db, record_id)
         except Exception as exc:
             logger.exception(exc)
         finally:
@@ -2190,9 +2325,324 @@ class TicketLogPullService:
             gc.collect()
 
     @classmethod
-    def _process_record(cls, db: Session, record_id: int) -> None:
+    def scan_pending_records(cls, db: Session) -> dict[str, int]:
         """
-        执行日志拉取全流程。
+        后台周期任务入口：扫描待处理的日志拉取记录。
+        1. created 兜底：投递到线程池提交外部申请；
+        2. submitting/polling 超时：标记为轮询超时失败；
+        3. submitting/polling 未超时：单次探测外部平台，命中可下载结果则投递下载解析。
+        :param db: 数据库会话
+        :return: 扫描摘要
+        """
+        summary = {
+            "scanned": 0,
+            "submitted": 0,
+            "expired": 0,
+            "failed": 0,
+            "downloading": 0,
+            "pending": 0,
+        }
+        try:
+            now = datetime.now()
+            created_records = TicketLogPullDao.list_created_records(db, 100)
+            for record in created_records:
+                cls.queue_record(record.id)
+                current = TicketLogPullDao.get_record_by_id(db, record.id)
+                if current is not None and current.status != TicketLogPullStatus.CREATED.value:
+                    summary["submitted"] += 1
+
+            expired_records = TicketLogPullDao.list_expired_polling_records(
+                db,
+                now,
+                [TicketLogPullStatus.SUBMITTING.value, TicketLogPullStatus.POLLING.value],
+            )
+            for record in expired_records:
+                cls._fail_record(
+                    db,
+                    record.id,
+                    status=TicketLogPullStatus.FAILED.value,
+                    status_desc="轮询外部平台超时",
+                    error_message="在配置的超时时间内未获取到日志拉取结果",
+                )
+                cls._add_ticket_event(
+                    db,
+                    ticket_id=record.ticket_id,
+                    operator_id=None,
+                    operator_name="system",
+                    content="日志拉取轮询外部平台超时",
+                    event_data={"record_id": record.id, "finished_at": now.isoformat()},
+                )
+                cls._log_chain_step(
+                    db,
+                    ticket_id=record.ticket_id,
+                    record_id=record.id,
+                    step="poll-external",
+                    status="timeout",
+                    reason="在配置超时时间内未获取到结果",
+                )
+                summary["expired"] += 1
+
+            pending_records = TicketLogPullDao.list_polling_records(
+                db,
+                [TicketLogPullStatus.SUBMITTING.value, TicketLogPullStatus.POLLING.value],
+                200,
+            )
+            for record in pending_records:
+                summary["scanned"] += 1
+                probe = cls._probe_external_status(db, record)
+                if probe == "matched":
+                    summary["downloading"] += 1
+                    cls.queue_record(record.id)
+                elif probe == "failed":
+                    summary["failed"] += 1
+                else:
+                    summary["pending"] += 1
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception(f"日志拉取周期扫描异常: {exc}")
+        return summary
+
+    @classmethod
+    def stop_log_pull_services(cls, db: Session, record_id: int, current_user: CurrentUserModel) -> CrudResponseModel:
+        """
+        停止指定的日志拉取记录（协作式取消，在下次检查点生效，保留已有进度）。
+        :param db: 数据库会话
+        :param record_id: 记录ID
+        :param current_user: 当前登录用户
+        :return: 操作结果
+        """
+        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        if not record:
+            return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
+        if record.status not in cls.ACTIVE_STATUSES:
+            return CrudResponseModel(is_success=False, message=f"当前状态({record.status})不允许停止")
+        now = datetime.now()
+        TicketLogPullDao.update_record(
+            db,
+            record_id,
+            {
+                "status": TicketLogPullStatus.CANCELLED.value,
+                "status_desc": "已标记停止",
+                "is_error": False,
+                "update_by": cls._user_name(current_user),
+                "update_time": now,
+            },
+        )
+        cls._add_ticket_event(
+            db,
+            ticket_id=record.ticket_id,
+            operator_id=cls._user_id(current_user),
+            operator_name=cls._user_name(current_user),
+            content="日志拉取任务已停止",
+            event_data={"record_id": record.id, "status": record.status, "stopped_at": now.isoformat()},
+        )
+        db.commit()
+        return CrudResponseModel(
+            is_success=True,
+            message="已请求停止任务",
+            result={"recordId": record_id, "status": TicketLogPullStatus.CANCELLED.value},
+        )
+
+    @classmethod
+    def _process_submit(cls, db: Session, record_id: int) -> None:
+        """
+        提交申请阶段：幂等检查外部列表，未命中则提交外部申请，命中则直接进入下载解析。
+        :param db: 数据库会话
+        :param record_id: 记录ID
+        :return: 无
+        """
+        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        if not record:
+            return
+        if record.status not in {
+            TicketLogPullStatus.CREATED.value,
+            TicketLogPullStatus.SUBMITTING.value,
+        }:
+            return
+        try:
+            rows = cls._fetch_external_rows(db, record)
+            matched_row = cls._match_external_row(record, rows)
+            if matched_row:
+                external_status = int(matched_row.get("commandStatus") or 0)
+                command_result_url = cls._extract_command_result_url(matched_row.get("commandResult"))
+                if external_status == 2:
+                    cls._fail_record(
+                        db,
+                        record_id,
+                        status=TicketLogPullStatus.FAILED.value,
+                        status_desc="外部平台日志拉取失败",
+                        error_message=str(matched_row.get("errorMsg") or "外部平台返回失败"),
+                    )
+                    cls._add_ticket_event(
+                        db,
+                        ticket_id=record.ticket_id,
+                        operator_id=None,
+                        operator_name="system",
+                        content="外部平台日志拉取失败",
+                        event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
+                    )
+                    cls._notify_log_pull_record(
+                        db,
+                        record,
+                        status="failed",
+                        message="外部平台日志拉取失败",
+                        detail=f"record_id={record.id}, error={matched_row.get('errorMsg')}",
+                    )
+                    db.commit()
+                    return
+                if external_status == 1 and command_result_url:
+                    cls._update_status(
+                        db,
+                        record_id,
+                        status=TicketLogPullStatus.DOWNLOADING.value,
+                        status_desc="已匹配到外部平台结果，正在下载日志压缩包",
+                        is_error=False,
+                        update_by="system",
+                        last_polled_at=datetime.now(),
+                        external_command_id=matched_row.get("id"),
+                        external_serial_number=matched_row.get("serialNumber"),
+                        external_command_status=external_status,
+                        external_command_status_desc=matched_row.get("commandStatusDesc"),
+                        command_result_url=command_result_url,
+                        source_created_at=cls._parse_external_datetime(matched_row),
+                    )
+                    record = TicketLogPullDao.get_record_by_id(db, record_id)
+                    if record is None:
+                        return
+                    cls._process_download(db, record_id)
+                    return
+            if record.status == TicketLogPullStatus.CREATED.value:
+                cls._update_status(
+                    db,
+                    record_id,
+                    status=TicketLogPullStatus.SUBMITTING.value,
+                    status_desc="正在提交外部日志拉取申请",
+                    is_error=False,
+                    update_by="system",
+                )
+            record = TicketLogPullDao.get_record_by_id(db, record_id)
+            if record is None:
+                return
+            cls._submit_external_request(db, record)
+        except Exception as exc:
+            logger.exception(exc)
+            try:
+                cls._exception_record(
+                    db,
+                    record_id,
+                    status_desc="日志拉取提交申请异常",
+                    error_message=str(exc) or exc.__class__.__name__,
+                    exception_detail=traceback.format_exc(),
+                )
+            except Exception:
+                db.rollback()
+
+    @classmethod
+    def _probe_external_status(cls, db: Session, record: TicketLogPullRecord) -> str:
+        """
+        单次探测外部平台列表接口，返回 matched / failed / pending。
+        :param db: 数据库会话
+        :param record: 日志拉取记录
+        :return: 探测结果
+        """
+        rows = cls._fetch_external_rows(db, record)
+        matched_row = cls._match_external_row(record, rows)
+        now = datetime.now()
+        if not matched_row:
+            TicketLogPullDao.update_record(
+                db,
+                record.id,
+                {
+                    "last_polled_at": now,
+                    "status_desc": "已提交申请，轮询外部平台处理中",
+                    "update_by": "system",
+                    "update_time": now,
+                },
+            )
+            db.commit()
+            return "pending"
+        external_status = int(matched_row.get("commandStatus") or 0)
+        if external_status == 1:
+            cls._update_status(
+                db,
+                record.id,
+                status=TicketLogPullStatus.DOWNLOADING.value,
+                status_desc="已匹配到外部平台结果，正在下载日志压缩包",
+                is_error=False,
+                update_by="system",
+                last_polled_at=now,
+                external_command_id=matched_row.get("id"),
+                external_serial_number=matched_row.get("serialNumber"),
+                external_command_status=external_status,
+                external_command_status_desc=matched_row.get("commandStatusDesc"),
+                command_result_url=cls._extract_command_result_url(matched_row.get("commandResult")),
+                source_created_at=cls._parse_external_datetime(matched_row),
+            )
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="poll-external",
+                status="matched",
+                reason="外部平台已生成可下载结果",
+                detail={"externalStatus": external_status, "serialNumber": matched_row.get("serialNumber")},
+            )
+            return "matched"
+        if external_status == 2:
+            cls._fail_record(
+                db,
+                record.id,
+                status=TicketLogPullStatus.FAILED.value,
+                status_desc="外部平台日志拉取失败",
+                error_message=str(matched_row.get("errorMsg") or "外部平台返回失败"),
+            )
+            cls._add_ticket_event(
+                db,
+                ticket_id=record.ticket_id,
+                operator_id=None,
+                operator_name="system",
+                content="外部平台日志拉取失败",
+                event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
+            )
+            cls._notify_log_pull_record(
+                db,
+                record,
+                status="failed",
+                message="外部平台日志拉取失败",
+                detail=f"record_id={record.id}, error={matched_row.get('errorMsg')}",
+            )
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="poll-external",
+                status="failed",
+                reason="外部平台返回失败",
+                detail={"errorMessage": matched_row.get("errorMsg")},
+            )
+            return "failed"
+        TicketLogPullDao.update_record(
+            db,
+            record.id,
+            {
+                "external_command_id": matched_row.get("id"),
+                "external_serial_number": matched_row.get("serialNumber"),
+                "external_command_status": external_status,
+                "external_command_status_desc": matched_row.get("commandStatusDesc"),
+                "last_polled_at": now,
+                "update_by": "system",
+                "update_time": now,
+            },
+        )
+        db.commit()
+        return "pending"
+
+    @classmethod
+    def _process_download(cls, db: Session, record_id: int) -> None:
+        """
+        下载解析阶段：下载压缩包、归档、按时间范围截取入库、后处理并触发 AI。
+        协作式取消：下载前、解析前检查记录是否被标记为 CANCELLED，是则清理临时文件直接返回。
         :param db: 数据库会话
         :param record_id: 记录ID
         :return: 无
@@ -2202,263 +2652,168 @@ class TicketLogPullService:
             return
 
         temp_file_path: Path | None = None
-        direct_download_ready = False
         try:
             has_log_time_range = bool(record.log_begin_time or record.log_end_time)
-            if record.status == TicketLogPullStatus.CREATED.value:
-                rows = cls._fetch_external_rows(db, record)
-                matched_row = cls._match_external_row(record, rows)
-                if matched_row:
-                    external_status = int(matched_row.get("commandStatus") or 0)
-                    command_result_url = cls._extract_command_result_url(matched_row.get("commandResult"))
-                    if external_status == 2:
-                        cls._fail_record(
-                            db,
-                            record_id,
-                            status=TicketLogPullStatus.FAILED.value,
-                            status_desc="外部平台日志拉取失败",
-                            error_message=str(matched_row.get("errorMsg") or "外部平台返回失败"),
-                        )
-                        cls._add_ticket_event(
-                            db,
-                            ticket_id=record.ticket_id,
-                            operator_id=None,
-                            operator_name="system",
-                            content="外部平台日志拉取失败",
-                            event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
-                        )
-                        cls._notify_log_pull_record(
-                            db,
-                            record,
-                            status="failed",
-                            message="外部平台日志拉取失败",
-                            detail=f"record_id={record.id}, error={matched_row.get('errorMsg')}",
-                        )
-                        db.commit()
-                        return
-                    if external_status == 1 and command_result_url:
-                        now = datetime.now()
-                        cls._update_status(
-                            db,
-                            record_id,
-                            status=TicketLogPullStatus.DOWNLOADING.value,
-                            status_desc="已匹配到外部平台结果，正在下载日志压缩包",
-                            is_error=False,
-                            update_by="system",
-                            last_polled_at=now,
-                            external_command_id=matched_row.get("id"),
-                            external_serial_number=matched_row.get("serialNumber"),
-                            external_command_status=external_status,
-                            external_command_status_desc=matched_row.get("commandStatusDesc"),
-                            command_result_url=command_result_url,
-                            source_created_at=cls._parse_external_datetime(matched_row),
-                        )
-                        record = TicketLogPullDao.get_record_by_id(db, record_id)
-                        if record is None:
-                            return
-                        direct_download_ready = True
-                if record.status == TicketLogPullStatus.CREATED.value:
-                    cls._update_status(
-                        db,
-                        record_id,
-                        status=TicketLogPullStatus.SUBMITTING.value,
-                        status_desc="正在提交外部日志拉取申请",
-                        is_error=False,
-                        update_by="system",
-                    )
-                    record = TicketLogPullDao.get_record_by_id(db, record_id)
-                    if record is None:
-                        return
-                    cls._submit_external_request(db, record)
-                    record = TicketLogPullDao.get_record_by_id(db, record_id)
-                    if record is None:
-                        return
-
-            if record.status in {
-                TicketLogPullStatus.SUBMITTING.value,
-                TicketLogPullStatus.POLLING.value,
-                TicketLogPullStatus.DOWNLOADING.value,
-                TicketLogPullStatus.PROCESSING.value,
-            }:
-                if not direct_download_ready:
-                    command_row = cls._poll_external_result(db, record)
-                    record = TicketLogPullDao.get_record_by_id(db, record_id)
-                    if record is None:
-                        return
-                    if not command_row:
-                        return
-                    if not record.command_result_url:
-                        cls._fail_record(
-                            db,
-                            record_id,
-                            status=TicketLogPullStatus.FAILED.value,
-                            status_desc="外部平台未返回压缩包地址",
-                            error_message="外部平台返回成功状态但缺少 commandResult.url",
-                        )
-                        cls._notify_log_pull_record(
-                            db,
-                            record,
-                            status="failed",
-                            message="外部平台未返回压缩包地址",
-                            detail=f"record_id={record.id}",
-                        )
-                        return
-
-                if record.status != TicketLogPullStatus.DOWNLOADING.value:
-                    cls._update_status(
-                        db,
-                        record_id,
-                        status=TicketLogPullStatus.DOWNLOADING.value,
-                        status_desc="正在下载日志压缩包",
-                        is_error=False,
-                        update_by="system",
-                    )
+            if record.status == TicketLogPullStatus.CANCELLED.value:
+                return
+            if record.status != TicketLogPullStatus.DOWNLOADING.value:
+                cls._update_status(
+                    db,
+                    record_id,
+                    status=TicketLogPullStatus.DOWNLOADING.value,
+                    status_desc="正在下载日志压缩包",
+                    is_error=False,
+                    update_by="system",
+                )
+            record = TicketLogPullDao.get_record_by_id(db, record_id)
+            if record is None or record.status == TicketLogPullStatus.CANCELLED.value:
+                return
+            temp_file_path, file_size = cls._download_archive(record, db)
+            storage_path = cls._store_archive(record, temp_file_path, db)
+            update_kwargs: dict[str, Any] = {
+                "download_file_name": temp_file_path.name,
+                "download_file_size": file_size,
+                "storage_path": storage_path,
+            }
+            if has_log_time_range:
+                record = TicketLogPullDao.get_record_by_id(db, record_id)
+                if record is None or record.status == TicketLogPullStatus.CANCELLED.value:
+                    return
+                cls._update_status(
+                    db,
+                    record_id,
+                    status=TicketLogPullStatus.PROCESSING.value,
+                    status_desc="正在解析日志内容并压缩入库",
+                    is_error=False,
+                    update_by="system",
+                    **update_kwargs,
+                )
                 record = TicketLogPullDao.get_record_by_id(db, record_id)
                 if record is None:
                     return
-                temp_file_path, file_size = cls._download_archive(record, db)
-                storage_path = cls._store_archive(record, temp_file_path, db)
-                update_kwargs: dict[str, Any] = {
-                    "download_file_name": temp_file_path.name,
-                    "download_file_size": file_size,
-                    "storage_path": storage_path,
-                }
-                if has_log_time_range:
-                    cls._update_status(
-                        db,
-                        record_id,
-                        status=TicketLogPullStatus.PROCESSING.value,
-                        status_desc="正在解析日志内容并压缩入库",
-                        is_error=False,
-                        update_by="system",
-                        **update_kwargs,
-                    )
-                    record = TicketLogPullDao.get_record_by_id(db, record_id)
-                    if record is None:
-                        return
-                    try:
-                        content_result = cls._extract_archive_content(record, temp_file_path, db)
-                    except TicketLogContentTooLargeError as exc:
-                        cls._fail_record(
-                            db,
-                            record_id,
-                            status=TicketLogPullStatus.FAILED.value,
-                            status_desc="日志内容超出入库上限",
-                            error_message=str(exc),
-                        )
-                        cls._notify_log_pull_record(
-                            db,
-                            record,
-                            status="failed",
-                            message="日志内容超出入库上限",
-                            detail=f"record_id={record.id}, error={exc}",
-                        )
-                        return
-                    success_desc = "日志拉取完成"
-                    if record.command_data_type == TicketLogDataType.DB.value:
-                        success_desc = "DB 拉取完成"
-                    elif content_result["matched_entry_count"] == 0:
-                        success_desc = "日志拉取完成，未匹配到时间范围内日志"
-                    cls._update_status(
-                        db,
-                        record_id,
-                        status=TicketLogPullStatus.SUCCESS.value,
-                        status_desc=success_desc,
-                        is_error=False,
-                        update_by="system",
-                        archive_entry_count=content_result["archive_entry_count"],
-                        matched_entry_count=content_result["matched_entry_count"],
-                        content_char_count=content_result["content_char_count"],
-                        content_truncated=content_result["content_truncated"],
-                        compressed_content=content_result["compressed_content"],
-                        content_summary=content_result["content_summary"],
-                        finished_at=datetime.now(),
-                        **update_kwargs,
-                    )
-                else:
-                    archive_entry_count = cls._count_archive_entries(temp_file_path)
-                    cls._update_status(
-                        db,
-                        record_id,
-                        status=TicketLogPullStatus.SUCCESS.value,
-                        status_desc="日志已下载，未截取内容",
-                        is_error=False,
-                        update_by="system",
-                        archive_entry_count=archive_entry_count,
-                        matched_entry_count=0,
-                        content_char_count=0,
-                        content_truncated=False,
-                        compressed_content=None,
-                        content_summary="日志已下载完成，未截取入库，AI 分析将使用整包压缩文件。",
-                        finished_at=datetime.now(),
-                        **update_kwargs,
-                    )
-                cls._log_chain_step(
-                    db,
-                    ticket_id=record.ticket_id,
-                    record_id=record.id,
-                    step="archive-process",
-                    status="success",
-                    reason="归档与解析完成" if has_log_time_range else "仅归档完成",
-                    detail={
-                        "storagePath": storage_path,
-                        "fileSize": file_size,
-                        "hasLogTimeRange": has_log_time_range,
-                    },
-                )
-                cls._add_ticket_event(
-                    db,
-                    ticket_id=record.ticket_id,
-                    operator_id=None,
-                    operator_name="system",
-                    content="日志拉取完成" if has_log_time_range else "日志已下载，未截取内容",
-                    event_data={
-                        "record_id": record.id,
-                        "storage_mode": record.storage_mode,
-                        "storage_path": storage_path,
-                        "matched_entry_count": content_result["matched_entry_count"] if has_log_time_range else 0,
-                        "archive_entry_count": (
-                            content_result["archive_entry_count"] if has_log_time_range else archive_entry_count
-                        ),
-                        "whole_archive": not has_log_time_range,
-                    },
-                )
                 try:
-                    post_process_result = TicketLogPostProcessService.run_after_download(
+                    content_result = cls._extract_archive_content(record, temp_file_path, db)
+                except TicketLogContentTooLargeError as exc:
+                    cls._fail_record(
+                        db,
+                        record_id,
+                        status=TicketLogPullStatus.FAILED.value,
+                        status_desc="日志内容超出入库上限",
+                        error_message=str(exc),
+                    )
+                    cls._notify_log_pull_record(
                         db,
                         record,
-                        temp_file_path,
-                        cls._get_storage_config_dict(db),
+                        status="failed",
+                        message="日志内容超出入库上限",
+                        detail=f"record_id={record.id}, error={exc}",
                     )
-                    if post_process_result.get("enabled"):
-                        cls._log_chain_step(
-                            db,
-                            ticket_id=record.ticket_id,
-                            record_id=record.id,
-                            step="post-download-prepare",
-                            status="success" if post_process_result.get("prepared") else "skipped",
-                            reason=str(post_process_result.get("message") or "日志下载完成后处理完成"),
-                            detail=post_process_result,
-                        )
-                except Exception as exc:
-                    logger.warning(f"日志下载完成后处理失败，record_id={record.id}，reason={exc}")
+                    return
+                success_desc = "日志拉取完成"
+                if record.command_data_type == TicketLogDataType.DB.value:
+                    success_desc = "DB 拉取完成"
+                elif content_result["matched_entry_count"] == 0:
+                    success_desc = "日志拉取完成，未匹配到时间范围内日志"
+                cls._update_status(
+                    db,
+                    record_id,
+                    status=TicketLogPullStatus.SUCCESS.value,
+                    status_desc=success_desc,
+                    is_error=False,
+                    update_by="system",
+                    archive_entry_count=content_result["archive_entry_count"],
+                    matched_entry_count=content_result["matched_entry_count"],
+                    content_char_count=content_result["content_char_count"],
+                    content_truncated=content_result["content_truncated"],
+                    compressed_content=content_result["compressed_content"],
+                    content_summary=content_result["content_summary"],
+                    finished_at=datetime.now(),
+                    **update_kwargs,
+                )
+            else:
+                archive_entry_count = cls._count_archive_entries(temp_file_path)
+                cls._update_status(
+                    db,
+                    record_id,
+                    status=TicketLogPullStatus.SUCCESS.value,
+                    status_desc="日志已下载，未截取内容",
+                    is_error=False,
+                    update_by="system",
+                    archive_entry_count=archive_entry_count,
+                    matched_entry_count=0,
+                    content_char_count=0,
+                    content_truncated=False,
+                    compressed_content=None,
+                    content_summary="日志已下载完成，未截取入库，AI 分析将使用整包压缩文件。",
+                    finished_at=datetime.now(),
+                    **update_kwargs,
+                )
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record.id,
+                step="archive-process",
+                status="success",
+                reason="归档与解析完成" if has_log_time_range else "仅归档完成",
+                detail={
+                    "storagePath": storage_path,
+                    "fileSize": file_size,
+                    "hasLogTimeRange": has_log_time_range,
+                },
+            )
+            cls._add_ticket_event(
+                db,
+                ticket_id=record.ticket_id,
+                operator_id=None,
+                operator_name="system",
+                content="日志拉取完成" if has_log_time_range else "日志已下载，未截取内容",
+                event_data={
+                    "record_id": record.id,
+                    "storage_mode": record.storage_mode,
+                    "storage_path": storage_path,
+                    "matched_entry_count": content_result["matched_entry_count"] if has_log_time_range else 0,
+                    "archive_entry_count": (
+                        content_result["archive_entry_count"] if has_log_time_range else archive_entry_count
+                    ),
+                    "whole_archive": not has_log_time_range,
+                },
+            )
+            try:
+                post_process_result = TicketLogPostProcessService.run_after_download(
+                    db,
+                    record,
+                    temp_file_path,
+                    cls._get_storage_config_dict(db),
+                )
+                if post_process_result.get("enabled"):
                     cls._log_chain_step(
                         db,
                         ticket_id=record.ticket_id,
                         record_id=record.id,
                         step="post-download-prepare",
-                        status="failed",
-                        reason=str(exc),
+                        status="success" if post_process_result.get("prepared") else "skipped",
+                        reason=str(post_process_result.get("message") or "日志下载完成后处理完成"),
+                        detail=post_process_result,
                     )
-                cls._notify_log_pull_record(
+            except Exception as exc:
+                logger.warning(f"日志下载完成后处理失败，record_id={record.id}，reason={exc}")
+                cls._log_chain_step(
                     db,
-                    record,
-                    status="success",
-                    message="日志拉取已完成" if has_log_time_range else "日志压缩包已下载，未切割入库",
-                    detail=f"record_id={record.id}, storage_path={storage_path}",
+                    ticket_id=record.ticket_id,
+                    record_id=record.id,
+                    step="post-download-prepare",
+                    status="failed",
+                    reason=str(exc),
                 )
-                db.commit()
-                cls._trigger_auto_ai_analysis(db, record.id)
+            cls._notify_log_pull_record(
+                db,
+                record,
+                status="success",
+                message="日志拉取已完成" if has_log_time_range else "日志压缩包已下载，未切割入库",
+                detail=f"record_id={record.id}, storage_path={storage_path}",
+            )
+            db.commit()
+            cls._trigger_auto_ai_analysis(db, record.id)
         except Exception as exc:
             logger.exception(exc)
             error_message = str(exc) or exc.__class__.__name__
@@ -2490,6 +2845,7 @@ class TicketLogPullService:
                     temp_file_path.unlink()
                 except Exception:
                     logger.warning(f"删除临时日志压缩包失败: {temp_file_path}")
+
 
     @classmethod
     def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> None:
@@ -2713,6 +3069,9 @@ class TicketLogPullService:
                 reason=f"外部平台拒绝提交: {payload.get('msg') or payload}",
             )
             raise RuntimeError(f"提交日志拉取申请失败: {payload.get('msg') or payload}")
+        storage_config = cls._get_storage_config_dict(db)
+        poll_timeout_sec = int(storage_config.get("pollTimeoutSec") or 1800)
+        now = datetime.now()
         cls._update_status(
             db,
             record.id,
@@ -2720,6 +3079,8 @@ class TicketLogPullService:
             status_desc="已提交申请，等待外部平台生成压缩包",
             is_error=False,
             update_by="system",
+            last_polled_at=now,
+            poll_deadline_at=now + timedelta(seconds=poll_timeout_sec),
         )
         cls._log_chain_step(
             db,
@@ -2730,116 +3091,6 @@ class TicketLogPullService:
             reason="外部平台提交成功",
             detail={"requestUrl": request_url, "pageUrl": page_url},
         )
-
-    @classmethod
-    def _poll_external_result(cls, db: Session, record: TicketLogPullRecord) -> dict[str, Any] | None:
-        """
-        轮询外部平台列表接口，直到获取成功或失败结果。
-        :param db: 数据库会话
-        :param record: 日志拉取记录
-        :return: 匹配到的外部命令数据
-        """
-        storage_config = cls._get_storage_config_dict(db)
-        deadline = datetime.now() + timedelta(seconds=int(storage_config.get("pollTimeoutSec") or 1800))
-        interval_seconds = int(storage_config.get("pollIntervalSec") or 20)
-        cls._log_chain_step(
-            db,
-            ticket_id=record.ticket_id,
-            record_id=record.id,
-            step="poll-external",
-            status="running",
-            reason="开始轮询外部平台结果",
-            detail={
-                "timeoutSeconds": int(storage_config.get("pollTimeoutSec") or 1800),
-                "intervalSeconds": interval_seconds,
-            },
-        )
-        while datetime.now() < deadline:
-            rows = cls._fetch_external_rows(db, record)
-            matched_row = cls._match_external_row(record, rows)
-            now = datetime.now()
-            TicketLogPullDao.update_record(
-                db,
-                record.id,
-                {
-                    "status": TicketLogPullStatus.POLLING.value,
-                    "status_desc": "已提交申请，轮询外部平台处理中",
-                    "last_polled_at": now,
-                    "update_by": "system",
-                    "update_time": now,
-                },
-            )
-            db.commit()
-            if matched_row:
-                external_status = int(matched_row.get("commandStatus") or 0)
-                update_data = {
-                    "external_command_id": matched_row.get("id"),
-                    "external_serial_number": matched_row.get("serialNumber"),
-                    "external_command_status": external_status,
-                    "external_command_status_desc": matched_row.get("commandStatusDesc"),
-                    "command_result_url": cls._extract_command_result_url(matched_row.get("commandResult")),
-                    "source_created_at": cls._parse_external_datetime(matched_row),
-                    "last_polled_at": now,
-                    "update_by": "system",
-                    "update_time": now,
-                }
-                TicketLogPullDao.update_record(db, record.id, update_data)
-                db.commit()
-                if external_status == 1:
-                    cls._log_chain_step(
-                        db,
-                        ticket_id=record.ticket_id,
-                        record_id=record.id,
-                        step="poll-external",
-                        status="matched",
-                        reason="外部平台已生成可下载结果",
-                        detail={"externalStatus": external_status, "serialNumber": matched_row.get("serialNumber")},
-                    )
-                    return matched_row
-                if external_status == 2:
-                    cls._fail_record(
-                        db,
-                        record.id,
-                        status=TicketLogPullStatus.FAILED.value,
-                        status_desc="外部平台日志拉取失败",
-                        error_message=str(matched_row.get("errorMsg") or "外部平台返回失败"),
-                    )
-                    cls._add_ticket_event(
-                        db,
-                        ticket_id=record.ticket_id,
-                        operator_id=None,
-                        operator_name="system",
-                        content="外部平台日志拉取失败",
-                        event_data={"record_id": record.id, "error_message": matched_row.get("errorMsg")},
-                    )
-                    db.commit()
-                    cls._log_chain_step(
-                        db,
-                        ticket_id=record.ticket_id,
-                        record_id=record.id,
-                        step="poll-external",
-                        status="failed",
-                        reason="外部平台返回失败",
-                        detail={"errorMessage": matched_row.get("errorMsg")},
-                    )
-                    return None
-            threading.Event().wait(interval_seconds)
-        cls._fail_record(
-            db,
-            record.id,
-            status=TicketLogPullStatus.FAILED.value,
-            status_desc="轮询外部平台超时",
-            error_message="在配置的超时时间内未获取到日志拉取结果",
-        )
-        cls._log_chain_step(
-            db,
-            ticket_id=record.ticket_id,
-            record_id=record.id,
-            step="poll-external",
-            status="timeout",
-            reason="在配置超时时间内未获取到结果",
-        )
-        return None
 
     @classmethod
     def _fetch_external_rows(cls, db: Session, record: TicketLogPullRecord) -> list[dict[str, Any]]:
@@ -4238,10 +4489,19 @@ class TicketLogPullService:
     @classmethod
     def _get_external_config_dict(cls, db: Session, environment: str | None = None) -> dict[str, Any]:
         """
-        读取日志拉取外部接口配置字典，可按环境标识返回指定环境的配置。
+        读取日志拉取外部接口配置字典，支持 group:item 格式和旧单环境 key 格式。
+
+        新格式（推荐）：environment = "uat:uat2"
+          从 groups["uat"]["items"]["uat2"] 获取配置
+
+        旧格式（兼容）：environment = "uat2"
+          升级后的 normalized 中 key 已是分组名，尝试：
+          1. 直接 key 匹配分组 → 使用 defaultItem 或第一个子环境
+          2. 遍历所有分组的子环境查找 key
+
         :param db: 数据库会话
         :param environment: 环境标识，空值会直接报错，避免历史记录误用默认环境
-        :return: 指定 environment 的外部接口配置
+        :return: 指定 environment 的外部接口配置（单环境dict，包含 insertUrl/pageUrl/credentialBindingId/origin）
         """
         cls.ensure_param_config_rows(db)
         config_row = TicketLogPullDao.get_external_config_row(db)
@@ -4250,23 +4510,119 @@ class TicketLogPullService:
         env_key = str(environment or "").strip()
         if not env_key:
             raise ValueError("日志拉取记录未保存环境信息，无法重新拉取")
+
+        # 尝试 group:item 格式拆分
+        if ":" in env_key:
+            group_key, item_key = env_key.split(":", 1)
+            group_config = normalized.get(group_key)
+            if not isinstance(group_config, dict):
+                raise ValueError(
+                    f"日志拉取环境分组 '{group_key}' 不存在，"
+                    f"当前可用分组：{', '.join(str(k) for k in normalized.keys()) or '无'}"
+                )
+            items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+            item_config = items.get(item_key)
+            if not isinstance(item_config, dict):
+                available_items = ", ".join(str(k) for k in items.keys()) or "无"
+                raise ValueError(
+                    f"日志拉取子环境 '{item_key}' 在分组 '{group_key}' 中不存在，"
+                    f"当前可用子环境：{available_items}"
+                )
+            return dict(item_config)
+
+        # 旧格式兼容：直接 key 匹配
         if env_key in normalized:
-            return normalized[env_key]
+            group_config = normalized.get(env_key)
+            if not isinstance(group_config, dict):
+                raise ValueError(f"日志拉取环境 '{env_key}' 配置无效")
+            # 如果该分组配置包含 items，使用 defaultItem 或第一个子环境
+            items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+            if items:
+                # 是分组格式，取 defaultItem 或第一个子环境
+                default_item = str(group_config.get("defaultItem") or "").strip()
+                if default_item and default_item in items:
+                    return dict(items[default_item])
+                first_key = next(iter(items.keys()))
+                return dict(items[first_key])
+            # 旧单环境配置（已升级但直接key匹配到了分组），item没有items字段时应直接返回该分组
+            # 这种情况在升级后的格式中不存在，但作为兼容兜底
+            return dict(group_config)
+
+        # 旧格式兼容：直接 key 在旧多环境格式中查找（未升级前的配置）
+        # 遍历所有分组及其子环境查找匹配
+        for group_config in normalized.values():
+            if not isinstance(group_config, dict):
+                continue
+            items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+            if env_key in items:
+                return dict(items[env_key])
+
         available_envs = ", ".join(str(key) for key in normalized.keys()) or "无"
-        raise ValueError(f"日志拉取环境 '{env_key}' 不存在，请检查 ticket.logPull.external 配置，当前可用环境：{available_envs}")
+        raise ValueError(
+            f"日志拉取环境 '{env_key}' 不存在，请检查 ticket.logPull.external 配置，"
+            f"当前可用环境：{available_envs}"
+        )
 
     @classmethod
-    def _get_environment_options(cls, db: Session) -> list[str]:
+    def _get_environment_options(cls, db: Session) -> list[TicketLogPullEnvironmentOptionModel]:
         """
-        获取所有可用环境标识列表。
+        获取所有可用环境分组选项列表。
         :param db: 数据库会话
-        :return: 环境 key 列表
+        :return: 环境分组选项列表
         """
         cls.ensure_param_config_rows(db)
         config_row = TicketLogPullDao.get_external_config_row(db)
         payload = cls._json_loads(getattr(config_row, "config_value", None), {})
         normalized = cls._normalize_external_config(payload)
-        return list(normalized.keys())
+        options: list[TicketLogPullEnvironmentOptionModel] = []
+        for group_key, group_config in normalized.items():
+            label = str(group_config.get("label") or group_key)
+            options.append(TicketLogPullEnvironmentOptionModel(key=group_key, label=label))
+        return options
+
+    @classmethod
+    def resolve_env_item_services(
+        cls, db: Session, group_key: str, vender_no: str
+    ) -> list[TicketLogPullEnvResolveResultModel]:
+        """
+        根据环境分组和商家编号，解析出所有匹配的子环境列表。
+        :param db: 数据库会话
+        :param group_key: 环境分组 key，如 "uat"
+        :param vender_no: 商家编号
+        :return: 匹配到的子环境列表，可能为空
+        """
+        cls.ensure_param_config_rows(db)
+        config_row = TicketLogPullDao.get_external_config_row(db)
+        payload = cls._json_loads(getattr(config_row, "config_value", None), {})
+        normalized = cls._normalize_external_config(payload)
+        resolved_group_key = str(group_key or "").strip()
+        resolved_vender_no = str(vender_no or "").strip()
+        if not resolved_group_key:
+            raise ValueError("环境分组 key 不能为空")
+        if not resolved_vender_no:
+            raise ValueError("商家编号不能为空")
+        group_config = normalized.get(resolved_group_key)
+        if not isinstance(group_config, dict):
+            raise ValueError(f"环境分组 '{resolved_group_key}' 不存在，请检查 ticket.logPull.external 配置")
+        items = group_config.get("items") if isinstance(group_config.get("items"), dict) else {}
+        results: list[TicketLogPullEnvResolveResultModel] = []
+        for item_key, item_config in items.items():
+            if not isinstance(item_config, dict):
+                continue
+            vendor_filter = item_config.get("vendorFilter")
+            if isinstance(vendor_filter, list) and (
+                "*" in vendor_filter or resolved_vender_no in vendor_filter
+            ):
+                results.append(
+                    TicketLogPullEnvResolveResultModel(
+                        group_key=resolved_group_key,
+                        group_label=str(group_config.get("label") or resolved_group_key),
+                        item_key=str(item_key),
+                        item_label=str(item_config.get("label") or item_key),
+                        credential_binding_id=str(item_config.get("credentialBindingId") or "").strip(),
+                    )
+                )
+        return results
 
     @classmethod
     def _add_ticket_event(

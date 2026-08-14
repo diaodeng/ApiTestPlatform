@@ -26,6 +26,7 @@ class AiProviderBaseModel(BaseModel):
     api_protocol: str | None = Field(default=None, description="Provider API调用协议")
     supported_usages: list[str] = Field(default_factory=list, description="Provider允许的业务用途")
     supported_executors: list[str] = Field(default_factory=list, description="Provider兼容的执行器")
+    preferred_executor: str | None = Field(default=None, description="Provider默认执行器")
     preferred_agent_code: str | None = Field(default=None, description="Provider首选Agent编码")
     default_model: str | None = Field(default=None, description="Provider默认模型名称")
     provider_level: int | None = Field(default=0, description="Provider等级")
@@ -54,6 +55,7 @@ class AiProviderBaseModel(BaseModel):
         self.api_protocol = str(self.api_protocol or "").strip() or None
         self.supported_usages = [str(item).strip() for item in self.supported_usages if str(item).strip()]
         self.supported_executors = [str(item).strip() for item in self.supported_executors if str(item).strip()]
+        self.preferred_executor = str(self.preferred_executor or "").strip() or None
         self.preferred_agent_code = str(self.preferred_agent_code or "").strip() or None
         self.default_model = str(self.default_model or "").strip() or None
         self.base_url = str(self.base_url or "").strip() or None
@@ -133,6 +135,7 @@ class AiProviderOptionModel(BaseModel):
     api_protocol: str | None = None
     supported_usages: list[str] = Field(default_factory=list)
     supported_executors: list[str] = Field(default_factory=list)
+    preferred_executor: str | None = None
     preferred_agent_code: str | None = None
     default_model: str | None = None
     provider_level: int | None = None

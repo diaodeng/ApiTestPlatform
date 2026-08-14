@@ -116,6 +116,14 @@ class AiProviderService:
         for provider in providers:
             if not AiProviderCapabilityService.is_provider_eligible(provider, usage, executor):
                 continue
+            # 工单 AI 分析场景未指定具体执行器时，按“分析执行器集合”过滤，
+            # 使仅支持 claude_code 而未配置 codex 的 Provider 也能出现在下拉候选中。
+            if (
+                usage == "ticket_analysis_worker"
+                and not executor
+                and not AiProviderCapabilityService.resolve_analysis_executor_options(provider)
+            ):
+                continue
             option = AiProviderOptionModel.model_validate(provider)
             options.append(option)
         return options
@@ -172,6 +180,7 @@ class AiProviderService:
                     "api_protocol": api_protocol,
                     "supported_usages": supported_usages,
                     "supported_executors": supported_executors,
+                    "preferred_executor": str(page_object.preferred_executor or "").strip() or None,
                     "preferred_agent_code": str(page_object.preferred_agent_code or "").strip() or None,
                     "default_model": default_model,
                     "provider_level": int(page_object.provider_level or 0),
@@ -242,6 +251,7 @@ class AiProviderService:
             "api_protocol": api_protocol,
             "supported_usages": supported_usages,
             "supported_executors": supported_executors,
+            "preferred_executor": str(page_object.preferred_executor or "").strip() or None,
             "preferred_agent_code": str(page_object.preferred_agent_code or "").strip() or None,
             "default_model": default_model,
             "provider_level": int(page_object.provider_level or 0),

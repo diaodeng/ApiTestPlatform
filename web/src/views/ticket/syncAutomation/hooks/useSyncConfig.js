@@ -10,10 +10,6 @@ import {
   saveTicketSyncAutomationConfig,
   getTicketWorkflow
 } from '@/api/ticket/ticket'
-import {
-  getTicketLogPullPostProcessConfig,
-  saveTicketLogPullPostProcessConfig,
-} from '@/api/ticket/logPull'
 import { listCredentialBindingOptions } from '@/api/system/credential'
 
 export function useSyncConfig(proxy) {
@@ -38,7 +34,7 @@ export function useSyncConfig(proxy) {
     },
     {
       key: 'moduleMappings', label: '模块映射',
-      description: '示例：[{"keywords":["订单服务","order-service"],"moduleId":2001,"moduleName":"订单模块"}]',
+      description: '示例：[{"keywords":["订单服务","order-service"],"moduleCode":"order","moduleId":2001,"moduleName":"订单模块","projectId":1001}]',
       rows: 6,
     },
     {
@@ -300,14 +296,9 @@ export function useSyncConfig(proxy) {
       scoPatterns: [],
       versionPatterns: [],
       logPullDefaults: {
-        commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500, logPullConcurrency: 2,
+        commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500,
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
-      },
-      logPullPostProcess: {
-        postDownloadExtractEnabled: false,
-        postDownloadVersionExtractEnabled: false,
-        postDownloadIndexEnabled: false,
       },
       promptTemplates: { classificationHint: '' },
       aiClassification: {
@@ -413,29 +404,18 @@ export function useSyncConfig(proxy) {
     return text
   }
 
-  /**
-   * 应用日志拉取后处理配置，只把后处理开关映射到当前公共配置表单。
-   * @param {object} payload 后端返回的日志下载完成后处理配置。
-   * @returns {void}
-   */
-  function applyLogPullPostProcessConfig(payload = {}) {
-    const config = payload || {}
-    form.logPullPostProcess = {
-      postDownloadExtractEnabled: Boolean(config.postDownloadExtractEnabled),
-      postDownloadVersionExtractEnabled: Boolean(config.postDownloadVersionExtractEnabled),
-      postDownloadIndexEnabled: Boolean(config.postDownloadIndexEnabled),
-    }
-  }
-
-  /**
-   * 构建日志拉取后处理配置保存载荷，只提交公共配置页维护的三个开关。
-   * @returns {object} 日志下载完成后处理配置。
-   */
-  function buildLogPullPostProcessPayload() {
-    return {
-      postDownloadExtractEnabled: Boolean(form.logPullPostProcess?.postDownloadExtractEnabled),
-      postDownloadVersionExtractEnabled: Boolean(form.logPullPostProcess?.postDownloadVersionExtractEnabled),
-      postDownloadIndexEnabled: Boolean(form.logPullPostProcess?.postDownloadIndexEnabled),
+  function applyLogPullDefaultsConfig(payload = {}) {
+    const logPullDefaults = payload || {}
+    form.logPullDefaults = {
+      commandDataType: Number(logPullDefaults.commandDataType || 1),
+      fileMaxSize: Number(logPullDefaults.fileMaxSize || 500),
+      zipMaxSize: Number(logPullDefaults.zipMaxSize || 500),
+      storageMode: logPullDefaults.storageMode || 'local',
+      rangeBeforeMinutes: Number(logPullDefaults.rangeBeforeMinutes || 10),
+      rangeAfterMinutes: Number(logPullDefaults.rangeAfterMinutes || 10),
+      autoAiEnabled: Boolean(logPullDefaults.autoAiEnabled),
+      aiAgentCode: logPullDefaults.aiAgentCode || '',
+      aiProviderCode: logPullDefaults.aiProviderCode || '',
     }
   }
 
@@ -861,19 +841,7 @@ export function useSyncConfig(proxy) {
     scoPatternsText.value = JSON.stringify(normalizeArray(payload.scoPatterns), null, 2)
     versionPatternsText.value = JSON.stringify(normalizeArray(payload.versionPatterns), null, 2)
 
-    const logPullDefaults = payload.logPullDefaults || {}
-    form.logPullDefaults = {
-      commandDataType: Number(logPullDefaults.commandDataType || 1),
-      fileMaxSize: Number(logPullDefaults.fileMaxSize || 500),
-      zipMaxSize: Number(logPullDefaults.zipMaxSize || 500),
-      storageMode: logPullDefaults.storageMode || 'local',
-      rangeBeforeMinutes: Number(logPullDefaults.rangeBeforeMinutes || 10),
-      rangeAfterMinutes: Number(logPullDefaults.rangeAfterMinutes || 10),
-      autoAiEnabled: Boolean(logPullDefaults.autoAiEnabled),
-      aiAgentCode: logPullDefaults.aiAgentCode || '',
-      aiProviderCode: logPullDefaults.aiProviderCode || '',
-      logPullConcurrency: Number(logPullDefaults.logPullConcurrency || 2),
-    }
+    applyLogPullDefaultsConfig(payload.logPullDefaults || {})
 
     const promptTemplates = payload.promptTemplates || {}
     form.promptTemplates = {
@@ -888,13 +856,11 @@ export function useSyncConfig(proxy) {
 
   function loadConfig() {
     loading.value = true
-    return Promise.all([
-      getTicketSyncAutomationConfig(),
-      getTicketLogPullPostProcessConfig().catch(() => ({ data: {} })),
-    ]).then(([syncRes, postProcessRes]) => {
-      applyConfig((syncRes.data && syncRes.data.configValue) || syncRes.data || {})
-      applyLogPullPostProcessConfig(postProcessRes.data || {})
-    }).finally(() => { loading.value = false })
+    return getTicketSyncAutomationConfig()
+      .then(syncRes => {
+        applyConfig((syncRes.data && syncRes.data.configValue) || syncRes.data || {})
+      })
+      .finally(() => { loading.value = false })
   }
 
   function loadWorkflowStatuses() {
@@ -1158,7 +1124,6 @@ export function useSyncConfig(proxy) {
       payload.statClassification = normalizeStatClassificationConfig(payload.statClassification)
 
       await saveTicketSyncAutomationConfig(payload)
-      await saveTicketLogPullPostProcessConfig(buildLogPullPostProcessPayload())
       proxy.$modal.msgSuccess('保存成功')
       loadConfig()
     } catch (error) {

@@ -717,15 +717,6 @@ class TicketDao:
         latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
         latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
         submit_time_expr = _ticket_submit_time_expr()
-        matched_module_ids_by_code = (
-            _resolve_module_ids_by_codes(
-                db,
-                module_codes,
-                project_ids or None,
-            )
-            if module_codes
-            else []
-        )
         ticket_query = (
             db.query(Ticket)
             .filter(
@@ -735,9 +726,7 @@ class TicketDao:
                 Ticket.status.in_(status_values) if status_values else True,
                 Ticket.project_id.in_(project_ids) if project_ids else True,
                 Ticket.module_id.in_(module_ids) if module_ids else True,
-                Ticket.module_id.in_(matched_module_ids_by_code) if module_codes and matched_module_ids_by_code else (
-                    Ticket.ticket_id == -1 if module_codes else True
-                ),
+                Ticket.module_code.in_(module_codes) if module_codes else True,
                 Ticket.category_id == query.category_id if query.category_id else True,
                 Ticket.issue_type_id.in_(issue_type_ids) if issue_type_ids else True,
                 Ticket.issue_type_name.like(f"%{query.issue_type_name}%") if query.issue_type_name else True,
@@ -1511,11 +1500,6 @@ class TicketDao:
         :return: 统计结果
         """
         filters = [Ticket.del_flag == "0"]
-        matched_module_ids_by_code = (
-            _resolve_module_ids_by_codes(db, module_codes or [], project_ids or None)
-            if module_codes
-            else []
-        )
         submit_time_expr = _ticket_submit_time_expr()
         if begin_time:
             filters.append(submit_time_expr >= begin_time)
@@ -1526,10 +1510,7 @@ class TicketDao:
         if module_ids:
             filters.append(Ticket.module_id.in_(module_ids))
         if module_codes:
-            if matched_module_ids_by_code:
-                filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
-            else:
-                filters.append(Ticket.ticket_id == -1)
+            filters.append(Ticket.module_code.in_(module_codes))
         if automation_scope_module_ids is not None or automation_scope_module_name_includes is not None:
             filters.append(
                 _build_automation_scope_filter(
@@ -1622,10 +1603,7 @@ class TicketDao:
         if module_ids:
             transition_filters.append(Ticket.module_id.in_(module_ids))
         if module_codes:
-            if matched_module_ids_by_code:
-                transition_filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
-            else:
-                transition_filters.append(Ticket.ticket_id == -1)
+            transition_filters.append(Ticket.module_code.in_(module_codes))
         if issue_type_ids:
             transition_filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         transition_rows = (
@@ -1735,21 +1713,13 @@ class TicketDao:
         )
         if normalized_week_bucket_mode not in {"calendar_week", "business_week"}:
             normalized_week_bucket_mode = "calendar_week"
-        matched_module_ids_by_code = (
-            _resolve_module_ids_by_codes(db, module_codes or [], project_ids or None)
-            if module_codes
-            else []
-        )
         filters = [Ticket.del_flag == "0"]
         if project_ids:
             filters.append(Ticket.project_id.in_(project_ids))
         if module_ids:
             filters.append(Ticket.module_id.in_(module_ids))
         if module_codes:
-            if matched_module_ids_by_code:
-                filters.append(Ticket.module_id.in_(matched_module_ids_by_code))
-            else:
-                filters.append(Ticket.ticket_id == -1)
+            filters.append(Ticket.module_code.in_(module_codes))
         if automation_scope_module_ids is not None or automation_scope_module_name_includes is not None:
             filters.append(
                 _build_automation_scope_filter(

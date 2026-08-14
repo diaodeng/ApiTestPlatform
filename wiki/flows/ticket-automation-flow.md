@@ -73,8 +73,8 @@ sequenceDiagram
 | 1 | 新增、导入或远端拉取工单时，前端可勾选是否需要拉取日志，并在同一表单里填写日志拉取参数。 |
 | 2 | 日志拉取参数支持商家、门店、POS 和日期组合；页面会先从系统配置拉取可选商家/门店，再按选择联动约束门店候选。 |
 | 3 | 若勾选“日志后自动 AI”，前端同时要求选择 Agent；后端会把 Agent 编码与通知配置一并写入日志拉取记录的内部自动化配置。 |
-| 4 | `TicketService.create_ticket` 在保存工单后可同步创建日志拉取任务，并把自动化配置写入工单 `extra_data.ticket_automation` 便于追溯；日志拉取服务会先查外部列表，已可下载时直接进入下载流程，否则再提交申请并轮询。 |
-| 5 | `TicketLogPullService._process_record` 在日志拉取成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
+| 4 | `TicketService.create_ticket` 在保存工单后可同步创建日志拉取任务，并把自动化配置写入工单 `extra_data.ticket_automation` 便于追溯；日志拉取服务先查外部列表，已可下载时直接进入下载流程，否则提交申请后由后台周期任务批量探测（提交申请与轮询探测解耦，不再阻塞后台线程）。 |
+| 5 | 日志拉取下载解析阶段（`TicketLogPullService._process_download`）成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 6 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
 | 7 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
 | 8 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；任务成功或失败结束时都会按通知配置发送消息。 |

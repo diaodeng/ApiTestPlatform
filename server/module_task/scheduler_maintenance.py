@@ -13,6 +13,7 @@ from module_task.runtime_control import TaskStopRequestedError, is_task_stop_req
 from modules.ticket.service.stats.ticket_custom_statistics_service import TicketCustomStatisticsService
 from modules.ticket.service.stats.ticket_statistics_snapshot_service import TicketStatisticsSnapshotService
 from modules.ticket.service.stats.ticket_topic_stats_service import TicketTopicStatsService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_remote_sync_service import TicketRemoteSyncService
 from modules.ticket.service.sync.ticket_sync_notification_job_service import TicketSyncNotificationJobService
@@ -858,3 +859,32 @@ def ticket_topic_stats_report(
         "sent": bool(result.get("response")),
         "response": result.get("response"),
     }
+
+
+@register_job("module_task.scheduler_maintenance.scan_log_pull_records")
+def scan_log_pull_records(*args, **kwargs):
+    """
+    日志拉取记录后台扫描任务。
+
+    周期性执行：提交待提交的外部申请、单次探测外部平台结果（命中可下载则投递下载解析）、
+    标记轮询超时失败。轮询不再占用后台线程，任务提交与轮询不受并发数限制。
+
+    :return: 扫描摘要字典。
+    """
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    result: dict[str, Any] = {}
+    try:
+        with SessionLocal() as db:
+            result = TicketLogPullService.scan_pending_records(db)
+    except Exception as exc:
+        logger.exception(f"日志拉取周期扫描任务执行失败: error={exc}")
+        raise
+    logger.info(
+        f"日志拉取周期扫描完成 | scanned={result.get('scanned', 0)} "
+        f"submitted={result.get('submitted', 0)} expired={result.get('expired', 0)} "
+        f"failed={result.get('failed', 0)} downloading={result.get('downloading', 0)} "
+        f"pending={result.get('pending', 0)}"
+    )
+    return result

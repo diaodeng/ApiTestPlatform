@@ -58,7 +58,7 @@ graph TD
 - 帮助中心读取 `web/public/docs/docs-index.json` 自动展示 Markdown 文档，业务说明和配置说明只要写入 `web/public/docs` 并重新启动或构建前端即可出现在页面中；`web/public/docs/updates/` 用于独立展示更新记录，避免与用户说明混排。
 - 工单日志拉取列表的参数展示、归档/原始压缩包链接解析和 AI 表单前端偏好由工单前端 hook/shared 维护；用户手动选择的 Agent、Provider、追加提示词优先于配置项，下次打开表单自动沿用。
 - 工单日志查看器支持“全局关键字搜索 -> 命中文件范围搜索”的收敛流程；搜索关键字使用文本框输入，支持英文逗号或换行分隔多个关键字，并可选择“任一/全部”匹配模式。
-- AI Provider 已按平台、API协议、业务用途与执行器能力分离。工单轻量 AI 只使用 `ticket_light_text + direct_http` Provider，工单 AI 分析只使用 `ticket_analysis_worker + codex` Provider；候选过滤与运行时校验均由后端能力契约统一执行。
+- AI Provider 已按平台、API协议、业务用途与执行器能力分离。工单轻量 AI 只使用 `ticket_light_text + direct_http` Provider；工单 AI 分析使用 `ticket_analysis_worker` 用途，执行器支持 `codex` 与 `claude_code` 两种，由 Provider 的 `supported_executors` 声明、`preferred_executor` 确定默认值，发起分析弹窗可覆盖选择。候选过滤与运行时校验均由后端能力契约统一执行。
 - AI Provider 新增和编辑弹窗的“更新模型”“测试”均基于当前表单草稿执行，不需要先保存；新增必须输入密钥，编辑未输入新密钥时服务端只临时使用同一 Provider 的已保存密文密钥，密钥不会回显或写入日志。
 - 日志详细信息高亮位于详情区顶部文本框，支持英文逗号或换行分隔多个字符串；上下文行数配置也在详情区顶部。2026-07-16 起上下文文本选中会作为临时高亮候选词并立即高亮，取消浏览器选区时自动移除本次临时高亮。
 - 支持 CSS Highlight API 的浏览器使用 `CSS.highlights` 对日志上下文做非侵入高亮，减少 `<mark>` 节点拆分；不支持时继续回退到原 `<mark>` 片段渲染。

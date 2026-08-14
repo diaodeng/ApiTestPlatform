@@ -764,6 +764,28 @@ class TicketAiAnalysisService:
             return None
         return AiProviderDao.get_ai_provider_by_code(db, normalized_code)
 
+    @classmethod
+    def _resolve_executor(
+        cls,
+        provider,
+        requested_executor: str | None = None,
+    ) -> str | None:
+        """
+        解析工单 AI 分析本次使用的执行器。
+        解析优先级：请求显式指定 > Provider 默认执行器 > Provider 支持的首个分析执行器 > codex 兜底。
+        :param provider: Provider 数据库对象
+        :param requested_executor: 请求指定的执行器编码
+        :return: 解析后的执行器编码
+        """
+        requested = str(requested_executor or "").strip()
+        if requested:
+            return requested
+        if provider:
+            preferred = AiProviderCapabilityService.resolve_preferred_executor(provider)
+            if preferred:
+                return preferred
+        return "codex"
+
     @staticmethod
     def _normalize_provider_worker_env(worker_env: Any) -> dict[str, str]:
         """
@@ -1176,6 +1198,7 @@ class TicketAiAnalysisService:
                 str(context_payload.get("selectedAiProviderProtocol") or "").strip() or None
             )
             snapshot["selectedWorkerModel"] = str(context_payload.get("selectedWorkerModel") or "").strip() or None
+            snapshot["selectedExecutor"] = str(context_payload.get("selectedExecutor") or "").strip() or None
 
         if isinstance(context_payload.get("promptLayers"), dict):
             snapshot["promptLayers"] = context_payload.get("promptLayers")
@@ -1262,6 +1285,7 @@ class TicketAiAnalysisService:
                 "selectedAiProviderPlatform",
                 "selectedAiProviderProtocol",
                 "selectedWorkerModel",
+                "selectedExecutor",
             )
             for key in user_config_keys:
                 compact_val = compact_context.get(key)
@@ -1911,15 +1935,17 @@ class TicketAiAnalysisService:
             context_payload["selectedPromptTemplates"] = selected_prompt_templates
         selected_provider = None
         selected_provider_code = str(request.ai_provider_code or "").strip()
+        selected_executor = None
         if selected_provider_code:
             selected_provider = cls._resolve_ai_provider(db, selected_provider_code)
             if not selected_provider:
                 return CrudResponseModel(is_success=False, message="未找到可用的AI Provider配置")
+            selected_executor = cls._resolve_executor(selected_provider, request.executor)
             try:
                 AiProviderCapabilityService.require_provider_eligibility(
                     selected_provider,
                     usage="ticket_analysis_worker",
-                    executor="codex",
+                    executor=selected_executor,
                 )
             except ValueError as exc:
                 return CrudResponseModel(is_success=False, message=str(exc))
@@ -1928,6 +1954,7 @@ class TicketAiAnalysisService:
             context_payload["selectedAiProviderPlatform"] = selected_provider.platform_code
             context_payload["selectedAiProviderProtocol"] = selected_provider.api_protocol
             context_payload["selectedWorkerModel"] = selected_provider.default_model
+            context_payload["selectedExecutor"] = selected_executor
             # 判断是否需要 resume
             resume_from_workspace_path: str | None = None
             if request.resume and selected_provider_code:
@@ -2523,11 +2550,14 @@ class TicketAiAnalysisService:
         context_payload = cls._load_workspace_context_payload(db, task, ticket, mapping, workspace_dir)
         requested_provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip()
         selected_provider = cls._resolve_ai_provider(db, requested_provider_code) if requested_provider_code else None
+        selected_executor = str((context_payload or {}).get("selectedExecutor") or "").strip()
+        if not selected_executor:
+            selected_executor = cls._resolve_executor(selected_provider)
         if selected_provider:
             AiProviderCapabilityService.require_provider_eligibility(
                 selected_provider,
                 usage="ticket_analysis_worker",
-                executor="codex",
+                executor=selected_executor,
             )
         provider_env_overrides = cls._build_provider_env_overrides(selected_provider) if selected_provider else {}
         requested_agent_code = str((context_payload or {}).get("selectedAgentCode") or "").strip()
