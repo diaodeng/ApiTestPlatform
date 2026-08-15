@@ -219,20 +219,23 @@
           <template v-for="item in contextDisplayLines" :key="`${item.file}:${item.line}`">
             <span class="log-context-line">
               <span class="log-context-line-no">{{ item.paddedLine }}</span>
-              <span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content">
+              <span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content log-context-line-content-inline">
                 <template v-for="(part, partIndex) in item.parts" :key="partIndex">
                   <mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark>
                   <span v-else>{{ part.text }}</span>
                 </template>
                 <button class="log-line-expand-btn" @click="expandLine(item)">展开完整内容（{{ formatFileSize(item.contentLength) }}）</button>
               </span>
-              <span v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content">
+              <div v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content log-context-line-content-expanded">
                 <div class="log-line-expanded-block">
+                  <div class="log-line-expanded-header">
+                    <span class="log-line-expanded-title">完整内容 · {{ item.file }}:{{ item.line }}</span>
+                    <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
+                  </div>
                   <pre class="log-line-expanded-content">{{ getExpandedContent(item) }}</pre>
-                  <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
                 </div>
-              </span>
-              <span v-else class="log-context-line-content">
+              </div>
+              <span v-else class="log-context-line-content log-context-line-content-inline">
                 <template v-for="(part, partIndex) in item.parts" :key="partIndex">
                   <mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark>
                   <span v-else>{{ part.text }}</span>
@@ -1428,6 +1431,16 @@ onBeforeUnmount(() => {
   white-space: inherit;
 }
 
+.log-context-line-content-inline {
+  display: inline;
+}
+
+.log-context-line-content-expanded {
+  display: block;
+  width: 100%;
+  margin: 8px 0 6px;
+}
+
 .log-line-expand-btn {
   display: inline-block;
   margin-left: 6px;
@@ -1451,32 +1464,55 @@ onBeforeUnmount(() => {
 }
 
 .log-line-expanded-block {
-  display: block;
-  margin: 4px 0;
-  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
   border: 1px solid #f59e0b;
-  border-radius: 4px;
+  border-radius: 8px;
   background: #1e293b;
-  max-height: 400px;
+  box-sizing: border-box;
+  max-height: 58vh;
   overflow: auto;
-  contain: strict;
+  contain: content;
+}
+
+.log-line-expanded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-line-expanded-title {
+  color: #fbbf24;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .log-line-expanded-content {
   margin: 0;
-  padding: 0;
+  padding: 10px 12px;
+  min-width: 100%;
+  box-sizing: border-box;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.7;
   color: #e2e8f0;
-  background: transparent;
+  background: #0f172a;
+  border-radius: 6px;
   font-family: inherit;
 }
 
 .log-line-collapse-btn {
   display: inline-block;
-  margin-top: 4px;
+  flex: none;
   padding: 1px 8px;
   border: 1px solid #64748b;
   border-radius: 3px;
