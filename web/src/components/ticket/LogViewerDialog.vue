@@ -209,7 +209,7 @@
             />
           </div>
         </div>
-        <pre
+        <div
           ref="contextBlockRef"
           v-show="contextViewMode !== 'minimized'"
           :class="['log-content-block', 'log-context-block', { 'log-content-wrap': wrapEnabled }]"
@@ -217,33 +217,16 @@
           @keyup="handleContextSelection"
         >
           <template v-for="item in contextDisplayLines" :key="`${item.file}:${item.line}`">
-            <span class="log-context-line">
-              <span class="log-context-line-no">{{ item.paddedLine }}</span>
-              <span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content log-context-line-content-inline">
-                <template v-for="(part, partIndex) in item.parts" :key="partIndex">
-                  <mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark>
-                  <span v-else>{{ part.text }}</span>
-                </template>
-                <button class="log-line-expand-btn" @click="expandLine(item)">展开完整内容（{{ formatFileSize(item.contentLength) }}）</button>
-              </span>
-              <div v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content log-context-line-content-expanded">
-                <div class="log-line-expanded-block">
-                  <div class="log-line-expanded-header">
-                    <span class="log-line-expanded-title">完整内容 · {{ item.file }}:{{ item.line }}</span>
-                    <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
-                  </div>
-                  <pre class="log-line-expanded-content">{{ getExpandedContent(item) }}</pre>
-                </div>
+            <span class="log-context-line"><span class="log-context-line-no">{{ item.paddedLine }}</span><span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content"><template v-for="(part, partIndex) in item.parts" :key="partIndex"><mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark><span v-else>{{ part.text }}</span></template> <button class="log-line-expand-btn" @click="expandLine(item)">展开完整内容（{{ formatFileSize(item.contentLength) }}）</button></span><span v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content log-context-line-content-ph">[已展开，见下方]</span><span v-else class="log-context-line-content"><template v-for="(part, partIndex) in item.parts" :key="partIndex"><mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark><span v-else>{{ part.text }}</span></template></span></span>
+            <div v-if="item.contentTruncated && isLineExpanded(item)" class="log-line-expanded-block">
+              <div class="log-line-expanded-header">
+                <span class="log-line-expanded-title">完整内容 · {{ item.file }}:{{ item.line }}</span>
+                <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
               </div>
-              <span v-else class="log-context-line-content log-context-line-content-inline">
-                <template v-for="(part, partIndex) in item.parts" :key="partIndex">
-                  <mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark>
-                  <span v-else>{{ part.text }}</span>
-                </template>
-              </span>
-            </span>
+              <pre class="log-line-expanded-content">{{ getExpandedContent(item) }}</pre>
+            </div>
           </template>
-        </pre>
+        </div>
       </div>
 
       <!-- 日志准备全屏遮罩：覆盖弹窗 body，可点击关闭按钮或 ESC 取消 -->
@@ -1402,8 +1385,6 @@ onBeforeUnmount(() => {
   padding: 12px;
   margin: 0;
   overflow: auto;
-  white-space: pre;
-  word-break: normal;
   background: #0f172a;
   color: #e2e8f0;
   border-radius: 6px;
@@ -1412,33 +1393,40 @@ onBeforeUnmount(() => {
 }
 
 .log-content-wrap {
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* 换行开关由子元素 .log-context-line-content 控制，见下方 */
 }
 
 .log-context-line {
   display: block;
-  min-height: 18px;
+  line-height: 1.55;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .log-context-line-no {
   display: inline-block;
   user-select: none;
   color: #64748b;
+  vertical-align: baseline;
+  min-width: 6ch;
 }
 
 .log-context-line-content {
-  white-space: inherit;
-}
-
-.log-context-line-content-inline {
   display: inline;
+  vertical-align: baseline;
+  white-space: pre;
 }
 
-.log-context-line-content-expanded {
-  display: block;
-  width: 100%;
-  margin: 8px 0 6px;
+.log-content-wrap .log-context-line-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-context-line-content-ph {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 11px;
 }
 
 .log-line-expand-btn {
@@ -1467,7 +1455,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: 100%;
+  margin-left: 6ch;
+  max-width: calc(100% - 6ch);
   padding: 12px 14px;
   border: 1px solid #f59e0b;
   border-radius: 8px;
