@@ -45,6 +45,9 @@ class LogService:
     LINE_INDEX_ENCODING_VERSION = 2
     SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
     CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
+    CONTEXT_LINE_TRUNCATE_ENV = "TICKET_LOG_CONTEXT_LINE_TRUNCATE"
+    # 上下文单行内容最大字符数，超过则截断，避免超大行导致 JSON 序列化与前端渲染卡顿
+    MAX_CONTEXT_LINE_LENGTH = 102400
     # rg 单次命令行文件数上限，超过后自动分批执行，避免 execve 参数过长导致进程启动失败
     RG_MAX_FILE_ARGS = 50
 
@@ -1779,7 +1782,7 @@ class LogService:
         total: int,
         before_count: int,
         after_count: int,
-        current_lines: list[tuple[int, str]],
+        current_lines: list[tuple[int, str, bool, int]],
         record_id: int | None = None,
     ) -> TicketLogContextModel:
         """
@@ -1792,10 +1795,10 @@ class LogService:
         :param total: 当前文件总行数
         :param before_count: 需要的前置上下文行数
         :param after_count: 需要的后置上下文行数
-        :param current_lines: 当前文件已读取行
+        :param current_lines: 当前文件已读取行，四元组 (行号, 内容, 是否截断, 原始长度)
         :return: 上下文响应
         """
-        context_parts: list[tuple[str, int, str]] = []
+        context_parts: list[tuple[str, int, str, bool, int]] = []
         missing_before = max(before_count - (center - start), 0)
         missing_after = max(after_count - (end - center), 0)
         if missing_before > 0:
@@ -1806,24 +1809,35 @@ class LogService:
                 previous_total = int(previous_index.get("line_count") or 0)
                 previous_start = max(previous_total - missing_before + 1, 1)
                 context_parts.extend(
-                    (previous_file, line, content)
-                    for line, content in cls._read_lines_by_index(previous_path, previous_start, previous_total)
+                    (previous_file, line, content, truncated, original_length)
+                    for line, content, truncated, original_length in
+                    cls._read_lines_by_index(previous_path, previous_start, previous_total)
                 )
 
-        context_parts.extend((file_path, line, content) for line, content in current_lines)
+        context_parts.extend(
+            (file_path, line, content, truncated, original_length)
+            for line, content, truncated, original_length in current_lines
+        )
 
         if missing_after > 0:
             next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id)
             if next_file:
                 next_path = cls._resolve_log_file(ticket_id, next_file, record_id)
                 context_parts.extend(
-                    (next_file, line, content)
-                    for line, content in cls._read_lines_by_index(next_path, 1, missing_after)
+                    (next_file, line, content, truncated, original_length)
+                    for line, content, truncated, original_length in
+                    cls._read_lines_by_index(next_path, 1, missing_after)
                 )
 
         context_lines = [
-            TicketLogContextLineModel(file=line_file, line=index, content=content.rstrip("\r\n"))
-            for line_file, index, content in context_parts
+            TicketLogContextLineModel(
+                file=line_file,
+                line=index,
+                content=content.rstrip("\r\n"),
+                content_length=original_length,
+                content_truncated=truncated,
+            )
+            for line_file, index, content, truncated, original_length in context_parts
         ]
         has_prev = (
             start > 1
@@ -1865,16 +1879,19 @@ class LogService:
         )
 
     @classmethod
-    def _read_current_file_lines_by_native(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+    def _read_current_file_lines_by_native(cls, path: Path, start: int, end: int) -> list[tuple[int, str, bool, int]]:
         """
-        使用系统工具读取当前文件指定行段。
+        使用系统工具读取当前文件指定行段，同样应用单行截断逻辑。
         :param path: 日志文件路径
         :param start: 起始行号
         :param end: 结束行号
-        :return: 行号与内容列表
+        :return: 行号、内容、是否截断、原始长度 四元组列表
         """
         if end < start:
             return []
+        truncate_value = os.environ.get(cls.CONTEXT_LINE_TRUNCATE_ENV, "1").strip().lower()
+        truncate_enabled = truncate_value not in ("0", "false", "no", "off")
+        max_line_length = cls.MAX_CONTEXT_LINE_LENGTH
         if os.name == "nt":
             executable = shutil.which("powershell") or shutil.which("powershell.exe")
             if not executable:
@@ -1914,19 +1931,32 @@ class LogService:
         )
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "原生命令读取上下文失败")
-        return [(line_no, content) for line_no, content in enumerate(process.stdout.splitlines(), start=start)]
+        result: list[tuple[int, str, bool, int]] = []
+        for line_no, content in enumerate(process.stdout.splitlines(), start=start):
+            original_length = len(content)
+            if truncate_enabled and original_length > max_line_length:
+                content = content[:max_line_length]
+                result.append((line_no, content, True, original_length))
+            else:
+                result.append((line_no, content, False, 0))
+        return result
 
     @classmethod
-    def _read_lines_by_index(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+    def _read_lines_by_index(cls, path: Path, start: int, end: int) -> list[tuple[int, str, bool, int]]:
         """
         基于行索引读取指定行范围，不扫描整份日志。
+        超过 CONTEXT_LINE_TRUNCATE_ENV 控制阈值的行会被截断，避免超大行导致 JSON 序列化与前端渲染卡顿。
         :param path: 日志文件路径
         :param start: 起始行号
         :param end: 结束行号
-        :return: 行号与文本内容列表
+        :return: 行号、文本内容、是否截断、原始长度 四元组列表
         """
         if end < start:
             return []
+        # 检查是否启用单行截断，默认启用
+        truncate_value = os.environ.get(cls.CONTEXT_LINE_TRUNCATE_ENV, "1").strip().lower()
+        truncate_enabled = truncate_value not in ("0", "false", "no", "off")
+        max_line_length = cls.MAX_CONTEXT_LINE_LENGTH
         meta = cls._ensure_line_index(path)
         total = int(meta.get("line_count") or 0)
         if total <= 0:
@@ -1935,12 +1965,20 @@ class LogService:
         normalized_end = min(int(end or total), total)
         offsets = cls._read_line_offsets(path, normalized_start, normalized_end)
         encoding = str(meta.get("encoding") or "utf-8")
-        result: list[tuple[int, str]] = []
+        result: list[tuple[int, str, bool, int]] = []
         with path.open("rb") as source:
             for line_no, offset in offsets:
                 source.seek(offset)
                 content = source.readline().decode(encoding, errors="replace")
-                result.append((line_no, content))
+                original_length = len(content)
+                if truncate_enabled and original_length > max_line_length:
+                    content = content[:max_line_length]
+                    last_newline = content.rfind("\n")
+                    if last_newline > 0:
+                        content = content[:last_newline]
+                    result.append((line_no, content, True, original_length))
+                else:
+                    result.append((line_no, content, False, 0))
         return result
 
     @classmethod
@@ -2227,3 +2265,29 @@ class LogService:
         :return: 解压目录
         """
         return cls._ticket_dir(ticket_id, record_id) / "extract"
+
+    @classmethod
+    def read_line_content(
+        cls, ticket_id: int, file_path: str, line_no: int, record_id: int | None = None
+    ) -> str:
+        """
+        获取指定日志文件的单行完整原始内容，不做截断，用于前端展开超大行的完整内容。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 行号
+        :param record_id: 日志拉取记录ID
+        :return: 完整原始行内容
+        """
+        normalized_file = cls._normalize_relative_path(file_path)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file, record_id)
+        center = max(int(line_no or 1), 1)
+        rows = cls._read_line_offsets(target_path, center, center)
+        if not rows:
+            raise ValueError(f"行号 {center} 在日志文件 {normalized_file} 中不存在")
+        _, offset = rows[0]
+        meta = cls._ensure_line_index(target_path)
+        encoding = str(meta.get("encoding") or "utf-8")
+        with target_path.open("rb") as source:
+            source.seek(offset)
+            content = source.readline().decode(encoding, errors="replace")
+        return content.rstrip("\r\n")

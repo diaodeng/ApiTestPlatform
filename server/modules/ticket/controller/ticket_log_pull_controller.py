@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -551,6 +551,35 @@ async def get_ticket_log_errors(
             LogService.errors, errors_object.ticket_id, errors_object.limit, errors_object.record_id, query_db
         )
         return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
+    "/logs/line-content",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_line_content(
+    request: Request,
+    file: str,
+    line: int,
+    ticket_id: int = 0,
+    record_id: int | None = None,
+):
+    """
+    获取指定日志文件单行完整原始内容接口，不做截断，用于前端展开超大行的完整内容。
+    返回纯文本，避免 JSON 序列化超大行内容。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param file: 相对日志文件路径
+    :param line: 行号
+    :param record_id: 日志拉取记录ID
+    :return: 纯文本行内容
+    """
+    try:
+        content = await run_in_threadpool(LogService.read_line_content, ticket_id, file, line, record_id)
+        return PlainTextResponse(content=content, media_type="text/plain; charset=utf-8")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

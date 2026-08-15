@@ -507,6 +507,8 @@ class TicketLogContextLineModel(TicketLogPullBaseModel):
     file: str | None = Field(default=None, description="相对日志文件路径，跨文件上下文时用于标识来源")
     line: int = Field(description="行号")
     content: str = Field(default="", description="行内容")
+    content_length: int = Field(default=0, description="原始行内容的字符数，未截断时为 0")
+    content_truncated: bool = Field(default=False, description="行内容是否因超长被截断")
 
 
 class TicketLogContextModel(TicketLogPullBaseModel):

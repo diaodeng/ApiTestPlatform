@@ -215,21 +215,32 @@
           :class="['log-content-block', 'log-context-block', { 'log-content-wrap': wrapEnabled }]"
           @mouseup="handleContextSelection"
           @keyup="handleContextSelection"
-        ><span
-            v-for="item in contextDisplayLines"
-            :key="`${item.file}:${item.line}`"
-            class="log-context-line"
-          ><span class="log-context-line-no">{{ item.paddedLine }}</span
-          ><span class="log-context-line-content"
-            ><template v-for="(part, partIndex) in item.parts" :key="partIndex"
-              ><mark
-                v-if="part.highlight"
-                :class="['log-context-highlight', part.highlightClass]"
-                >{{ part.text }}</mark
-              ><span v-else>{{ part.text }}</span></template
-            ></span
-          ></span
-        ></pre>
+        >
+          <template v-for="item in contextDisplayLines" :key="`${item.file}:${item.line}`">
+            <span class="log-context-line">
+              <span class="log-context-line-no">{{ item.paddedLine }}</span>
+              <span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content">
+                <template v-for="(part, partIndex) in item.parts" :key="partIndex">
+                  <mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+                <button class="log-line-expand-btn" @click="expandLine(item)">展开完整内容（{{ formatFileSize(item.contentLength) }}）</button>
+              </span>
+              <span v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content">
+                <div class="log-line-expanded-block">
+                  <pre class="log-line-expanded-content">{{ getExpandedContent(item) }}</pre>
+                  <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
+                </div>
+              </span>
+              <span v-else class="log-context-line-content">
+                <template v-for="(part, partIndex) in item.parts" :key="partIndex">
+                  <mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+              </span>
+            </span>
+          </template>
+        </pre>
       </div>
 
       <!-- 日志准备全屏遮罩：覆盖弹窗 body，可点击关闭按钮或 ESC 取消 -->
@@ -260,6 +271,7 @@ import {
   searchTicketLogs,
   getTicketLogContext,
   getTicketLogErrors,
+  getTicketLogLineContent,
 } from '@/api/ticket/ticket'
 import { useLogPrepareProgress } from '@/views/ticket/hooks/useLogPrepareProgress'
 
@@ -355,11 +367,96 @@ const contextDisplayLines = computed(() => {
     line: item.line,
     paddedLine: `${String(item.line).padStart(6, ' ')}  `,
     content: item.content || '',
+    contentLength: item.contentLength || 0,
+    contentTruncated: item.contentTruncated || false,
     parts: nativeHighlightSupported.value
       ? [{ text: item.content || '', highlight: false }]
       : splitHighlightParts(item.content || ''),
   }))
 })
+
+// ── 超大行展开/收起状态 ──
+const expandedLineMap = ref({})
+const loadingLineSet = ref(new Set())
+
+/**
+ * 生成展开行的唯一标识键。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {string} 唯一键
+ */
+function expandedLineKey(item) {
+  return `${item.file}:${item.line}`
+}
+
+/**
+ * 判断指定行是否已展开完整内容。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {boolean} 是否已展开
+ */
+function isLineExpanded(item) {
+  const key = expandedLineKey(item)
+  return key in expandedLineMap.value
+}
+
+/**
+ * 获取已展开行的完整内容。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {string} 完整内容
+ */
+function getExpandedContent(item) {
+  const key = expandedLineKey(item)
+  return expandedLineMap.value[key] || ''
+}
+
+/**
+ * 格式化文件大小。
+ * @param {number} bytes 字节数
+ * @returns {string} 可读大小
+ */
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0)
+  if (size <= 0) return '0 B'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`
+}
+
+/**
+ * 展开截断行，请求后端获取完整内容。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {Promise<void>}
+ */
+async function expandLine(item) {
+  const key = expandedLineKey(item)
+  if (key in expandedLineMap.value || loadingLineSet.value.has(key)) return
+  loadingLineSet.value.add(key)
+  try {
+    const ticketId = props.record?.ticketId || 0
+    const recordId = props.record?.id
+    const response = await getTicketLogLineContent({
+      ticket_id: ticketId,
+      record_id: recordId,
+      file: item.file,
+      line: item.line,
+    })
+    expandedLineMap.value = { ...expandedLineMap.value, [key]: typeof response === 'string' ? response : (response?.data || '') }
+  } catch {
+    // 加载失败时静默处理，不展开
+  } finally {
+    loadingLineSet.value.delete(key)
+  }
+}
+
+/**
+ * 收起已展开的超大行。
+ * @param {{ file: string, line: number }} item 上下文行
+ */
+function collapseLine(item) {
+  const key = expandedLineKey(item)
+  const next = { ...expandedLineMap.value }
+  delete next[key]
+  expandedLineMap.value = next
+}
 
 /**
  * 搜索结果区改为虚拟表格，避免大结果集在普通表格下卡顿。
@@ -654,6 +751,8 @@ function resetViewerState() {
   resultViewMode.value = 'normal'
   contextViewMode.value = 'normal'
   wrapEnabled.value = false
+  expandedLineMap.value = {}
+  loadingLineSet.value.clear()
 }
 
 /**
@@ -866,6 +965,8 @@ function loadContext(file, line) {
     .then((response) => {
       context.value = response?.data || null
       contextJumpLine.value = Number(context.value?.line || line || 1)
+      expandedLineMap.value = {}
+      loadingLineSet.value.clear()
     })
     .finally(() => {
       searching.value = false
@@ -1325,6 +1426,71 @@ onBeforeUnmount(() => {
 
 .log-context-line-content {
   white-space: inherit;
+}
+
+.log-line-expand-btn {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 3px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+.log-line-expand-btn:hover {
+  background: #fde68a;
+  border-color: #d97706;
+}
+
+.log-line-expanded-block {
+  display: block;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 4px;
+  background: #1e293b;
+  max-height: 400px;
+  overflow: auto;
+  contain: strict;
+}
+
+.log-line-expanded-content {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #e2e8f0;
+  background: transparent;
+  font-family: inherit;
+}
+
+.log-line-collapse-btn {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border: 1px solid #64748b;
+  border-radius: 3px;
+  background: #334155;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.log-line-collapse-btn:hover {
+  background: #475569;
+  color: #f1f5f9;
 }
 
 .log-context-highlight {
