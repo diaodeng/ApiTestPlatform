@@ -218,10 +218,19 @@
         >
           <template v-for="item in contextDisplayLines" :key="`${item.file}:${item.line}`">
             <span class="log-context-line"><span class="log-context-line-no">{{ item.paddedLine }}</span><span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content"><template v-for="(part, partIndex) in item.parts" :key="partIndex"><mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark><span v-else>{{ part.text }}</span></template> <button class="log-line-expand-btn" @click="expandLine(item)">展开完整内容（{{ formatFileSize(item.contentLength) }}）</button></span><span v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content log-context-line-content-ph">[已展开，见下方]</span><span v-else class="log-context-line-content"><template v-for="(part, partIndex) in item.parts" :key="partIndex"><mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark><span v-else>{{ part.text }}</span></template></span></span>
-            <div v-if="item.contentTruncated && isLineExpanded(item)" class="log-line-expanded-block">
+            <div v-if="item.contentTruncated && isLineExpanded(item)" :class="['log-line-expanded-block', { 'log-line-expanded-block-fullwidth': getExpandedMode(item) === 'fullwidth', 'log-line-expanded-block-fullscreen': getExpandedMode(item) === 'fullscreen' }]">
               <div class="log-line-expanded-header">
                 <span class="log-line-expanded-title">完整内容 · {{ item.file }}:{{ item.line }}</span>
-                <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
+                <div class="log-line-expanded-actions">
+                  <button class="log-line-action-btn" @click="copyLineContent(item)" :title="isCopySuccess(item) ? '已复制' : '复制内容'">
+                    {{ isCopySuccess(item) ? '✓ 已复制' : '复制' }}
+                  </button>
+                  <button v-if="getExpandedMode(item) !== 'fullwidth'" class="log-line-action-btn" @click="toggleExpandedMode(item, 'fullwidth')" title="全宽阅读">全宽</button>
+                  <button v-else class="log-line-action-btn log-line-action-btn-active" @click="toggleExpandedMode(item, 'normal')" title="还原宽度">还原</button>
+                  <button v-if="getExpandedMode(item) !== 'fullscreen'" class="log-line-action-btn" @click="toggleExpandedMode(item, 'fullscreen')" title="全屏阅读">全屏</button>
+                  <button v-else class="log-line-action-btn log-line-action-btn-active" @click="toggleExpandedMode(item, 'normal')" title="退出全屏">退出全屏</button>
+                  <button class="log-line-collapse-btn" @click="collapseLine(item)">收起</button>
+                </div>
               </div>
               <pre class="log-line-expanded-content">{{ getExpandedContent(item) }}</pre>
             </div>
@@ -304,6 +313,11 @@ const wrapEnabled = ref(false)
 const availableFiles = ref([])
 const hasFullscreenPanel = computed(
   () => resultViewMode.value === 'fullscreen' || contextViewMode.value === 'fullscreen'
+    || hasExpandedFullscreen.value
+)
+
+const hasExpandedFullscreen = computed(() =>
+  Object.values(expandedModeMap.value).includes('fullscreen')
 )
 
 const { width: windowWidth, height: windowHeight } = useWindowSize()
@@ -364,6 +378,8 @@ const contextDisplayLines = computed(() => {
 // ── 超大行展开/收起状态 ──
 const expandedLineMap = ref({})
 const loadingLineSet = ref(new Set())
+const expandedModeMap = ref({})
+const copySuccessMap = ref({})
 
 /**
  * 生成展开行的唯一标识键。
@@ -442,6 +458,61 @@ function collapseLine(item) {
   const next = { ...expandedLineMap.value }
   delete next[key]
   expandedLineMap.value = next
+  const nextMode = { ...expandedModeMap.value }
+  delete nextMode[key]
+  expandedModeMap.value = nextMode
+  const nextCopy = { ...copySuccessMap.value }
+  delete nextCopy[key]
+  copySuccessMap.value = nextCopy
+}
+
+/**
+ * 获取当前行的展开模式。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {'normal'|'fullwidth'|'fullscreen'} 展开模式
+ */
+function getExpandedMode(item) {
+  return expandedModeMap.value[expandedLineKey(item)] || 'normal'
+}
+
+/**
+ * 切换当前行的展开模式。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @param {'normal'|'fullwidth'|'fullscreen'} mode 目标模式
+ */
+function toggleExpandedMode(item, mode) {
+  expandedModeMap.value = { ...expandedModeMap.value, [expandedLineKey(item)]: mode }
+}
+
+/**
+ * 复制展开行的完整内容到剪贴板。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {Promise<void>}
+ */
+async function copyLineContent(item) {
+  const key = expandedLineKey(item)
+  const content = getExpandedContent(item)
+  if (!content) return
+  try {
+    await navigator.clipboard.writeText(content)
+    copySuccessMap.value = { ...copySuccessMap.value, [key]: true }
+    setTimeout(() => {
+      const next = { ...copySuccessMap.value }
+      delete next[key]
+      copySuccessMap.value = next
+    }, 2000)
+  } catch {
+    // 复制失败静默处理
+  }
+}
+
+/**
+ * 判断指定行复制是否成功（用于显示"已复制"反馈）。
+ * @param {{ file: string, line: number }} item 上下文行
+ * @returns {boolean} 是否复制成功
+ */
+function isCopySuccess(item) {
+  return !!copySuccessMap.value[expandedLineKey(item)]
 }
 
 /**
@@ -739,6 +810,8 @@ function resetViewerState() {
   wrapEnabled.value = false
   expandedLineMap.value = {}
   loadingLineSet.value.clear()
+  expandedModeMap.value = {}
+  copySuccessMap.value = {}
 }
 
 /**
@@ -953,6 +1026,8 @@ function loadContext(file, line) {
       contextJumpLine.value = Number(context.value?.line || line || 1)
       expandedLineMap.value = {}
       loadingLineSet.value.clear()
+      expandedModeMap.value = {}
+      copySuccessMap.value = {}
     })
     .finally(() => {
       searching.value = false
@@ -1250,9 +1325,16 @@ function handleEscapeKey(event) {
   event.stopImmediatePropagation()
   if (resultViewMode.value === 'fullscreen') {
     resultViewMode.value = 'normal'
+    return
   }
   if (contextViewMode.value === 'fullscreen') {
     contextViewMode.value = 'normal'
+    return
+  }
+  // 退出展开块的全屏模式
+  const fullscreenKey = Object.entries(expandedModeMap.value).find(([, v]) => v === 'fullscreen')
+  if (fullscreenKey) {
+    expandedModeMap.value = { ...expandedModeMap.value, [fullscreenKey[0]]: 'normal' }
   }
 }
 
@@ -1474,11 +1556,27 @@ onBeforeUnmount(() => {
   contain: content;
 }
 
+.log-line-expanded-block-fullwidth {
+  margin-left: 0;
+  max-width: 100%;
+}
+
+.log-line-expanded-block-fullscreen {
+  position: fixed;
+  inset: 16px;
+  z-index: 3500;
+  margin-left: 0;
+  max-width: none;
+  max-height: none;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
 .log-line-expanded-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex: none;
 }
 
 .log-line-expanded-title {
@@ -1489,6 +1587,48 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.log-line-expanded-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.log-line-action-btn {
+  padding: 2px 10px;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  background: #334155;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1.5;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.log-line-action-btn:hover {
+  background: #475569;
+  border-color: #94a3b8;
+  color: #f1f5f9;
+}
+
+.log-line-action-btn-active {
+  background: #1e40af;
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+
+.log-line-action-btn-active:hover {
+  background: #1e3a8a;
+  border-color: #60a5fa;
+  color: #dbeafe;
 }
 
 .log-line-expanded-content {
