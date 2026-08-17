@@ -1872,7 +1872,9 @@ class TicketAiAnalysisService:
             "error_message": error_message,
             "started_at": started_at,
             "finished_at": finished_at,
-            "command_line": command_line,
+            # 数据库字段 command_line 为非空字段；历史任务恢复时可能没有执行命令，
+            # 此时统一写入空字符串，避免批量更新显式写入 NULL 导致启动失败。
+            "command_line": command_line if command_line is not None else "",
             "update_time": datetime.now(),
         }
         if analysis_result is not None:

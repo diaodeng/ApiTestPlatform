@@ -8,6 +8,14 @@ updated: 2026-08-17
 
 # 操作日志
 
+## [2026-08-17] FIX | 工单 AI 历史任务恢复写入 NULL 导致生产启动失败
+
+- 触发：生产服务启动时清理 `created` / `running` 状态的工单 AI 历史任务，`ticket_ai_analysis_task.command_line` 被批量更新为 `NULL`，触发 MySQL 非空约束错误并导致 FastAPI 被 Supervisor 反复重启。
+- 根因：`TicketAiAnalysisService._mark_task_status` 的 `command_line` 参数允许缺省，但更新数据时直接写入 `None`；数据库实体字段 `command_line` 为非空字段。
+- 修复：状态更新时将 `command_line is None` 规范化为空字符串；已有命令内容保持不变。
+- 验证：新增任务状态更新单元测试，覆盖缺省命令和已提供命令两种场景。
+- 影响：仅影响工单 AI 任务状态更新；服务启动恢复流程不再因缺省执行命令触发数据库非空约束异常。
+
 ## [2026-08-17] FIX | Codex Worker 旧 bearer token 导致工单 AI 分析 401
 
 - 触发：本地 Agent 使用 Provider `openai_com`（Provider ID 1）执行 Codex Worker 时，`auth.json.OPENAI_API_KEY` 指纹与 Provider 密钥一致且直接访问 `https://ai-router.dmall.com/v1/models` 返回 200，但 Worker `/responses` 返回 `401 Unauthorized: Invalid token`。
