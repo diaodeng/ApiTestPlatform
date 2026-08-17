@@ -3,10 +3,18 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-11
+updated: 2026-08-17
 ---
 
 # 操作日志
+
+## [2026-08-17] FIX | Codex Worker 旧 bearer token 导致工单 AI 分析 401
+
+- 触发：本地 Agent 使用 Provider `openai_com`（Provider ID 1）执行 Codex Worker 时，`auth.json.OPENAI_API_KEY` 指纹与 Provider 密钥一致且直接访问 `https://ai-router.dmall.com/v1/models` 返回 200，但 Worker `/responses` 返回 `401 Unauthorized: Invalid token`。
+- 根因：任务级 Codex Home 从本机配置复制了 `[model_providers.custom]` 下旧的 `experimental_bearer_token`（例如本地代理令牌 `PROXY_MANAGED`）。Codex CLI 对该字段的使用优先级高于 `auth.json`，因此实际请求没有使用 Provider 下发的 API Key。
+- 修复：`client_new/services/ticket_ai_analysis_service.py` 在准备任务级 Codex 配置时同步覆盖当前 `model_provider` 对应区段的 `experimental_bearer_token`；鉴权诊断也按该字段、`auth.json`、环境变量的实际回退顺序取值。
+- 验证：新增任务级 bearer token 诊断与配置覆盖测试；`client_new` 定向测试 9 项全部通过。
+- 影响：仅影响 `codex` Worker 的任务级配置准备和鉴权诊断，不修改本机全局 Codex 配置，不记录 API Key 明文。
 
 ## [2026-08-12] FIX | rg 日志搜索文件数过多导致 execve 参数过长应用重启
 

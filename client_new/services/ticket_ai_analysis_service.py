@@ -152,14 +152,32 @@ class TicketAiAnalysisService:
     ) -> tuple[str, str]:
         """
         解析 Worker 实际用于鉴权的 API Key，但不记录明文。
-        Codex 配置了 requires_openai_auth 时优先读取任务级 auth.json，避免仅依据
-        环境变量误判实际认证来源；其他 Provider 使用其约定的环境变量。
+        Codex 的 model_providers 配置可能通过 experimental_bearer_token 覆盖
+        auth.json，必须按 CLI 的实际优先级读取；其他 Provider 使用其约定的环境变量。
         :param provider_type: 当前 Provider 类型
         :param ai_home: 任务级配置目录
         :param env_values: 已合并的 Worker 环境变量
         :return: (API Key, 脱敏诊断中的来源标识)
         """
         if provider_type == "codex" and ai_home:
+            config_file = ai_home / "config.toml"
+            if config_file.exists():
+                try:
+                    config_text = config_file.read_text(encoding="utf-8")
+                    bearer_match = re.search(
+                        r'^\s*experimental_bearer_token\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s#]+))',
+                        config_text,
+                        flags=re.MULTILINE,
+                    )
+                    if bearer_match:
+                        bearer_token = next(
+                            (group for group in bearer_match.groups() if group is not None),
+                            "",
+                        ).strip()
+                        if bearer_token:
+                            return bearer_token, "config.toml.experimental_bearer_token"
+                except OSError as exc:
+                    logger.warning(f"读取任务级 Codex config.toml 鉴权配置失败，将回退 auth.json: {exc}")
             auth_file = ai_home / "auth.json"
             if auth_file.exists():
                 try:
@@ -343,8 +361,8 @@ class TicketAiAnalysisService:
     def _patch_codex_config_for_provider(codex_home: Path, overrides: dict[str, str]) -> None:
         """
         修改副本 config.toml 和 .env，使 Provider 下发的 base_url 和 api_key 生效。
-        Codex CLI 读 config.toml 中 model_providers 的 base_url 优先级高于 OPENAI_BASE_URL 环境变量，
-        读 auth.json 中的 OPENAI_API_KEY 优先级也高于环境变量，因此需要直接修改副本文件。
+        Codex CLI 读 config.toml 中 model_providers 的 base_url 和
+        experimental_bearer_token 优先级高于环境变量/auth.json，因此需要直接修改副本文件。
         :param codex_home: Codex home 目录
         :param overrides: Provider 环境变量覆盖项
         :return: 无
@@ -368,6 +386,51 @@ class TicketAiAnalysisService:
                         logger.info(f"已修改 Codex config.toml base_url: {base_url}")
                 except Exception as exc:
                     logger.warning(f"修改 Codex config.toml 失败: {exc}")
+        # 修改当前 model provider 的 experimental_bearer_token，避免复制用户本地配置中的旧代理令牌。
+        if api_key:
+            config_file = codex_home / "config.toml"
+            try:
+                if config_file.exists():
+                    config_text = config_file.read_text(encoding="utf-8")
+                    provider_match = re.search(
+                        r'^\s*model_provider\s*=\s*["\']([^"\']+)["\']',
+                        config_text,
+                        flags=re.MULTILINE,
+                    )
+                    provider_name = provider_match.group(1) if provider_match else ""
+                    section_pattern = (
+                        rf'(?ms)(^\[model_providers\.{re.escape(provider_name)}\]\s*$.*?)(?=^\[|\Z)'
+                        if provider_name
+                        else ""
+                    )
+                    section_match = re.search(section_pattern, config_text) if section_pattern else None
+                    if section_match:
+                        provider_section = section_match.group(1)
+                        token_pattern = (
+                            r'(?m)^(\s*experimental_bearer_token\s*=\s*)'
+                            r'("[^"]*"|\'[^\']*\'|[^\s#]+)'
+                        )
+                        token_value = json.dumps(api_key, ensure_ascii=False)
+                        patched_section, replaced_count = re.subn(
+                            token_pattern,
+                            lambda match: f"{match.group(1)}{token_value}",
+                            provider_section,
+                            count=1,
+                        )
+                        if replaced_count == 0:
+                            patched_section = provider_section.rstrip() + (
+                                f"\nexperimental_bearer_token = {token_value}\n"
+                            )
+                        if patched_section != provider_section:
+                            config_file.write_text(
+                                config_text[: section_match.start(1)]
+                                + patched_section
+                                + config_text[section_match.end(1) :],
+                                encoding="utf-8",
+                            )
+                            logger.info("已修改 Codex config.toml experimental_bearer_token")
+            except Exception as exc:
+                logger.warning(f"修改 Codex config.toml experimental_bearer_token 失败: {exc}")
         # 修改 .env 中的 OPENAI_API_KEY 和 OPENAI_BASE_URL
         if base_url or api_key:
             env_file = codex_home / ".env"
@@ -395,7 +458,7 @@ class TicketAiAnalysisService:
                 logger.info(f"已修改 Codex .env: api_key={'***' if api_key else ''}, base_url={base_url}")
             except Exception as exc:
                 logger.warning(f"修改 Codex .env 失败: {exc}")
-        # 修改 auth.json 中的 OPENAI_API_KEY，Codex CLI 的 requires_openai_auth 从 auth.json 读取认证
+        # 同步修改 auth.json 中的 OPENAI_API_KEY，兼容 Codex 的认证回退路径。
         if api_key:
             auth_file = codex_home / "auth.json"
             try:

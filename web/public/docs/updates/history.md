@@ -4,7 +4,12 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（5 天，12 项变更）
+## 2026-08 月（5 天，13 项变更）
+
+### 修复 Codex Worker 使用旧 bearer token 导致的误报鉴权失败
+- 修复工单 AI 分析 Agent 复制本机 Codex 配置后，仍沿用 `config.toml` 中旧的 `experimental_bearer_token`，导致 Provider API Key 实际可用但 Worker 请求 `/responses` 返回 `401 Unauthorized`。
+- Provider 下发时现在同步覆盖任务级 `config.toml` 的 bearer token，并让鉴权诊断按 Codex CLI 实际优先级读取该配置，避免把 `auth.json` 的有效密钥误判为实际请求密钥。
+- 补充 AI Provider 管理说明与故障排查指引。
 
 ### 工单模块映射修复脚本
 - 新增一次性数据修复脚本 `server/scripts/sync_ticket_module_mapping.py`：按「工单同步配置」的 `moduleMappings` 将 `ticket.module_name`（现有模块名）与模块映射配置匹配，解析出正确模块后更新 `ticket.module_id`/`module_code`，不改 `module_name`。

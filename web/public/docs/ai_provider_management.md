@@ -44,6 +44,12 @@
 - 工单 AI 分析只使用 `ticket_analysis_worker` 用途的 Provider，执行器可选 `codex`（Codex Worker）或 `claude_code`（Claude Code Worker）；发起分析弹窗会按 Provider 的 `supportedExecutors` 收敛可选执行器，并按 `preferredExecutor` 回填默认值。
 - Claude Code Worker 以 `claude -p` 非交互模式执行，采用只读权限模式（`plan`）与工具白名单（`Read,Grep,Glob,Bash(rg *)`）保证“只分析不改代码”。
 
+## Codex Worker 鉴权注意事项
+- Agent 会为每次工单 AI 分析创建独立的任务级 Codex 配置目录，不直接修改本机全局 Codex 配置。
+- 当执行器为 `codex` 时，Provider 的 `baseUrl` 和 `apiKey` 会同时写入任务级 `config.toml`、`.env` 与 `auth.json`；其中 `config.toml` 的 `experimental_bearer_token` 是 Codex CLI 实际请求的优先认证来源。
+- 如果复制的本机 Codex 配置中残留 `experimental_bearer_token = "PROXY_MANAGED"` 或旧令牌，而 Provider 的 `baseUrl` 已切换到远端地址，Worker 可能返回 `401 Unauthorized: Invalid token`，即使同一 API Key 直接访问 Provider 的 `/models` 是正常的。Agent 会在启动 Worker 时覆盖该字段。
+- 排查时查看 Agent 任务工作区的 `worker.stderr.txt` 和系统日志中的脱敏 `auth_diagnostic`：`/models` 探测返回 200 表示 API Key/基础地址可用，应继续排查 Responses 接口、模型或 CLI 配置；返回 401 才优先检查 Provider 密钥和权限。日志不会记录 API Key 明文。
+
 ## 变更说明
 - 该能力已经接入工单 AI 分析、消息发起 AI、日志拉取自动 AI 三条链路。
 - 后续如果新增流程节点，需要复用同一套 Provider 选择和下发逻辑。

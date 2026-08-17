@@ -71,6 +71,56 @@ class TicketAiAuthDiagnosticTests(unittest.TestCase):
             self.assertEqual(diagnostic["api_key_length"], len("auth-json-key"))
             self.assertNotIn("auth-json-key", json.dumps(diagnostic))
 
+    def test_build_worker_auth_diagnostic_prefers_config_bearer_token(self) -> None:
+        """Codex 配置存在 bearer token 时，诊断应以 CLI 实际使用的令牌为准。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ai_home = Path(temp_dir)
+            (ai_home / "config.toml").write_text(
+                '[model_providers.custom]\nexperimental_bearer_token = "config-token"\n'
+                'base_url = "https://provider.example/v1"\n',
+                encoding="utf-8",
+            )
+            (ai_home / "auth.json").write_text(
+                json.dumps({"OPENAI_API_KEY": "auth-json-key"}),
+                encoding="utf-8",
+            )
+
+            diagnostic, api_key = TicketAiAnalysisService._build_worker_auth_diagnostic(
+                provider_type="codex",
+                provider_code="provider-code",
+                worker_model="gpt-test",
+                ai_home=ai_home,
+                env_values={"OPENAI_API_KEY": "environment-key"},
+            )
+
+            self.assertEqual(api_key, "config-token")
+            self.assertEqual(diagnostic["api_key_source"], "config.toml.experimental_bearer_token")
+            self.assertEqual(diagnostic["api_key_length"], len("config-token"))
+            self.assertNotIn("config-token", json.dumps(diagnostic))
+
+    def test_patch_codex_config_updates_experimental_bearer_token(self) -> None:
+        """Provider 密钥下发时，应覆盖复制来的旧 Codex bearer token。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir)
+            (codex_home / "config.toml").write_text(
+                'model_provider = "custom"\n\n'
+                '[model_providers.custom]\n'
+                'base_url = "https://old.example/v1"\n'
+                'experimental_bearer_token = "PROXY_MANAGED"\n\n'
+                '[notice]\nvalue = true\n',
+                encoding="utf-8",
+            )
+
+            TicketAiAnalysisService._patch_codex_config_for_provider(
+                codex_home,
+                {"OPENAI_BASE_URL": "https://provider.example/v1", "OPENAI_API_KEY": "provider-key"},
+            )
+
+            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
+            self.assertIn('base_url = "https://provider.example/v1"', config_text)
+            self.assertIn('experimental_bearer_token = "provider-key"', config_text)
+            self.assertNotIn('experimental_bearer_token = "PROXY_MANAGED"', config_text)
+
     def test_is_unauthorized_worker_failure_matches_expected_errors(self) -> None:
         """401、Unauthorized 和 Invalid token 都应触发轻量鉴权探测。"""
         self.assertTrue(TicketAiAnalysisService._is_unauthorized_worker_failure("", "ERROR: 401 Unauthorized"))
