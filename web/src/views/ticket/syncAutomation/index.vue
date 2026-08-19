@@ -2890,6 +2890,27 @@
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索最大并发数">
+                    <el-input-number
+                      v-model="logPullStorage.maxConcurrentSearches"
+                      :min="1"
+                      :max="8"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索单行最大字节数">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchLineBytes"
+                      :min="1024"
+                      :max="4194304"
+                      :step="65536"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="存储方式">
                     <el-select
                       v-model="logPullStorage.mode"

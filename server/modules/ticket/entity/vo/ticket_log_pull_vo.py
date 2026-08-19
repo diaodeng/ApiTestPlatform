@@ -55,6 +55,8 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
     max_search_seconds: int = Field(default=30, description="日志关键字搜索最大执行秒数")
     max_search_file_count: int = Field(default=1000, description="日志关键字搜索最大扫描文件数")
     max_python_search_bytes: int = Field(default=268435456, description="Python降级搜索最大扫描字节数")
+    max_concurrent_searches: int = Field(default=2, description="日志搜索最大并发数，范围1-8")
+    max_search_line_bytes: int = Field(default=524288, description="日志搜索单行最大输出字节数，范围1KB-4MB")
     post_download_extract_enabled: bool = Field(default=False, description="日志下载完成后是否自动解压到查看目录")
     post_download_version_extract_enabled: bool = Field(
         default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
@@ -539,9 +541,9 @@ class TicketLogSearchHitModel(TicketLogPullBaseModel):
 
     file: str = Field(description="相对日志文件路径")
     line: int = Field(description="命中行号")
-    content: str = Field(default="", description="命中行内容；搜索接口返回时最多保留行首 500 个字符")
-    content_length: int = Field(default=0, description="命中行原始字符数")
-    content_truncated: bool = Field(default=False, description="搜索接口中的命中行内容是否已截断")
+    content: str = Field(default="", description="命中行内容，按日志搜索单行字节上限返回")
+    content_length: int = Field(default=0, description="命中行返回内容的字符数")
+    content_truncated: bool = Field(default=False, description="命中行内容是否达到单行字节上限")
     matched_keywords: list[str] = Field(default_factory=list, description="当前命中行匹配到的关键字")
     context: TicketLogContextModel | None = Field(default=None, description="命中上下文")
 

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import codecs
+import inspect
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +32,28 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
 )
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
+from modules.ticket.util.ticket_log_search_limiter import TicketLogSearchLimiter
 from utils.log_util import logger
+
+_SEARCH_LIMITER = TicketLogSearchLimiter()
+
+
+def _limit_search_concurrency(method):
+    """
+    为同步日志搜索入口增加进程内并发限制。
+    :param method: 原始搜索方法
+    :return: 受并发限制包装的方法
+    """
+    @wraps(method)
+    def wrapper(cls, *args, **kwargs):
+        bound = inspect.signature(method).bind_partial(cls, *args, **kwargs)
+        db = bound.arguments.get("db")
+        runtime_config = cls._get_runtime_config(db)
+        max_concurrent = runtime_config.get("maxConcurrentSearches", 2)
+        with _SEARCH_LIMITER.slot(max_concurrent):
+            return method(cls, *args, **kwargs)
+
+    return wrapper
 
 
 class LogService:
@@ -225,6 +250,7 @@ class LogService:
         return sorted(result, key=lambda item: item.file)
 
     @classmethod
+    @_limit_search_concurrency
     def search(
         cls,
         ticket_id: int,
@@ -380,6 +406,8 @@ class LogService:
                     "<target_file...>",
                 ],
                 "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
             },
         )
         return cls._search_by_rg_keywords(
@@ -402,6 +430,7 @@ class LogService:
         )
 
     @classmethod
+    @_limit_search_concurrency
     def search_keywords(
         cls,
         ticket_id: int,
@@ -482,6 +511,8 @@ class LogService:
                 args={
                     "reason": "env_python",
                     "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                    "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
                     "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
                     "ignoreCase": ignore_case,
                     "wordRegexp": word_regexp,
@@ -577,6 +608,8 @@ class LogService:
                     "<target_file...>",
                 ],
                 "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
             },
         )
         hits = cls._search_by_rg_keywords(
@@ -738,6 +771,7 @@ class LogService:
             ticket_id, record_id, file_path, resolved_config
         )
         max_scan_bytes = cls._config_int(resolved_config, "maxPythonSearchBytes", 268435456)
+        max_line_bytes = cls._config_int(resolved_config, "maxSearchLineBytes", 524288)
         scanned_bytes = 0
         for target_file in resolved_target_files:
             if len(hits) >= limit:
@@ -754,10 +788,15 @@ class LogService:
                     )
                     if not matched_keywords:
                         continue
+                    display_content, content_length, content_truncated = cls._truncate_search_content(
+                        content, max_line_bytes
+                    )
                     hit = TicketLogSearchHitModel(
                         file=target_file,
                         line=line_no,
-                        content=content.rstrip("\r\n"),
+                        content=display_content,
+                        content_length=content_length,
+                        content_truncated=content_truncated,
                         matched_keywords=matched_keywords,
                     )
                     if with_context:
@@ -893,8 +932,6 @@ class LogService:
         :param max_seconds: 管道最大执行秒数
         :return: 搜索命中列表
         """
-        hits: list[TicketLogSearchHitModel] = []
-        seen_keys: set[tuple[str, int]] = set()
         first_keyword = keywords[0]
         # 构建 rg 第一段命令：从指定文件中搜索关键字
         first_command = [
@@ -923,14 +960,40 @@ class LogService:
             for index, keyword in enumerate(keywords[1:], start=1):
                 command = [executable, "--color", "never"]
                 if index == len(keywords) - 1:
+                    command.extend(cls._rg_max_columns_args(runtime_config))
                     command.extend(["-m", str(limit)])
                 command.append(cls._build_rg_output_content_pattern(keyword, ignore_case, word_regexp))
                 commands.append(command)
         else:
-            commands.append([executable, "--color", "never", "-m", str(limit), "."])
+            commands.append(
+                [
+                    executable,
+                    "--color",
+                    "never",
+                    *cls._rg_max_columns_args(runtime_config),
+                    "-m",
+                    str(limit),
+                    ".",
+                ]
+            )
 
         try:
-            stdout_text = cls._run_rg_pipeline(commands, extract_dir, max_seconds)
+            hits = cls._collect_rg_hits(
+                commands=commands,
+                extract_dir=extract_dir,
+                timeout_seconds=max_seconds,
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+                max_line_bytes=cls._config_int(runtime_config, "maxSearchLineBytes", 524288),
+            )
         except subprocess.TimeoutExpired:
             logger.warning(
                 f"rg 日志搜索达到保护超时，日志搜索降级为 Python，ticket_id={ticket_id}，record_id={record_id}"
@@ -951,6 +1014,8 @@ class LogService:
                 args={
                     "reason": "rg_timeout",
                     "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                    "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
                     "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
                     "ignoreCase": ignore_case,
                     "wordRegexp": word_regexp,
@@ -1093,26 +1158,6 @@ class LogService:
                 cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
             return fallback_hits
 
-        # 解析 rg 输出，去重并收集命中
-        for raw_line in stdout_text.splitlines():
-            if len(hits) >= limit:
-                break
-            hit = cls._parse_rg_line(raw_line)
-            if not hit:
-                continue
-            unique_key = (hit.file, hit.line)
-            if unique_key in seen_keys:
-                continue
-            matched_keywords = cls._match_keywords(
-                hit.content, keywords, search_mode, ignore_case=ignore_case, word_regexp=word_regexp
-            )
-            if not matched_keywords:
-                continue
-            hit.matched_keywords = matched_keywords
-            if with_context:
-                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
-            hits.append(hit)
-            seen_keys.add(unique_key)
         if search_started_at is not None:
             cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
         return hits
@@ -1229,16 +1274,117 @@ class LogService:
         return hits
 
     @classmethod
-    def _run_rg_pipeline(cls, commands: list[list[str]], extract_dir: Path, timeout_seconds: int) -> str:
+    def _collect_rg_hits(
+        cls,
+        *,
+        commands: list[list[str]],
+        extract_dir: Path,
+        timeout_seconds: int,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        ignore_case: bool,
+        word_regexp: bool,
+        max_line_bytes: int,
+    ) -> list[TicketLogSearchHitModel]:
         """
-        使用管道串联多个 rg 进程，避免把中间匹配结果收集到 Python 内存。
+        流式消费 rg 最终输出并构造命中结果，避免整批 stdout 和拆分列表同时驻留内存。
+        :param commands: rg 命令链
+        :param extract_dir: 日志解压目录
+        :param timeout_seconds: 管道最大执行秒数
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param search_mode: 匹配模式
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :param max_line_bytes: 单行最大输出字节数
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        seen_keys: set[tuple[str, int]] = set()
+        output_stream = cls._run_rg_pipeline(commands, extract_dir, timeout_seconds)
+        try:
+            for raw_line in output_stream:
+                if len(hits) >= limit:
+                    break
+                hit = cls._parse_rg_line(raw_line, max_line_bytes=max_line_bytes)
+                if not hit:
+                    continue
+                unique_key = (hit.file, hit.line)
+                if unique_key in seen_keys:
+                    continue
+                matched_keywords = cls._match_keywords(
+                    hit.content, keywords, search_mode, ignore_case=ignore_case, word_regexp=word_regexp
+                )
+                if not matched_keywords:
+                    if not hit.content_truncated:
+                        continue
+                    matched_keywords = keywords if search_mode == "all" or len(keywords) == 1 else []
+                hit.matched_keywords = matched_keywords
+                if with_context:
+                    hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
+                hits.append(hit)
+                seen_keys.add(unique_key)
+        finally:
+            output_stream.close()
+        return hits
+
+    @classmethod
+    def _run_rg_pipeline(cls, commands: list[list[str]], extract_dir: Path, timeout_seconds: int) -> Iterator[str]:
+        """
+        使用管道串联多个 rg 进程，并逐行产出最后一段输出。
         :param commands: rg 命令链，第一段读取日志文件，后续段从 stdin 过滤
         :param extract_dir: 日志解压目录
         :param timeout_seconds: 管道最大执行秒数
-        :return: 最后一段 rg 的标准输出
+        :return: 最后一段 rg 的标准输出迭代器
         """
         processes: list[subprocess.Popen] = []
         previous_stdout = None
+        output_queue: queue.Queue[object] = queue.Queue(maxsize=64)
+        stream_end = object()
+        stop_event = threading.Event()
+        stderr_chunks: list[str] = []
+        output_reader: threading.Thread | None = None
+        stderr_reader: threading.Thread | None = None
+
+        def enqueue(item: object) -> None:
+            """向有界队列写入输出，停止清理时放弃未消费内容。"""
+            while not stop_event.is_set():
+                try:
+                    output_queue.put(item, timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
+
+        def read_output(stream) -> None:
+            """在线程中读取最终 rg 输出，避免主线程阻塞在无超时 readline。"""
+            try:
+                for line in iter(stream.readline, ""):
+                    enqueue(line)
+            except BaseException as exc:
+                enqueue(exc)
+            finally:
+                enqueue(stream_end)
+
+        def read_stderr(stream) -> None:
+            """后台读取最后一个 rg 的错误输出，避免 stderr 管道反压。"""
+            try:
+                text = stream.read()
+                if text:
+                    stderr_chunks.append(text)
+            except Exception:
+                return
+
         try:
             for index, command in enumerate(commands):
                 process = subprocess.Popen(
@@ -1255,17 +1401,69 @@ class LogService:
                     previous_stdout.close()
                 previous_stdout = process.stdout
                 processes.append(process)
-            stdout_text, stderr_text = processes[-1].communicate(timeout=timeout_seconds)
+
+            final_process = processes[-1]
+            output_reader = threading.Thread(
+                target=read_output,
+                args=(final_process.stdout,),
+                name="ticket-log-rg-stdout",
+                daemon=True,
+            )
+            output_reader.start()
+            if final_process.stderr is not None:
+                stderr_reader = threading.Thread(
+                    target=read_stderr,
+                    args=(final_process.stderr,),
+                    name="ticket-log-rg-stderr",
+                    daemon=True,
+                )
+                stderr_reader.start()
+
+            deadline = time.monotonic() + max(int(timeout_seconds), 1)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(commands[-1], timeout_seconds)
+                try:
+                    item = output_queue.get(timeout=remaining)
+                except queue.Empty as exc:
+                    raise subprocess.TimeoutExpired(commands[-1], timeout_seconds) from exc
+                if item is stream_end:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield str(item)
+
+            final_process.wait(timeout=max(deadline - time.monotonic(), 0.1))
             for process in processes[:-1]:
                 process.wait(timeout=1)
-            final_returncode = processes[-1].returncode
-            if final_returncode not in (0, 1):
-                raise RuntimeError(str(stderr_text or stdout_text or "rg 搜索失败").strip())
-            return stdout_text
+            if stderr_reader is not None:
+                stderr_reader.join(timeout=1)
+            stderr_text = "".join(stderr_chunks)
+            if final_process.returncode not in (0, 1):
+                raise RuntimeError(stderr_text.strip() or "rg 搜索失败")
         finally:
+            stop_event.set()
             for process in processes:
                 if process.poll() is None:
                     process.kill()
+            for process in processes:
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+            if output_reader is not None:
+                output_reader.join(timeout=0.2)
+            if stderr_reader is not None:
+                stderr_reader.join(timeout=0.2)
+            for process in processes:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
 
     @staticmethod
     def _build_rg_output_content_pattern(keyword: str, ignore_case: bool, word_regexp: bool) -> str:
@@ -1318,6 +1516,7 @@ class LogService:
         """
         hits: list[TicketLogSearchHitModel] = []
         max_scan_bytes = cls._config_int(runtime_config, "maxPythonSearchBytes", 268435456)
+        max_line_bytes = cls._config_int(runtime_config, "maxSearchLineBytes", 524288)
         deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
         scanned_bytes = 0
         for target_file in target_files:
@@ -1343,10 +1542,15 @@ class LogService:
                     )
                     if not matched_keywords:
                         continue
+                    display_content, content_length, content_truncated = cls._truncate_search_content(
+                        content, max_line_bytes
+                    )
                     hit = TicketLogSearchHitModel(
                         file=target_file,
                         line=line_no,
-                        content=content.rstrip("\r\n"),
+                        content=display_content,
+                        content_length=content_length,
+                        content_truncated=content_truncated,
                         matched_keywords=matched_keywords,
                     )
                     if with_context:
@@ -1453,6 +1657,8 @@ class LogService:
                 "maxSearchSeconds": 30,
                 "maxSearchFileCount": 1000,
                 "maxPythonSearchBytes": 268435456,
+                "maxConcurrentSearches": 2,
+                "maxSearchLineBytes": 524288,
             }
         return TicketLogPullService.get_storage_config_dict(db)
 
@@ -1525,6 +1731,31 @@ class LogService:
     def _config_int(config: dict[str, Any], key: str, default: int) -> int:
         """委托到 TicketLogArchiveUtil。"""
         return TicketLogArchiveUtil.config_int(config, key, default)
+
+    @staticmethod
+    def _truncate_search_content(content: str, max_bytes: int) -> tuple[str, int, bool]:
+        """
+        按 UTF-8 字节上限截断搜索结果内容，并返回实际返回内容长度。
+        :param content: 原始日志行内容
+        :param max_bytes: 单行最大输出字节数
+        :return: 截断后的内容、返回内容字符长度、是否截断
+        """
+        text = str(content or "").rstrip("\r\n")
+        encoded = text.encode("utf-8", errors="replace")
+        if len(encoded) <= max_bytes:
+            return text, len(text), False
+        truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
+        return truncated, len(truncated), True
+
+    @staticmethod
+    def _rg_max_columns_args(runtime_config: dict[str, Any]) -> list[str]:
+        """
+        构造最终 rg 输出阶段的单行字节限制参数。
+        :param runtime_config: 日志搜索运行保护配置
+        :return: rg 命令参数
+        """
+        max_line_bytes = LogService._config_int(runtime_config, "maxSearchLineBytes", 524288)
+        return ["--max-columns", str(max_line_bytes), "--max-columns-preview"]
 
     @staticmethod
     def _normalize_keywords(keywords: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -2049,14 +2280,26 @@ class LogService:
             pass
         return "utf-8"
 
-    @classmethod
-    def _parse_rg_line(cls, raw_line: str) -> TicketLogSearchHitModel | None:
+    @staticmethod
+    def _clean_rg_preview_content(content: str) -> str:
         """
-        解析 rg 的 no-heading 输出行。搜索命令在 extract 目录内执行，因此这里拿到的是相对路径。
+        移除 rg --max-columns-preview 为超长行附加的说明文本。
+        :param content: rg 输出的行内容
+        :return: 可直接返回给接口的日志内容
+        """
+        return re.sub(r"\s+\[\.\.\. omitted end of long line\]$", "", str(content or ""))
+
+    @classmethod
+    def _parse_rg_line(
+        cls, raw_line: str, *, max_line_bytes: int | None = None
+    ) -> TicketLogSearchHitModel | None:
+        """
+        解析 rg 的 no-heading 输出行，并标记最终输出阶段可能发生的单行截断。
         :param raw_line: rg 输出原始行
+        :param max_line_bytes: 单行最大输出字节数
         :return: 搜索命中
         """
-        remain = raw_line.lstrip(".\\/")
+        remain = raw_line.lstrip(".\\/").rstrip("\r\n")
         parts = remain.split(":", 2)
         if len(parts) < 3:
             return None
@@ -2064,10 +2307,21 @@ class LogService:
             line_no = int(parts[1])
         except ValueError:
             return None
+        raw_content = parts[2]
+        cleaned_content = cls._clean_rg_preview_content(raw_content)
+        if max_line_bytes:
+            content, content_length, content_truncated = cls._truncate_search_content(cleaned_content, max_line_bytes)
+        else:
+            content = cleaned_content
+            content_length = len(content)
+            content_truncated = False
+        content_truncated = content_truncated or cleaned_content != raw_content
         return TicketLogSearchHitModel(
             file=cls._normalize_relative_path(parts[0]),
             line=line_no,
-            content=parts[2],
+            content=content,
+            content_length=content_length,
+            content_truncated=content_truncated,
         )
 
     @classmethod

@@ -8,7 +8,7 @@ entry_points:
     path: /ticket/logs/prepare
     trigger: 用户从工单详情或日志拉取记录列表打开指定日志记录
 created: 2026-06-23
-updated: 2026-08-08
+updated: 2026-08-18
 related_files:
   - server/modules/ticket/service/log_pull/ticket_log_service.py
   - server/modules/ticket/service/log_pull/ticket_log_prepare_progress_service.py
@@ -33,6 +33,9 @@ related_files:
 - 日志文件列表、关键字搜索、时间搜索、上下文读取、异常摘要都继续携带 `recordId`，避免搜索和翻页回到工单级旧目录。
 - 前端在日志准备完成后读取 `GET /ticket/logs/files` 返回的当前记录完整文件列表，并保持后端顺序；文件范围下拉不依赖搜索命中，因此搜索前后均可选全部文件。
 - `POST /ticket/logs/search` 支持可选 `file` 相对路径；为空时全局搜索，传入命中文件后只在该文件中继续搜索。
+- 日志搜索受 `ticket.logPull.storage.maxConcurrentSearches` 限制，默认单进程最多并发 2 个搜索；`maxSearchLineBytes` 默认 512 KiB，并在最终 rg 输出阶段通过 `--max-columns --max-columns-preview` 限制单行返回字节数。用户传入的 `limit` 仍动态控制命中行数，不使用固定 `head` 截断。
+- rg 搜索结果采用逐行流式消费，超时或提前达到 `limit` 时会关闭并回收管道进程；Python 降级路径也按同一单行字节配置截断结果。
+- 搜索接口直接返回已受单行字节上限保护的命中对象，不再额外复制一份固定 500 字符预览；完整行仍通过行内容/上下文接口按需读取。
 - 日志详细信息块的换行开关放在该块标题区；用户在详细块选中文案后，当前上下文相同文案高亮并写入高亮候选词，上一段/下一段翻页保持同一高亮关键字；取消浏览器选区时，自动移除本次选区临时追加的高亮词。支持 CSS Highlight API 的浏览器必须使用非侵入高亮，避免重建日志正文 DOM 打断浏览器选区复制。
 - 前端打开日志查看器时必须先清理旧搜索状态，再写入当前日志拉取记录；否则 `prepare` 已解压到 `record_{recordId}`，搜索却因 `recordId` 被清空而回落到工单级旧目录，接口会 200 但命中为空。
 - 同一记录已准备过 `extract` 目录时直接复用，不重复下载或解压。

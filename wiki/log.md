@@ -3,10 +3,19 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-17
+updated: 2026-08-18
 ---
 
 # 操作日志
+
+## [2026-08-18] FIX | 工单日志搜索内存峰值保护与并发限制
+
+- 触发：生产 Supervisor 记录 FastAPI 在日志搜索开始后多次被 `SIGKILL`，随后由 `autorestart=true` 拉起；搜索实现通过 `communicate()` 和 `splitlines()` 暂存整批 rg 输出，且没有应用层搜索并发上限。
+- 根因判断：应用日志只能确认外部 `SIGKILL`，OOM 需由 Pod 状态或 cgroup `memory.events` 最终确认；本次改造针对搜索峰值、超长行和并发叠加增加保护。
+- 修复：新增 `maxConcurrentSearches`（默认 2，范围 1-8）和 `maxSearchLineBytes`（默认 524288，范围 1 KiB-4 MiB）配置；rg 最终输出层使用 `--max-columns --max-columns-preview`，Python 降级路径复用同一单行字节限制。
+- 修复：rg 管道改为有界队列逐行消费，达到用户动态 `limit`、超时或异常时关闭并 wait 回收子进程；搜索接口不再额外复制固定 500 字符预览。
+- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_service.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`server/modules/ticket/util/ticket_log_search_limiter.py`、`server/modules/ticket/controller/ticket_log_pull_controller.py`、`web/src/views/ticket/syncAutomation/hooks/useLogPullStorageConfig.js`、`web/src/views/ticket/syncAutomation/index.vue`、`wiki/flows/ticket-log-record-isolated-view.md`、`wiki/entities/data-models/ticket-core-models.md`。
+- 验证：新增并发限制、配置归一化、UTF-8 单行截断、动态 limit、native rg any/all 和进程流式清理测试；ruff 与日志相关 unittest 全部通过。
 
 ## [2026-08-17] FIX | 工单 AI 历史任务恢复写入 NULL 导致生产启动失败
 

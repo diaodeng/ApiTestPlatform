@@ -366,6 +366,8 @@ class TicketLogPullService:
             "maxSearchSeconds": 30,
             "maxSearchFileCount": 1000,
             "maxPythonSearchBytes": 268435456,
+            "maxConcurrentSearches": 2,
+            "maxSearchLineBytes": 524288,
             "postDownloadExtractEnabled": False,
             "postDownloadVersionExtractEnabled": False,
             "postDownloadIndexEnabled": False,
@@ -450,6 +452,12 @@ class TicketLogPullService:
         normalized["maxSearchFileCount"] = max(cls._parse_positive_int(normalized.get("maxSearchFileCount"), 1000), 10)
         normalized["maxPythonSearchBytes"] = max(
             cls._parse_positive_int(normalized.get("maxPythonSearchBytes"), 268435456), 10485760
+        )
+        normalized["maxConcurrentSearches"] = min(
+            max(cls._parse_positive_int(normalized.get("maxConcurrentSearches"), 2), 1), 8
+        )
+        normalized["maxSearchLineBytes"] = min(
+            max(cls._parse_positive_int(normalized.get("maxSearchLineBytes"), 524288), 1024), 4194304
         )
         normalized["postDownloadExtractEnabled"] = bool(normalized.get("postDownloadExtractEnabled"))
         normalized["postDownloadVersionExtractEnabled"] = bool(normalized.get("postDownloadVersionExtractEnabled"))

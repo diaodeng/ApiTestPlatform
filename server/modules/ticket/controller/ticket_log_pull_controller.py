@@ -31,7 +31,6 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
 from modules.ticket.service.log_pull.ticket_log_prepare_progress_service import TicketLogPrepareProgressService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.log_pull.ticket_log_service import LogService
-from modules.ticket.util.ticket_log_preview_util import build_ticket_log_search_hit_previews
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -459,7 +458,7 @@ async def search_ticket_logs(
             search_object.ignore_case,
             search_object.word_regexp,
         )
-        return ResponseUtil.success(data=build_ticket_log_search_hit_previews(result))
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
