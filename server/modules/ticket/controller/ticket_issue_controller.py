@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -37,7 +38,7 @@ async def get_ticket_issue_list(
     :return: 问题实例分页列表
     """
     try:
-        query_result = TicketIssueService.get_issue_list_services(query_db, query)
+        query_result = await run_in_threadpool(TicketIssueService.get_issue_list_services, query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=query_result)
         return ResponseUtil.success(data=query_result)
@@ -59,7 +60,7 @@ async def get_ticket_issue_detail(request: Request, issue_id: int, query_db: Ses
     :return: 问题实例详情和绑定工单列表
     """
     try:
-        result = TicketIssueService.get_issue_detail_services(query_db, issue_id)
+        result = await run_in_threadpool(TicketIssueService.get_issue_detail_services, query_db, issue_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="问题实例不存在")
     except Exception as e:
         logger.exception(e)
@@ -83,7 +84,7 @@ async def add_ticket_issue(
     :return: 创建结果
     """
     try:
-        result = TicketIssueService.create_issue(query_db, issue_object, current_user)
+        result = await run_in_threadpool(TicketIssueService.create_issue, query_db, issue_object, current_user)
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -109,7 +110,7 @@ async def edit_ticket_issue(
     :return: 编辑结果
     """
     try:
-        result = TicketIssueService.update_issue(query_db, issue_object, current_user)
+        result = await run_in_threadpool(TicketIssueService.update_issue, query_db, issue_object, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -140,7 +141,9 @@ async def bind_ticket_issue(
     :return: 绑定结果
     """
     try:
-        result = TicketIssueService.bind_ticket_to_issue(query_db, ticket_id, bind_object, current_user)
+        result = await run_in_threadpool(
+            TicketIssueService.bind_ticket_to_issue, query_db, ticket_id, bind_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -171,7 +174,9 @@ async def create_ticket_issue_and_bind(
     :return: 绑定结果
     """
     try:
-        result = TicketIssueService.create_issue_and_bind(query_db, ticket_id, issue_object, current_user)
+        result = await run_in_threadpool(
+            TicketIssueService.create_issue_and_bind, query_db, ticket_id, issue_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -202,7 +207,9 @@ async def bind_ticket_issue_from_similar(
     :return: 绑定结果
     """
     try:
-        result = TicketIssueService.bind_from_similar(query_db, ticket_id, bind_object, current_user)
+        result = await run_in_threadpool(
+            TicketIssueService.bind_from_similar, query_db, ticket_id, bind_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -231,7 +238,7 @@ async def unbind_ticket_issue(
     :return: 解绑结果
     """
     try:
-        result = TicketIssueService.unbind_ticket_issue(query_db, ticket_id, current_user)
+        result = await run_in_threadpool(TicketIssueService.unbind_ticket_issue, query_db, ticket_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -257,7 +264,7 @@ async def add_ticket_relation(
     :return: 创建结果
     """
     try:
-        result = TicketRelationService.create_relation(query_db, relation_object, current_user)
+        result = await run_in_threadpool(TicketRelationService.create_relation, query_db, relation_object, current_user)
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -286,7 +293,7 @@ async def confirm_ticket_relation(
     :return: 确认结果
     """
     try:
-        result = TicketRelationService.confirm_relation(query_db, relation_id, current_user)
+        result = await run_in_threadpool(TicketRelationService.confirm_relation, query_db, relation_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -315,7 +322,7 @@ async def delete_ticket_relation(
     :return: 删除结果
     """
     try:
-        result = TicketRelationService.delete_relation(query_db, relation_id, current_user)
+        result = await run_in_threadpool(TicketRelationService.delete_relation, query_db, relation_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)

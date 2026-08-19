@@ -64,7 +64,9 @@ async def add_ticket_ai_repo_mapping(
     :return: 新增结果
     """
     try:
-        result = TicketAiAnalysisService.save_repo_mapping_services(query_db, mapping_object, current_user)
+        result = await run_in_threadpool(
+            TicketAiAnalysisService.save_repo_mapping_services, query_db, mapping_object, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -88,7 +90,9 @@ async def edit_ticket_ai_repo_mapping(
     :return: 编辑结果
     """
     try:
-        result = TicketAiAnalysisService.save_repo_mapping_services(query_db, mapping_object, current_user)
+        result = await run_in_threadpool(
+            TicketAiAnalysisService.save_repo_mapping_services, query_db, mapping_object, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -113,7 +117,7 @@ async def delete_ticket_ai_repo_mapping(
     :return: 删除结果
     """
     try:
-        result = TicketAiAnalysisService.delete_repo_mapping_services(query_db, mapping_id)
+        result = await run_in_threadpool(TicketAiAnalysisService.delete_repo_mapping_services, query_db, mapping_id)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -141,7 +145,7 @@ async def get_ticket_ai_analysis_tasks(
     :return: AI 分析任务分页列表
     """
     try:
-        result = TicketAiAnalysisService.get_task_list_services(query_db, ticket_id, query)
+        result = await run_in_threadpool(TicketAiAnalysisService.get_task_list_services, query_db, ticket_id, query)
         if query.is_page:
             return ResponseUtil.success(model_content=result)
         return ResponseUtil.success(data=result)
@@ -172,7 +176,9 @@ async def retry_ticket_ai_analysis_task(
     :return: 重试结果
     """
     try:
-        result = TicketAiAnalysisService.retry_analysis_task_services(query_db, ticket_id, task_id, current_user)
+        result = await run_in_threadpool(
+            TicketAiAnalysisService.retry_analysis_task_services, query_db, ticket_id, task_id, current_user
+        )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -201,7 +207,7 @@ async def create_ticket_ai_analysis(
     :return: 创建结果
     """
     try:
-        result = TicketAiAnalysisService.create_analysis_task_services(
+        result = await run_in_threadpool(TicketAiAnalysisService.create_analysis_task_services,
             query_db, ticket_id, analysis_object, current_user
         )
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)

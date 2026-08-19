@@ -117,7 +117,11 @@ async def get_ticket_log_pull_storage_config(request: Request, query_db: Session
     :return: 日志压缩包本地/FTP 保存与轮询配置
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_storage_config_services(query_db))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_storage_config_services, query_db
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -140,7 +144,9 @@ async def get_ticket_log_pull_vendor_store_options(
     :return: 脱敏后的商家与门店选项
     """
     try:
-        result = TicketLogPullService.get_vendor_store_options_services(query_db, vender_no=vender_no)
+        result = await run_in_threadpool(
+            TicketLogPullService.get_vendor_store_options_services, query_db, vender_no=vender_no
+        )
         return ResponseUtil.success(data=result.model_dump(by_alias=True))
     except Exception as e:
         logger.exception(e)
@@ -166,7 +172,9 @@ async def resolve_ticket_log_pull_env_item(
     :return: 匹配到的子环境列表
     """
     try:
-        result = TicketLogPullService.resolve_env_item_services(query_db, group_key=group_key, vender_no=vender_no)
+        result = await run_in_threadpool(
+            TicketLogPullService.resolve_env_item_services, query_db, group_key=group_key, vender_no=vender_no
+        )
         return ResponseUtil.success(data=[r.model_dump(by_alias=True) for r in result])
     except Exception as e:
         logger.exception(e)
@@ -626,7 +634,11 @@ async def get_ticket_log_pull_store_configs(
     :return: 门店配置分页列表
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_store_config_list_services(query_db, query))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_store_config_list_services, query_db, query
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -686,7 +698,11 @@ async def get_ticket_log_pull_project_vendor_maps(
     :return: 项目商家映射列表
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_project_vendor_map_list_services(query_db, query))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_project_vendor_map_list_services, query_db, query
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -704,7 +720,11 @@ async def get_ticket_log_pull_project_vendor_map_options(request: Request, query
     :return: 项目商家映射选项列表
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_project_vendor_map_options_services(query_db))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_project_vendor_map_options_services, query_db
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -727,7 +747,9 @@ async def get_ticket_log_pull_project_vendor_map_by_project(
     :return: 映射信息
     """
     try:
-        result = TicketLogPullService.get_project_vendor_map_by_project_services(query_db, project_id)
+        result = await run_in_threadpool(
+            TicketLogPullService.get_project_vendor_map_by_project_services, query_db, project_id
+        )
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="映射不存在")
     except Exception as e:
         logger.exception(e)
@@ -754,7 +776,9 @@ async def save_ticket_log_pull_project_vendor_map(
     :return: 保存结果
     """
     try:
-        result = TicketLogPullService.save_project_vendor_map_services(query_db, config_object, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.save_project_vendor_map_services, query_db, config_object, current_user
+        )
         return (
             ResponseUtil.success(data=result.result, msg=result.message)
             if result.is_success

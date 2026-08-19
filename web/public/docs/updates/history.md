@@ -4,7 +4,13 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（6 天，14 项变更）
+## 2026-08 月（6 天，15 项变更）
+
+### 工单模块 Controller 异步阻塞修复
+- 修复工单模块 6 个 Controller 文件中共 64 个 `async def` 接口在事件循环中直接执行同步 DB 操作导致阻塞的问题。
+- 统一使用 `run_in_threadpool` 将同步 Service 调用包装到线程池执行，避免阻塞 FastAPI 主事件循环。
+- 修复 `extract_ticket_knowledge` 接口在 async 函数中直接调用 `query_db.commit()`/`rollback()` 的错误。
+- 仅改动 Controller 层，不涉及 Service/DAO 层，不影响接口契约和行为语义。
 
 ### 工单日志搜索内存优化
 - 每次 rg 搜索完成后对搜索文件调用 `posix_fadvise(POSIX_FADV_DONTNEED)` 释放 OS 页缓存，避免多次搜索不同工单日志后内存持续增长。
