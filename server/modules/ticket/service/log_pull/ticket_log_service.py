@@ -1160,6 +1160,8 @@ class LogService:
 
         if search_started_at is not None:
             cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+        # 建议 OS 释放本次搜索读取文件的页缓存，避免多次搜索不同工单日志后内存持续增长
+        cls._release_page_cache(target_files, ticket_id, record_id)
         return hits
 
     @classmethod
@@ -1271,6 +1273,7 @@ class LogService:
             f"rg 分批搜索完成，共 {batch_count} 批，命中 {len(hits)} 条，"
             f"ticket_id={ticket_id}，record_id={record_id}"
         )
+        cls._release_page_cache(target_files, ticket_id, record_id)
         return hits
 
     @classmethod
@@ -1323,14 +1326,10 @@ class LogService:
                 unique_key = (hit.file, hit.line)
                 if unique_key in seen_keys:
                     continue
-                matched_keywords = cls._match_keywords(
-                    hit.content, keywords, search_mode, ignore_case=ignore_case, word_regexp=word_regexp
-                )
-                if not matched_keywords:
-                    if not hit.content_truncated:
-                        continue
-                    matched_keywords = keywords if search_mode == "all" or len(keywords) == 1 else []
-                hit.matched_keywords = matched_keywords
+                # rg 管道链已确保最终输出的每一行都满足关键字匹配条件，
+                # 不需要 Python 侧再做 _match_keywords 二次校验。
+                # 前端不使用 matched_keywords 按命中粒度高亮，统一传入所有关键字。
+                hit.matched_keywords = keywords
                 if with_context:
                     hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
                 hits.append(hit)
@@ -1447,6 +1446,12 @@ class LogService:
             for process in processes:
                 if process.poll() is None:
                     process.kill()
+            # 显式关闭最后一个进程的 stdout，确保 readline() 线程立即收到 EOF 退出
+            if processes and processes[-1].stdout is not None:
+                try:
+                    processes[-1].stdout.close()
+                except OSError:
+                    pass
             for process in processes:
                 try:
                     process.wait(timeout=1)
@@ -1457,13 +1462,16 @@ class LogService:
                     except subprocess.TimeoutExpired:
                         pass
             if output_reader is not None:
-                output_reader.join(timeout=0.2)
+                output_reader.join(timeout=3)
             if stderr_reader is not None:
-                stderr_reader.join(timeout=0.2)
+                stderr_reader.join(timeout=3)
             for process in processes:
                 for stream in (process.stdout, process.stderr):
                     if stream is not None:
-                        stream.close()
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
 
     @staticmethod
     def _build_rg_output_content_pattern(keyword: str, ignore_case: bool, word_regexp: bool) -> str:
@@ -2248,10 +2256,14 @@ class LogService:
     @classmethod
     def _detect_file_encoding(cls, path: Path) -> str:
         """
-        读取文件头部样本并探测编码，优先兼容 UTF-8 和常见中文日志编码。
+        读取文件头部样本并探测编码，优先使用行索引中缓存的编码，避免重复 charset_normalizer 调用。
         :param path: 文件路径
         :return: 编码名称
         """
+        # 优先从已有的行索引中读取缓存的编码
+        cached_encoding = cls._read_encoding_from_line_index(path)
+        if cached_encoding:
+            return cached_encoding
         with path.open("rb") as file_obj:
             sample = file_obj.read(65536)
         if not sample:
@@ -2280,6 +2292,24 @@ class LogService:
             pass
         return "utf-8"
 
+    @classmethod
+    def _read_encoding_from_line_index(cls, path: Path) -> str | None:
+        """
+        从已有的行索引文件中读取缓存的编码，避免重复探测。
+        :param path: 日志文件路径
+        :return: 缓存的编码名称，索引不存在或无效时返回 None
+        """
+        index_path = cls._line_index_path(path)
+        try:
+            if not index_path.exists():
+                return None
+            with index_path.open("r", encoding="utf-8") as file_obj:
+                meta = json.loads(file_obj.readline() or "{}")
+            encoding = str(meta.get("encoding") or "").strip()
+            return encoding if encoding else None
+        except Exception:
+            return None
+
     @staticmethod
     def _clean_rg_preview_content(content: str) -> str:
         """
@@ -2294,9 +2324,11 @@ class LogService:
         cls, raw_line: str, *, max_line_bytes: int | None = None
     ) -> TicketLogSearchHitModel | None:
         """
-        解析 rg 的 no-heading 输出行，并标记最终输出阶段可能发生的单行截断。
+        解析 rg 的 no-heading 输出行。
+        rg 已通过 --max-columns 限制单行输出字节数，不再做 Python 侧二次截断。
+        content_truncated 通过 rg 的 --max-columns-preview 后缀判断。
         :param raw_line: rg 输出原始行
-        :param max_line_bytes: 单行最大输出字节数
+        :param max_line_bytes: 保留参数兼容调用方，不再使用
         :return: 搜索命中
         """
         remain = raw_line.lstrip(".\\/").rstrip("\r\n")
@@ -2309,18 +2341,14 @@ class LogService:
             return None
         raw_content = parts[2]
         cleaned_content = cls._clean_rg_preview_content(raw_content)
-        if max_line_bytes:
-            content, content_length, content_truncated = cls._truncate_search_content(cleaned_content, max_line_bytes)
-        else:
-            content = cleaned_content
-            content_length = len(content)
-            content_truncated = False
-        content_truncated = content_truncated or cleaned_content != raw_content
+        # rg 的 --max-columns-preview 会在超长行末尾追加 "[... omitted end of long line]"
+        # _clean_rg_preview_content 移除该后缀后，若 raw_content 与原内容不一致即表示 rg 已截断
+        content_truncated = cleaned_content != raw_content
         return TicketLogSearchHitModel(
             file=cls._normalize_relative_path(parts[0]),
             line=line_no,
-            content=content,
-            content_length=content_length,
+            content=cleaned_content,
+            content_length=len(cleaned_content),
             content_truncated=content_truncated,
         )
 
@@ -2489,6 +2517,51 @@ class LogService:
             logger.warning(f"日志读取模式配置非法，env_key={env_key}，value={value}，fallback={default}")
             return default
         return value
+
+    @classmethod
+    def _release_page_cache(
+        cls,
+        target_files: list[str],
+        ticket_id: int,
+        record_id: int | None = None,
+    ) -> None:
+        """
+        rg 搜索完成后建议 OS 释放本次搜索读取文件的页缓存，避免多次搜索不同工单日志后内存持续增长。
+        在 Linux 上使用 posix_fadvise(POSIX_FADV_DONTNEED)，Windows 上跳过。
+        :param target_files: 本次搜索的日志文件相对路径列表
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :return: 无
+        """
+        if os.name != "posix":
+            return
+        try:
+            import ctypes
+
+            POSIX_FADV_DONTNEED = 4  # Linux 标准值
+            released_count = 0
+            for target_file in target_files:
+                try:
+                    target_path = cls._resolve_log_file(ticket_id, target_file, record_id)
+                    fd = os.open(str(target_path), os.O_RDONLY)
+                    try:
+                        ctypes.CDLL("libc.so.6", use_errno=True).posix_fadvise(
+                            fd, 0, 0, POSIX_FADV_DONTNEED
+                        )
+                        released_count += 1
+                    except Exception:
+                        pass
+                    finally:
+                        os.close(fd)
+                except Exception:
+                    pass
+            if released_count > 0:
+                logger.debug(
+                    f"日志搜索后释放页缓存完成，ticket_id={ticket_id}，"
+                    f"record_id={record_id}，released_files={released_count}/{len(target_files)}"
+                )
+        except Exception:
+            pass
 
     @classmethod
     def _write_meta(cls, path: Path, payload: dict[str, Any]) -> None:

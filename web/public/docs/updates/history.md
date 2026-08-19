@@ -4,7 +4,13 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（5 天，13 项变更）
+## 2026-08 月（6 天，14 项变更）
+
+### 工单日志搜索内存优化
+- 每次 rg 搜索完成后对搜索文件调用 `posix_fadvise(POSIX_FADV_DONTNEED)` 释放 OS 页缓存，避免多次搜索不同工单日志后内存持续增长。
+- 移除 rg 搜索路径中 Python 侧的 `_match_keywords` 二次校验和 `_truncate_search_content` 冗余截断，rg 管道链已确保输出正确性。
+- 优化 `_run_rg_pipeline` 子进程/线程清理：显式关闭 stdout 管道、join 超时从 200ms 延长至 3s、增加双重关闭异常保护。
+- 文件编码检测优先从 `.lineidx` 索引读取缓存值，减少 `charset_normalizer` 实时探测。
 
 ### 修复 Codex Worker 使用旧 bearer token 导致的误报鉴权失败
 - 修复工单 AI 分析 Agent 复制本机 Codex 配置后，仍沿用 `config.toml` 中旧的 `experimental_bearer_token`，导致 Provider API Key 实际可用但 Worker 请求 `/responses` 返回 `401 Unauthorized`。
