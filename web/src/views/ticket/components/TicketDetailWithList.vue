@@ -31,6 +31,7 @@
     buildTicketAiPreferenceDefaults,
     saveTicketAiPreferencePatch,
   } from '../hooks/useTicketAiPreference';
+  import { useAiProviderModelOptions } from '../hooks/useAiProviderModelOptions';
 
   const props = defineProps({
     open: {
@@ -124,6 +125,10 @@
   const projectVendorMapLoading = ref(false);
   const projectVendorMapSubmitting = ref(false);
   const aiTaskLoading = ref(false);
+  const {
+    modelOptions: aiAnalysisModelOptions,
+    loadModelOptions: loadAiAnalysisModelOptions,
+  } = useAiProviderModelOptions();
   const aiTaskList = ref([]);
   const aiTaskTotal = ref(0);
   // detailVersionOptions 已通过 useOptions() 提供
@@ -132,6 +137,7 @@
     logPullRecordId: undefined,
     agentCode: '',
     aiProviderCode: '',
+    aiModelName: '',
     executor: '',
     forceRefresh: false,
     logAnalysisMode: 'hybrid',
@@ -187,9 +193,17 @@
     applyAiAnalysisProviderExecutor(providerCode);
     saveTicketAiPreferencePatch({
       aiProviderCode: providerCode,
+      aiModelName: '',
       agentCode: aiAnalysisTaskForm.value.agentCode,
       executor: aiAnalysisTaskForm.value.executor,
     });
+    // Provider切换后清理旧模型，再加载新Provider的启用模型。
+    aiAnalysisTaskForm.value.aiModelName = '';
+    loadAiAnalysisModelOptions(providerCode);
+  }
+
+  function handleAiAnalysisModelChange(aiModelName) {
+    saveTicketAiPreferencePatch({ aiModelName });
   }
 
   /**
@@ -720,6 +734,8 @@
     aiAnalysisTaskForm.value.logPullRecordId = detail.value.latestLogPull?.id || undefined;
     aiAnalysisTaskForm.value.agentCode = aiDefaults.agentCode;
     aiAnalysisTaskForm.value.aiProviderCode = aiDefaults.aiProviderCode;
+    aiAnalysisTaskForm.value.aiModelName = aiDefaults.aiModelName || '';
+    loadAiAnalysisModelOptions(aiAnalysisTaskForm.value.aiProviderCode);
     if (!aiDefaults.hasManualAgentCode) {
       applyAiAnalysisProviderAgent(aiAnalysisTaskForm.value.aiProviderCode);
     }
@@ -835,6 +851,7 @@
         logPullRecordId: aiAnalysisTaskForm.value.logPullRecordId || undefined,
         agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
         aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
+        aiModelName: aiAnalysisTaskForm.value.aiModelName || undefined,
         executor: aiAnalysisTaskForm.value.executor || undefined,
         forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
         logAnalysisMode: aiAnalysisTaskForm.value.logAnalysisMode || 'hybrid',
@@ -1339,6 +1356,24 @@
             :key="item.providerCode"
             :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
             :value="item.providerCode"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="模型">
+        <el-select
+          v-model="aiAnalysisTaskForm.aiModelName"
+          placeholder="留空使用Provider默认模型"
+          filterable
+          clearable
+          style="width: 100%"
+          :disabled="!aiAnalysisTaskForm.aiProviderCode"
+          @change="handleAiAnalysisModelChange"
+        >
+          <el-option
+            v-for="item in aiAnalysisModelOptions"
+            :key="item.modelId"
+            :label="item.displayName || item.modelId"
+            :value="item.modelId"
           />
         </el-select>
       </el-form-item>

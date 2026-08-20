@@ -282,7 +282,7 @@ export function useSyncConfig(proxy) {
         timeField: 'create_time', appToken: '', tableId: '', viewId: '', filterFormula: '',
         statusField: '状态', categoryField: '分类', priorityField: '优先级',
         bitableTimeField: '', pageSize: 500,
-        aiEnabled: false, aiProviderCode: '', aiPromptCode: '',
+        aiEnabled: false, aiProviderCode: '', aiModelName: '', aiPromptCode: '',
         windowMinutes: 60, endDelayMinutes: 0,
         startTime: '', endTime: '', includeClosed: true, messageTemplate: '',
       },
@@ -311,6 +311,7 @@ export function useSyncConfig(proxy) {
         statusChangeTriggerStatuses: [],
         statusChangeForceReclassify: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_stat_classify_default',
       },
       aiSyncExtract: {
@@ -319,12 +320,14 @@ export function useSyncConfig(proxy) {
         bitablePullEnabled: false,
         manualCreateEnabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_sync_extract_default',
         extractFields: ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
       },
       translateConfig: {
         enabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_translate_default',
         translateOnExternalSync: true,
         translateOnRemotePull: true,
@@ -334,11 +337,13 @@ export function useSyncConfig(proxy) {
       titleSummaryConfig: {
         enabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_title_summary_default',
       },
       knowledgeConfig: {
         enabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_knowledge_extract_default',
       },
       automationConfig: {
@@ -727,6 +732,7 @@ export function useSyncConfig(proxy) {
       pageSize: Number(summaryReport.pageSize || 500),
       aiEnabled: Boolean(summaryReport.aiEnabled),
       aiProviderCode: summaryReport.aiProviderCode || '',
+      aiModelName: summaryReport.aiModelName || '',
       aiPromptCode: summaryReport.aiPromptCode || '',
       windowMinutes: Number(summaryReport.windowMinutes || 60),
       endDelayMinutes: Number(summaryReport.endDelayMinutes || 0),
@@ -749,6 +755,7 @@ export function useSyncConfig(proxy) {
         : [],
       statusChangeForceReclassify: Boolean(aiClassification.statusChangeForceReclassify),
       providerCode: aiClassification.providerCode || '',
+      modelName: aiClassification.modelName || '',
       promptCode: aiClassification.promptCode || 'ticket_stat_classify_default',
     }
 
@@ -759,6 +766,7 @@ export function useSyncConfig(proxy) {
       bitablePullEnabled: Boolean(aiSyncExtract.bitablePullEnabled),
       manualCreateEnabled: Boolean(aiSyncExtract.manualCreateEnabled),
       providerCode: aiSyncExtract.providerCode || '',
+      modelName: aiSyncExtract.modelName || '',
       promptCode: aiSyncExtract.promptCode || 'ticket_sync_extract_default',
       extractFields: Array.isArray(aiSyncExtract.extractFields)
         ? aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)
@@ -769,6 +777,7 @@ export function useSyncConfig(proxy) {
     form.translateConfig = {
       enabled: Boolean(translateConfig.enabled),
       providerCode: translateConfig.providerCode || '',
+      modelName: translateConfig.modelName || '',
       promptCode: translateConfig.promptCode || 'ticket_translate_default',
       translateOnExternalSync: translateConfig.translateOnExternalSync !== false,
       translateOnRemotePull: translateConfig.translateOnRemotePull !== false,
@@ -780,6 +789,7 @@ export function useSyncConfig(proxy) {
     form.titleSummaryConfig = {
       enabled: Boolean(titleSummaryConfig.enabled),
       providerCode: titleSummaryConfig.providerCode || '',
+      modelName: titleSummaryConfig.modelName || '',
       promptCode: titleSummaryConfig.promptCode || 'ticket_title_summary_default',
     }
 
@@ -787,6 +797,7 @@ export function useSyncConfig(proxy) {
     form.knowledgeConfig = {
       enabled: Boolean(knowledgeConfig.enabled),
       providerCode: knowledgeConfig.providerCode || '',
+      modelName: knowledgeConfig.modelName || '',
       promptCode: knowledgeConfig.promptCode || 'ticket_knowledge_extract_default',
     }
 
@@ -1032,6 +1043,7 @@ export function useSyncConfig(proxy) {
       payload.summaryReport.pageSize = Math.min(Math.max(Number(payload.summaryReport?.pageSize || 500), 1), 500)
       payload.summaryReport.aiEnabled = Boolean(payload.summaryReport?.aiEnabled)
       payload.summaryReport.aiProviderCode = String(payload.summaryReport?.aiProviderCode || '').trim()
+      payload.summaryReport.aiModelName = String(payload.summaryReport?.aiModelName || '').trim()
       payload.summaryReport.aiPromptCode = String(payload.summaryReport?.aiPromptCode || '').trim()
       payload.aiClassification = {
         enabled: Boolean(payload.aiClassification?.enabled),
@@ -1045,6 +1057,7 @@ export function useSyncConfig(proxy) {
           : [],
         statusChangeForceReclassify: Boolean(payload.aiClassification?.statusChangeForceReclassify),
         providerCode: String(payload.aiClassification?.providerCode || '').trim(),
+        modelName: String(payload.aiClassification?.modelName || '').trim(),
         promptCode: String(payload.aiClassification?.promptCode || '').trim() || 'ticket_stat_classify_default',
       }
       payload.aiSyncExtract = {
@@ -1053,6 +1066,7 @@ export function useSyncConfig(proxy) {
         bitablePullEnabled: Boolean(payload.aiSyncExtract?.bitablePullEnabled),
         manualCreateEnabled: Boolean(payload.aiSyncExtract?.manualCreateEnabled),
         providerCode: String(payload.aiSyncExtract?.providerCode || '').trim(),
+        modelName: String(payload.aiSyncExtract?.modelName || '').trim(),
         promptCode: String(payload.aiSyncExtract?.promptCode || '').trim() || 'ticket_sync_extract_default',
         extractFields: Array.isArray(payload.aiSyncExtract?.extractFields)
           ? Array.from(new Set(payload.aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)))
@@ -1061,6 +1075,7 @@ export function useSyncConfig(proxy) {
       payload.translateConfig = {
         enabled: Boolean(payload.translateConfig?.enabled),
         providerCode: String(payload.translateConfig?.providerCode || '').trim(),
+        modelName: String(payload.translateConfig?.modelName || '').trim(),
         promptCode: String(payload.translateConfig?.promptCode || '').trim() || 'ticket_translate_default',
         translateOnExternalSync: payload.translateConfig?.translateOnExternalSync !== false,
         translateOnRemotePull: payload.translateConfig?.translateOnRemotePull !== false,
@@ -1070,11 +1085,13 @@ export function useSyncConfig(proxy) {
       payload.titleSummaryConfig = {
         enabled: Boolean(payload.titleSummaryConfig?.enabled),
         providerCode: String(payload.titleSummaryConfig?.providerCode || '').trim(),
+        modelName: String(payload.titleSummaryConfig?.modelName || '').trim(),
         promptCode: String(payload.titleSummaryConfig?.promptCode || '').trim() || 'ticket_title_summary_default',
       }
       payload.knowledgeConfig = {
         enabled: Boolean(payload.knowledgeConfig?.enabled),
         providerCode: String(payload.knowledgeConfig?.providerCode || '').trim(),
+        modelName: String(payload.knowledgeConfig?.modelName || '').trim(),
         promptCode: String(payload.knowledgeConfig?.promptCode || '').trim() || 'ticket_knowledge_extract_default',
       }
       payload.automationConfig = {

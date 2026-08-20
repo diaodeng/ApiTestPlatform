@@ -19,6 +19,7 @@ class TicketSyncAiConfigService:
         "translateConfig": {
             "enabled": False,
             "providerCode": "",
+            "modelName": "",
             "promptCode": "ticket_translate_default",
             "translateOnExternalSync": True,
             "translateOnRemotePull": True,
@@ -28,11 +29,13 @@ class TicketSyncAiConfigService:
         "titleSummaryConfig": {
             "enabled": False,
             "providerCode": "",
+            "modelName": "",
             "promptCode": "ticket_title_summary_default",
         },
         "aiClassification": {
             "enabled": False,
             "providerCode": "",
+            "modelName": "",
             "promptCode": "ticket_stat_classify_default",
         },
         "aiSyncExtract": {
@@ -41,12 +44,14 @@ class TicketSyncAiConfigService:
             "bitablePullEnabled": False,
             "manualCreateEnabled": False,
             "providerCode": "",
+            "modelName": "",
             "promptCode": "ticket_sync_extract_default",
             "extractFields": ["storeName", "posNo", "scoNo", "logDate", "versionKey"],
         },
         "knowledgeConfig": {
             "enabled": False,
             "providerCode": "",
+            "modelName": "",
             "promptCode": "ticket_knowledge_extract_default",
         },
     }
@@ -87,6 +92,7 @@ class TicketSyncAiConfigService:
         for field_name in cls.BOOLEAN_FIELDS.intersection(normalized):
             normalized[field_name] = SyncUtil.to_bool(normalized.get(field_name), bool(defaults.get(field_name)))
         normalized["providerCode"] = str(normalized.get("providerCode") or "").strip()
+        normalized["modelName"] = str(normalized.get("modelName") or "").strip()
         normalized["promptCode"] = str(
             normalized.get("promptCode") or defaults.get("promptCode") or ""
         ).strip()
@@ -125,16 +131,20 @@ class TicketSyncAiConfigService:
         return bool(cls.load_section(db, section_name).get("enabled"))
 
     @classmethod
-    def resolve_task_settings(cls, db: Session, section_name: str) -> tuple[str, str]:
+    def resolve_task_settings(cls, db: Session, section_name: str) -> tuple[str, str, str]:
         """
-        解析指定轻量 AI 任务使用的 Provider 和提示词编码。
+        解析指定轻量 AI 任务使用的 Provider、模型和提示词编码。
 
         :param db: 数据库会话。
         :param section_name: 配置段名称。
-        :return: Provider 编码和提示词编码。
+        :return: Provider 编码、模型名称和提示词编码。
         """
         section = cls.load_section(db, section_name)
-        return str(section.get("providerCode") or "").strip(), str(section.get("promptCode") or "").strip()
+        return (
+            str(section.get("providerCode") or "").strip(),
+            str(section.get("modelName") or "").strip(),
+            str(section.get("promptCode") or "").strip(),
+        )
 
     @classmethod
     def is_sync_extract_enabled_for_scene(cls, db: Session, sync_scene: str) -> bool:

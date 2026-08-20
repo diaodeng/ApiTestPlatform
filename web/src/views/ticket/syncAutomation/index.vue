@@ -328,8 +328,23 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('summaryReport', $event)"
                     >
                       <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="AI模型">
+                    <el-select
+                      v-model="form.summaryReport.aiModelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.summaryReport.aiProviderCode"
+                    >
+                      <el-option v-for="item in (lightModelOptionsMap[form.summaryReport.aiProviderCode] || [])" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -660,12 +675,32 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('aiSyncExtract', $event)"
                     >
                       <el-option
                         v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select
+                      v-model="form.aiSyncExtract.modelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.aiSyncExtract.providerCode"
+                    >
+                      <el-option
+                        v-for="item in (lightModelOptionsMap[form.aiSyncExtract.providerCode] || [])"
+                        :key="item.modelId"
+                        :label="item.displayName || item.modelId"
+                        :value="item.modelId"
                       />
                     </el-select>
                   </el-form-item>
@@ -742,12 +777,32 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('translateConfig', $event)"
                     >
                       <el-option
                         v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select
+                      v-model="form.translateConfig.modelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.translateConfig.providerCode"
+                    >
+                      <el-option
+                        v-for="item in (lightModelOptionsMap[form.translateConfig.providerCode] || [])"
+                        :key="item.modelId"
+                        :label="item.displayName || item.modelId"
+                        :value="item.modelId"
                       />
                     </el-select>
                   </el-form-item>
@@ -831,8 +886,15 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
-                    <el-select v-model="form.titleSummaryConfig.providerCode" placeholder="请选择标题总结 Provider" filterable clearable style="width: 100%">
+                    <el-select v-model="form.titleSummaryConfig.providerCode" placeholder="请选择标题总结 Provider" filterable clearable style="width: 100%" @change="handleProviderModelChange('titleSummaryConfig', $event)">
                       <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="form.titleSummaryConfig.modelName" placeholder="留空使用Provider默认模型" filterable clearable style="width: 100%" :disabled="!form.titleSummaryConfig.providerCode">
+                      <el-option v-for="item in (lightModelOptionsMap[form.titleSummaryConfig.providerCode] || [])" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -864,8 +926,15 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
-                    <el-select v-model="form.knowledgeConfig.providerCode" placeholder="请选择知识提炼 Provider" filterable clearable style="width: 100%">
+                    <el-select v-model="form.knowledgeConfig.providerCode" placeholder="请选择知识提炼 Provider" filterable clearable style="width: 100%" @change="handleProviderModelChange('knowledgeConfig', $event)">
                       <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="form.knowledgeConfig.modelName" placeholder="留空使用Provider默认模型" filterable clearable style="width: 100%" :disabled="!form.knowledgeConfig.providerCode">
+                      <el-option v-for="item in (lightModelOptionsMap[form.knowledgeConfig.providerCode] || [])" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -988,12 +1057,32 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('aiClassification', $event)"
                     >
                       <el-option
                         v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select
+                      v-model="form.aiClassification.modelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.aiClassification.providerCode"
+                    >
+                      <el-option
+                        v-for="item in (lightModelOptionsMap[form.aiClassification.providerCode] || [])"
+                        :key="item.modelId"
+                        :label="item.displayName || item.modelId"
+                        :value="item.modelId"
                       />
                     </el-select>
                   </el-form-item>
@@ -3164,7 +3253,7 @@
     runTicketCustomStatistics,
     sendTicketSyncGroupPushByTicket,
   } from '@/api/ticket/ticket';
-  import { listAiProviderOptions } from '@/api/system/aiprovider';
+  import { listAiProviderOptions, listAiProviderModelOptions } from '@/api/system/aiprovider';
   import { listAiPromptTemplateOptions } from '@/api/system/aiprompt';
   import { all as listAllAgents } from '@/api/hrm/agent';
   import { useSyncConfig } from './hooks/useSyncConfig';
@@ -3285,6 +3374,7 @@
   const pushOptions = ref([]);
   const analysisProviderOptions = ref([]);
   const lightProviderOptions = ref([]);
+const lightModelOptionsMap = ref({});
   const promptOptions = ref([]);
   const agentOptions = ref([]);
   const groupSendLoading = ref(false);
@@ -3394,6 +3484,37 @@
     const code = item.promptCode || item.templateCode || item.value || '';
     const name = item.promptName || item.templateName || item.label || code || '-';
     return `${name}${code && name !== code ? ` [${code}]` : ''}`;
+  }
+
+  /**
+   * Provider 变更时加载该 Provider 的可用模型列表。
+   * @param {string} sectionName 配置段名称
+   * @param {string} providerCode Provider 编码
+   */
+  function handleProviderModelChange(sectionName, providerCode) {
+    if (!providerCode) {
+      lightModelOptionsMap.value[providerCode] = [];
+      return;
+    }
+    if (lightModelOptionsMap.value[providerCode]) return;
+    listAiProviderModelOptions(providerCode).then((response) => {
+      lightModelOptionsMap.value[providerCode] = Array.isArray(response.data) ? response.data : [];
+    }).catch(() => {
+      lightModelOptionsMap.value[providerCode] = [];
+    });
+  }
+
+  /**
+   * 预加载所有已配置 Provider 的模型列表。
+   */
+  function preloadModelOptions() {
+    const sections = ['aiSyncExtract', 'translateConfig', 'titleSummaryConfig', 'knowledgeConfig', 'aiClassification', 'summaryReport'];
+    sections.forEach((section) => {
+      const providerCode = form[section]?.providerCode || form[section]?.aiProviderCode;
+      if (providerCode) {
+        handleProviderModelChange(section, providerCode);
+      }
+    });
   }
 
   function loadAiOptions() {
@@ -3762,7 +3883,7 @@
   }
 
   onMounted(() => {
-    loadConfig();
+    loadConfig().then(() => { preloadModelOptions(); });
     loadRemoteCredentialOptions();
     loadPushOptions();
     loadAiOptions();

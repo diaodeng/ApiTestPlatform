@@ -3,10 +3,32 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-18
+updated: 2026-08-20
 ---
 
 # 操作日志
+
+## [2026-08-20] FIX | Provider模型下拉预览字段和工单分析初始化加载
+
+- 现象：Provider弹窗点击“更新模型”后模型选项数量有返回但文案为空；工单AI分析/协同消息弹窗自动回填Provider后模型下拉为空，切换Provider后才出现。
+- 根因：模型发现协议服务返回 `model_id/display_name` 普通字典，预览接口未按 Web camelCase 契约转换；工单页面只在 Provider `change` 事件中请求模型，初始化回填未触发请求。
+- 修复：预览接口统一输出 `modelId/displayName`；新增工单模型选项加载 hook，初始化和切换均按当前 Provider 加载并忽略过期响应；分析和协同请求透传 `aiModelName`，服务端校验模型属于当前 Provider 启用目录后复用 `selectedWorkerModel` 执行链，空值回退 Provider 默认模型。
+- 关键日志：Provider预览成功记录模型数量；任务创建阶段保留 Provider、模型和执行器快照，非法模型直接返回明确错误，不创建任务。
+- 验证：后端变更文件 `compileall` 通过；前端 hook 语法检查通过；完整前端构建和真实 Provider/Agent 联调待环境可用后执行。
+
+
+- 原因：模型目录新增接口为异步 FastAPI 路由，但底层 Service、DAO 和远端模型发现仍是同步实现，直接调用会阻塞事件循环。
+- 修复：保留既有同步 Service/DAO 接口，模型目录查询、刷新、手动添加、启用/禁用、删除和模型选项接口统一通过 `await run_in_threadpool(...)` 执行。
+- 兼容性：不改造共享 Service/DAO 方法，不切换 `AsyncSessionProxy`，降低对其他调用方的影响。
+- 验证：模型目录相关控制器、DAO、Service 的 ruff 检查通过。
+
+
+- 功能：支持一个 Provider 配置多个可用模型，使用方可按场景选择不同模型，实现"同一 API Key 不同模型"的灵活配置。
+- 后端新增：6 个模型管理接口（全局模型列表、刷新并持久化、手动添加、启用/禁用、删除、按编码查询可用模型）。
+- 后端修改：`AiProviderProtocolService.generate_text()` 新增 `model_name` 可选参数；`TicketSyncAiConfigService` 各 AI 配置段增加 `modelName` 字段；`TicketLightAiService` 所有调用点透传模型名称。
+- 前端新增：Provider 管理页增加"可用模型"管理表格，支持添加/刷新/启用/禁用/删除模型；工单 AI 分析、同步自动化各配置段、协同消息均增加模型选择器。
+- 权限：查看模型列表 `system:aiprovider:query`，管理模型 `system:aiprovider:edit`。
+- 向后兼容：所有新增字段均为可选，空值时 fallback 到 Provider 的 `default_model`。
 
 ## [2026-08-18] FIX | 工单日志搜索内存峰值保护与并发限制
 

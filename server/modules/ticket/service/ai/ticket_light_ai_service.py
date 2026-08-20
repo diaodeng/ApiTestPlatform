@@ -521,26 +521,26 @@ class TicketLightAiService:
         return ""
 
     @classmethod
-    def _resolve_task_settings(cls, db: Session, section_name: str) -> tuple[str, str]:
+    def _resolve_task_settings(cls, db: Session, section_name: str) -> tuple[str, str, str]:
         """
-        解析轻量 AI 任务使用的 Provider 和提示词编码。
+        解析轻量 AI 任务使用的 Provider、模型和提示词编码。
         :param db: 数据库会话
         :param section_name: 工单同步配置中的任务配置段名称
-        :return: (provider_code, prompt_code)
+        :return: (provider_code, model_name, prompt_code)
         """
         return TicketSyncAiConfigService.resolve_task_settings(db, section_name)
 
     @classmethod
-    def _resolve_classification_task_settings(cls, db: Session) -> tuple[str, str]:
+    def _resolve_classification_task_settings(cls, db: Session) -> tuple[str, str, str]:
         """
-        解析工单分类统计使用的 Provider 和提示词编码。
+        解析工单分类统计使用的 Provider、模型和提示词编码。
         :param db: 数据库会话。
-        :return: (provider_code, prompt_code)。
+        :return: (provider_code, model_name, prompt_code)。
         """
-        provider_code, prompt_code = cls._resolve_task_settings(db, "aiClassification")
+        provider_code, model_name, prompt_code = cls._resolve_task_settings(db, "aiClassification")
         if not prompt_code or prompt_code == "ticket_category_classify_default":
             prompt_code = "ticket_stat_classify_default"
-        return provider_code, prompt_code
+        return provider_code, model_name, prompt_code
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
@@ -782,7 +782,7 @@ class TicketLightAiService:
                 f"工单知识提炼AI跳过: 总开关关闭, ticket_no={getattr(ticket, 'ticket_no', '') or '-'}"
             )
             return {}, {"provider_code": "", "prompt_code": "", "skipped": True}
-        provider_code, prompt_code = cls._resolve_task_settings(db, "knowledgeConfig")
+        provider_code, model_name, prompt_code = cls._resolve_task_settings(db, "knowledgeConfig")
         context_text = cls._build_knowledge_context(ticket, timeline)
         extra_data = getattr(ticket, "extra_data", None)
         origin_description = (
@@ -887,6 +887,7 @@ class TicketLightAiService:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.2,
+                model_name=model_name if model_name else None,
             )
             parsed_data = cls._normalize_knowledge_case_data(cls._extract_json_object(raw_text))
             cls._finish_execution_record(
@@ -983,6 +984,7 @@ class TicketLightAiService:
         user_prompt: str,
         temperature: float = 0.2,
         timeout_sec: int | None = None,
+        model_name: str | None = None,
     ) -> str:
         """
         调用具备工单轻量AI能力的Provider文本生成接口。
@@ -991,6 +993,7 @@ class TicketLightAiService:
         :param user_prompt: 用户提示词
         :param temperature: 温度参数
         :param timeout_sec: 超时时间
+        :param model_name: 可选覆盖模型名称，为空时使用Provider默认模型
         :return: 模型回复文本
         """
         AiProviderCapabilityService.require_provider_eligibility(
@@ -1004,6 +1007,7 @@ class TicketLightAiService:
             user_prompt=user_prompt,
             temperature=temperature,
             timeout_sec=timeout_sec or cls.DEFAULT_TIMEOUT_SEC,
+            model_name=model_name,
         )
         logger.debug(f"调用AI返回结果：{content}")
         if not str(content or "").strip():
@@ -1063,6 +1067,7 @@ class TicketLightAiService:
 
         ai_sync_extract = TicketSyncAiConfigService.load_section(db, "aiSyncExtract")
         provider_code = str(ai_sync_extract.get("providerCode") or "").strip()
+        model_name = str(ai_sync_extract.get("modelName") or "").strip()
         prompt_code = str(ai_sync_extract.get("promptCode") or "").strip()
         if not provider_code:
             execution_id = cls._write_execution_record(
@@ -1167,6 +1172,7 @@ class TicketLightAiService:
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
+                model_name=model_name if model_name else None,
             )
             parsed_payload = cls._extract_json_object(response_text)
             title_candidate = str(
@@ -1289,7 +1295,7 @@ class TicketLightAiService:
             )
             return "", {"provider_code": "", "prompt_code": "", "summary_title": "", "skipped": True}
 
-        provider_code, prompt_code = cls._resolve_task_settings(db, "titleSummaryConfig")
+        provider_code, model_name, prompt_code = cls._resolve_task_settings(db, "titleSummaryConfig")
         if not provider_code or not prompt_code:
             execution_id = cls._write_execution_record(
                 execution_data=cls._build_execution_payload(
@@ -1411,6 +1417,7 @@ class TicketLightAiService:
                     provider=provider,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
+                    model_name=model_name if model_name else None,
                 )
                 or ""
             ).strip()
@@ -1486,7 +1493,7 @@ class TicketLightAiService:
                 "skipReason": "标题和描述为空",
             }
 
-        default_provider_code, default_prompt_code = cls._resolve_classification_task_settings(db)
+        default_provider_code, default_model_name, default_prompt_code = cls._resolve_classification_task_settings(db)
         provider_code = str(override_provider_code or "").strip() or default_provider_code
         prompt_code = str(override_prompt_code or "").strip() or default_prompt_code
         if not prompt_code or prompt_code == "ticket_category_classify_default":
@@ -1606,7 +1613,10 @@ class TicketLightAiService:
         logger.debug(f"工单AI分类统计参数：system_prompt： {system_prompt}, user_prompt: {user_prompt}")
         try:
             response_text = str(
-                cls._call_model_api(provider=provider, system_prompt=system_prompt, user_prompt=user_prompt)
+                cls._call_model_api(
+                    provider=provider, system_prompt=system_prompt, user_prompt=user_prompt,
+                    model_name=default_model_name if default_model_name else None,
+                )
                 or ""
             ).strip()
 
@@ -1678,7 +1688,7 @@ class TicketLightAiService:
                 f"source_id={source_id}, source_ref={source_ref}"
             )
             return origin_text, {"provider_code": "", "prompt_code": "", "translated_text": "", "skipped": True}
-        provider_code, prompt_code = cls._resolve_task_settings(db, "translateConfig")
+        provider_code, model_name, prompt_code = cls._resolve_task_settings(db, "translateConfig")
         if not provider_code or not prompt_code:
             logger.info(
                 f"工单轻量翻译跳过: provider/prompt 未配置, provider={provider_code or '-'}, "
@@ -1774,6 +1784,7 @@ class TicketLightAiService:
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
+                model_name=model_name if model_name else None,
             )
             cls._finish_execution_record(
                 db,

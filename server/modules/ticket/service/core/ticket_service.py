@@ -2071,6 +2071,7 @@ class TicketService:
                             versionId=version_id,
                             agentCode=message_object.agent_code,
                             aiProviderCode=message_object.ai_provider_code,
+                            aiModelName=message_object.ai_model_name,
                             forceRefresh=True,
                             extraInstruction=content,
                         )

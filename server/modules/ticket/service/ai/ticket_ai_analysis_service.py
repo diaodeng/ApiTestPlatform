@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
 from module_admin.dao.ai_provider_dao import AiProviderDao
+from module_admin.dao.ai_provider_model_dao import AiProviderModelDao
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
@@ -1955,7 +1956,17 @@ class TicketAiAnalysisService:
             context_payload["selectedAiProviderName"] = selected_provider.provider_name
             context_payload["selectedAiProviderPlatform"] = selected_provider.platform_code
             context_payload["selectedAiProviderProtocol"] = selected_provider.api_protocol
-            context_payload["selectedWorkerModel"] = selected_provider.default_model
+            requested_model_name = str(request.ai_model_name or "").strip()
+            if requested_model_name:
+                selected_model = AiProviderModelDao.get_provider_model_by_id(
+                    db, selected_provider.provider_id, requested_model_name
+                )
+                if not selected_model or not bool(selected_model.enabled):
+                    return CrudResponseModel(
+                        is_success=False,
+                        message=f"模型[{requested_model_name}]不属于当前Provider的启用模型目录",
+                    )
+            context_payload["selectedWorkerModel"] = requested_model_name or selected_provider.default_model
             context_payload["selectedExecutor"] = selected_executor
             # 判断是否需要 resume
             resume_from_workspace_path: str | None = None

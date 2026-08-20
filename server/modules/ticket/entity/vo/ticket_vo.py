@@ -330,6 +330,7 @@ class TicketMessageCreateModel(BaseModel):
     version_id: int | None = Field(default=None, description="发起 AI 追问时使用的版本中心ID")
     agent_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Agent 编码")
     ai_provider_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Provider 编码")
+    ai_model_name: str | None = Field(default=None, description="发起 AI 追问时使用的模型标识")
 
 
 class TicketMessageModel(BaseModel):
@@ -501,6 +502,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
+    ai_model_name: str | None = Field(default=None, description="执行AI分析的模型标识")
     executor: str | None = Field(default=None, description="执行AI分析的执行器，如 codex/claude_code")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     resume: bool = Field(default=False, description="是否复用上次 AI 分析会话继续分析")
@@ -528,6 +530,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         """
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        self.ai_model_name = str(self.ai_model_name or "").strip() or None
         self.executor = str(self.executor or "").strip() or None
         self.log_analysis_mode = str(self.log_analysis_mode or "").strip() or None
         self.log_window_missing_strategy = str(self.log_window_missing_strategy or "").strip() or None

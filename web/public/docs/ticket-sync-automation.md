@@ -127,13 +127,29 @@
 
 - 控制外部同步、远端拉取、手动创建场景是否执行分类
 - 选择 Provider 编码和提示词编码（Provider 和提示词正文在 AI Provider 管理和 AI 提示词管理维护）
+- 支持独立选择模型名称，留空则使用 Provider 默认模型
 - 配置状态变更后是否触发重新分类
 
 配置项 `ticket.ai.category.classify.provider.code` 和 `ticket.ai.category.classify.prompt.code` 作为当分类配置中 Provider/提示词为空时的兜底。
 
+## 八、AI 配置段通用说明
+
+同步自动化配置中以下 AI 配置段均支持独立选择 Provider 和模型：
+
+| 配置段 | 说明 |
+|--------|------|
+| `translateConfig` | 工单翻译，支持按场景（外部同步/远端拉取/多维表格拉取/手动创建）开关 |
+| `titleSummaryConfig` | 工单标题总结，缺少标题时自动生成 |
+| `knowledgeConfig` | 工单知识提炼，从工单上下文生成知识库案例 |
+| `aiClassification` | 工单 AI 分类统计 |
+| `aiSyncExtract` | 工单同步统一提取，从标题和描述中提取分类、POS/SCO 编号等 |
+| `summaryReport` | 汇总通知 AI 解读 |
+
+每个配置段中的 `modelName` 字段均为可选，留空时自动使用对应 Provider 的默认模型。模型的可用列表在 Provider 管理页面的"可用模型"中维护。
+
 ---
 
-## 八、常见问题
+## 九、常见问题
 
 ### Q1: remoteSync.enabled 关闭后有什么影响？
 
