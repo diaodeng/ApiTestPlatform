@@ -277,6 +277,12 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         proxy.$modal.msgWarning('请先选择环境对应的子环境')
         return
       }
+      // 校验门店：不能为空
+      const storeId = String(logPullForm.value.storeId || '').trim()
+      if (!storeId) {
+        proxy.$modal.msgWarning('门店（storeId）不能为空，请输入正确的 org_no')
+        return
+      }
       const payload = {
         environment: envKey && resolvedKey ? `${envKey}:${resolvedKey}` : (envKey || undefined),
         vendorId: logPullForm.value.vendorId,

@@ -1876,6 +1876,19 @@ class TicketLogPullService:
             )
             return CrudResponseModel(is_success=False, message="日志开始时间不能晚于结束时间")
 
+        # 校验门店：store_id 不能为空，否则传给外部接口必然失败
+        resolved_store_id = str(payload.store_id or "").strip()
+        if not resolved_store_id:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=None,
+                step="create-log-pull",
+                status="skipped",
+                reason="门店（storeId）不能为空，请输入正确的 org_no",
+            )
+            return CrudResponseModel(is_success=False, message="门店（storeId）不能为空，请输入正确的 org_no")
+
         try:
             record = TicketLogPullDao.add_record(
                 query_db,

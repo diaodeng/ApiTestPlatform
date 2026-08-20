@@ -994,6 +994,12 @@ function submitCreateForm() {
       proxy.$modal.msgWarning('请先选择环境对应的子环境')
       return
     }
+    // 校验门店：不能为空
+    const storeId = String(createForm.value.storeId || '').trim()
+    if (!storeId) {
+      proxy.$modal.msgWarning('门店（storeId）不能为空，请输入正确的 org_no')
+      return
+    }
 
     submitting.value = true
     const payload = {
