@@ -819,14 +819,9 @@ class TicketLogPullService:
             existing_store_map: dict[tuple[str, str, str], TicketLogPullStoreConfig] = {}
             if normalized_mode == "overwrite":
                 deleted_count = TicketLogPullDao.delete_all_store_configs(query_db)
-                cls._log_chain_step(
-                    query_db,
-                    ticket_id=None,
-                    record_id=None,
-                    step="store-import",
-                    status="overwrite",
-                    reason=f"覆盖导入前清空旧数据 {deleted_count} 条",
-                    detail={"deletedCount": deleted_count},
+                query_db.commit()
+                logger.info(
+                    f"门店配置导入-覆盖模式：清空旧数据 {deleted_count} 条"
                 )
             else:
                 # 先把已有配置放入内存，避免逐行查库和重复 flush。
@@ -843,71 +838,59 @@ class TicketLogPullService:
                 "importMode": normalized_mode,
             }
             now = datetime.now()
-            for row_index, row in rows:
-                try:
-                    store = cls._build_store_config_entity(row, now)
-                    match_key = cls._build_store_config_match_key(store)
-                    if not any(match_key):
-                        raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
+            # 每 BATCH_SIZE 条提交一次，避免单次事务过大导致超时
+            BATCH_SIZE = 100
+            for batch_start in range(0, len(rows), BATCH_SIZE):
+                batch = rows[batch_start:batch_start + BATCH_SIZE]
+                for row_index, row in batch:
+                    try:
+                        store = cls._build_store_config_entity(row, now)
+                        match_key = cls._build_store_config_match_key(store)
+                        if not any(match_key):
+                            raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
 
-                    existing = existing_store_map.get(match_key)
-                    if existing:
-                        for field in (
-                            "group_no",
-                            "vender_no",
-                            "region_no",
-                            "org_no",
-                            "org_name",
-                            "sap_org_no",
-                            "platform_no",
-                            "parent_org_no",
-                            "perm_node_id",
-                            "org_type",
-                            "company_no",
-                            "city_no",
-                            "biz_type_no",
-                            "status",
-                            "created",
-                            "modifid",
-                            "open_date",
-                            "language_desc",
-                        ):
-                            setattr(existing, field, getattr(store, field))
-                        saved = existing
-                        summary["updatedCount"] += 1
-                    else:
-                        query_db.add(store)
-                        existing_store_map[match_key] = store
-                        saved = store
-                        summary["insertedCount"] += 1
+                        existing = existing_store_map.get(match_key)
+                        if existing:
+                            for field in (
+                                "group_no",
+                                "vender_no",
+                                "region_no",
+                                "org_no",
+                                "org_name",
+                                "sap_org_no",
+                                "platform_no",
+                                "parent_org_no",
+                                "perm_node_id",
+                                "org_type",
+                                "company_no",
+                                "city_no",
+                                "biz_type_no",
+                                "status",
+                                "created",
+                                "modifid",
+                                "open_date",
+                                "language_desc",
+                            ):
+                                setattr(existing, field, getattr(store, field))
+                            summary["updatedCount"] += 1
+                        else:
+                            query_db.add(store)
+                            existing_store_map[match_key] = store
+                            summary["insertedCount"] += 1
 
-                    cls._log_chain_step(
-                        query_db,
-                        ticket_id=None,
-                        record_id=int(saved.id) if getattr(saved, "id", None) else None,
-                        step="store-import",
-                        status="success",
-                        reason="覆盖保存完成" if existing else "新增保存完成",
-                        detail={
-                            "row": row_index,
-                            "venderNo": saved.vender_no,
-                            "orgNo": saved.org_no,
-                            "sapOrgNo": saved.sap_org_no,
-                            "importMode": normalized_mode,
-                        },
-                    )
-                except Exception as exc:
-                    summary["failedRows"].append({"row": row_index, "reason": str(exc)})
-                    cls._log_chain_step(
-                        query_db,
-                        ticket_id=None,
-                        record_id=None,
-                        step="store-import",
-                        status="failed",
-                        reason=str(exc),
-                        detail={"row": row_index},
-                    )
-            query_db.commit()
+                    except Exception as exc:
+                        summary["failedRows"].append({"row": row_index, "reason": str(exc)})
+                        logger.warning(
+                            f"门店配置导入-第 {row_index} 行失败：{exc}"
+                        )
+                # 每批结束后提交一次，避免 session 膨胀和单次 commit 超时
+                query_db.commit()
+                logger.info(
+                    f"门店配置导入-已提交批次 batch_start={batch_start}，"
+                    f"当前累计 新增={summary['insertedCount']} "
+                    f"更新={summary['updatedCount']} "
+                    f"失败={len(summary['failedRows'])}"
+                )
             return CrudResponseModel(is_success=True, message="门店配置导入完成", result=summary)
         except Exception:
             query_db.rollback()

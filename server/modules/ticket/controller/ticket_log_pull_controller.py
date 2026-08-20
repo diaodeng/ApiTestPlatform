@@ -649,7 +649,7 @@ async def get_ticket_log_pull_store_configs(
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
 )
 @log_decorator(title="门店配置导入", business_type=1)
-def import_ticket_log_pull_store_configs(
+async def import_ticket_log_pull_store_configs(
     request: Request,
     file: UploadFile = File(...),
     import_mode: str = Form(default="incremental"),
@@ -657,7 +657,7 @@ def import_ticket_log_pull_store_configs(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     """
-    导入门店配置接口。
+    导入门店配置接口（异步）。
     :param request: 请求对象
     :param file: 门店配置 Excel 文件
     :param import_mode: 导入方式，incremental 为增量，overwrite 为覆盖
@@ -668,8 +668,12 @@ def import_ticket_log_pull_store_configs(
     try:
         if not file.filename.lower().endswith(".xlsx"):
             return ResponseUtil.failure(msg="仅支持 xlsx 文件")
-        result = TicketLogPullService.import_store_config_services(
-            query_db, file.file.read(), import_mode, current_user
+        result = await run_in_threadpool(
+            TicketLogPullService.import_store_config_services,
+            query_db,
+            file.file.read(),
+            import_mode,
+            current_user,
         )
         return (
             ResponseUtil.success(data=result.result, msg=result.message)
