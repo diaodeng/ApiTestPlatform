@@ -8,6 +8,13 @@ updated: 2026-08-21
 
 # 操作日志
 
+## [2026-08-21] FIX | 修复工单日志上下文横向滚动
+
+- 触发：用户反馈工单日志上下文查看窗口在关闭换行时无法左右滑动，影响较长日志内容查看。
+- 根因：日志行默认样式使用 `overflow: hidden`，在子元素层截断了单行内容，父级滚动容器无法形成横向溢出范围；该规则来自此前日志大文件显示优化。
+- 变更传播链：`LogViewerDialog.vue` 日志上下文行样式 -> `.log-content-block` 横向滚动 -> 工单详情日志拉取和日志拉取记录查看入口；服务端上下文行长度保护及完整行按需读取逻辑保持不变。
+- 更新文件：`web/src/components/ticket/LogViewerDialog.vue`、`web/public/docs/ticket_log_viewer.md`、`web/public/docs/updates/2026-08-21-ticket-log-viewer-horizontal-scroll-fix.md`、`web/public/docs/updates/history.md`、`wiki/flows/ticket-log-record-isolated-view.md`。
+
 ## [2026-08-21] INGEST-CODE | 修复工单日志拉取门店回填
 
 - 触发：工单详情日志拉取弹窗未回填门店，且工单门店值可能不完整或无法匹配门店配置时仍需要原样显示。

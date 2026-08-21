@@ -1481,7 +1481,7 @@ onBeforeUnmount(() => {
 .log-context-line {
   display: block;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
   line-height: 1.55;
   min-height: 0;
   margin: 0;

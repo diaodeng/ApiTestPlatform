@@ -2992,7 +2992,7 @@
                   <el-form-item label="搜索单行最大字节数">
                     <el-input-number
                       v-model="logPullStorage.maxSearchLineBytes"
-                      :min="1024"
+                      :min="256"
                       :max="4194304"
                       :step="65536"
                       style="width: 100%"
