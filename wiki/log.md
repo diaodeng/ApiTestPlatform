@@ -3,10 +3,26 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-20
+updated: 2026-08-21
 ---
 
 # 操作日志
+
+## [2026-08-21] INGEST-CODE | 修复工单日志拉取门店回填
+
+- 触发：工单详情日志拉取弹窗未回填门店，且工单门店值可能不完整或无法匹配门店配置时仍需要原样显示。
+- 根因：详情页切换到轻量 summary 后，`TicketSummaryModel` 未声明 `extraData`，导致 `log_pull_hints`、`external_sync.source` 和自动日志配置在响应模型校验时被过滤；同时历史同步字段可能只保存顶层 `external_field_mapping.ticketStore`。
+- 变更传播链：`Ticket.extra_data` -> `TicketSummaryModel.extra_data` -> `useLogViewer` 多来源回填 -> `LogPullConfigFields` 按 `org_no/storeCode/sap_org_no` 匹配；命中后提交 `org_no` 并显示门店名称、`org_no`、`sap_org_no`，未命中保留原始值。
+- 更新文件：`server/modules/ticket/entity/vo/ticket_read_vo.py`、`server/tests/test_ticket_summary_log_pull_hints.py`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/components/ticket/LogPullConfigFields.vue`、`web/public/docs/ticket_log_pull.md`、`web/public/docs/updates/2026-08-21-ticket-log-pull-store-prefill.md`、`web/public/docs/updates/history.md`、`wiki/entities/services/ticket-domain.md`。
+
+
+- 结论：生产有效工单的 `submit_time` 已全部回填，工单列表、详情响应和实时统计不再从 `extra_data.external_sync` JSON 或 `create_time` 回退提交时间。
+- 列表语义：`/ticket/list` 的提交时间范围筛选、默认排序、`submitTime`/`submit_time` 排序和页面展示统一以 `ticket.submit_time` 为准，默认顺序为 `submit_time DESC, ticket_id DESC`；详情与实时统计沿用相同主表时间口径。
+- 性能：移除 JSON `COALESCE` 时间表达式后，默认列表可使用既有 `idx_ticket_del_submit_time (del_flag, submit_time, ticket_id)` 反向扫描，避免全表扫描与 Top-N 排序。
+- 索引：ORM 同步声明 `idx_ticket_del_module_code_submit_time`、`idx_ticket_log_pull_ticket_created_status`、`idx_ticket_ai_task_ticket_created_status`；物理 `CREATE INDEX` 由运维按同名、同列顺序手工执行，本次未执行 DDL。
+- 边界：`externalCreateTime` 继续保留为外部同步来源和审计元数据；同步、导入和手工创建链路仍负责将业务提交时间写入 `submit_time`。
+- 验证：新增列表 SQL 编译、列表响应装饰和 ORM 索引元数据回归测试；生产索引创建后需执行只读 `EXPLAIN` 确认模块筛选和最新日志/AI 状态查询命中新索引。
+
 
 ## [2026-08-21] FEAT | 工单轻量概览与按需读取接口
 

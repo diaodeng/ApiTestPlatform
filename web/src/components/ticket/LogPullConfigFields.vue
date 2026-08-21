@@ -487,15 +487,16 @@ function syncStoreSelection() {
   if (!resolvedStoreOptions.value.length) {
     return
   }
-  // 只按 sap_org_no 精确匹配，匹配成功则替换为对应的 storeId (org_no)
-  const sapMatch = resolvedStoreOptions.value.find(
-    item => String(item.sapOrgNo || '').trim() === storeId
-  )
-  if (sapMatch) {
-    model.value.storeId = sapMatch.storeId
-    return
+  // 先按规范门店编号匹配，再按 SAP 编号兼容历史工单值；未命中时保留原始输入。
+  const matchedStore = resolvedStoreOptions.value.find(item => {
+    const candidates = [item.storeId, item.storeCode, item.sapOrgNo]
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+    return candidates.includes(storeId)
+  })
+  if (matchedStore) {
+    model.value.storeId = matchedStore.storeId
   }
-  // 不匹配则保留原值作为自由文本，供手动参考
 }
 
 function handleEnvironmentChange(value) {

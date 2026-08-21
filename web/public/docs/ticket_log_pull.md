@@ -24,7 +24,27 @@
 9. 配置存储方式（本地/FTP）和通知设置
 10. 提交后记录状态为「待执行」，后台自动提交申请并进入轮询
 
-## 记录状态说明
+## 工单门店信息回填
+
+从工单详情的「日志拉取」Tab 打开提交弹窗时，系统会按以下来源回填商家、门店、POS 和拉取日期：
+
+1. 最近一次日志拉取记录；
+2. 工单同步保存的 `extraData.externalSync.source` 或 `extraData.logPullHints`；
+3. 工单自动化配置 `extraData.ticketAutomation.logPullConfig`；
+4. 历史同步字段 `extraData.external_field_mapping.ticketStore`（作为门店原始值兜底）。
+
+门店配置由 `/ticket/log-pull/vendor-store-options` 按当前商家懒加载，选项显示格式为：
+
+```text
+门店名称 [org_no] (sap_org_no)
+```
+
+- 如果回填值命中 `org_no`、`storeCode` 或 `sap_org_no`，弹窗会显示对应的完整门店选项；提交给外部日志接口的 `storeId` 统一使用 `org_no`。
+- 如果工单中的门店信息不完整，或没有匹配到门店配置，系统会保留原始值显示，并提示用户确认；用户可以直接编辑为正确的 `org_no` 后提交。
+- 用户手动切换商家时，旧门店值会清空，避免把其他商家的门店提交到当前商家。
+
+工单中的这些值不是 `ticket` 表的独立列：原始同步字段和日志提示保存在 `ticket.extra_data`，已经提交的日志拉取记录则保存在 `ticket_log_pull_record.store_id`，其语义为最终提交的 `org_no`。
+
 
 | 状态 | 说明 |
 |------|------|

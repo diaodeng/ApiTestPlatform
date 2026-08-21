@@ -113,6 +113,20 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     const externalSync = extraData.externalSync || extraData.external_sync || {};
     const source = externalSync.source || {};
     const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {};
+    const externalFieldMapping =
+      extraData.externalFieldMapping || extraData.external_field_mapping || {};
+    const externalSyncFieldMapping =
+      externalSync.externalFieldMapping || externalSync.external_field_mapping || {};
+    const ticketStore = pickFirstFilledValue([
+      externalFieldMapping.ticketStore,
+      externalFieldMapping.ticket_store,
+      externalFieldMapping.storeInfo,
+      externalFieldMapping.store_info,
+      externalSyncFieldMapping.ticketStore,
+      externalSyncFieldMapping.ticket_store,
+      externalSyncFieldMapping.storeInfo,
+      externalSyncFieldMapping.store_info,
+    ]);
     const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {};
     const automationLogPullConfig =
       ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {};
@@ -142,6 +156,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         automationLogPullConfig.store_id,
         directLogPullConfig.storeId,
         directLogPullConfig.store_id,
+        ticketStore,
       ]),
       posNo: pickFirstFilledValue([
         source.posNo,

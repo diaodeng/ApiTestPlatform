@@ -94,13 +94,13 @@ erDiagram
 
 - `Ticket.project_id` 与 `Ticket.module_id` 直接引用 HRM 项目/模块主键，工单归属不再维护独立“商户/模块”字典。
 - `Ticket.ticket_no` 作为外部系统工单号，手动录入且全局唯一；问题发生、计划修复、实际修复和实际发版均通过对应 `*_version_id` 关联 `TicketVersion`。
-- 2026-07-08 第一阶段已新增 `Ticket.submit_time` 作为统计主时间，外部同步工单取外部 `createTime`，手工创建工单取本地 `create_time`；查询过渡期优先 `submit_time`，为空再回退 `extra_data.external_sync.externalCreateTime` 和 `create_time`。
+- 2026-07-08 第一阶段已新增 `Ticket.submit_time` 作为业务提交时间，外部同步工单取外部 `createTime`，手工创建工单取本地 `create_time`；2026-08-21 起工单列表、详情响应和实时统计的提交时间筛选、排序、展示只读取主表 `submit_time`，`extra_data.external_sync.externalCreateTime` 仅保留同步来源与审计语义。
 - 2026-07-08 第一阶段已新增 `Ticket.processed_at` 作为“首次形成有效排查结论时间”，用它统计已处理数、处理率、首次处理耗时和未处理存量；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。
 - 2026-07-08 待实施方案确认 `Ticket.resolved_at` 保留当前终态写入逻辑，语义为“工单处置完成时间”；真实 Bug 修复统计应结合 `is_problem/solution_type/resolution_code/fixed_version_id/released_at/verified_at`。
 - 版本号提取会过滤 `version`、`版本号` 等字段名误识别结果，输入文本解析成功后只写入相应的 `*_version_id`；计划修复、实际修复和实际发版同样只保存版本中心 ID。
 - 2026-07-11 版本治理批量维护已启用这些字段：批量发版会写入 `released_version_id/released_at`，批量验证会写入 `verified_at`，并分别生成 `TicketEventType.DEPLOYED/VERIFIED` 事件。版本统计暂不新增数据表，直接按 `ticket` 当前态实时聚合；需要冻结历史版本周报时再新增版本统计快照表。
 - 2026-07-29 起，`TicketVersion` 是项目级版本唯一来源，使用 `project_id + version_key` 唯一约束；`TicketVersionRelease` 单独记录环境和批次维度的发布事实。`Ticket` 仅保存 `affected_version_id/planned_fix_version_id/fixed_version_id/released_version_id`；`TicketAiRepoMapping` 与 `TicketAiAnalysisTask` 同样只保存 `version_id`。手工创建、外部同步、Excel 导入和日志提取发现未知版本时创建 `lifecycle_status=discovered` 候选版本，不阻断工单链路。
-- `Ticket` 新增索引 `idx_ticket_del_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version`，支撑提交时间、处理时间、处置/关闭时间和计划版本筛选。
+- `Ticket` 已声明 `idx_ticket_del_submit_time`、`idx_ticket_del_module_code_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version` 等索引，分别支撑提交时间、模块业务码加提交时间、处理时间、处置/关闭时间和计划版本筛选；`TicketLogPullRecord` 的 `idx_ticket_log_pull_ticket_created_status` 与 `TicketAiAnalysisTask` 的 `idx_ticket_ai_task_ticket_created_status` 支撑按工单读取最新日志拉取和 AI 分析状态。
 - 2026-07-10 第三阶段维度快照已补齐：`TicketStatisticsDaily.snapshot_scope='all'` 保存全局自然日快照，`snapshot_scope='leaf'` 保存 `project_id + module_id + issue_type_id` 叶子维度快照；唯一键为 `statistics_date/snapshot_scope/project_id/module_id/issue_type_id`。快照口径支持项目、模块、模块 Code 和工单类型筛选，细分问题 `problem_pattern_code` 暂不冻结。
 - 2026-07-08 第二阶段已新增 `TicketIssue`、`Ticket.issue_id/issue_relation_type/issue_confirmed` 和 `TicketRelation`：`Ticket.issue_id` 是主归因字段，`TicketRelation` 只保存补充关系，不替代主归因。
 - `TicketIssue.affected_ticket_count` 由 `TicketIssueService.refresh_affected_ticket_count` 按有效工单实时刷新，软删除工单不计入；解绑工单只清空主归因，不删除 Issue。

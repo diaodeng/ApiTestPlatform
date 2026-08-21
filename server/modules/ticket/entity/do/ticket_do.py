@@ -34,6 +34,13 @@ class Ticket(Base):
         Index("idx_ticket_del_solution_create", "del_flag", "solution_type", "create_time", "ticket_id"),
         Index("idx_ticket_del_resolution_create", "del_flag", "resolution_code", "create_time", "ticket_id"),
         Index("idx_ticket_del_submit_time", "del_flag", "submit_time", "ticket_id"),
+        Index(
+            "idx_ticket_del_module_code_submit_time",
+            "del_flag",
+            "module_code",
+            "submit_time",
+            "ticket_id",
+        ),
         Index("idx_ticket_del_processed_time", "del_flag", "processed_at", "ticket_id"),
         Index("idx_ticket_del_resolved_time", "del_flag", "resolved_at", "ticket_id"),
         Index("idx_ticket_del_closed_time", "del_flag", "closed_at", "ticket_id"),
@@ -494,6 +501,15 @@ class TicketAiAnalysisTask(Base):
     """
 
     __tablename__ = "ticket_ai_analysis_task"
+    __table_args__ = (
+        Index(
+            "idx_ticket_ai_task_ticket_created_status",
+            "ticket_id",
+            "create_time",
+            "task_id",
+            "status",
+        ),
+    )
 
     task_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="任务ID")
     ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")

@@ -712,9 +712,7 @@
           width="170"
           sortable="custom"
         >
-          <template #default="scope">{{
-            parseTime(scope.row.submitTime || scope.row.externalCreateTime || scope.row.createTime)
-          }}</template>
+          <template #default="scope">{{ parseTime(scope.row.submitTime) }}</template>
         </el-table-column>
         <el-table-column
           v-if="isTicketColumnVisible('firstResponseAt')"

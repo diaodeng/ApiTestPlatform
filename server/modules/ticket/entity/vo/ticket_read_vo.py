@@ -204,6 +204,7 @@ class TicketSummaryModel(BaseModel):
     root_cause: str | None = None
     solution: str | None = None
     source: str | None = None
+    extra_data: dict[str, Any] | None = Field(default=None, description="工单扩展上下文，包含日志拉取回填提示")
     reporter_id: str | None = None
     reporter_name: str | None = None
     current_assignee_id: str | None = None

@@ -117,7 +117,7 @@ graph TD
 - `GET /ticket/statistics/trend` 按 `day/week/month` 返回新增、关闭、净增、周期末未关闭存量、工单类型、Top 模块和 Top 细分问题；自定义指标只在请求显式传入 `metricCodes` 时计算或读取快照。
 - 用户级偏好采用通用表 `sys_user_config`，以 `user_id + config_type + config_key` 唯一定位，`config_value` 保存少量 JSON 配置；后续用户级 AI prompt/provider 等零散配置优先复用该模型。
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
-- 工单列表页支持服务端表头排序，默认 `submitTime desc`；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。
+- 工单列表页支持服务端表头排序，默认 `submitTime desc`，实际按主表 `submit_time DESC, ticket_id DESC` 执行；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。
 - 2026-07-02 起，工单列表页主要下拉筛选项支持多选：状态、处理状态、项目、模块、模块Code、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、内部优先级和三类负责人；前端按逗号分隔提交多值参数（通过 `joinQueryList` 将数组拼成逗号分隔字符串，由 `tansParams` 序列化为 `key=val1%2Cval2` 格式），后端兼容旧单值参数并使用 `IN` 过滤。`Ticket` 模型同步声明常用筛选组合索引，数据库侧已手动创建对应索引。
 - 2026-07-16 起，工单列表根因分类和解决方式筛选在 `TicketService` 层会将枚举编码扩展为“编码 + 中文标签”，兼容历史 AI 分类把中文标签写入 `ticket.root_cause_type/solution_type` 的数据；后续 `TicketLightAiService` 自动分类归一化统一回填枚举 `value`，避免继续写 label。
 - **注意**：多选查询字段在 `TicketQueryModel` 和 `TicketStatisticsQueryModel` 中的类型必须为 `str | None`（不能是 `str | list[X] | None`）。因为 FastAPI 的 `Query()` 检测到类型含 `list[...]` 时会自动将标量查询值包装成列表（如 `"3,2"` → `["3,2"]`），导致 DAO 的 `_normalize_*_list` 收到已包装的列表后不再拆分，文本字段用 `.in_(["open,closed"])` 查不到数据，整数人员字段则直接触发 Pydantic 验证错误。
@@ -201,6 +201,7 @@ graph TD
 - `ticket.logPull.external` 的大体量门店基础数据已拆分到 `ticket_log_pull_store_config` 独立表，支持模板导入、增量覆盖、整表覆盖和 `org_no/sap_org_no` 搜索；同时新增 `ticket_log_pull_project_vendor_map` 保存项目 ID 到 `vender_no` 的映射，日志拉取弹窗会优先按项目自动回填商家编号。
 - 门店配置增量导入的判重逻辑已经改为 `vender_no + org_no + sap_org_no` 三字段联合唯一键精确匹配，只有三者同时一致才会覆盖，不再按任意单字段命中就覆盖；导入时也会先批量加载已有配置并在内存中 upsert，减少大文件导入的查库压力。
 - 日志拉取页面和工单日志拉取记录页的商家/门店联动选项已改为直接聚合 `ticket_log_pull_store_config` 表，不再依赖系统参数里的商家门店配置；接口仍返回 `vendorId/vendorCode/vendorName` 与 `storeId/storeCode/sapOrgNo/storeName` 的联动结构，其中 `storeId` 实际回填为 `org_no` 字符串，前端下拉可按 `org_no`、`sap_org_no` 和门店名称搜索。
+- 工单详情的轻量概览响应显式保留 `extraData`，供日志拉取弹窗读取 `external_sync.source`、`log_pull_hints`、`ticket_automation.log_pull_config` 和历史 `external_field_mapping.ticketStore`；门店值命中配置时归一化为 `org_no` 提交，选项展示名称、`org_no` 与 `sap_org_no`，未命中则保留原始值供人工修正。
 - 日志拉取查看入口改为弹窗模式，默认返回入库内容；切换为原始文档后可显示当前截取范围并按时间范围实时重截。
 - 日志拉取提交入口改为弹窗，标签页默认只保留记录列表，减少页面占用；后台会先查外部列表，命中可下载结果时只比较 `modifyTime/path`，且双方参数个数必须一致，满足时会跳过重新提交申请。
 - 日志拉取链路补充步骤级日志，提交、轮询、下载、解析、导入以及跳过原因都会写入系统日志和工单事件，方便定位工单号执行到哪一步。

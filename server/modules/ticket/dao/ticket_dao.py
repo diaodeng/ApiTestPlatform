@@ -1,8 +1,7 @@
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import DateTime as SqlDateTime
-from sqlalchemy import and_, case, cast, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from module_admin.entity.do.user_do import SysUser
@@ -286,35 +285,6 @@ def _latest_ai_status_expr(ticket_id_column):
         .limit(1)
         .scalar_subquery()
     )
-
-
-def _ticket_submit_time_expr():
-    """
-    构造工单提交时间表达式（主表 submit_time 优先，缺失时兼容外部 createTime）。
-    :return: 可用于 SQL 查询过滤的提交时间表达式
-    """
-    external_create_time_expr = Ticket.extra_data["external_sync"]["externalCreateTime"].as_string()
-    source_external_create_time_expr = Ticket.extra_data["external_sync"]["source"]["externalCreateTime"].as_string()
-    resolved_external_create_time_expr = func.coalesce(
-        func.nullif(external_create_time_expr, ""),
-        func.nullif(source_external_create_time_expr, ""),
-    )
-    return func.coalesce(Ticket.submit_time, cast(resolved_external_create_time_expr, SqlDateTime), Ticket.create_time)
-
-
-def _resolve_ticket_submit_time(ticket: Ticket) -> datetime | None:
-    """
-    解析单条工单的提交时间（主表 submit_time 优先，缺失时兼容外部 createTime）。
-    :param ticket: 工单实体
-    :return: 工单提交时间
-    """
-    if getattr(ticket, "submit_time", None):
-        return ticket.submit_time
-    extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-    external_sync = extra_data.get("external_sync") if isinstance(extra_data.get("external_sync"), dict) else {}
-    source = external_sync.get("source") if isinstance(external_sync.get("source"), dict) else {}
-    external_create_time = external_sync.get("externalCreateTime") or source.get("externalCreateTime")
-    return _parse_sync_time(external_create_time) or ticket.create_time
 
 
 def _build_ticket_process_status_filter(latest_log_status, latest_ai_status, process_status: str):
@@ -716,7 +686,8 @@ class TicketDao:
         ticket_ids = _normalize_int_list(query.ticket_ids)
         latest_log_status = _latest_log_pull_status_expr(Ticket.ticket_id)
         latest_ai_status = _latest_ai_status_expr(Ticket.ticket_id)
-        submit_time_expr = _ticket_submit_time_expr()
+        # 列表提交时间已完成主表回填，筛选和排序只使用可索引的 submit_time。
+        submit_time_expr = Ticket.submit_time
         ticket_query = (
             db.query(Ticket)
             .filter(
@@ -1489,8 +1460,8 @@ class TicketDao:
         """
         实时统计指定提交时间范围内的工单数量、分类和人员处理量。
         :param db: 数据库会话
-        :param begin_time: 提交开始时间，优先匹配外部同步提交时间
-        :param end_time: 提交结束时间，优先匹配外部同步提交时间
+        :param begin_time: 提交开始时间。
+        :param end_time: 提交结束时间。
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
@@ -1500,7 +1471,7 @@ class TicketDao:
         :return: 统计结果
         """
         filters = [Ticket.del_flag == "0"]
-        submit_time_expr = _ticket_submit_time_expr()
+        submit_time_expr = Ticket.submit_time
         if begin_time:
             filters.append(submit_time_expr >= begin_time)
         if end_time:
@@ -1691,8 +1662,8 @@ class TicketDao:
         """
         实时计算工单趋势，面向治理看板展示按提交时间归属的新增、关闭、存量和关键分类变化。
         :param db: 数据库会话
-        :param begin_time: 提交开始时间，优先匹配外部同步提交时间
-        :param end_time: 提交结束时间，优先匹配外部同步提交时间
+        :param begin_time: 提交开始时间。
+        :param end_time: 提交结束时间。
         :param project_ids: 项目ID多选过滤
         :param module_ids: 模块ID多选过滤
         :param module_codes: 模块业务码多选过滤
@@ -1731,7 +1702,7 @@ class TicketDao:
             filters.append(Ticket.issue_type_id.in_(issue_type_ids))
         if problem_pattern_codes:
             filters.append(Ticket.problem_pattern_code.in_(problem_pattern_codes))
-        submit_time_expr = _ticket_submit_time_expr()
+        submit_time_expr = Ticket.submit_time
         if end_time:
             filters.append(submit_time_expr <= end_time)
 
@@ -1741,7 +1712,7 @@ class TicketDao:
             .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())
             .all()
         )
-        submit_time_map = {ticket.ticket_id: _resolve_ticket_submit_time(ticket) for ticket in rows}
+        submit_time_map = {ticket.ticket_id: ticket.submit_time for ticket in rows}
         bucket_map: dict[date, dict[str, Any]] = {}
         event_times = [
             item

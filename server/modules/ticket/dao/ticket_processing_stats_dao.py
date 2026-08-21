@@ -5,11 +5,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from modules.ticket.dao.ticket_dao import (
-    _resolve_module_ids_by_codes,
-    _resolve_ticket_submit_time,
-    _ticket_submit_time_expr,
-)
+from modules.ticket.dao.ticket_dao import _resolve_module_ids_by_codes
 from modules.ticket.entity.do.ticket_do import Ticket
 
 
@@ -97,7 +93,7 @@ class TicketProcessingStatsDao:
         :param problem_pattern_codes: 细分问题编码列表。
         :return: 轻量字段行迭代器。
         """
-        submit_time_expr = _ticket_submit_time_expr()
+        submit_time_expr = Ticket.submit_time
         filters = cls.build_scope_filters(
             db,
             project_ids=project_ids,
@@ -178,7 +174,7 @@ class TicketProcessingStatsDao:
         :param problem_pattern_codes: 细分问题编码列表。
         :return: 轻量字段行列表。
         """
-        submit_time_expr = _ticket_submit_time_expr()
+        submit_time_expr = Ticket.submit_time
         filters = cls.build_scope_filters(
             db,
             project_ids=project_ids,
@@ -225,4 +221,4 @@ class TicketProcessingStatsDao:
         :param ticket: 工单实体。
         :return: 提交时间。
         """
-        return _resolve_ticket_submit_time(ticket)
+        return ticket.submit_time
