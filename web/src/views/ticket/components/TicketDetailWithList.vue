@@ -8,7 +8,8 @@
   import {
     addTicketAiAnalysis,
     createAndBindTicketIssue,
-    getTicket,
+    getTicketSimilarTickets,
+    getTicketSummary,
     getTicketLogPullProjectVendorMap,
     listTicketAiAnalysisTasks,
     retryTicketAiAnalysis,
@@ -100,6 +101,13 @@
   const issueActionLoading = ref(false);
   const issueCreateBindForm = ref({});
   const detail = ref({});
+  const detailLoading = ref(false);
+  const similarTickets = ref([]);
+  const similarLoading = ref(false);
+  const similarError = ref('');
+  const similarStatus = ref('idle');
+  let detailRequestGeneration = 0;
+  let aiPollingGeneration = 0;
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
@@ -347,6 +355,57 @@
     detail.value = payload || {};
   }
 
+  function isCurrentDetailRequest(ticketId, generation) {
+    return (
+      props.open &&
+      currentTicketId.value === ticketId &&
+      detailRequestGeneration === generation
+    );
+  }
+
+  function stopAiTaskPolling() {
+    aiPollingGeneration += 1;
+  }
+
+  function resetDetailLoadingState() {
+    detail.value = {};
+    detailLoading.value = false;
+    similarTickets.value = [];
+    similarLoading.value = false;
+    similarError.value = '';
+    similarStatus.value = 'idle';
+  }
+
+  function loadSimilarTickets(ticketId, generation) {
+    similarLoading.value = true;
+    similarError.value = '';
+    similarStatus.value = 'loading';
+    return getTicketSimilarTickets(ticketId, { limit: 5 })
+      .then((response) => {
+        if (!isCurrentDetailRequest(ticketId, generation)) return;
+        const payload = response?.data || {};
+        similarTickets.value = payload.items || [];
+        similarStatus.value = payload.status || 'ready';
+        similarError.value = payload.message || '';
+      })
+      .catch((error) => {
+        if (!isCurrentDetailRequest(ticketId, generation)) return;
+        similarTickets.value = [];
+        similarStatus.value = 'failed';
+        similarError.value = error?.message || '相似工单加载失败';
+      })
+      .finally(() => {
+        if (isCurrentDetailRequest(ticketId, generation)) {
+          similarLoading.value = false;
+        }
+      });
+  }
+
+  function reloadSimilarTickets() {
+    if (!currentTicketId.value || !props.open) return Promise.resolve();
+    return loadSimilarTickets(currentTicketId.value, detailRequestGeneration);
+  }
+
   /**
    * 解析外部工单详情链接，优先使用同步来源和原始字段。
    * @param {object} ticketRow 工单行或详情数据
@@ -376,13 +435,23 @@
   }
 
   function refreshDetail() {
-    if (!currentTicketId.value) {
+    if (!currentTicketId.value || !props.open) {
       return Promise.resolve();
     }
-    return getTicket(currentTicketId.value).then((response) => {
-      syncDetailBundle(response.data || {});
-      loadDetailVersionOptions(detail.value.projectId);
-    });
+    const ticketId = currentTicketId.value;
+    const generation = detailRequestGeneration;
+    detailLoading.value = true;
+    return getTicketSummary(ticketId)
+      .then((response) => {
+        if (!isCurrentDetailRequest(ticketId, generation)) return;
+        syncDetailBundle(response.data || {});
+        return loadDetailVersionOptions(detail.value.projectId);
+      })
+      .finally(() => {
+        if (isCurrentDetailRequest(ticketId, generation)) {
+          detailLoading.value = false;
+        }
+      });
   }
 
   /**
@@ -656,11 +725,34 @@
   async function waitForAiTaskTerminal(taskId, options = {}) {
     const maxAttempts = Number(options.maxAttempts || 6);
     const intervalMs = Number(options.intervalMs || 1500);
+    const pollingGeneration = aiPollingGeneration;
+    const pollingTicketId = currentTicketId.value;
     for (let index = 0; index < maxAttempts; index += 1) {
+      if (
+        pollingGeneration !== aiPollingGeneration ||
+        !props.open ||
+        currentTicketId.value !== pollingTicketId
+      ) {
+        return null;
+      }
       if (index > 0) {
         await sleep(intervalMs);
       }
+      if (
+        pollingGeneration !== aiPollingGeneration ||
+        !props.open ||
+        currentTicketId.value !== pollingTicketId
+      ) {
+        return null;
+      }
       const tasks = await loadAiAnalysisTasks(true);
+      if (
+        pollingGeneration !== aiPollingGeneration ||
+        !props.open ||
+        currentTicketId.value !== pollingTicketId
+      ) {
+        return null;
+      }
       const currentTask = (tasks || []).find((item) => String(item.taskId) === String(taskId));
       const status = String(currentTask?.status || '').toLowerCase();
       if (currentTask && aiTerminalStatuses.includes(status)) {
@@ -920,7 +1012,11 @@
       proxy.$modal.msgWarning('工单ID无效，无法打开详情');
       return Promise.resolve();
     }
+    stopAiTaskPolling();
+    detailRequestGeneration += 1;
+    const generation = detailRequestGeneration;
     currentTicketId.value = ticketId;
+    resetDetailLoadingState();
     detailOpen.value = true;
     detailMainTab.value = 'overview';
     descriptionExpanded.value = true;
@@ -933,17 +1029,9 @@
     selectedAiTask.value = null;
     aiRepoMappingList.value = [];
     aiRepoMappingTotal.value = 0;
-    return getTicket(ticketId).then((response) => {
-      syncDetailBundle(response.data || {});
-      return loadDetailVersionOptions(detail.value.projectId)
-        .catch(() => {
-          detailVersionOptions.value = [];
-        })
-        .then(() => {
-          aiAnalysisTaskForm.value.mappingId =
-            detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId;
-        });
-    });
+    const detailRequest = refreshDetail();
+    const similarRequest = loadSimilarTickets(ticketId, generation);
+    return Promise.all([detailRequest, similarRequest]);
   }
 
   function handleTranslateDescription() {
@@ -967,15 +1055,28 @@
   }
 
   function resetDetailDialog() {
+    detailRequestGeneration += 1;
+    currentTicketId.value = undefined;
     detailMainTab.value = 'overview';
     descriptionExpanded.value = true;
     translationExpanded.value = false;
     detailMoreInfoExpanded.value = false;
     detail.value = {};
+    detailLoading.value = false;
+    similarTickets.value = [];
+    similarLoading.value = false;
+    similarError.value = '';
+    similarStatus.value = 'idle';
     detailVersionOptions.value = [];
     aiTaskHistoryOpen.value = false;
     aiTaskDetailOpen.value = false;
+    aiTaskList.value = [];
+    aiTaskTotal.value = 0;
+    aiTaskQuery.value = { pageNum: 1, pageSize: 10, status: undefined };
+    aiAnalysisLogPullOptions.value = [];
     selectedAiTask.value = null;
+    issueCreateBindOpen.value = false;
+    issueCreateBindForm.value = {};
     aiAnalysisOpen.value = false;
     aiRepoMappingOpen.value = false;
     projectVendorMapOpen.value = false;
@@ -1016,6 +1117,8 @@
    * @returns {void}
    */
   function handleDetailClosed() {
+    stopAiTaskPolling();
+    detailRequestGeneration += 1;
     resetDetailDialog();
     emit('closed');
   }
@@ -1024,13 +1127,13 @@
     () => [props.open, props.ticketId],
     ([openValue, ticketId]) => {
       const resolvedTicketId = Number(ticketId);
-      if (!openValue || !Number.isFinite(resolvedTicketId) || resolvedTicketId <= 0) {
-        return;
-      }
-      if (resolvedTicketId === currentTicketId.value && detail.value.ticketId) {
-        return;
-      }
-      openDetail({ ticketId: resolvedTicketId });
+    if (!openValue || !Number.isFinite(resolvedTicketId) || resolvedTicketId <= 0) {
+      return;
+    }
+    if (resolvedTicketId === currentTicketId.value && detail.value.ticketId) {
+      return;
+    }
+    openDetail({ ticketId: resolvedTicketId });
     },
     { immediate: true }
   );
@@ -1245,6 +1348,10 @@
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'overview'"
               :detail="detail"
+              :similar-tickets="similarTickets"
+              :similar-loading="similarLoading"
+              :similar-error="similarError"
+              :similar-status="similarStatus"
               @run-ai="openAiAnalysisDialog"
               @refresh-ai="refreshAiAnalysisData"
               @open-ai-history="openAiTaskHistory"
@@ -1258,6 +1365,7 @@
             <TicketDetailLogPullTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'logPull'"
+              :detail-open="props.open"
               :detail="detail"
               @changed="refreshDetailAndNotify"
             />
@@ -1268,6 +1376,7 @@
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'collab'"
               :detail="detail"
+              :similar-tickets="similarTickets"
               @changed="refreshDetailAndNotify"
               @run-ai="openAiAnalysisDialog"
               @open-ai-history="openAiTaskHistory"
@@ -1286,12 +1395,16 @@
             <TicketDetailHistoryTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'history'"
+              :detail-open="props.open"
               @changed="refreshDetailAndNotify"
             />
           </el-tab-pane>
         </el-tabs>
       </div>
     </template>
+    <div v-else v-loading="detailLoading" class="ticket-detail-loading">
+      <el-empty description="正在加载工单详情" />
+    </div>
   </el-dialog>
 
   <el-dialog

@@ -1,7 +1,7 @@
 <script setup name="TicketDetailOverviewTab">
   import { computed, getCurrentInstance, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
-  import { bindTicketIssueFromSimilar, getTicket } from '@/api/ticket/ticket';
+  import { bindTicketIssueFromSimilar, getTicketSummary } from '@/api/ticket/ticket';
 
   const props = defineProps({
     ticketId: {
@@ -15,6 +15,22 @@
     detail: {
       type: Object,
       default: null,
+    },
+    similarTickets: {
+      type: Array,
+      default: () => [],
+    },
+    similarLoading: {
+      type: Boolean,
+      default: false,
+    },
+    similarError: {
+      type: String,
+      default: '',
+    },
+    similarStatus: {
+      type: String,
+      default: 'idle',
     },
   });
 
@@ -43,7 +59,16 @@
   const latestSnapshot = computed(
     () => detail.value.latestSnapshot || detail.value.snapshots?.[0] || null
   );
-  const latestSimilarTickets = computed(() => (detail.value.similarTickets || []).slice(0, 3));
+  const latestConclusion = computed(() => ({
+    summary: latestSnapshot.value?.summary || latestAiAnalysisTask.value?.analysisSummary || '',
+    rootCause: latestSnapshot.value?.rootCause || latestAiAnalysisTask.value?.rootCause || '',
+    solution:
+      latestSnapshot.value?.solution || latestAiAnalysisTask.value?.fixSuggestion || '',
+    prevention: latestSnapshot.value?.prevention || '',
+    risk: latestSnapshot.value?.risk || '',
+    owner: latestSnapshot.value?.owner || '',
+  }));
+  const latestSimilarTickets = computed(() => (props.similarTickets || []).slice(0, 3));
 
   /**
    * 加载概览 tab 需要的工单快照、AI 任务和相似工单数据。
@@ -56,7 +81,7 @@
     }
     if (!resolvedTicketId.value) return Promise.resolve();
     loading.value = true;
-    return getTicket(resolvedTicketId.value)
+    return getTicketSummary(resolvedTicketId.value)
       .then((response) => {
         detail.value = response.data || {};
       })
@@ -286,22 +311,22 @@
             {{ latestSnapshot?.createdByName || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="摘要" :span="2">{{
-            latestSnapshot?.summary || '-'
+            latestConclusion.summary || '-'
           }}</el-descriptions-item>
           <el-descriptions-item label="根因" :span="2">{{
-            latestSnapshot?.rootCause || '-'
+            latestConclusion.rootCause || '-'
           }}</el-descriptions-item>
           <el-descriptions-item label="解决方案" :span="2">{{
-            latestSnapshot?.solution || '-'
+            latestConclusion.solution || '-'
           }}</el-descriptions-item>
           <el-descriptions-item label="预防建议" :span="2">{{
-            latestSnapshot?.prevention || '-'
+            latestConclusion.prevention || '-'
           }}</el-descriptions-item>
           <el-descriptions-item label="风险说明" :span="2">{{
-            latestSnapshot?.risk || '-'
+            latestConclusion.risk || '-'
           }}</el-descriptions-item>
           <el-descriptions-item label="负责人" :span="2">{{
-            latestSnapshot?.owner || '-'
+            latestConclusion.owner || '-'
           }}</el-descriptions-item>
         </el-descriptions>
         <el-alert
@@ -314,10 +339,25 @@
       </el-card>
     </el-col>
     <el-col :span="8">
-      <el-card shadow="never">
-        <template #header>相似工单</template>
-        <el-empty v-if="!latestSimilarTickets.length" description="暂无相似工单" />
-        <div v-for="item in latestSimilarTickets" :key="item.ticketId" class="similar-item">
+        <el-card shadow="never" v-loading="similarLoading">
+          <template #header>相似工单</template>
+          <el-alert
+            v-if="similarError"
+            type="error"
+            :closable="false"
+            :title="similarError"
+            class="mb12"
+          />
+          <el-empty
+            v-else-if="similarStatus === 'ready' && !latestSimilarTickets.length"
+            description="暂无相似工单"
+          />
+          <el-empty
+            v-else-if="similarStatus === 'pending'"
+            description="相似工单正在生成，请稍后刷新"
+          />
+          <div v-for="item in latestSimilarTickets" :key="item.ticketId" class="similar-item">
+
           <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
           <div class="similar-meta">
             <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>

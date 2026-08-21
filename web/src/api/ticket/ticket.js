@@ -85,7 +85,24 @@ export function rebuildTicketSimilarity(data) {
   });
 }
 
-// 查询工单详情
+// 查询工单轻量详情
+export function getTicketSummary(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/summary`,
+    method: 'get',
+  });
+}
+
+// 查询工单相似工单
+export function getTicketSimilarTickets(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/similar-tickets`,
+    method: 'get',
+    params: sanitizeQueryParams(params),
+  });
+}
+
+// 查询工单详情（兼容旧完整详情契约）
 export function getTicket(ticketId) {
   return request({
     url: `/ticket/${ticketId}`,
@@ -93,6 +110,23 @@ export function getTicket(ticketId) {
   });
 }
 
+// 查询工单分页协同消息
+export function getTicketMessagesPage(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/messages/page`,
+    method: 'get',
+    params: sanitizeQueryParams(params),
+  });
+}
+
+// 查询工单分页快照
+export function getTicketSnapshotsPage(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/snapshots/page`,
+    method: 'get',
+    params: sanitizeQueryParams(params),
+  });
+}
 // 查询问题实例列表
 export function listTicketIssues(query) {
   return request({

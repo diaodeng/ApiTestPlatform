@@ -9,6 +9,11 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from modules.ticket.entity.vo.ticket_read_vo import (
+    TicketMessagesPageQueryModel,
+    TicketSimilarQueryModel,
+    TicketSnapshotsPageQueryModel,
+)
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAssignModel,
     TicketCommentCreateModel,
@@ -24,6 +29,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_import_service import TicketImportService
+from modules.ticket.service.core.ticket_read_service import TicketReadService
 from modules.ticket.service.core.ticket_service import TicketService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -277,6 +283,73 @@ async def delete_ticket(
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/summary", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
+)
+async def get_ticket_summary(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
+    """获取轻量工单概览，不读取消息、快照、相似工单和提示词。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_summary, query_db, ticket_id)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/similar-tickets", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
+)
+async def get_ticket_similar_tickets(
+    request: Request,
+    ticket_id: int,
+    query: TicketSimilarQueryModel = Depends(TicketSimilarQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """获取相似工单摘要，limit 默认 5、最大 100。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_similar_tickets, query_db, ticket_id, query.limit)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/messages/page", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))]
+)
+async def get_ticket_messages_page(
+    request: Request,
+    ticket_id: int,
+    query: TicketMessagesPageQueryModel = Depends(TicketMessagesPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """按需获取最近工单消息，limit 默认 20、最大 100。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_messages_page, query_db, ticket_id, query.limit)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/snapshots/page", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))]
+)
+async def get_ticket_snapshots_page(
+    request: Request,
+    ticket_id: int,
+    query: TicketSnapshotsPageQueryModel = Depends(TicketSnapshotsPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """按需获取最近工单 ACR 快照，limit 默认 10、最大 100。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_snapshots_page, query_db, ticket_id, query.limit)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

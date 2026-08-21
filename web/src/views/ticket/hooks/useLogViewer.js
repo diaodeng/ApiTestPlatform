@@ -72,7 +72,11 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     contextLines: 20,
     limit: 500,
   });
-  const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress();
+  const {
+    prepareWithDownloadProgress,
+    getDownloadProgress,
+    stopAllPolling: stopLogPreparePolling,
+  } = useLogPrepareProgress();
 
   function resetLogPullForm() {
     logPullForm.value = createDefaultLogPullForm();
@@ -208,6 +212,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       window.clearTimeout(logPullRefreshTimer);
       logPullRefreshTimer = null;
     }
+    stopLogPreparePolling();
     logPullAutoRefreshing.value = false;
   }
 

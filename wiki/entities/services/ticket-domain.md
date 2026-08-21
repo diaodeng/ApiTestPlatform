@@ -6,12 +6,13 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-08-04
+freshness: 2026-08-21
 created: 2026-05-20
 updated: 2026-08-04
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
-  - server/modules/ticket/service/core/ticket_service.py
+  - server/modules/ticket/service/core/ticket_read_service.py
+  - server/modules/ticket/entity/vo/ticket_read_vo.py
   - server/modules/ticket/service/core/ticket_import_service.py
   - server/modules/ticket/service/core/ticket_processing_metric_service.py
   - server/modules/ticket/service/stats/ticket_processing_stats_service.py
@@ -314,7 +315,8 @@ graph TD
 - 工作流流转规则会把允许角色、默认处理人和通知预留统一压到 `workflow_transition.allowed_roles` JSON 中，避免引入额外表结构迁移。
 - 工单列表页和流转弹窗的状态选项优先读取 `/ticket/workflow/config` 的动态工作流状态节点；流转弹窗只展示当前状态已配置流转规则的目标状态。新增状态节点后必须配置对应流转规则，才会出现在目标状态下拉中。
 - 2026-07-04 对照备份分支 `master_params_ticket_new` 完成工单前端拆分逻辑审计：工单 API 拆分保持 80 个函数 method/url 一致；工单管理页和同步自动化页旧函数无遗漏；已恢复日志拉取表单字段、提交签名、详情预填、下载来源、日志查看器请求参数、列表查询逗号序列化、列配置结构、版本选项数据源、AI Provider 回填 Agent，以及同步自动化 JSON 校验失败即阻止保存的语义。
-- 2026-07-17 起，工单详情全屏弹窗由 `web/src/views/ticket/components/TicketDetailWithList.vue` 自闭环承接；`web/src/views/ticket/index.vue` 只传 `ticketId/open`，详情组件内部自行拉取详情、评论、时间线、日志拉取、AI 任务和选项数据，并管理 AI 分析、任务历史、仓库映射、商家映射、问题绑定和日志查看器弹窗。
+- 2026-08-21 起，工单列表详情弹窗使用 `TicketReadService` 的轻量读取链路：`GET /ticket/{ticket_id}/summary` 只返回基础信息、版本、Issue 和最新摘要，不读取消息、快照、相似工单或提示词层；相似工单通过 `GET /ticket/{ticket_id}/similar-tickets` 独立加载，协同/AI 标签按需读取 `/messages/page` 和 `/snapshots/page`，分别默认限制 20 和 10 条、最大 100 条。相似结果使用摘要白名单，新增读取接口的 BIGINT 主键按字符串返回，旧完整详情和旧消息接口保持兼容。
+- 同一详情弹窗切换工单前会清空概览、相似工单、AI 任务和问题操作状态，并通过工单 ID、请求 generation 和弹窗打开状态校验异步响应；关闭详情时停止日志列表自动刷新、日志准备进度查询和 AI 短轮询，清理日志查看器和历史临时表单状态。前端用户说明见 `web/public/docs/ticket_detail.md`，接口契约见 `server/docs/ticket_read_api.md`。
 
 ## 参见
 

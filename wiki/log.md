@@ -8,6 +8,17 @@ updated: 2026-08-20
 
 # 操作日志
 
+## [2026-08-21] FEAT | 工单轻量概览与按需读取接口
+
+- 功能：新增工单轻量概览、独立相似工单和消息/快照按需读取接口；旧工单详情与消息接口保持兼容。
+- 后端新增：`GET /ticket/{ticket_id}/summary`、`GET /ticket/{ticket_id}/similar-tickets`、`GET /ticket/{ticket_id}/messages/page`、`GET /ticket/{ticket_id}/snapshots/page`。
+- 契约：相似工单 `data` 返回 `status/message/items`，消息和快照返回 `items/limit/hasMore`；数量参数默认分别为 5、20、10，最大 100。
+- 安全：相似工单使用摘要白名单投影，工单、Issue、消息和快照的 BIGINT 主键按字符串返回。
+- 关键日志：概览记录未加载消息、快照、相似度和提示词；相似度与按需读取记录 ticket_id、limit、返回数量和 has_more。
+- 用户说明：`server/docs/ticket_read_api.md`。
+- 验证：新增文件 compileall 与 Ruff 通过；本环境虚拟环境未安装 pytest，相关测试未能执行。
+
+
 ## [2026-08-20] FIX | Provider模型下拉预览字段和工单分析初始化加载
 
 - 现象：Provider弹窗点击“更新模型”后模型选项数量有返回但文案为空；工单AI分析/协同消息弹窗自动回填Provider后模型下拉为空，切换Provider后才出现。

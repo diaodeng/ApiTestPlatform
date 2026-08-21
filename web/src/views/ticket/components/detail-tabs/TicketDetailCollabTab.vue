@@ -7,7 +7,9 @@
     addTicketSnapshot,
     bindTicketIssueFromSimilar,
     extractTicketKnowledge,
-    getTicket,
+    getTicketMessagesPage,
+    getTicketSnapshotsPage,
+    getTicketSummary,
   } from '@/api/ticket/ticket';
   import {
     buildTicketAiPreferenceDefaults,
@@ -28,6 +30,10 @@
     detail: {
       type: Object,
       default: null,
+    },
+    similarTickets: {
+      type: Array,
+      default: () => [],
     },
   });
 
@@ -63,9 +69,9 @@
     return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined;
   });
 
-  const ticketMessages = computed(() => detail.value.messages || []);
-  const ticketSnapshots = computed(() => detail.value.snapshots || []);
-  const similarTickets = computed(() => detail.value.similarTickets || []);
+  const ticketMessages = ref([]);
+  const ticketSnapshots = ref([]);
+  const similarTickets = computed(() => props.similarTickets || []);
   const latestSnapshot = computed(
     () => ticketSnapshots.value[0] || detail.value.latestSnapshot || null
   );
@@ -192,11 +198,18 @@
   function refreshDetail() {
     if (hasExternalDetail.value) {
       detail.value = props.detail || {};
-      return reloadDetailVersionsAndResetMessageForm();
+      return Promise.all([
+        getTicketMessagesPage(resolvedTicketId.value, { limit: 20 }),
+        getTicketSnapshotsPage(resolvedTicketId.value, { limit: 10 }),
+      ]).then(([messagesResponse, snapshotsResponse]) => {
+        ticketMessages.value = messagesResponse?.data?.items || [];
+        ticketSnapshots.value = snapshotsResponse?.data?.items || [];
+        return reloadDetailVersionsAndResetMessageForm();
+      });
     }
     if (!resolvedTicketId.value) return Promise.resolve();
     loading.value = true;
-    return getTicket(resolvedTicketId.value)
+    return getTicketSummary(resolvedTicketId.value)
       .then((response) => {
         detail.value = response.data || {};
         return reloadDetailVersionsAndResetMessageForm();
