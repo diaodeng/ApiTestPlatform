@@ -252,9 +252,13 @@ class TicketLightAiService:
             f"工单描述：\n{content}".strip(),
             f"外部原始入参：\n{raw_payload_text}".strip(),
             (
-                "请只输出JSON对象，字段尽量包含："
-                "title, category, posNo, scoNo, logDate。"
-                "其中 posNo/scoNo 必须是纯数字，logDate 输出 YYYY-MM-DD。"
+                "请先理解工单语义，再完成全部字段提取："
+                "title、category、storeName、posNo、scoNo、logDate、versionKey。"
+                "其中 storeName 字段的值必须是门店编码或门店编号，"
+                "不是优先提取门店名称；posNo 和 scoNo 都表示收银机机台编号，"
+                "只有明确具有收银机语义时才能填写。"
+                "不要因为信息不在标题中就跳过描述、日志片段或原始入参中的信息。"
+                "无法确认时按系统提示词返回空字符串或 null。"
             ),
         ]
         return "\n\n".join([part for part in parts if str(part or "").strip()])
