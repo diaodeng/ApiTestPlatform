@@ -55,7 +55,7 @@ def test_messages_page_returns_latest_limit_and_has_more(monkeypatch):
     result = TicketReadService.get_messages_page(Mock(), 1, 2)
 
     assert result is not None
-    assert [item.id for item in result.items] == [3, 4]
+    assert [item.id for item in result.items] == ["3", "4"]
     assert result.has_more is True
 
 

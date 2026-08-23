@@ -322,17 +322,21 @@
   }
   const aiTaskDetailPayload = computed(() => selectedAiTask.value || {});
   const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {});
+  const aiPromptLayerItems = computed(() => [
+    { key: 'project', label: '项目默认提示词', layer: aiPromptLayers.value.project },
+    { key: 'moduleCommon', label: '模块通用说明', layer: aiPromptLayers.value.moduleCommon },
+    { key: 'moduleProject', label: '项目模块说明', layer: aiPromptLayers.value.moduleProject }
+  ]);
   const aiPromptHintTitle = computed(() => {
     const projectName =
       aiPromptLayers.value?.project?.projectName || detail.value.projectName || '';
-    const moduleName = aiPromptLayers.value?.module?.moduleName || detail.value.moduleName || '';
+    const moduleName =
+      aiPromptLayers.value?.moduleProject?.moduleName || detail.value.moduleName || '';
+    const moduleCode = aiPromptLayers.value?.moduleCommon?.moduleCode || detail.value.moduleCode || '';
     const parts = ['AI 分析会自动叠加默认提示词'];
-    if (projectName) {
-      parts.push(`项目：${projectName}`);
-    }
-    if (moduleName) {
-      parts.push(`模块：${moduleName}`);
-    }
+    if (projectName) parts.push(`项目：${projectName}`);
+    if (moduleName) parts.push(`模块：${moduleName}`);
+    if (moduleCode) parts.push(`编码：${moduleCode}`);
     return parts.join('，');
   });
   const aiPromptHintDesc = computed(() => {
@@ -1625,6 +1629,20 @@
         </el-select>
       </el-form-item>
       <el-alert :title="aiPromptHintTitle" :description="aiPromptHintDesc" type="info" show-icon />
+      <el-collapse class="ai-prompt-layer-preview" accordion>
+        <el-collapse-item title="查看本次自动加载的提示词层" name="prompt-layers">
+          <div v-for="item in aiPromptLayerItems" :key="item.key" class="ai-prompt-layer-item">
+            <div class="ai-prompt-layer-title">
+              <span>{{ item.label }}</span>
+              <el-tag v-if="item.layer?.matched" type="success" size="small">已加载</el-tag>
+              <el-tag v-else type="info" size="small">未配置</el-tag>
+            </div>
+            <div v-if="item.layer?.moduleCode" class="form-item-tip">模块编码：{{ item.layer.moduleCode }}</div>
+            <pre v-if="item.layer?.promptText" class="ai-prompt-layer-content">{{ item.layer.promptText }}</pre>
+            <div v-else class="form-item-tip">{{ item.layer?.reason || '当前没有可用说明' }}</div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
     </el-form>
     <template #footer>
       <el-button @click="aiAnalysisOpen = false">取消</el-button>

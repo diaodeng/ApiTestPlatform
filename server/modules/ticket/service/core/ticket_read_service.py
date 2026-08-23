@@ -18,6 +18,7 @@ from modules.ticket.entity.vo.ticket_read_vo import (
     TicketSummaryModel,
 )
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
 from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimilarityQueryService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
@@ -98,7 +99,7 @@ class TicketReadService:
 
     @classmethod
     def get_summary(cls, db: Session, ticket_id: int) -> TicketSummaryModel | None:
-        """查询轻量工单概览，不加载消息、快照、相似工单或提示词。"""
+        """查询轻量工单概览，并返回当前三层 AI 提示词摘要。"""
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             logger.info(f"工单概览未查询到工单 | ticket_id={ticket_id}")
@@ -112,6 +113,7 @@ class TicketReadService:
         # 仅读取已有摘要表中的最新一条，不触发日志、AI、向量或提示词计算。
         data["latestLogPull"] = TicketLogPullService.get_latest_summary(db, ticket_id)
         data["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(db, ticket_id)
+        data["aiPromptLayers"] = TicketPromptService.resolve_prompt_layers(db, ticket)
         for key in (
             "ticketId",
             "projectId",

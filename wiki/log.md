@@ -8,6 +8,16 @@ updated: 2026-08-21
 
 # 操作日志
 
+## [2026-08-23] FEAT | 工单模块通用提示词按编码复用
+
+- 触发：多个项目存在相同 `module_code` 的模块，需要复用共同 AI 分析说明，同时保留项目模块的特殊说明。
+- 架构层：工单域 / HRM 模块管理 / AI 提示词编排 / Web 控制台。
+- 变更传播链：`hrm_module_common_prompt` 管理资源 -> `TicketPromptService.resolve_prompt_layers` 按模块编码解析 -> AI 任务 `prompt_text/analysis_context` 快照 -> 工单 summary 与详情层级展示。
+- 数据规则：跨项目相同编码保留；不合并 `module_id`，不改写历史工单、统计快照或历史 AI 任务；项目内重复编码先只读盘点，确认清理后再加联合唯一索引。
+- 更新页面：`web/public/docs/module_common_prompt.md`、`web/public/docs/updates/2026-08-23-module-common-prompt.md`、`server/docs/ticket_read_api.md`、`web/public/docs/ticket_detail.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`。
+- 更新代码：HRM 模块通用提示词 ORM/VO/DAO/Service/Controller、菜单权限、工单 AI 提示词解析与任务快照、summary 契约、前端管理页和详情展示。
+
+
 ## [2026-08-21] FIX | 修复工单日志上下文横向滚动
 
 - 触发：用户反馈工单日志上下文查看窗口在关闭换行时无法左右滑动，影响较长日志内容查看。

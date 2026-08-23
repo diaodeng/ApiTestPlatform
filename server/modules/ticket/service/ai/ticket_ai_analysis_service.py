@@ -1310,7 +1310,7 @@ class TicketAiAnalysisService:
         mapping: TicketAiRepoMapping,
         ticket: Ticket,
         *,
-        version_key: str,
+        version_key: str = "",
         prompt_layers: dict[str, Any] | None = None,
         prompt_templates: list[dict[str, Any]] | None = None,
         extra_instruction: str = "",
@@ -2547,14 +2547,25 @@ class TicketAiAnalysisService:
         result_file = str(task.result_path or workspace_dir / "result.json")
         # 优先使用任务创建时生成的 prompt；若缺失则重建，从紧凑快照中取 logAnalysisMode
         fallback_log_mode = "digest"
+        fallback_prompt_layers: dict[str, Any] = {}
+        fallback_prompt_templates: list[dict[str, Any]] = []
+        fallback_extra_instruction = ""
         if isinstance(task.analysis_context, dict):
             fallback_log_mode = str(task.analysis_context.get("logAnalysisMode") or "digest")
+            if isinstance(task.analysis_context.get("promptLayers"), dict):
+                fallback_prompt_layers = task.analysis_context.get("promptLayers")
+            if isinstance(task.analysis_context.get("selectedPromptTemplates"), list):
+                fallback_prompt_templates = task.analysis_context.get("selectedPromptTemplates")
+            fallback_extra_instruction = str(task.analysis_context.get("extraInstruction") or "").strip()
         version_key = cls._get_version_key(db, task.version_id)
         prompt_template = task.prompt_text or cls._build_prompt(
             "{workspace_path}",
             mapping,
             ticket,
             version_key=version_key,
+            prompt_layers=fallback_prompt_layers,
+            prompt_templates=fallback_prompt_templates,
+            extra_instruction=fallback_extra_instruction,
             log_analysis_mode=fallback_log_mode,
             source_logs_path="{source_logs_path}",
         )
