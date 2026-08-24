@@ -14,6 +14,7 @@ from module_admin.service.ai_provider_capability_service import AiProviderCapabi
 from module_admin.service.ai_provider_protocol_service import AiProviderProtocolService
 from module_admin.service.ai_task_execution_service import AiTaskExecutionService
 from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
+from modules.ticket.service.sync.ticket_sync_extract_state_service import TicketSyncExtractStateService
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from utils.log_util import logger
 
@@ -1115,6 +1116,8 @@ class TicketLightAiService:
         source_ref: str | None = None,
         current_user_name: str | None = None,
         sync_scene: str | None = None,
+        cached_extract_state: dict[str, Any] | None = None,
+        source_fields: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """
         统一提取工单同步所需信息（标题、分类、POS/SCO、日志日期）。
@@ -1127,6 +1130,7 @@ class TicketLightAiService:
         :param source_ref: 来源引用
         :param current_user_name: 当前用户名称
         :param sync_scene: 同步场景（external_sync/remote_pull/bitable_pull），用于场景级开关判断
+        :param cached_extract_state: 工单中已保存的统一提取状态，用于同源缓存复用
         :return: (提取结果, 元信息)
         """
         title_text = str(title or "").strip()
@@ -1222,19 +1226,54 @@ class TicketLightAiService:
             return empty_result, {"provider_code": provider_code, "prompt_code": prompt_code, "skipped": True}
 
         prompt_template = prompt_templates[0]
+        extract_fields = set(ai_sync_extract.get("extractFields") or [])
+        source_snapshot, source_hash = TicketSyncExtractStateService.build_source_hash(
+            title=title_text,
+            description=content,
+            raw_payload=raw_payload,
+            source_fields=source_fields,
+        )
+        effective_model_name = model_name or str(getattr(provider, "default_model", "") or "").strip()
+        prompt_hash = TicketSyncExtractStateService.build_prompt_hash(
+            prompt_code=prompt_code,
+            prompt_content=str(prompt_template.get("promptContent") or ""),
+            extract_fields=extract_fields,
+            categories=cls.TICKET_CATEGORY_CANDIDATES,
+            provider_code=provider_code,
+            model_name=effective_model_name,
+        )
+        cached_result = TicketSyncExtractStateService.get_cache_hit(
+            cached_extract_state,
+            source_hash=source_hash,
+            prompt_hash=prompt_hash,
+        )
+        if cached_result is not None:
+            logger.info(
+                f"工单同步统一提取命中缓存：source_ref={source_ref}, sourceHash={source_hash}, promptHash={prompt_hash}"
+            )
+            return dict(cached_result), {
+                "provider_code": provider_code,
+                "prompt_code": prompt_code,
+                "model_name": effective_model_name,
+                "sourceHash": source_hash,
+                "promptHash": prompt_hash,
+                "sourceSnapshot": source_snapshot,
+                "success": True,
+                "cacheHit": True,
+                "skipped": True,
+            }
+        filtered_raw_payload = source_snapshot.get("rawPayload")
         system_prompt = AiPromptTemplateService.render_prompt_text(
             prompt_template["promptContent"],
             {
                 "title": title_text,
                 "content": content,
                 "description": content,
-                "raw_payload": (
-                    json.dumps(raw_payload, ensure_ascii=False, default=str) if isinstance(raw_payload, dict) else ""
-                ),
+                "raw_payload": json.dumps(filtered_raw_payload, ensure_ascii=False, default=str),
                 "categories": "、".join(cls.TICKET_CATEGORY_CANDIDATES),
             },
         )
-        user_prompt = cls._build_sync_extract_prompt(title_text, content, raw_payload)
+        user_prompt = cls._build_sync_extract_prompt(title_text, content, filtered_raw_payload)
         execution_id = cls._write_execution_record(
             execution_data=cls._build_execution_payload(
                 task_type="ticket_sync_extract",
@@ -1339,9 +1378,15 @@ class TicketLightAiService:
             return extracted, {
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
+                "model_name": effective_model_name,
                 "raw_payload": parsed_payload,
                 "raw_text": response_text,
                 "result": extracted,
+                "sourceHash": source_hash,
+                "promptHash": prompt_hash,
+                "sourceSnapshot": source_snapshot,
+                "success": True,
+                "cacheHit": False,
             }
         except Exception as exc:
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
@@ -1349,6 +1394,11 @@ class TicketLightAiService:
             return empty_result, {
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
+                "model_name": effective_model_name,
+                "sourceHash": source_hash,
+                "promptHash": prompt_hash,
+                "sourceSnapshot": source_snapshot,
+                "success": False,
                 "error": str(exc),
             }
 

@@ -26,6 +26,7 @@ from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyn
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import user_name as _user_name
+from modules.ticket.util.ticket_store_resolution_util import TicketStoreResolutionUtil
 from utils.log_util import logger
 
 
@@ -210,6 +211,11 @@ class TicketSyncPostProcessService:
         existing_title = str(ticket.title or "").strip()
         incoming_title = str(sync_object.title or "").strip()
         meta = TicketSyncPayloadService.build_meta(extra_data)
+        cached_extract_state = (
+            extra_data.get("ai_sync_extract")
+            if isinstance(extra_data.get("ai_sync_extract"), dict)
+            else {}
+        )
         scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
         scope_allowed = scope_decision.eligible
         extra_data = TicketAutomationScopeService.attach_audit_data(extra_data, scope_decision)
@@ -225,11 +231,6 @@ class TicketSyncPostProcessService:
             f"module_name={scope_decision.module_name!r}, matched_by={scope_decision.matched_by}, "
             f"matched_value={scope_decision.matched_value!r}, reason={scope_decision.reason}"
         )
-        skip_ai_analysis_due_to_update_title = cls.should_skip_ai_analysis_for_update_with_title(
-            ticket=ticket,
-            incoming_title=incoming_title,
-            meta=meta,
-        )
         ai_extract_result: dict[str, Any] = {}
         ai_extract_meta: dict[str, Any] = {"skipped": True}
         ai_extract_apply_meta: dict[str, Any] = {"updated": False}
@@ -238,11 +239,6 @@ class TicketSyncPostProcessService:
             logger.info(
                 f"外部工单同步延后处理跳过统一提取与标题AI: ticket_no={sync_object.ticket_no}, "
                 f"reason={scope_decision.reason}"
-            )
-        elif skip_ai_analysis_due_to_update_title:
-            logger.info(
-                f"外部工单同步延后处理跳过统一提取与分类AI：更新场景且已携带标题, "
-                f"ticket_no={sync_object.ticket_no}"
             )
         else:
             try:
@@ -256,6 +252,16 @@ class TicketSyncPostProcessService:
                     source_ref=sync_object.ticket_no,
                     current_user_name=_user_name(current_user),
                     sync_scene=sync_scene,
+                    cached_extract_state=cached_extract_state,
+                    source_fields={
+                        "projectName": sync_object.project_name or sync_object.merchant_name,
+                        "moduleName": sync_object.module_name,
+                        "sourceStoreCode": TicketStoreResolutionUtil.resolve_source_store_code(
+                            raw_payload=sync_object.raw_payload,
+                            extra_data=sync_object.extra_data,
+                            log_pull_config=sync_object.log_pull_config,
+                        ),
+                    },
                 )
                 sync_object, ai_extract_apply_meta = TicketSyncAiFieldService.apply_extract_to_sync_object(
                     sync_object,
@@ -277,6 +283,7 @@ class TicketSyncPostProcessService:
                 ai_extract_result = {}
                 ai_extract_meta = {"skipped": True, "error": str(exc)}
                 ai_extract_apply_meta = {"updated": False}
+
 
         try:
             if not scope_allowed and not incoming_title and not existing_title and "title" not in update_data:
@@ -381,11 +388,6 @@ class TicketSyncPostProcessService:
                 logger.info(
                     f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
                     f"reason={scope_decision.reason}"
-                )
-            elif skip_ai_analysis_due_to_update_title and not classify_reason.startswith("status_changed:"):
-                logger.info(
-                    f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
-                    f"reason=更新场景且已携带标题，未命中状态变更分类"
                 )
             else:
                 logger.info(

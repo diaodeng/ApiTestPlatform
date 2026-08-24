@@ -4,6 +4,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from modules.credential.service.credential_resolve_service import CredentialResolveService
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel, TicketSyncAutomationModel
@@ -11,7 +12,6 @@ from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncCon
 from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
-from modules.credential.service.credential_resolve_service import CredentialResolveService
 from utils.log_util import logger
 
 
@@ -194,6 +194,7 @@ class TicketRemoteSyncService:
         )
         log_pull_config = {
             "vendorId": log_pull_hints.get("vendorId") or log_pull_hints.get("vendor_id"),
+            "sourceStoreCode": log_pull_hints.get("sourceStoreCode") or log_pull_hints.get("source_store_code"),
             "storeId": log_pull_hints.get("storeId") or log_pull_hints.get("store_id"),
             "storeName": log_pull_hints.get("storeName") or log_pull_hints.get("store_name"),
             "posNo": log_pull_hints.get("posNo") or log_pull_hints.get("pos_no"),

@@ -23,6 +23,7 @@ from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel, Tic
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.sync.ticket_sync_automation_input_service import TicketSyncAutomationInputService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_field_mapping_service import (
     ModuleMappingResult,
@@ -520,7 +521,6 @@ class TicketSyncAutomationService:
             auto_ai_analysis = bool(automation.auto_ai_analysis)
             ai_agent_code = automation.ai_agent_code
             ai_provider_code = automation.ai_provider_code
-            log_pull_config = automation.log_pull_config
         else:
             auto_config = config.get("automationConfig") if isinstance(config.get("automationConfig"), dict) else {}
             scene_map = {
@@ -534,7 +534,6 @@ class TicketSyncAutomationService:
             auto_ai_analysis = bool(auto_config.get(f"autoAiAnalysisOn{scene_suffix}"))
             ai_agent_code = str(config.get("logPullDefaults", {}).get("aiAgentCode") or "").strip() or None
             ai_provider_code = str(config.get("logPullDefaults", {}).get("aiProviderCode") or "").strip() or None
-            log_pull_config = None
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         meta = TicketSyncPayloadService.build_meta(extra_data)
         safe_detected = cls._json_safe_detected(detected)
@@ -597,21 +596,24 @@ class TicketSyncAutomationService:
             )
 
             if auto_log_pull:
-                log_pull_payload = dict(config.get("logPullDefaults") or {})
-                if isinstance(log_pull_config, dict):
-                    log_pull_payload.update(log_pull_config)
-                if isinstance(sync_object.log_pull_config, dict):
-                    log_pull_payload.update(sync_object.log_pull_config)
-                resolved_vendor_id = SyncUtil.safe_int(detected.get("vendorId") or log_pull_payload.get("vendorId"))
-                resolved_store_id = str(detected.get("storeId") or log_pull_payload.get("storeId") or "").strip()
-                resolved_pos_no = SyncUtil.safe_int(
-                    detected.get("posNo") or detected.get("scoNo") or log_pull_payload.get("posNo")
-                )
-                resolved_modify_time = TicketSyncPayloadService.resolve_auto_log_pull_modify_time(
+                runtime_config = TicketSyncAutomationInputService.resolve_runtime_config(
+                    config=config,
+                    automation=automation,
                     sync_object=sync_object,
-                    log_pull_payload=log_pull_payload,
+                    detected=detected,
+                    ticket_id=ticket_id,
+                    ticket_extra_data=extra_data,
                 )
-                log_pull_payload.update(
+                resolved_vendor_id = SyncUtil.safe_int(runtime_config.get("vendorId"))
+                resolved_store_id = str(runtime_config.get("storeId") or "").strip()
+                resolved_pos_no = SyncUtil.safe_int(runtime_config.get("posNo")) or SyncUtil.safe_int(
+                    runtime_config.get("scoNo")
+                )
+                resolved_modify_time = TicketSyncAutomationInputService.resolve_modify_time(
+                    sync_object=sync_object,
+                    runtime_config=runtime_config,
+                )
+                runtime_config.update(
                     {
                         "ticketId": ticket_id,
                         "vendorId": resolved_vendor_id,
@@ -621,16 +623,16 @@ class TicketSyncAutomationService:
                     }
                 )
                 if auto_ai_analysis:
-                    log_pull_payload["autoAiEnabled"] = True
-                    log_pull_payload["aiAgentCode"] = ai_agent_code
-                    log_pull_payload["aiProviderCode"] = ai_provider_code
+                    runtime_config["autoAiEnabled"] = True
+                    runtime_config["aiAgentCode"] = ai_agent_code
+                    runtime_config["aiProviderCode"] = ai_provider_code
                 missing_log_pull_fields: list[str] = []
                 if not resolved_vendor_id:
                     missing_log_pull_fields.append("vendorId")
                 if not resolved_store_id:
                     missing_log_pull_fields.append("storeId")
                 else:
-                    # 按商家过滤后的门店中校验 org_no 是否匹配
+                    # 按商家过滤后的门店中校验 org_no 是否匹配。
                     if resolved_vendor_id:
                         store_verified = TicketLogPullDao.verify_store_by_org_no(
                             db,
@@ -650,13 +652,7 @@ class TicketSyncAutomationService:
                         meta,
                         step="log_pull",
                         status="skipped",
-                        detail={
-                            "reason": skip_reason,
-                            "vendorId": resolved_vendor_id,
-                            "storeId": resolved_store_id,
-                            "posNo": resolved_pos_no,
-                            "modifyTime": resolved_modify_time,
-                        },
+                        detail={"reason": skip_reason, **runtime_config},
                     )
                     if auto_ai_analysis:
                         summary["aiAnalysisSkipReason"] = "自动拉日志未触发，自动AI分析跳过"
@@ -668,7 +664,7 @@ class TicketSyncAutomationService:
                         )
                 else:
                     try:
-                        create_model = TicketLogPullCreateModel.model_validate(log_pull_payload)
+                        create_model = TicketLogPullCreateModel.model_validate(runtime_config)
                         log_result = TicketLogPullService.create_log_pull_services(
                             db, ticket_id, create_model, current_user
                         )
@@ -678,7 +674,7 @@ class TicketSyncAutomationService:
                                 meta,
                                 step="log_pull",
                                 status="submitted",
-                                detail=log_result.result,
+                                detail={"runtimeConfig": runtime_config, "result": log_result.result},
                             )
                             if auto_ai_analysis:
                                 cls.mark_automation_step(

@@ -8,6 +8,7 @@ from typing import Any
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
+from modules.ticket.util.ticket_store_resolution_util import TicketStoreResolutionUtil
 
 
 class TicketSyncAiFieldService:
@@ -40,7 +41,18 @@ class TicketSyncAiFieldService:
             if isinstance(sync_object.log_pull_config, dict)
             else {}
         )
-        changed = False
+        source_store_code = TicketStoreResolutionUtil.resolve_source_store_code(
+            raw_payload=sync_object.raw_payload,
+            extra_data=sync_object.extra_data,
+            log_pull_config=log_pull_payload,
+        )
+        if source_store_code and source_store_code != TicketStoreResolutionUtil.normalize_store_value(
+            log_pull_payload.get("sourceStoreCode")
+        ):
+            log_pull_payload["sourceStoreCode"] = source_store_code
+            changed = True
+        else:
+            changed = False
         if pos_no:
             if SyncUtil.safe_int(log_pull_payload.get("posNo")) != pos_no:
                 log_pull_payload["posNo"] = pos_no
@@ -56,16 +68,52 @@ class TicketSyncAiFieldService:
             if previous_date != log_date:
                 log_pull_payload["modifyTime"] = log_date
                 changed = True
-        if store and str(log_pull_payload.get("storeId") or "").strip() != store:
-            log_pull_payload["storeId"] = store
-            changed = True
+        if store:
+            source_store_code = TicketStoreResolutionUtil.normalize_store_value(
+                log_pull_payload.get("sourceStoreCode")
+            )
+            existing_store_id = TicketStoreResolutionUtil.normalize_store_value(
+                log_pull_payload.get("storeId")
+            )
+            selected_store_id, selection_reason = TicketStoreResolutionUtil.select_store_id(
+                source_store_code=source_store_code,
+                ai_store=store,
+                existing_store_id=existing_store_id,
+            )
+            if selected_store_id and existing_store_id != selected_store_id:
+                log_pull_payload["storeId"] = selected_store_id
+                changed = True
+        else:
+            source_store_code = TicketStoreResolutionUtil.normalize_store_value(
+                log_pull_payload.get("sourceStoreCode")
+            )
+            existing_store_id = TicketStoreResolutionUtil.normalize_store_value(
+                log_pull_payload.get("storeId")
+            )
+            selected_store_id, selection_reason = TicketStoreResolutionUtil.select_store_id(
+                source_store_code=source_store_code,
+                ai_store="",
+                existing_store_id=existing_store_id,
+            )
+            if selected_store_id and existing_store_id != selected_store_id:
+                log_pull_payload["storeId"] = selected_store_id
+                changed = True
+
+        selected_store_id = TicketStoreResolutionUtil.normalize_store_value(
+            log_pull_payload.get("storeId")
+        )
+        source_store_code = TicketStoreResolutionUtil.normalize_store_value(
+            log_pull_payload.get("sourceStoreCode")
+        )
 
         extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
         ai_extract_payload = dict(extra_data.get("_ai_extract") or {})
-        if store and str(ai_extract_payload.get("store") or "").strip() != store:
-            ai_extract_payload["store"] = store
+        if selected_store_id and str(ai_extract_payload.get("store") or "").strip() != selected_store_id:
+            ai_extract_payload["store"] = selected_store_id
             extra_data["_ai_extract"] = ai_extract_payload
             changed = True
+        if changed and source_store_code:
+            log_pull_payload["sourceStoreCode"] = source_store_code
 
         update_payload: dict[str, Any] = {}
         if changed:
@@ -81,15 +129,20 @@ class TicketSyncAiFieldService:
         return updated_sync_object, {
             "updated": True,
             "logPullConfig": {
+                "sourceStoreCode": source_store_code,
+                "storeId": selected_store_id,
+                "selectionReason": selection_reason,
                 "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
                 "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
-                "storeId": str(log_pull_payload.get("storeId") or "").strip(),
                 "modifyTime": TicketSyncPayloadService.normalize_auto_log_pull_date_text(
                     log_pull_payload.get("modifyTime")
                 ),
             },
             "aiExtract": {
-                "store": store,
+                "aiStore": store,
+                "sourceStoreCode": source_store_code,
+                "selectedStoreId": selected_store_id,
+                "selectionReason": selection_reason,
                 "versionKey": version_key,
             },
         }

@@ -27,6 +27,7 @@ from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_common_util import user_id as _user_id
 from modules.ticket.util.ticket_common_util import user_name as _user_name
 from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
+from modules.ticket.util.ticket_store_resolution_util import TicketStoreResolutionUtil
 
 
 class TicketSyncPayloadService:
@@ -126,6 +127,15 @@ class TicketSyncPayloadService:
             return normalized_payload_date
 
         raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        hints = sync_object.extra_data.get("log_pull_hints") if isinstance(sync_object.extra_data, dict) else {}
+        hint_candidate = (
+            SyncUtil.payload_field_value(hints, "modifyTime", "modify_time", default="")
+            or SyncUtil.payload_field_value(hints, "logDate", "log_date", default="")
+            or SyncUtil.payload_field_value(hints, "ticketDate", "ticket_date", default="")
+        )
+        normalized_hint_date = cls.normalize_auto_log_pull_date_text(hint_candidate)
+        if normalized_hint_date:
+            return normalized_hint_date
         for camel_key, snake_key in (
             ("modifyTime", "modify_time"),
             ("logDate", "log_date"),
@@ -459,6 +469,11 @@ class TicketSyncPayloadService:
             else {}
         )
         vendor_id_hint = SyncUtil.safe_int((detected or {}).get("vendorId"))
+        source_store_code_hint = TicketStoreResolutionUtil.resolve_source_store_code(
+            raw_payload=sync_object.raw_payload,
+            extra_data=extra_data,
+            log_pull_config=sync_object.log_pull_config,
+        )
         store_id_hint = str((detected or {}).get("storeId") or "").strip()
         pos_no_hint = SyncUtil.safe_int((detected or {}).get("posNo")) or SyncUtil.safe_int(
             (detected or {}).get("scoNo")
@@ -472,6 +487,8 @@ class TicketSyncPayloadService:
         elif incoming_project_value:
             log_pull_hints.pop("vendorId", None)
             log_pull_hints.pop("vendor_id", None)
+        if source_store_code_hint:
+            log_pull_hints["sourceStoreCode"] = source_store_code_hint
         if store_id_hint:
             log_pull_hints["storeId"] = store_id_hint
         if pos_no_hint:
@@ -591,6 +608,12 @@ class TicketSyncPayloadService:
                 or source_snapshot.get("moduleName"),
                 "vendorId": SyncUtil.safe_int(detected.get("vendorId")) or source_snapshot.get("vendorId"),
                 "vendorName": str(detected.get("vendorName") or "").strip() or source_snapshot.get("vendorName"),
+                "sourceStoreCode": TicketStoreResolutionUtil.resolve_source_store_code(
+                    raw_payload=sync_object.raw_payload,
+                    extra_data=extra_data,
+                    log_pull_config=sync_object.log_pull_config,
+                )
+                or source_snapshot.get("sourceStoreCode"),
                 "storeId": str(detected.get("storeId") or "").strip() or source_snapshot.get("storeId"),
                 "storeName": str(detected.get("storeName") or "").strip() or source_snapshot.get("storeName"),
                 "posNo": SyncUtil.safe_int(detected.get("posNo")) or source_snapshot.get("posNo"),

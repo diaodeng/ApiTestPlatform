@@ -43,7 +43,17 @@
 - 如果工单中的门店信息不完整，或没有匹配到门店配置，系统会保留原始值显示，并提示用户确认；用户可以直接编辑为正确的 `org_no` 后提交。
 - 用户手动切换商家时，旧门店值会清空，避免把其他商家的门店提交到当前商家。
 
-工单中的这些值不是 `ticket` 表的独立列：原始同步字段和日志提示保存在 `ticket.extra_data`，已经提交的日志拉取记录则保存在 `ticket_log_pull_record.store_id`，其语义为最终提交的 `org_no`。
+工单同步自动拉日志时，系统会统一合并任务级日志参数、当前有效 AI 提取结果、同步对象字段、历史 `extraData.log_pull_hints`、规则识别结果和系统默认值。自动化审计中的 `identify`、日志提交请求和自动 AI 使用同一份最终参数；缺少 `vendorId`、`storeId`、`posNo/SCO` 或 `modifyTime` 时只记录跳过原因，不创建无效拉取记录。
+
+`log_pull_hints` 中建议使用以下字段：
+
+- `vendorId`：商家编号；
+- `sourceStoreCode`：外部来源中的门店编码，只用于保留来源和与 AI 结果做一致性判断，不一定是日志接口可用的 `org_no`，AI 永远不会反写它；
+- `storeId`：日志接口使用的门店 `org_no`，由门店选择规则确定并在提交前按当前商家校验；
+- `posNo` / `scoNo`：机台编号；
+- `modifyTime`：日志日期，格式为 `YYYY-MM-DD`。
+
+AI 提取门店时，如果 AI 值与 `sourceStoreCode` 相等或 AI 值包含在 `sourceStoreCode` 中，则使用 AI 值更新 `storeId`；如果 AI 值为空或不匹配，则使用 `sourceStoreCode`。没有 `sourceStoreCode` 时，有效 AI 新值可以替换旧 `storeId`，无有效 AI 值时保留旧值。`sourceStoreCode` 始终保持外部原始值，不会被 AI 反写。最终 `storeId` 只有通过当前商家 `org_no` 校验后才会提交日志。
 
 
 | 状态 | 说明 |
