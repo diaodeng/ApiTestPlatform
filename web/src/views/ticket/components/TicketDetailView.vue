@@ -159,17 +159,33 @@
 
   const detailOriginalDescription = computed(() => {
     const extraData = detail.value.extraData || {};
-    return (
+    const originalText = String(
       detail.value.originalDescription ||
       extraData.originDescription ||
       extraData.origin_description ||
-      detail.value.description ||
       ''
-    );
+    ).trim();
+    if (originalText) return originalText;
+    const description = String(detail.value.description || '').trim();
+    return description.includes('【AI翻译】')
+      ? description.split('【AI翻译】')[0].trim()
+      : description;
   });
   const detailAiTranslation = computed(() => {
     const extraData = detail.value.extraData || {};
-    return detail.value.aiTranslation || extraData.aiTranslation || extraData.ai_translation || '';
+    const raw = String(
+      detail.value.aiTranslation || extraData.aiTranslation || extraData.ai_translation || ''
+    ).trim();
+    if (!raw) return '';
+    // 移除可能混入的【AI翻译】标记，确保只展示纯译文
+    if (raw.startsWith('【AI翻译】')) {
+      return raw.slice('【AI翻译】'.length).trim();
+    }
+    const markerIndex = raw.indexOf('【AI翻译】');
+    if (markerIndex >= 0) {
+      return raw.slice(markerIndex + '【AI翻译】'.length).trim();
+    }
+    return raw;
   });
   const latestSummary = computed(
     () =>

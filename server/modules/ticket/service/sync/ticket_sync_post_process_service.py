@@ -327,7 +327,7 @@ class TicketSyncPostProcessService:
                 update_data["description"] = translated_description
             if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
                 extra_data["origin_description"] = origin_description
-                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                extra_data["ai_translation"] = str(translation_meta.get("translated_text") or "").strip()
                 extra_data["ai_translation_source_hash"] = SyncUtil.text_sha256(origin_description)
                 if translation_meta.get("provider_code"):
                     extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")

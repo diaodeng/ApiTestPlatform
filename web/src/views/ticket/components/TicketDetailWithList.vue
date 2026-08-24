@@ -273,14 +273,24 @@
       ? description.split('【AI翻译】')[0].trim()
       : description;
   });
-  const detailAiTranslation = computed(() =>
-    String(
+  const detailAiTranslation = computed(() => {
+    const raw = String(
       detail.value.aiTranslation ||
         detail.value.extraData?.aiTranslation ||
         detail.value.extraData?.ai_translation ||
         ''
-    ).trim()
-  );
+    ).trim();
+    if (!raw) return '';
+    // 移除可能混入的【AI翻译】标记，确保只展示纯译文
+    if (raw.startsWith('【AI翻译】')) {
+      return raw.slice('【AI翻译】'.length).trim();
+    }
+    const markerIndex = raw.indexOf('【AI翻译】');
+    if (markerIndex >= 0) {
+      return raw.slice(markerIndex + '【AI翻译】'.length).trim();
+    }
+    return raw;
+  });
 
   /**
    * 解析详情页默认版本号。

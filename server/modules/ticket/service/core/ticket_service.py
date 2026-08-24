@@ -998,7 +998,7 @@ class TicketService:
                 elif str(translation_meta.get("translated_text") or "").strip():
                     data["description"] = translated_description
                     extra_data["origin_description"] = original_description
-                    extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                    extra_data["ai_translation"] = str(translation_meta.get("translated_text") or "").strip()
                     if translation_meta.get("provider_code"):
                         extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
                     if translation_meta.get("prompt_code"):
@@ -1250,7 +1250,7 @@ class TicketService:
                 elif str(translation_meta.get("translated_text") or "").strip():
                     data["description"] = translated_description
                     extra_data["origin_description"] = original_description
-                    extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                    extra_data["ai_translation"] = str(translation_meta.get("translated_text") or "").strip()
                     if translation_meta.get("provider_code"):
                         extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
                     if translation_meta.get("prompt_code"):

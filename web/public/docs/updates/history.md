@@ -4,7 +4,14 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（6 天，20 项变更）
+## 2026-08 月（7 天，21 项变更）
+
+### 工单详情页翻译内容显示修复
+- 修复工单详情页翻译区域有时显示"原文 + 【AI翻译】标记 + 译文"拼接内容的问题。
+- 后端 `ai_translation` 字段去掉了危险的 `translated_description` fallback，确保只存储纯译文。
+- 前端两个详情组件的 `detailAiTranslation` 增加防御性 `【AI翻译】` 标记剥离逻辑；`TicketDetailView.vue` 的 `detailOriginalDescription` 补齐分割处理。
+- 详见：[工单详情页翻译内容显示修复](2026-08-24-ticket-translation-display-fix.md)。
+
 
 ### 问题实例详情查询回归修复
 - 恢复问题实例按 `issue_id` 查询绑定工单的 DAO 方法，修复详情、编辑和绑定区域报 `TicketIssueDao has no attribute list_tickets_by_issue_id` 的问题。
