@@ -223,3 +223,4 @@ class TicketSummaryModel(BaseModel):
     processing_conclusion_status: str | None = None
     latest_log_pull: dict[str, Any] | None = None
     latest_ai_analysis: dict[str, Any] | None = None
+    ai_prompt_layers: dict[str, Any] | None = None

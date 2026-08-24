@@ -535,6 +535,7 @@ class TicketSyncPostProcessService:
         :return: (回填后的同步对象, 回填摘要)。
         """
         result = extract_result if isinstance(extract_result, dict) else {}
+        store = str(result.get("store") or "").strip()
         pos_no = SyncUtil.safe_int(result.get("posNo"))
         sco_no = SyncUtil.safe_int(result.get("scoNo"))
         log_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(result.get("logDate"))
@@ -559,6 +560,10 @@ class TicketSyncPostProcessService:
             if previous_date != log_date:
                 log_pull_payload["modifyTime"] = log_date
                 changed = True
+        if store:
+            if str(log_pull_payload.get("storeId") or "").strip() != store:
+                log_pull_payload["storeId"] = store
+                changed = True
         if not changed:
             return sync_object, {"updated": False}
         updated_sync_object = sync_object.model_copy(update={"log_pull_config": log_pull_payload})
@@ -567,6 +572,7 @@ class TicketSyncPostProcessService:
             "logPullConfig": {
                 "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
                 "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
+                "storeId": SyncUtil.safe_int(log_pull_payload.get("storeId")),
                 "modifyTime": TicketSyncPayloadService.normalize_auto_log_pull_date_text(
                     log_pull_payload.get("modifyTime")
                 ),
