@@ -54,6 +54,7 @@ updated: 2026-05-20
 
 - [HTTP API 入口流程](flows/http-api-entrypoint.md)
 - [工单流转路由流程](flows/ticket-workflow-routing.md)
+- [工单问题实例关联流程](flows/ticket-issue-attribution-flow.md)
 - [工单自动化链路流程](flows/ticket-automation-flow.md)
 - [工单自定义统计通知流程](flows/ticket-custom-statistics-notification.md)
 - [统一凭证刷新流程](flows/credential-refresh.md)

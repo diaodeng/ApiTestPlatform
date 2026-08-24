@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
@@ -31,11 +31,30 @@ class TicketIssueBaseModel(BaseModel):
     owner_id: int | None = Field(default=None, description="负责人ID")
     owner_name: str | None = Field(default=None, description="负责人名称")
     first_ticket_id: int | None = Field(default=None, description="首张工单ID")
+    first_ticket_no: str | None = Field(default=None, description="首张工单号")
     affected_ticket_count: int | None = Field(default=None, description="影响工单数")
     create_by: str | None = None
     update_by: str | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+    @field_validator(
+        "issue_id",
+        "project_id",
+        "module_id",
+        "owner_id",
+        "first_ticket_id",
+        "affected_ticket_count",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_integer(cls, value):
+        """
+        将表单传入的空字符串归一化为空值，避免可选整数校验失败。
+        :param value: 原始字段值
+        :return: 可供 Pydantic 继续校验的值
+        """
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
 
 
 class TicketIssueCreateModel(TicketIssueBaseModel):
@@ -77,6 +96,91 @@ class TicketIssueUpdateModel(TicketIssueBaseModel):
                 raise ValueError("问题标题不能为空")
         if self.status is not None:
             self.status = normalize_issue_status(self.status)
+        return self
+
+
+@as_query
+class TicketIssueTicketOptionQueryModel(BaseModel):
+    """
+    问题实例绑定工单选择器查询模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    keyword: str | None = Field(default=None, description="工单号或标题关键字")
+    project_id: int | None = Field(default=None, description="项目ID")
+    module_id: int | None = Field(default=None, description="模块ID")
+    limit: int = Field(default=20, description="返回数量限制")
+
+    @model_validator(mode="after")
+    def normalize_query(self):
+        """
+        归一化工单选择器查询参数。
+        :return: 当前模型
+        """
+        self.keyword = str(self.keyword or "").strip() or None
+        self.limit = min(max(int(self.limit or 20), 1), 20)
+        return self
+
+
+class TicketIssueBindByTicketNoModel(BaseModel):
+    """
+    按业务工单号绑定问题实例模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_no: str = Field(description="业务工单号")
+    relation_type: str | None = Field(default="manual", description="归属类型")
+    confirmed: bool = Field(default=True, description="是否人工确认")
+    remark: str | None = Field(default=None, description="操作备注")
+
+    @model_validator(mode="after")
+    def normalize_bind_by_no(self):
+        """
+        清理按工单号绑定参数。
+        :return: 当前模型
+        """
+        self.ticket_no = str(self.ticket_no or "").strip()
+        if not self.ticket_no:
+            raise ValueError("ticketNo 不能为空")
+        self.relation_type = normalize_relation_type(self.relation_type)
+        self.remark = str(self.remark or "").strip() or None
+        return self
+
+
+class TicketIssueBatchBindModel(BaseModel):
+    """
+    批量绑定工单到已有问题实例模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_nos: list[str] = Field(default_factory=list, description="业务工单号列表")
+    issue_id: int = Field(description="目标问题实例ID")
+    relation_type: str | None = Field(default="manual", description="归属类型")
+    confirmed: bool = Field(default=True, description="是否人工确认")
+    allow_reassign: bool = Field(default=False, description="是否允许覆盖已有问题归属")
+    remark: str | None = Field(default=None, description="批量归因说明")
+
+    @model_validator(mode="after")
+    def normalize_batch_bind(self):
+        """
+        清理批量绑定参数并限制单次处理规模。
+        :return: 当前模型
+        """
+        normalized_nos: list[str] = []
+        for ticket_no in self.ticket_nos or []:
+            value = str(ticket_no or "").strip()
+            if value and value not in normalized_nos:
+                normalized_nos.append(value)
+        if not normalized_nos:
+            raise ValueError("ticketNos 至少需要提供一个工单号")
+        if len(normalized_nos) > 200:
+            raise ValueError("单次最多关联 200 张工单")
+        self.ticket_nos = normalized_nos
+        self.relation_type = normalize_relation_type(self.relation_type)
+        self.remark = str(self.remark or "").strip() or None
         return self
 
 

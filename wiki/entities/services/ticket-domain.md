@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-08-21
 created: 2026-05-20
-updated: 2026-08-04
+updated: 2026-08-21
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_read_service.py
@@ -101,6 +101,18 @@ graph TD
 - 当前系统自定义统计：`TicketCustomStatisticsService` 按 `ticket.sync.automation.customStatisticsProfiles` 的白名单字段、单一时间口径和范围过滤实时查询工单，再按字段或规则分组聚合。结果只用于本次接口响应或通知，不写入 `ticket_statistics_*`；规则中的 `hasConclusion` 由 `processed_at` 是否为空派生。方案可使用系统推送、飞书应用文本或飞书卡片通知。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
+
+## 问题实例关联与批量归因
+
+问题实例管理以 `ticket_issue` 为主数据，工单通过 `ticket.issue_id/issue_relation_type/issue_confirmed` 保存主归因，`ticket_relation` 继续只承载相似、重复和相关等补充关系。
+
+- `GET /ticket/issues/ticket-options` 按工单号或标题返回最多 20 条轻量候选，问题管理页面使用业务工单号绑定，不要求输入内部 `ticket_id`。
+- `POST /ticket/issues/{issue_id}/tickets/bind` 按业务工单号绑定单张工单；原有按工单 ID 的绑定接口继续保留。
+- `POST /ticket/issues/bind-batch` 只允许批量绑定到已有 Issue，不按问题类型或相似度自动强绑定。
+- 批量绑定先全量校验工单、目标 Issue、项目一致性和已有归属，再在同一事务中更新；默认拒绝覆盖其他 Issue，显式允许重新归因后才转移，并刷新所有受影响 Issue 的工单数。
+- 问题管理页面使用远程搜索选择器，不加载全量可关联工单列表；工单详情支持直接关联或更换已有 Issue，工单列表支持当前页多选批量关联。
+- Issue 详情的 `firstTicketNo` 由 `first_ticket_id` 反查生成；绑定工单表展示四类工单版本（发生、计划修复、实际修复、实际发版），版本事实仍以工单和版本中心为准。
+- 归因和解绑操作写入 `TicketEventType.ISSUE_ATTRIBUTED` 事件，保留操作人、原 Issue、目标 Issue、关系类型和备注，便于审计。
 
 ## 2026-06-16 分类统计维度
 

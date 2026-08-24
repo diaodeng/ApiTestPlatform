@@ -136,6 +136,33 @@ export function listTicketIssues(query) {
   });
 }
 
+// 查询问题实例可绑定的工单号/标题选项
+export function searchTicketIssueTicketOptions(query) {
+  return request({
+    url: '/ticket/issues/ticket-options',
+    method: 'get',
+    params: query,
+  });
+}
+
+// 按工单号绑定工单到问题实例
+export function bindTicketIssueByNo(issueId, data) {
+  return request({
+    url: `/ticket/issues/${issueId}/tickets/bind`,
+    method: 'post',
+    data,
+  });
+}
+
+// 批量绑定工单到问题实例
+export function batchBindTicketIssues(data) {
+  return request({
+    url: '/ticket/issues/bind-batch',
+    method: 'post',
+    data,
+  });
+}
+
 // 查询问题实例详情
 export function getTicketIssue(issueId) {
   return request({

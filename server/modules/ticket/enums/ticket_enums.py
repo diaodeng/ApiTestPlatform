@@ -68,6 +68,7 @@ class TicketEventType(str, Enum):
     NOTIFY_PENDING = "NOTIFY_PENDING"
     AI_ANALYZED = "AI_ANALYZED"
     AI_RECOMMENDED = "AI_RECOMMENDED"
+    ISSUE_ATTRIBUTED = "ISSUE_ATTRIBUTED"
 
 
 class EmbeddingObjectType(str, Enum):

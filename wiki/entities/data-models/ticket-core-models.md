@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-11
 created: 2026-05-20
-updated: 2026-08-18
+updated: 2026-08-21
 related_files:
   - server/modules/ticket/entity/do/ticket_do.py
   - server/modules/ticket/entity/do/ticket_log_pull_do.py
@@ -128,6 +128,9 @@ erDiagram
 - 2026-07-11 起，工单详情页相似查询优先复用当前工单已保存的 `EmbeddingRecord.embedding`。查询前会按当前配置重新计算标准文本 `content_hash`，并校验模型、版本和维度；缺失或过期时同步刷新当前工单向量，刷新成功后继续使用新向量查询相似工单。
 - `ticket.similarity.config` 是系统参数 JSON，不新增业务表；其中 `sceneTriggers` 控制外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀是否自动刷新向量。
 - `ticket.statistics.time.config` 是系统参数 JSON，用于配置统计页默认时间范围和周趋势分桶；自然日快照由 `TicketStatisticsDaily` 承载，业务周快照由 `TicketStatisticsPeriodSnapshot` 承载。
+
+- `ticket_issue` 的业务号绑定和批量归因不改变 `first_ticket_id`、`ticket.issue_id` 等内部主键关联：接口新增 `firstTicketNo` 和 `ticketNos` 业务字段，问题详情按工单关联的版本中心 ID 展示发生、计划修复、实际修复和实际发版版本。
+- 批量归因默认全量预校验且不覆盖其他 Issue；显式重新归因后在一个事务内更新工单，并刷新目标及旧 Issue 的 `affected_ticket_count`。归因和解绑会写入 `TicketEventType.ISSUE_ATTRIBUTED` 审计事件。
 
 ## 参见
 

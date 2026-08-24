@@ -8,6 +8,30 @@ updated: 2026-08-21
 
 # 操作日志
 
+## [2026-08-21] FIX | 问题实例详情 DAO 查询回归
+
+- 触发：进入问题详情、编辑页或绑定工单区域时，`TicketIssueDao` 缺少 `list_tickets_by_issue_id`，请求报属性不存在。
+- 根因：新增工单搜索 DAO 时误替换了原有按 Issue 查询绑定工单的方法。
+- 修复：恢复 `list_tickets_by_issue_id`，保留 `search_tickets_for_issue`；Issue 详情重新按 `ticket.issue_id` 查询有效工单。
+- 更新的页面：`server/modules/ticket/dao/ticket_issue_dao.py`、`web/public/docs/updates/2026-08-21-ticket-issue-dao-regression.md`、`web/public/docs/updates/history.md`。
+- 验证：补丁已完成静态结构核对；环境中的 Python/npm 命令执行受到运行器限流和解释器 PATH 差异影响。
+
+## [2026-08-21] FIX | 问题实例新增可选字段校验
+
+- 触发：问题实例新增表单未选择负责人时提交 `ownerId: ""`，Pydantic 整数校验失败并返回“参数或数据异常: ownerId”。
+- 修复：`TicketIssueBaseModel` 将可选整数空字符串归一化为 `None`；前端新增提交过滤空可选字段。
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_issue_vo.py`、`web/src/views/ticket/issue/index.vue`、`server/tests/test_ticket_issue_service.py`、`web/public/docs/ticket_issue.md`、`web/public/docs/updates/2026-08-21-ticket-issue-create-optional-fields.md`。
+- 验证：补充空负责人/项目/模块模型归一化测试；构建命令受当前执行器限流影响，待环境恢复后执行。
+
+## [2026-08-21] INGEST-CODE | 工单问题实例关联增强
+
+- 触发：问题管理页面绑定工单使用内部 ID，工单详情无法直接搜索已有 Issue，工单列表缺少批量归因入口。
+- 架构层：工单域 / 问题实例归因 / 工单列表 / 工单详情 / 版本展示。
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_issue_vo.py`、`server/modules/ticket/dao/ticket_issue_dao.py`、`server/modules/ticket/service/issue/ticket_issue_service.py`、`server/modules/ticket/controller/ticket_issue_controller.py`、`server/modules/ticket/enums/ticket_enums.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/issue/index.vue`、`web/src/views/ticket/components/TicketDetailWithList.vue`、`web/src/views/ticket/index.vue`、`web/public/docs/2026-08-21-ticket-issue-association-plan.md`、`web/public/docs/ticket_detail.md`、`web/public/docs/updates/2026-08-21-ticket-issue-association.md`、`wiki/flows/ticket-issue-attribution-flow.md`。
+- 变更传播链：`ticketNo` 远程搜索 -> Issue 单张业务号绑定 -> `ticket.issue_id` 主归因 -> Issue 影响工单数刷新；工单列表当前页多选 -> 全量预校验 -> 批量事务绑定 -> 目标/旧 Issue 计数刷新 -> `ISSUE_ATTRIBUTED` 事件。
+- 关键结论：内部 `ticket_id/first_ticket_id` 保留为稳定关联，用户界面改用工单号；批量归因默认不覆盖其他 Issue；相似度和工单分类仍不自动强绑定；Issue 版本先从绑定工单四类版本实时聚合。
+- 验证：已补充问题实例服务定向测试、后端编译和前端构建待环境限流恢复后执行。
+
 ## [2026-08-21] FIX | 修复工单日志上下文横向滚动
 
 - 触发：用户反馈工单日志上下文查看窗口在关闭换行时无法左右滑动，影响较长日志内容查看。
