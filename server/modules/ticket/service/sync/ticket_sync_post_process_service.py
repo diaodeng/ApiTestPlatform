@@ -19,6 +19,7 @@ from modules.ticket.service.ai.ticket_auto_classification_service import TicketA
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
+from modules.ticket.service.sync.ticket_sync_ai_field_service import TicketSyncAiFieldService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
@@ -256,9 +257,16 @@ class TicketSyncPostProcessService:
                     current_user_name=_user_name(current_user),
                     sync_scene=sync_scene,
                 )
-                sync_object, ai_extract_apply_meta = cls.apply_ai_extract_to_sync_object(
+                sync_object, ai_extract_apply_meta = TicketSyncAiFieldService.apply_extract_to_sync_object(
                     sync_object,
                     ai_extract_result,
+                )
+                # AI 回填后重新识别，避免延后自动化继续使用旧快照。
+                detected = TicketSyncAutomationService.detect_fields(
+                    db,
+                    sync_object,
+                    config,
+                    apply_external_mappings=sync_scene != "remote_pull",
                 )
                 ai_extract_title = str((ai_extract_result or {}).get("title") or "").strip()
                 if not incoming_title and not existing_title and ai_extract_title:
@@ -523,64 +531,8 @@ class TicketSyncPostProcessService:
         return revision > 1
 
     @classmethod
-    def apply_ai_extract_to_sync_object(
-        cls,
-        sync_object: TicketExternalSyncUpsertModel,
-        extract_result: dict[str, Any] | None,
-    ) -> tuple[TicketExternalSyncUpsertModel, dict[str, Any]]:
-        """
-        将统一提取结果回填到同步对象。
-        :param sync_object: 外部同步对象。
-        :param extract_result: 统一提取结果。
-        :return: (回填后的同步对象, 回填摘要)。
-        """
-        result = extract_result if isinstance(extract_result, dict) else {}
-        store = str(result.get("store") or "").strip()
-        pos_no = SyncUtil.safe_int(result.get("posNo"))
-        sco_no = SyncUtil.safe_int(result.get("scoNo"))
-        log_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(result.get("logDate"))
-        log_pull_payload = (
-            dict(sync_object.log_pull_config or {})
-            if isinstance(sync_object.log_pull_config, dict)
-            else {}
-        )
-        changed = False
-        if pos_no:
-            if SyncUtil.safe_int(log_pull_payload.get("posNo")) != pos_no:
-                log_pull_payload["posNo"] = pos_no
-                changed = True
-        elif sco_no:
-            if SyncUtil.safe_int(log_pull_payload.get("scoNo")) != sco_no:
-                log_pull_payload["scoNo"] = sco_no
-                changed = True
-        if log_date:
-            previous_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(
-                log_pull_payload.get("modifyTime") or log_pull_payload.get("logDate")
-            )
-            if previous_date != log_date:
-                log_pull_payload["modifyTime"] = log_date
-                changed = True
-        if store:
-            if str(log_pull_payload.get("storeId") or "").strip() != store:
-                log_pull_payload["storeId"] = store
-                changed = True
-        if not changed:
-            return sync_object, {"updated": False}
-        updated_sync_object = sync_object.model_copy(update={"log_pull_config": log_pull_payload})
-        return updated_sync_object, {
-            "updated": True,
-            "logPullConfig": {
-                "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
-                "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
-                "storeId": SyncUtil.safe_int(log_pull_payload.get("storeId")),
-                "modifyTime": TicketSyncPayloadService.normalize_auto_log_pull_date_text(
-                    log_pull_payload.get("modifyTime")
-                ),
-            },
-        }
-
-    @classmethod
     def attach_sync_ai_extract_meta(
+
         cls,
         extra_data: dict[str, Any],
         *,

@@ -437,6 +437,15 @@ class TicketSyncAutomationService:
         }
 
     @classmethod
+    def _json_safe_detected(cls, detected: dict[str, Any] | None) -> dict[str, Any]:
+        """将字段识别结果转换为可写入 JSON 的结构，保留模块映射审计字段。"""
+        payload = dict(detected or {}) if isinstance(detected, dict) else {}
+        module_result = payload.get("moduleMappingResult")
+        if isinstance(module_result, ModuleMappingResult):
+            payload["moduleMappingResult"] = module_result.to_payload()
+        return payload
+
+    @classmethod
     def mark_automation_step(
         cls,
         meta: dict[str, Any],
@@ -528,9 +537,10 @@ class TicketSyncAutomationService:
             log_pull_config = None
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         meta = TicketSyncPayloadService.build_meta(extra_data)
-        summary: dict[str, Any] = {"detected": detected}
+        safe_detected = cls._json_safe_detected(detected)
+        summary: dict[str, Any] = {"detected": safe_detected}
         try:
-            cls.mark_automation_step(meta, step="identify", status="success", detail=detected)
+            cls.mark_automation_step(meta, step="identify", status="success", detail=safe_detected)
             update_data: dict[str, Any] = {}
             detected_project_id = SyncUtil.safe_int(detected.get("projectId"))
             detected_project_name = str(detected.get("projectName") or "").strip()

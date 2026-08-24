@@ -1323,7 +1323,7 @@ class TicketLogPullService:
         return normalize_ticket_version_key(match.group(1))
 
     @staticmethod
-    def _update_ticket_version_id(cls, query_db: Session, ticket_id: int, version_key: str) -> int | None:
+    def _update_ticket_version_id(query_db: Session, ticket_id: int, version_key: str) -> int | None:
         """
         将日志中的版本文本解析为工单发生版本ID。
 
@@ -2933,6 +2933,14 @@ class TicketLogPullService:
             )
             return
         if not version_id:
+            version_id = cls.ensure_ticket_version_id_from_log(db, record.ticket_id, record.id)
+            if version_id:
+                ticket = TicketDao.get_ticket_by_id(db, record.ticket_id) or ticket
+                logger.info(
+                    f"日志拉取记录[{record_id}] 自动AI触发前已从日志回填发生版本 | "
+                    f"ticket_id={record.ticket_id}, version_id={version_id}"
+                )
+        if not version_id:
             logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单缺少发生版本")
             cls._log_chain_step(
                 db,
@@ -2968,10 +2976,8 @@ class TicketLogPullService:
             result = TicketAiAnalysisService.create_analysis_task_services(db, record.ticket_id, request, None)
             if not result.is_success:
                 logger.warning(
-                    "日志拉取记录[%s] 自动AI分析未成功提交 | ticket_id=%s, message=%s",
-                    record_id,
-                    record.ticket_id,
-                    result.message,
+                    f"日志拉取记录[{record_id}] 自动AI分析未成功提交 | "
+                    f"ticket_id={record.ticket_id}, message={result.message}"
                 )
                 cls._notify_automation(
                     db,

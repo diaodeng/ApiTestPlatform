@@ -20,6 +20,7 @@ from modules.ticket.service.sync.ticket_external_bitable_email_service import Ti
 from modules.ticket.service.sync.ticket_external_classification_mapping_service import (
     TicketExternalClassificationMappingService,
 )
+from modules.ticket.service.sync.ticket_sync_ai_field_service import TicketSyncAiFieldService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_comment_service import TicketSyncCommentService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
@@ -139,84 +140,6 @@ class TicketSyncService:
         if revision is None:
             return True
         return revision > 1
-
-    @classmethod
-    def _apply_ai_extract_to_sync_object(
-        cls,
-        sync_object: TicketExternalSyncUpsertModel,
-        extract_result: dict[str, Any] | None,
-    ) -> tuple[TicketExternalSyncUpsertModel, dict[str, Any]]:
-        """
-        将统一提取结果回填到同步对象，包括日志拉取参数（POS/SCO/日期）和门店、版本号。
-        POS/SCO/日期写入 log_pull_config；门店和版本号写入 extra_data._ai_extract 供后续 detect_fields 兜底使用。
-        :param sync_object: 外部同步对象
-        :param extract_result: 统一提取结果
-        :return: (回填后的同步对象, 回填摘要)
-        """
-        result = extract_result if isinstance(extract_result, dict) else {}
-        pos_no = SyncUtil.safe_int(result.get("posNo"))
-        sco_no = SyncUtil.safe_int(result.get("scoNo"))
-        log_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(result.get("logDate"))
-        ai_store = str(result.get("store") or "").strip()
-        ai_version_key = str(result.get("versionKey") or "").strip()
-
-        log_pull_payload = (
-            dict(sync_object.log_pull_config or {}) if isinstance(sync_object.log_pull_config, dict) else {}
-        )
-        log_pull_changed = False
-        if pos_no:
-            if SyncUtil.safe_int(log_pull_payload.get("posNo")) != pos_no:
-                log_pull_payload["posNo"] = pos_no
-                log_pull_changed = True
-        elif sco_no:
-            if SyncUtil.safe_int(log_pull_payload.get("scoNo")) != sco_no:
-                log_pull_payload["scoNo"] = sco_no
-                log_pull_changed = True
-        if log_date:
-            previous_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(
-                log_pull_payload.get("modifyTime") or log_pull_payload.get("logDate")
-            )
-            if previous_date != log_date:
-                log_pull_payload["modifyTime"] = log_date
-                log_pull_changed = True
-
-        # 门店识别结果写入 extra_data；版本文本只作为本次同步输入，不持久化到工单扩展字段。
-        extra_data = dict(sync_object.extra_data or {}) if isinstance(sync_object.extra_data, dict) else {}
-        ai_extract_payload = dict(extra_data.get("_ai_extract") or {})
-        ai_extract_changed = False
-        if ai_store and str(ai_extract_payload.get("store") or "").strip() != ai_store:
-            ai_extract_payload["store"] = ai_store
-            ai_extract_changed = True
-        if ai_extract_changed:
-            extra_data["_ai_extract"] = ai_extract_payload
-
-        if not log_pull_changed and not ai_extract_changed and not ai_version_key:
-            return sync_object, {"updated": False}
-
-        update_payload: dict[str, Any] = {}
-        if log_pull_changed:
-            update_payload["log_pull_config"] = log_pull_payload
-        if ai_extract_changed:
-            update_payload["extra_data"] = extra_data
-        if ai_version_key:
-            update_payload["detected_version_key"] = ai_version_key
-
-        updated_sync_object = sync_object.model_copy(update=update_payload)
-        apply_summary: dict[str, Any] = {"updated": True}
-        if log_pull_changed:
-            apply_summary["logPullConfig"] = {
-                "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
-                "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
-                "modifyTime": TicketSyncPayloadService.normalize_auto_log_pull_date_text(
-                    log_pull_payload.get("modifyTime")
-                ),
-            }
-        if ai_extract_changed:
-            apply_summary["aiExtract"] = {
-                "store": ai_extract_payload.get("store", ""),
-                "versionKey": ai_version_key,
-            }
-        return updated_sync_object, apply_summary
 
     @classmethod
     def _attach_sync_ai_extract_meta(
@@ -457,9 +380,16 @@ class TicketSyncService:
                     current_user_name=_user_name(current_user),
                     sync_scene=sync_scene,
                 )
-                sync_object, ai_extract_apply_meta = cls._apply_ai_extract_to_sync_object(
+                sync_object, ai_extract_apply_meta = TicketSyncAiFieldService.apply_extract_to_sync_object(
                     sync_object,
                     ai_extract_result,
+                )
+                # AI 回填后重新识别，确保自动化使用本次提取后的统一字段。
+                detected = TicketSyncAutomationService.detect_fields(
+                    db,
+                    sync_object,
+                    config,
+                    apply_external_mappings=apply_external_mappings,
                 )
             except Exception as exc:
                 logger.warning(
@@ -530,7 +460,8 @@ class TicketSyncService:
                 })
                 logger.info(
                     f"外部字段工单类型映射命中: ticket_no={sync_object.ticket_no}, "
-                    f"rule_id={external_classification_match.rule_id}, issue_type={external_classification_match.issue_type_id}"
+                    f"rule_id={external_classification_match.rule_id}, "
+                    f"issue_type={external_classification_match.issue_type_id}"
                 )
         should_translate = False
         translated_description = str(sync_object.description or "").strip()

@@ -115,13 +115,17 @@ class TicketLightAiService:
         "1. title: 如果工单标题不够清晰，可以生成一个更简洁的标题（30字以内）\n"
         "2. category: 从可选分类中选择一个最匹配的分类\n"
         "3. storeName: 门店名称，如'北京一店'、'上海旗舰店'等\n"
-        "4. posNo: POS编号，必须是纯数字\n"
-        "5. scoNo: SCO编号，必须是纯数字\n"
+        "4. posNo: POS机台编号，输出正整数或null，不是金额、金额片段、订单号、日期、时间或门店编号\n"
+        "5. scoNo: SCO机台编号，输出正整数或null，不是金额、金额片段、订单号、日期、时间或门店编号\n"
         "6. logDate: 日志日期，格式 YYYY-MM-DD\n"
         "7. versionKey: 版本号，如'1.0.0.0'、'v2.3.1.0'等\n\n"
         "提取规则：\n"
         "- 如果某个字段在工单中找不到明确信息，返回空字符串或null\n"
-        "- posNo和scoNo必须是纯数字，不要包含其他字符\n"
+        "- POS/SCO 只表示收银机机台编号；应根据 POS/SCO 与编号之间的语义关系判断，不要把普通数字直接当作机台编号\n"
+        "- 金额、货币符号、千分位金额、金额小数、订单号、日期、时间、门店编号和日志行号都不能填写到 posNo/scoNo\n"
+        "- 例如“#2 POS, $44,510.00”中 posNo 必须为 2，$44,510.00 是金额，不能输出 44、44510 或 510\n"
+        "- 若存在多个数字候选但无法确认哪个是机台编号，posNo/scoNo 返回 null，不要猜测\n"
+        "- posNo和scoNo输出正整数或null，不要输出带货币符号、千分位或其他说明文字的值\n"
         "- logDate必须是YYYY-MM-DD格式\n"
         "- 不要编造不存在的信息\n\n"
         "输出 JSON 格式：\n"
@@ -129,8 +133,8 @@ class TicketLightAiService:
         '  "title": "简洁标题",\n'
         '  "category": "分类名称",\n'
         '  "storeName": "门店名称",\n'
-        '  "posNo": "POS编号",\n'
-        '  "scoNo": "SCO编号",\n'
+        '  "posNo": 2,\n'
+        '  "scoNo": null,\n'
         '  "logDate": "YYYY-MM-DD",\n'
         '  "versionKey": "版本号"\n'
         "}"
@@ -257,6 +261,7 @@ class TicketLightAiService:
                 "其中 storeName 字段的值必须是门店编码或门店编号，"
                 "不是优先提取门店名称；posNo 和 scoNo 都表示收银机机台编号，"
                 "只有明确具有收银机语义时才能填写。"
+                "金额、货币符号和千分位金额不能作为 posNo 或 scoNo；例如“#2 POS, $44,510.00”必须提取 posNo=2。"
                 "不要因为信息不在标题中就跳过描述、日志片段或原始入参中的信息。"
                 "无法确认时按系统提示词返回空字符串或 null。"
             ),
@@ -450,9 +455,12 @@ class TicketLightAiService:
     @staticmethod
     def _normalize_pos_or_sco_no(value: Any) -> int | None:
         """
-        将 POS/SCO 值归一化为整数编号。
-        :param value: 原始值
-        :return: 纯数字编号，无法解析返回 None
+        将模型返回的 POS/SCO 值归一化为整数编号。
+
+        仅对明确的纯数字值或带明确机台语义的文本取值；金额和千分位数字直接拒绝，
+        避免把金额的首段数字误当成 POS/SCO。
+        :param value: 原始值。
+        :return: 纯数字编号，无法确认返回 None。
         """
         if value in (None, "", []):
             return None
@@ -462,16 +470,92 @@ class TicketLightAiService:
             number = int(value)
             return number if number > 0 else None
         text = str(value).strip()
+        if not text or re.search(r"(?:[$￥€£]|\d[\d,]*\.\d{2}\b|\d{1,3}(?:,\d{3})+)", text):
+            return None
+        if text.isdigit():
+            number = int(text)
+            return number if number > 0 else None
+        semantic_match = re.search(
+            r"(?:^|[^A-Za-z0-9])(?:POS|SCO|机台|收银机)\s*[-#号编号:]?\s*(\d{1,10})"
+            r"|(?:^|[^A-Za-z0-9#])(\d{1,10})\s*(?:POS|SCO|号机台|号收银机)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not semantic_match:
+            return None
+        raw_number = next((item for item in semantic_match.groups() if item), "")
+        number = int(raw_number)
+        return number if number > 0 else None
+
+    @classmethod
+    def _extract_explicit_machine_no(cls, text: str, label: str) -> int | None:
+        """从带 POS/SCO 机台语义的文本中提取明确编号。"""
         if not text:
             return None
-        matched = re.search(r"\d{1,10}", text)
+        escaped_label = re.escape(label)
+        matched = re.search(
+            rf"(?:^|[^A-Za-z0-9]){escaped_label}\s*[-#号编号:]?\s*(\d{{1,10}})"
+            rf"|(?:^|[^A-Za-z0-9])#?\s*(\d{{1,10}})\s*{escaped_label}(?:\b|[^A-Za-z0-9])"
+            rf"|(?:^|[^A-Za-z0-9])(?:\d{{1,10}})\s*号?{escaped_label}(?:\b|[^A-Za-z0-9])",
+            text,
+            flags=re.IGNORECASE,
+        )
         if not matched:
             return None
-        try:
-            number = int(matched.group(0))
-        except Exception:
+        candidates = [item for item in matched.groups() if item]
+        if not candidates:
             return None
+        number = int(candidates[0])
         return number if number > 0 else None
+
+    @classmethod
+    def _normalize_sync_extract_machine_numbers(
+        cls,
+        parsed_payload: dict[str, Any],
+        title: str,
+        content: str,
+        raw_payload: dict[str, Any] | None,
+    ) -> tuple[int | None, int | None, list[str]]:
+        """统一校验模型结果与原文中的明确机台语义，返回校验告警。"""
+        raw_pos_value = (
+            parsed_payload.get("posNo")
+            or parsed_payload.get("pos_no")
+            or parsed_payload.get("pos")
+            or parsed_payload.get("posId")
+        )
+        raw_sco_value = (
+            parsed_payload.get("scoNo")
+            or parsed_payload.get("sco_no")
+            or parsed_payload.get("sco")
+            or parsed_payload.get("scoId")
+        )
+        pos_no = cls._normalize_pos_or_sco_no(raw_pos_value)
+        sco_no = cls._normalize_pos_or_sco_no(raw_sco_value)
+        source_text = "\n".join(
+            item for item in (
+                str(title or "").strip(),
+                str(content or "").strip(),
+                json.dumps(raw_payload, ensure_ascii=False, default=str) if isinstance(raw_payload, dict) else "",
+            ) if item
+        )
+        warnings: list[str] = []
+        explicit_pos = cls._extract_explicit_machine_no(source_text, "POS")
+        explicit_sco = cls._extract_explicit_machine_no(source_text, "SCO")
+        if explicit_pos:
+            if pos_no and pos_no != explicit_pos:
+                warnings.append(f"模型POS={pos_no}与原文明确POS={explicit_pos}不一致，已采用原文值")
+            elif pos_no is None and str(raw_pos_value or "").strip():
+                warnings.append(f"模型POS值{raw_pos_value}无效，已采用原文明确POS={explicit_pos}")
+            pos_no = explicit_pos
+        if explicit_sco:
+            if sco_no and sco_no != explicit_sco:
+                warnings.append(f"模型SCO={sco_no}与原文明确SCO={explicit_sco}不一致，已采用原文值")
+            elif sco_no is None and str(raw_sco_value or "").strip():
+                warnings.append(f"模型SCO值{raw_sco_value}无效，已采用原文明确SCO={explicit_sco}")
+            sco_no = explicit_sco
+        if pos_no and sco_no and pos_no == sco_no:
+            warnings.append("POS与SCO编号相同，请确认原文机台语义")
+        return pos_no, sco_no, warnings
 
     @classmethod
     def _normalize_log_date_text(cls, value: Any, default_year: int | None = None) -> str:
@@ -1191,17 +1275,11 @@ class TicketLightAiService:
                 or parsed_payload.get("classification")
                 or ""
             ).strip()
-            pos_no = cls._normalize_pos_or_sco_no(
-                parsed_payload.get("posNo")
-                or parsed_payload.get("pos_no")
-                or parsed_payload.get("pos")
-                or parsed_payload.get("posId")
-            )
-            sco_no = cls._normalize_pos_or_sco_no(
-                parsed_payload.get("scoNo")
-                or parsed_payload.get("sco_no")
-                or parsed_payload.get("sco")
-                or parsed_payload.get("scoId")
+            pos_no, sco_no, machine_number_warnings = cls._normalize_sync_extract_machine_numbers(
+                parsed_payload,
+                title_text,
+                content,
+                raw_payload,
             )
             log_date = cls._normalize_log_date_text(
                 parsed_payload.get("logDate")
@@ -1241,6 +1319,11 @@ class TicketLightAiService:
                 extracted["logDate"] = log_date
             if "versionKey" in extract_fields and version_key:
                 extracted["versionKey"] = version_key
+            if machine_number_warnings:
+                logger.warning(
+                    f"工单同步AI提取机台编号校验: source_ref={source_ref}, "
+                    f"warnings={machine_number_warnings}"
+                )
             cls._finish_execution_record(
                 db,
                 execution_id,
@@ -1250,6 +1333,7 @@ class TicketLightAiService:
                     "rawText": response_text,
                     "parsed": parsed_payload,
                     "normalized": extracted,
+                    "machineNumberWarnings": machine_number_warnings,
                 },
             )
             return extracted, {

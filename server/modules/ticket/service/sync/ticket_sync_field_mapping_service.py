@@ -44,6 +44,19 @@ class ModuleMappingResult:
     matched_by: str = ""
     """匹配方式：mapping_moduleId/mapping_moduleCode/mapping_moduleName/direct_code/direct_name。"""
 
+    def to_payload(self) -> dict[str, Any]:
+        """转换为可写入 JSON 字段的稳定审计结构。"""
+        return {
+            "mappingMatched": self.mapping_matched,
+            "mappedModuleId": self.mapped_module_id,
+            "mappedModuleCode": self.mapped_module_code,
+            "mappedModuleName": self.mapped_module_name,
+            "resolvedModuleId": self.resolved_module_id,
+            "resolvedModuleCode": self.resolved_module_code,
+            "resolvedModuleName": self.resolved_module_name,
+            "matchedBy": self.matched_by,
+        }
+
 
 class TicketSyncFieldMappingService:
     """工单外部字段映射与人员解析。"""
