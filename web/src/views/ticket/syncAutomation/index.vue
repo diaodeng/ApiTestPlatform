@@ -1265,6 +1265,48 @@
                 </el-col>
               </el-row>
 
+              <el-divider content-position="left">自动化结果通知</el-divider>
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="6">
+                  <el-form-item label="启用结果通知" label-width="150px">
+                    <el-switch v-model="form.automationNotification.enabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :xs="24" :md="9">
+                  <el-form-item label="推送配置" label-width="150px">
+                    <el-select v-model="form.automationNotification.pushIds" multiple filterable collapse-tags :loading="pushOptionsLoading" placeholder="请选择推送配置" style="width: 100%">
+                      <el-option v-for="item in pushOptions" :key="item.pushId || item.value" :label="item.pushName || item.label || item.name" :value="item.pushId || item.value" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :xs="12" :md="4">
+                  <el-form-item label="成功时推送" label-width="110px">
+                    <el-switch v-model="form.automationNotification.success.push" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :xs="12" :md="4">
+                  <el-form-item label="失败时推送" label-width="110px">
+                    <el-switch v-model="form.automationNotification.failed.push" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :span="24">
+                  <el-form-item label="消息模板" label-width="150px">
+                    <el-input v-model="form.automationNotification.messageTemplate" type="textarea" :rows="6" placeholder="留空使用系统默认模板；使用 ${变量名} 引用变量" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-descriptions v-if="form.automationNotification.enabled" :column="3" border size="small" class="automation-notify-variables">
+                <el-descriptions-item label="${ticket_no}">工单号</el-descriptions-item>
+                <el-descriptions-item label="${ticket_title}">工单标题</el-descriptions-item>
+                <el-descriptions-item label="${merchant_name}">商家名称</el-descriptions-item>
+                <el-descriptions-item label="${store_name}">门店名称或日志门店编号</el-descriptions-item>
+                <el-descriptions-item label="${stage_label}">当前阶段，如日志拉取、AI 分析</el-descriptions-item>
+                <el-descriptions-item label="${status_label}">成功或失败</el-descriptions-item>
+                <el-descriptions-item label="${reason}">失败原因或结果说明</el-descriptions-item>
+                <el-descriptions-item label="${detail}">任务、日志或异常详情</el-descriptions-item>
+                <el-descriptions-item label="${ticket_url}">工单详情链接</el-descriptions-item>
+              </el-descriptions>
+
               <el-alert class="mt8" type="info" show-icon :closable="false" title="定时任务优先" description="定时任务参数中指定的 automation 配置优先级最高，此处配置仅在没有任务级参数时作为默认值。" />
             </el-form>
           </el-card>

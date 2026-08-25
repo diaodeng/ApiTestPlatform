@@ -1444,6 +1444,7 @@ class TicketLogPullService:
             message=message,
             detail=detail,
             notify_config=notify_config,
+            stage="auto_ai_analysis",
         )
 
     @staticmethod
@@ -1499,6 +1500,7 @@ class TicketLogPullService:
             message=message,
             detail=detail,
             notify_config=notify_config,
+            stage="log_pull",
         )
 
     @classmethod
@@ -3000,18 +3002,38 @@ class TicketLogPullService:
             )
             result = TicketAiAnalysisService.create_analysis_task_services(db, record.ticket_id, request, None)
             if not result.is_success:
+                failure_reason = str(result.message or "自动AI分析任务提交未成功").strip()
                 logger.warning(
                     f"日志拉取记录[{record_id}] 自动AI分析未成功提交 | "
-                    f"ticket_id={record.ticket_id}, message={result.message}"
+                    f"ticket_id={record.ticket_id}, reason={failure_reason}"
+                )
+                # 自动提交在创建 AI 任务前被拒绝时，任务表不会留下记录；因此需在工单事件中
+                # 固化返回原因，避免只靠通知详情中的记录 ID 排查。
+                cls._log_chain_step(
+                    db,
+                    ticket_id=record.ticket_id,
+                    record_id=record_id,
+                    step="auto-ai",
+                    status="failed",
+                    reason=failure_reason,
+                    detail={
+                        "versionId": version_id,
+                        "agentCode": agent_code,
+                        "providerCode": provider_code,
+                        "failureStage": "submit",
+                    },
                 )
                 cls._notify_automation(
                     db,
                     record.ticket_id,
                     status="failed",
-                    message=f"日志拉取后自动AI提交失败：{result.message}",
-                    detail=f"record_id={record_id}, version_id={version_id}",
+                    message="日志拉取后自动AI提交失败",
+                    detail=failure_reason,
                     notify_config=record_notify_config,
                 )
+                # _process_download 已在触发前提交日志成功状态；本次失败事件需单独提交，
+                # 否则线程池会话关闭时会回滚，导致时间线中没有自动 AI 的失败原因。
+                db.commit()
             else:
                 cls._log_chain_step(
                     db,

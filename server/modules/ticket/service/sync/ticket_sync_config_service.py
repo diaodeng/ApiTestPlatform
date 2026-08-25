@@ -156,6 +156,7 @@ class TicketSyncConfigService:
             "titleSummaryConfig": cls.default_title_summary_config(),
             "knowledgeConfig": cls.default_knowledge_config(),
             "automationConfig": cls.default_automation_config(),
+            "automationNotification": cls.default_automation_notification_config(),
             "automationScope": TicketAutomationScopeService.default_config(),
             "externalSyncRequiredFields": list(cls.DEFAULT_EXTERNAL_SYNC_REQUIRED_FIELDS),
             "projectMappings": [],
@@ -248,6 +249,21 @@ class TicketSyncConfigService:
             "autoAiAnalysisOnRemotePull": False,
             "autoAiAnalysisOnBitablePull": False,
             "autoAiAnalysisOnManualCreate": False,
+        }
+
+    @classmethod
+    def default_automation_notification_config(cls) -> dict[str, Any]:
+        """
+        构建自动化结果通知默认配置。
+
+        :return: 自动拉日志和自动 AI 分析共用的通知配置。
+        """
+        return {
+            "enabled": False,
+            "pushIds": [],
+            "success": {"push": True},
+            "failed": {"push": True},
+            "messageTemplate": "",
         }
 
 
@@ -1574,6 +1590,33 @@ class TicketSyncConfigService:
         ):
             automation_config[key] = bool(automation_config.get(key))
         merged["automationConfig"] = automation_config
+
+        automation_notification = (
+            merged.get("automationNotification")
+            if isinstance(merged.get("automationNotification"), dict)
+            else {}
+        )
+        automation_notification = {
+            **cls.default_automation_notification_config(),
+            **automation_notification,
+        }
+        automation_notification["enabled"] = bool(automation_notification.get("enabled"))
+        automation_notification["pushIds"] = TicketSyncNotifyService._normalize_push_ids(
+            automation_notification.get("pushIds") or automation_notification.get("push_ids")
+        )
+        for status_key in ("success", "failed"):
+            status_config = automation_notification.get(status_key)
+            automation_notification[status_key] = {
+                "push": bool(status_config.get("push"))
+                if isinstance(status_config, dict)
+                else True
+            }
+        automation_notification["messageTemplate"] = str(
+            automation_notification.get("messageTemplate")
+            or automation_notification.get("message_template")
+            or ""
+        ).strip()
+        merged["automationNotification"] = automation_notification
         merged["automationScope"] = TicketAutomationScopeService.normalize_config(
             merged.get("automationScope")
         )

@@ -2790,6 +2790,7 @@ class TicketAiAnalysisService:
                 message="AI分析已完成",
                 detail=f"task_id={task_id}, version_id={task.version_id}",
                 notify_config=notify_config,
+                stage="ai_analysis",
             )
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
             return
@@ -2822,5 +2823,6 @@ class TicketAiAnalysisService:
                     message="AI分析执行失败",
                     detail=f"task_id={task_id}, error={failure_message}",
                     notify_config=notify_config,
+                    stage="ai_analysis",
                 )
             return

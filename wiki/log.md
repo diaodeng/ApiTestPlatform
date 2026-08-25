@@ -3,10 +3,17 @@ title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-21
+updated: 2026-08-25
 ---
 
 # 操作日志
+
+## [2026-08-25] FIX | 自动 AI 提交失败原因写入通知与工单事件
+
+- 触发：日志拉取成功后自动 AI 提交被拒绝时，原通知只显示 `record_id/version_id`，无法判断是 Agent 未连接、版本映射还是其他前置校验失败。
+- 修复：读取 `result.message` 作为统一失败原因，同时写入通知详情（模板 `${reason}`）和 `auto-ai:failed` 工单事件；事件详情保留版本、Agent、Provider 及失败阶段，并单独提交数据库会话。
+- 架构诊断：`start.sh` 的 Supervisor 将 FastAPI、Celery Worker、Celery Beat 分进程启动；Agent WebSocket 连接表仅在 FastAPI 进程内，Celery 自动任务无法直接读取。跨进程派发尚未实现，后续需选择 Redis 消息网关或受保护的 FastAPI 内部中转接口。
+- 验证：新增自动 AI 提交失败原因写入事件和通知的定向测试；未修改生产数据库。
 
 ## [2026-08-23] FEAT | 工单模块通用提示词按编码复用
 
@@ -1963,3 +1970,12 @@ updated: 2026-08-21
 - 现象：凭证新增、更新、删除接口返回 500，日志装饰器在鉴权查询时收到 `query_db=None`。
 - 根因：凭证控制器使用 `db` 参数名，而系统日志装饰器按约定读取 `query_db`。
 - 修复：统一凭证控制器各接口数据库依赖参数为 `query_db`，保证鉴权和操作日志写入使用同一会话。
+## [2026-08-25] INGEST-CODE | 工单自动化结果通知
+
+- 触发：自动拉日志到自动 AI 分析需要按既有推送配置通知成功、失败和跳过结果，并支持业务字段模板变量。
+- 架构层：工单同步业务层、日志拉取服务、AI 分析服务、通用通知服务与 Web 同步自动化配置页。
+- 创建的页面：无。
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`log.md`。
+- 创建的双向链接：0 对（沿用工单域与自动化流程既有双向关联）。
+- 变更传播链：`automationNotification` 配置 -> 自动化启动快照 -> 日志拉取记录/工单 extra_data -> `TicketNotifyService` 模板渲染 -> 既有推送配置投递。
+- 总共涉及页面：3。

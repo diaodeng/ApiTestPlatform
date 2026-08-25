@@ -361,6 +361,13 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnBitablePull: false,
         autoAiAnalysisOnManualCreate: false,
       },
+      automationNotification: {
+        enabled: false,
+        pushIds: [],
+        success: { push: true },
+        failed: { push: true },
+        messageTemplate: '',
+      },
       automationScope: {
         enabled: false,
         moduleIds: [],
@@ -819,6 +826,17 @@ export function useSyncConfig(proxy) {
       autoAiAnalysisOnManualCreate: Boolean(automationConfig.autoAiAnalysisOnManualCreate),
     }
 
+    const automationNotification = payload.automationNotification || {}
+    form.automationNotification = {
+      enabled: Boolean(automationNotification.enabled),
+      pushIds: Array.isArray(automationNotification.pushIds)
+        ? automationNotification.pushIds.map(Number).filter((item) => Number.isFinite(item) && item > 0)
+        : [],
+      success: { push: automationNotification.success?.push !== false },
+      failed: { push: automationNotification.failed?.push !== false },
+      messageTemplate: String(automationNotification.messageTemplate || ''),
+    }
+
     const automationScope = payload.automationScope || {}
     form.automationScope = {
       enabled: Boolean(automationScope.enabled),
@@ -1109,6 +1127,21 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnRemotePull: Boolean(payload.automationConfig?.autoAiAnalysisOnRemotePull),
         autoAiAnalysisOnBitablePull: Boolean(payload.automationConfig?.autoAiAnalysisOnBitablePull),
         autoAiAnalysisOnManualCreate: Boolean(payload.automationConfig?.autoAiAnalysisOnManualCreate),
+      }
+      payload.automationNotification = {
+        enabled: Boolean(payload.automationNotification?.enabled),
+        pushIds: Array.from(
+          new Set(
+            (Array.isArray(payload.automationNotification?.pushIds)
+              ? payload.automationNotification.pushIds
+              : [])
+              .map(Number)
+              .filter((item) => Number.isFinite(item) && item > 0)
+          )
+        ),
+        success: { push: payload.automationNotification?.success?.push !== false },
+        failed: { push: payload.automationNotification?.failed?.push !== false },
+        messageTemplate: String(payload.automationNotification?.messageTemplate || '').trim(),
       }
       payload.automationScope = {
         enabled: Boolean(payload.automationScope?.enabled),

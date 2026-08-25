@@ -101,27 +101,74 @@
 
 ---
 
-## 六、通知推送配置
+## 六、自动化结果通知
 
-### 6.1 群推送
+“同步后自动化”配置卡中的“自动化结果通知”用于接收自动拉日志、日志拉取后的自动 AI 分析结果。启用后选择已有的推送配置服务，并分别控制成功、失败是否发送。未启用、未选择推送配置或关闭对应结果开关时，不会发送消息。
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `automationNotification.enabled` | 是否启用自动化结果通知 | `false` |
+| `automationNotification.pushIds` | 需要投递的推送配置 ID，可选择多个 | `[]` |
+| `automationNotification.success.push` | 日志拉取或 AI 分析成功时是否推送 | `true` |
+| `automationNotification.failed.push` | 拉取、创建任务或分析失败/跳过时是否推送 | `true` |
+| `automationNotification.messageTemplate` | 消息模板；留空使用系统默认模板 | 空字符串 |
+
+自动化开始时会把当前通知配置快照保存到工单和日志拉取记录中。因此，后续修改配置不会改变已经在运行或已创建的自动化任务的投递渠道和模板。
+
+当自动 AI 在提交阶段被服务拒绝时，通知中的 `${reason}` 会显示服务返回的实际 `result.message`（例如指定 Agent 未连接），不会只显示记录 ID；工单时间线也会记录 `auto-ai:failed` 事件及同一原因，便于定位失败发生在创建 AI 任务之前。
+
+部署注意：`start.sh` 使用 Supervisor 将 FastAPI 与 Celery Worker 分成独立进程。当前 Agent WebSocket 连接只保存在 FastAPI 进程内存中，Celery Worker 触发自动 AI 时可能无法看到已连接 Agent。生产环境如遇“Agent 已连接但自动 AI 提示未连接”，需要先按部署方案接入跨进程消息网关或受保护的 FastAPI 内部中转接口；该跨进程派发能力尚未在本次改动中实现。
+
+### 6.1 通知模板变量
+
+模板使用 `${变量名}` 格式。模板中未识别的变量会原样保留；格式不合法时系统会回退到默认模板并记录告警日志。
+
+| 变量 | 含义 |
+|------|------|
+| `${ticket_no}` | 工单号 |
+| `${ticket_title}` | 工单标题 |
+| `${merchant_name}` | 商家名称 |
+| `${store_name}` | 门店名称；没有名称时显示日志拉取门店编号 |
+| `${stage}` | 自动化阶段编码，如 `log_pull`、`ai_analysis` |
+| `${stage_label}` | 自动化阶段中文名称，如“日志拉取”“AI 分析” |
+| `${status}` | 结果状态编码，如 `success`、`failed` |
+| `${status_label}` | 结果状态中文名称，如“成功”“失败” |
+| `${message}` | 结果简要说明 |
+| `${reason}` | 失败原因或结果说明，优先使用详细信息 |
+| `${detail}` | 任务 ID、日志记录 ID 或异常详情 |
+| `${ticket_url}` | 工单详情链接 |
+| `${title}` | 通知标题 |
+
+示例：
+
+```text
+【${status_label}】${stage_label}
+工单：${ticket_no} ${ticket_title}
+商家/门店：${merchant_name} / ${store_name}
+原因：${reason}
+```
+
+## 七、通知推送配置
+
+### 7.1 群推送
 
 | 配置项 | 说明 |
 |--------|------|
 | `groupPush.autoPushCondition` | 自动推送条件表达式，手动发送不受此限制 |
 
-### 6.2 个人催办提醒
+### 7.2 个人催办提醒
 
 - 按飞书多维表格中的人员维度统计未处理工单并发送提醒
 - 可手动触发或通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行
 - 统计数据源可选 `bitable` 或 `local`
 
-### 6.3 汇总统计通知
+### 7.3 汇总统计通知
 
 - 页面支持手动触发或定时任务执行
 - 统计数据源可选 `local` 或 `bitable`
 - 可选开启 AI 解读生成摘要
 
-### 6.4 自定义统计方案
+### 7.4 自定义统计方案
 
 - 在"自定义统计"页签创建统计方案
 - 手动执行可选"仅预览"或"按方案通知"
@@ -129,7 +176,7 @@
 
 ---
 
-## 七、AI 分类统一配置
+## 八、AI 分类统一配置
 
 工单同步配置页提供场景开关 `ticket.sync.automation.aiClassification`：
 
@@ -140,7 +187,7 @@
 
 配置项 `ticket.ai.category.classify.provider.code` 和 `ticket.ai.category.classify.prompt.code` 作为当分类配置中 Provider/提示词为空时的兜底。
 
-## 八、AI 配置段通用说明
+## 九、AI 配置段通用说明
 
 同步自动化配置中以下 AI 配置段均支持独立选择 Provider 和模型：
 

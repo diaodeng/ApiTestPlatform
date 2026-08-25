@@ -12,8 +12,8 @@ class DummyUser:
     user = SimpleNamespace(user_name="tester")
 
 
-def test_get_external_config_services_returns_all_environments(monkeypatch):
-    """外部环境列表接口仍应返回全部环境，不应依赖单个环境参数。"""
+def test_get_external_config_services_returns_grouped_environments(monkeypatch):
+    """外部环境列表接口应返回归一化后的分组配置。"""
     monkeypatch.setattr(TicketLogPullService, "ensure_param_config_rows", lambda db: None)
     monkeypatch.setattr(
         TicketLogPullDao,
@@ -25,12 +25,9 @@ def test_get_external_config_services_returns_all_environments(monkeypatch):
 
     result = TicketLogPullService.get_external_config_services(object())
 
-    assert result == {
-        "environments": {
-            "dev": {"baseUrl": "https://dev.example.com"},
-            "prod": {"baseUrl": "https://prod.example.com"},
-        }
-    }
+    assert result["groups"]["dev"]["defaultItem"] == "dev"
+    assert result["groups"]["dev"]["items"]["dev"]["baseUrl"] == "https://dev.example.com"
+    assert result["groups"]["prod"]["items"]["prod"]["baseUrl"] == "https://prod.example.com"
 
 
 def test_retry_log_pull_services_rejects_missing_environment(monkeypatch):
@@ -71,3 +68,75 @@ def test_build_external_request_headers_wraps_credential_errors(monkeypatch):
             {"credentialBindingId": "binding-1"},
             "https://example.com/api/logs",
         )
+
+
+def test_auto_ai_submit_failure_records_reason_in_event_and_notification(monkeypatch):
+    """自动 AI 提交被拒绝时，应将服务返回原因同时写入时间线和通知原因。"""
+
+    class DummyDb:
+        """模拟仅记录提交次数的数据库会话。"""
+
+        def __init__(self):
+            self.commit_count = 0
+
+        def commit(self):
+            """记录失败事件提交，避免线程会话关闭时回滚。"""
+            self.commit_count += 1
+
+    db = DummyDb()
+    record = SimpleNamespace(
+        id=2043149749595136,
+        ticket_id=2043147524033536,
+        command_content={
+            "_automation": {
+                "autoAiEnabled": True,
+                "aiAgentCode": "agent-prod",
+                "aiProviderCode": "openai-prod",
+            }
+        },
+    )
+    ticket = SimpleNamespace(ticket_id=record.ticket_id, affected_version_id=174076259444195365)
+    chain_steps: list[dict] = []
+    notifications: list[dict] = []
+
+    monkeypatch.setattr(TicketLogPullDao, "get_record_by_id", lambda db, record_id: record)
+    monkeypatch.setattr(
+        "modules.ticket.service.log_pull.ticket_log_pull_service.TicketDao.get_ticket_by_id",
+        lambda db, ticket_id: ticket,
+    )
+    monkeypatch.setattr(TicketLogPullService, "_extract_record_notify_config", lambda record: {})
+    monkeypatch.setattr(TicketLogPullService, "_log_chain_step", lambda *args, **kwargs: chain_steps.append(kwargs))
+    monkeypatch.setattr(
+        TicketLogPullService,
+        "_notify_automation",
+        lambda *args, **kwargs: notifications.append(kwargs),
+    )
+
+    from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+
+    monkeypatch.setattr(
+        TicketAiAnalysisService,
+        "create_analysis_task_services",
+        lambda *args, **kwargs: SimpleNamespace(is_success=False, message="Agent[agent-prod]未连接服务端"),
+    )
+
+    TicketLogPullService._trigger_auto_ai_analysis(db, record.id)
+
+    assert chain_steps == [
+        {
+            "ticket_id": record.ticket_id,
+            "record_id": record.id,
+            "step": "auto-ai",
+            "status": "failed",
+            "reason": "Agent[agent-prod]未连接服务端",
+            "detail": {
+                "versionId": ticket.affected_version_id,
+                "agentCode": "agent-prod",
+                "providerCode": "openai-prod",
+                "failureStage": "submit",
+            },
+        }
+    ]
+    assert notifications[0]["message"] == "日志拉取后自动AI提交失败"
+    assert notifications[0]["detail"] == "Agent[agent-prod]未连接服务端"
+    assert db.commit_count == 1

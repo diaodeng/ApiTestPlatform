@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-08-21
+freshness: 2026-08-25
 created: 2026-05-20
-updated: 2026-08-21
+updated: 2026-08-25
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_read_service.py
@@ -99,6 +99,7 @@ graph TD
 - 自动化关注范围：`TicketAutomationScopeService` 在外部字段映射得到当前系统模块后，以模块 ID 精确匹配或模块名称关键字包含判定是否允许自动化。结果写入 `ticket.extra_data.automation_scope`；范围外工单仍执行同步、普通映射和外部规则分类，跳过标题/翻译/提取/分类 AI、自动日志与 AI 分析、向量刷新和自动群推送。统计默认范围和自动群推送复用同一配置，群推送原有条件表达式保持不变。
 - 可配置趋势：固定问题性质趋势已删除，工单类型趋势按 `issue_type_id/issue_type_name` 聚合；`TicketCustomMetricService` 仅按白名单字段计算管理员定义的指标，并可读取日/业务周通用快照。
 - 当前系统自定义统计：`TicketCustomStatisticsService` 按 `ticket.sync.automation.customStatisticsProfiles` 的白名单字段、单一时间口径和范围过滤实时查询工单，再按字段或规则分组聚合。结果只用于本次接口响应或通知，不写入 `ticket_statistics_*`；规则中的 `hasConclusion` 由 `processed_at` 是否为空派生。方案可使用系统推送、飞书应用文本或飞书卡片通知。
+- 自动化结果通知：`TicketSyncAutomationService` 读取 `ticket.sync.automation.automationNotification` 并在自动化启动时快照到 `ticket.extra_data.ticket_automation.notifyConfig` 和自动日志任务。`TicketNotifyService` 统一渲染工单、商家、门店、阶段、状态和原因变量，日志拉取与 AI 分析的成功、失败或跳过结果均可按成功/失败开关投递到既有推送配置。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
 
@@ -224,6 +225,9 @@ graph TD
 - 日志拉取成功后会优先从日志正文直接提取版本号，命中后创建或关联版本中心记录并写入工单发生版本 ID；未提取到则发送通知并终止后续自动 AI。
 - 手动发起 AI 分析可选择版本中心 ID；未选择时后端使用工单发生版本 ID，再尝试从指定日志记录或最近成功日志记录中提取版本并关联后提交分析。
 - 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
+- 2026-08-25 起，同步自动化结果通知支持模板变量；配置在自动化启动时冻结，后续变更不会影响已创建的日志拉取或 AI 分析任务。模板变量包含 `${ticket_no}`、`${ticket_title}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}`、`${detail}` 和 `${ticket_url}`。
+- 自动 AI 提交在创建任务前被拒绝时，服务返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知原因；失败事件在日志拉取线程会话中单独提交，确保时间线可追溯。
+- 生产 `start.sh` 通过 Supervisor 分离 FastAPI 与 Celery Worker 进程；Agent WebSocket 的进程内连接表不会被 Celery Worker 读取，跨进程 Agent 派发仍需 Redis 消息网关或受保护的 FastAPI 内部中转接口。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。
 - AI 整包日志分析支持三种模式：`digest` 允许优先读取受控大小的 `logs_ai_digest.txt`，证据不足时定点读取原始日志；`full_directory` 不生成摘要，要求直接检索 `source_logs/`；`hybrid` 会生成摘要但摘要只作为定位索引，Agent 必须查看 `source_logs_manifest.json` 或文件清单，并至少对 `source_logs/` 执行一次 `rg` 关键词检索，最终证据尽量引用原始日志文件路径和行号。

@@ -16,7 +16,7 @@ entry_points:
     path: /ticket/{ticket_id}/ai-analysis
     trigger: 手工或日志拉取成功后触发AI分析任务
 created: 2026-05-22
-updated: 2026-07-31
+updated: 2026-08-25
 ---
 
 # 工单自动化链路流程
@@ -41,16 +41,18 @@ sequenceDiagram
   alt 范围外
     S->>S: 仅保留同步与规则映射，跳过 AI、日志、向量和自动群推送
   else 范围内
+  S->>S: 读取自动化结果通知配置并快照到工单和日志任务
   S->>S: 根据商家/门店/POS/日期创建日志拉取任务
   S->>X: 提交日志申请并下载/解析压缩包
   X-->>S: 返回压缩包或结果地址
+  S->>S: 按快照配置推送日志拉取成功、失败或跳过结果
   S->>S: 日志成功后从文本提取版本号
   S->>S: 日志成功后检查 _automation 配置
   S->>C: 提交 AI 分析任务请求（含 agentCode）
   C->>A: 通过 WebSocket 发送 AI 分析任务
   A->>A: 本地执行 Codex Worker
   A-->>C: 回传 AI 分析结果
-  C->>W: 发送AI完成或失败通知
+  C->>W: 按快照配置推送AI完成或失败通知
   C->>S: 回写工单 AI 分析结果 / RCA / 事件
   S->>S: 写入AI消息与ACR快照
   S->>S: 关闭工单时自动生成知识库案例
@@ -77,7 +79,9 @@ sequenceDiagram
 | 5 | 日志拉取下载解析阶段（`TicketLogPullService._process_download`）成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 6 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
 | 7 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
-| 8 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；任务成功或失败结束时都会按通知配置发送消息。 |
+| 8 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
+| 9 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
+| 10 | `TicketNotifyService` 以 `${ticket_no}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}` 等变量渲染通知模板；日志拉取和 AI 分析的成功、失败与因前置条件跳过都会投递到选定的推送配置。 |
 | 9 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。Worker 失败时会回传脱敏的 Provider、模型、实际基础地址、认证来源和 API Key 指纹；仅当 Codex 输出命中 401/Unauthorized/Invalid token 时，才以同一认证信息异步调用 `GET /models`，不调用模型推理，用于区分 token 无效与 Responses 链路异常。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
 | 10 | 手工发起日志拉取、手工补录工单和工单详情页中的重新拉取入口仍保留；这些入口复用同一套日志拉取与 AI 分析服务，避免前后端出现两套流程。 |
 | 11 | 工单详情页的日志拉取、工单新增页的日志拉取、独立日志拉取管理页是三个前端页面，但共用同一套后端日志拉取模型、选项接口和重试逻辑。 |
@@ -100,14 +104,19 @@ sequenceDiagram
 |---|---|
 | 自动拉日志但缺少日志参数 | 创建工单前直接校验并返回失败，阻止生成不完整任务。 |
 | 自动 AI 但未选择 Agent | 前端与后端都拒绝提交，避免任务落到默认 Agent。 |
-| 日志拉取成功后自动 AI 提交失败 | 保留日志拉取成功结果，并在系统日志记录自动 AI 失败原因，同时按通知配置发送失败消息。 |
+| 日志拉取成功后自动 AI 提交失败 | 保留日志拉取成功结果，并把 `result.message` 同时写入 `auto-ai:failed` 工单事件和通知的“原因”字段；事件会单独提交，避免线程会话关闭时回滚。 |
 | 日志正文未提取到版本号 | 发送通知并停止后续 AI 分析，避免把无版本号任务误投递到仓库映射。 |
 | Agent 不在线 | AI 分析任务失败，服务端返回明确的 agent 不在线提示。 |
 | 指定 Agent 未连接 | 提交 AI 分析前直接校验在线连接，未连接时接口返回明确原因；若提交后连接异常导致后台快速失败，前端短轮询任务终态并弹出 `errorMessage`。 |
 | AI 分析成功或失败 | 分别发送成功/失败通知，通知渠道由页面保存的推送配置决定。 |
+| 自动日志拉取参数不完整、任务创建失败或自动 AI 前置条件不满足 | 记录自动化步骤并按失败通知开关推送工单号、商家、门店和具体原因。 |
 | Codex/OpenAI 返回 `bad_response_status_code` | Agent 返回更明确的上游异常摘要；服务端通过日志截断和放宽增强字段必填约束降低重试失败概率。 |
 | Codex 启动返回 `os error 2` | Agent 在启动 Worker 前校验并复制任务级 Codex Home 引用的模型目录文件；引用缺失时返回包含 `model_catalog_json` 路径的明确错误。 |
 | Codex 返回 401/Unauthorized/Invalid token | Agent 记录脱敏认证指纹并执行一次无推理的 `/models` 鉴权探测；任务级 `config.toml` 的 `experimental_bearer_token` 优先于 `auth.json`，启动 Worker 时会由 Provider key 覆盖；若探测 401 则优先检查 Provider key，若探测 200 则携带 Worker 与探测 request ID 排查 Provider Responses 链路。 |
+
+## 进程边界注意事项
+
+生产 `start.sh` 由 Supervisor 分别启动 FastAPI、Celery Worker 和 Celery Beat。日志扫描与下载后的自动 AI 触发运行在 Celery Worker；Agent WebSocket 连接及 `connected_agents` 注册表运行在 FastAPI 进程内，普通 Python 内存字典不会跨进程共享。因此自动任务可能在 Worker 中得到“指定 Agent 未连接”，即使 Agent 实际已连接 API 进程。跨进程投递需后续引入 Redis 定向消息/回包网关，或由 Worker 调用受保护的 FastAPI 内部中转接口；在方案落地前不要将多进程部署视为已支持。
 
 ## 参见
 

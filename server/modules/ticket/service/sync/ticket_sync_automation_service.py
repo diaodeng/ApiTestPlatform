@@ -24,6 +24,7 @@ from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel, Tic
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from modules.ticket.service.sync.ticket_sync_automation_input_service import TicketSyncAutomationInputService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_field_mapping_service import (
@@ -548,6 +549,11 @@ class TicketSyncAutomationService:
             return {}
         config = TicketSyncConfigService.load_sync_config(db)
         automation = sync_object.automation
+        notification_config = (
+            config.get("automationNotification")
+            if isinstance(config.get("automationNotification"), dict)
+            else {}
+        )
         # 优先级: 任务级 automation > automationConfig 页面配置
         if automation is not None:
             auto_log_pull = bool(automation.auto_log_pull)
@@ -568,6 +574,17 @@ class TicketSyncAutomationService:
             ai_agent_code = str(config.get("logPullDefaults", {}).get("aiAgentCode") or "").strip() or None
             ai_provider_code = str(config.get("logPullDefaults", {}).get("aiProviderCode") or "").strip() or None
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
+        ticket_automation = (
+            dict(extra_data.get("ticket_automation"))
+            if isinstance(extra_data.get("ticket_automation"), dict)
+            else {}
+        )
+        # 自动化执行时固化通知配置，避免后台日志/AI任务读取到后续修改后的配置。
+        ticket_automation["notifyConfig"] = notification_config
+        extra_data["ticket_automation"] = ticket_automation
+        TicketDao.update_ticket(db, ticket_id, {"extra_data": extra_data})
+        db.flush()
+        ticket = TicketDao.get_ticket_by_id(db, ticket_id) or ticket
         meta = TicketSyncPayloadService.build_meta(extra_data)
         safe_detected = cls._json_safe_detected(detected)
         summary: dict[str, Any] = {"detected": safe_detected}
@@ -655,6 +672,7 @@ class TicketSyncAutomationService:
                         "modifyTime": resolved_modify_time,
                     }
                 )
+                runtime_config["notifyConfig"] = notification_config
                 if auto_ai_analysis:
                     runtime_config["autoAiEnabled"] = True
                     runtime_config["aiAgentCode"] = ai_agent_code
@@ -713,6 +731,16 @@ class TicketSyncAutomationService:
                         status="skipped",
                         detail=audit_detail,
                     )
+                    TicketNotifyService.send_ticket_notification(
+                        db,
+                        ticket,
+                        title="工单自动化结果通知",
+                        status="failed",
+                        message="自动日志拉取已跳过",
+                        detail=skip_reason,
+                        notify_config=notification_config,
+                        stage="log_pull",
+                    )
                     if auto_ai_analysis:
                         summary["aiAnalysisSkipReason"] = "自动拉日志未触发，自动AI分析跳过"
                         cls.mark_automation_step(
@@ -748,9 +776,29 @@ class TicketSyncAutomationService:
                         else:
                             summary["logPullError"] = log_result.message
                             cls.mark_automation_step(meta, step="log_pull", status="failed", error=log_result.message)
+                            TicketNotifyService.send_ticket_notification(
+                                db,
+                                ticket,
+                                title="工单自动化结果通知",
+                                status="failed",
+                                message="自动日志拉取任务创建失败",
+                                detail=log_result.message,
+                                notify_config=notification_config,
+                                stage="log_pull",
+                            )
                     except Exception as exc:
                         summary["logPullError"] = str(exc)
                         cls.mark_automation_step(meta, step="log_pull", status="failed", error=str(exc))
+                        TicketNotifyService.send_ticket_notification(
+                            db,
+                            ticket,
+                            title="工单自动化结果通知",
+                            status="failed",
+                            message="自动日志拉取任务创建异常",
+                            detail=str(exc),
+                            notify_config=notification_config,
+                            stage="log_pull",
+                        )
             elif auto_ai_analysis:
                 version_id = ticket.affected_version_id
                 latest_log = TicketLogPullService.get_latest_summary(db, ticket_id)
@@ -775,13 +823,43 @@ class TicketSyncAutomationService:
                     else:
                         summary["aiAnalysisError"] = ai_result.message
                         cls.mark_automation_step(meta, step="ai_analysis", status="failed", error=ai_result.message)
+                        TicketNotifyService.send_ticket_notification(
+                            db,
+                            ticket,
+                            title="工单自动化结果通知",
+                            status="failed",
+                            message="自动 AI 分析任务创建失败",
+                            detail=ai_result.message,
+                            notify_config=notification_config,
+                            stage="ai_analysis",
+                        )
                 else:
                     reason = "缺少版本中心记录或可用日志记录，跳过自动 AI"
                     summary["aiAnalysisSkipReason"] = reason
                     cls.mark_automation_step(meta, step="ai_analysis", status="skipped", detail={"reason": reason})
+                    TicketNotifyService.send_ticket_notification(
+                        db,
+                        ticket,
+                        title="工单自动化结果通知",
+                        status="failed",
+                        message="自动 AI 分析已跳过",
+                        detail=reason,
+                        notify_config=notification_config,
+                        stage="ai_analysis",
+                    )
         except Exception as exc:
             cls.mark_automation_step(meta, step="automation", status="failed", error=str(exc))
             logger.exception(f"工单[{ticket_id}]同步自动化执行异常: {exc}")
+            TicketNotifyService.send_ticket_notification(
+                db,
+                ticket,
+                title="工单自动化结果通知",
+                status="failed",
+                message="同步后自动化执行异常",
+                detail=str(exc),
+                notify_config=notification_config,
+                stage="automation",
+            )
         finally:
             ticket = TicketDao.get_ticket_by_id(db, ticket_id)
             extra_data = dict(ticket.extra_data or {}) if ticket and isinstance(ticket.extra_data, dict) else {}
