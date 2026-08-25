@@ -2004,3 +2004,11 @@ updated: 2026-08-25
 - 变更传播链：同步配置页 -> `POST /ticket/sync/automation/manual-run` -> 手动自动化服务 -> 飞书单工单同步入库或本地 `Ticket` ORM 快照 -> `bitable_pull` 后处理。
 - 关键约束：飞书模式忽略定时开关、常规筛选和时间窗口，但仍要求连接与字段映射完整且精确匹配唯一记录；数据库模式不重新入库、不覆盖工单字段；两种模式均服从自动化范围与现有场景开关。
 - 总共涉及页面：4。
+
+
+## [2026-08-25] 修复 | 工单 AI 分析 Provider 下发优先级
+
+- 触发：工单分析选择 Claude Code/Codex Provider 后，Agent 仍可能读取旧 `workerEnv` 或任务工作区配置。
+- 根因：服务端扩展环境变量覆盖了 Provider 核心变量；Codex `config.toml` 的缩进 `base_url` 未被替换；Claude 工作区 `.env` 只追加、不覆盖旧值。
+- 修复：Provider 核心连接配置优先于 `workerEnv`，Codex 支持缩进配置覆盖，Claude `.env` 对同名变量执行覆盖。
+- 并发配置：`ticket.ai.agent.maxConcurrentTasks`，默认值 `1`，入口为“系统管理 → AI 配置中心 → Agent 并发数”。

@@ -61,6 +61,7 @@
 - 同步自动化配置中，翻译、标题总结、知识提炼、AI 分类、同步提取、汇总通知 AI 解读等各 AI 配置段均支持独立选择 Provider 和模型。
 - 如果 Provider 配置了 `agentCode`，前端会自动回填对应 Agent。
 - 服务端会把 Provider 解析成 `providerEnv` 下发给 `client_new`，由 Worker 执行时注入环境变量。
+- Provider 下发优先级为：当前选中 Provider 的核心连接配置（`apiKey`、`baseUrl`、`defaultModel`） > Provider 的 `workerEnv` 扩展配置 > Agent 工作区中已有的旧配置；因此切换或重试 Provider 时，旧的 Claude Code `.env` 和 Codex Provider 地址会被当前 Provider 覆盖。
 - 若 Provider 里配置了模型名称，`client_new` 会把它补到 Worker 命令中作为模型覆盖值。
 
 ## 执行规则
@@ -70,6 +71,15 @@
 - 工单 AI 分析只使用 `ticket_analysis_worker` 用途的 Provider，执行器可选 `codex`（Codex Worker）或 `claude_code`（Claude Code Worker）；发起分析弹窗会按 Provider 的 `supportedExecutors` 收敛可选执行器，并按 `preferredExecutor` 回填默认值。
 - Claude Code Worker 以 `claude -p` 非交互模式执行，采用只读权限模式（`plan`）与工具白名单（`Read,Grep,Glob,Bash(rg *)`）保证”只分析不改代码”。
 - 模型名称在使用方页面选择后，会透传给协议服务，覆盖 Provider 的默认模型。如果配置段中 `modelName` 为空，则回退使用 Provider 的 `defaultModel`。
+
+## Agent 工单分析并发限制
+
+- 配置入口：`系统管理 -> AI 配置中心 -> Agent 并发数`。
+- 配置键：`ticket.ai.agent.maxConcurrentTasks`。
+- 默认值：`1`。
+- 含义：限制单个 Agent 同时进入工单 AI 分析执行阶段的任务数；超过上限的任务会进入队列等待，不会立即失败。
+- 适用范围：工单 AI 分析以及日志拉取后触发的自动工单 AI 分析；不同 Agent 分别计算并发额度。
+- 调大并发数前应确认 Agent 主机、Codex/Claude CLI 和 Provider 的限流能力；若任务频繁断连或资源争抢，建议恢复为 `1`。
 
 ## Codex Worker 鉴权注意事项
 - Agent 会为每次工单 AI 分析创建独立的任务级 Codex 配置目录，不直接修改本机全局 Codex 配置。

@@ -215,9 +215,9 @@ class TicketAiAnalysisService:
             if config_file.exists():
                 try:
                     config_text = config_file.read_text(encoding="utf-8")
-                    match = re.search(r'^\s*base_url\s*=\s*"([^"]+)"', config_text, flags=re.MULTILINE)
+                    match = re.search(r'^[ \t]*base_url\s*=\s*(["\'])(.*?)\1', config_text, flags=re.MULTILINE)
                     if match:
-                        return match.group(1).strip().rstrip("/")
+                        return match.group(2).strip().rstrip("/")
                 except OSError as exc:
                     logger.warning(f"读取任务级 Codex config.toml 失败，将回退环境变量: {exc}")
         env_key = "ANTHROPIC_BASE_URL" if provider_type == "claude" else "OPENAI_BASE_URL"
@@ -375,9 +375,11 @@ class TicketAiAnalysisService:
             if config_file.exists():
                 try:
                     config_text = config_file.read_text(encoding="utf-8")
+                    # base_url 通常位于 [model_providers.<name>] 节中，前面带缩进，
+                    # 旧正则只匹配行首无缩进配置，导致下发 Provider 地址没有覆盖实际模型 Provider。
                     new_config = re.sub(
-                        r'^(base_url\s*=\s*)"[^"]*"',
-                        rf'\1"{base_url}"',
+                        r'^([ \t]*base_url\s*=\s*)(["\'])(.*?)(\2)',
+                        lambda match: f'{match.group(1)}{match.group(2)}{base_url}{match.group(4)}',
                         config_text,
                         flags=re.MULTILINE,
                     )
@@ -691,12 +693,26 @@ class TicketAiAnalysisService:
                 existing_lines: list[str] = []
                 if env_file.exists():
                     existing_lines = env_file.read_text(encoding="utf-8").splitlines()
-                existing_keys = {line.split("=", 1)[0] for line in existing_lines if "=" in line}
-                for line in env_lines:
-                    key = line.split("=", 1)[0]
-                    if key not in existing_keys:
-                        existing_lines.append(line)
-                env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+                # 同一工作区重试或切换 Provider 时必须覆盖旧值，不能只追加缺失键。
+                # 否则 Claude Code 会继续读取上一次任务的 API 地址和密钥。
+                override_map = {
+                    line.split("=", 1)[0]: line
+                    for line in env_lines
+                    if "=" in line
+                }
+                updated_lines: list[str] = []
+                written_keys: set[str] = set()
+                for existing_line in existing_lines:
+                    key = existing_line.split("=", 1)[0] if "=" in existing_line else ""
+                    if key in override_map:
+                        updated_lines.append(override_map[key])
+                        written_keys.add(key)
+                    else:
+                        updated_lines.append(existing_line)
+                updated_lines.extend(
+                    line for key, line in override_map.items() if key not in written_keys
+                )
+                env_file.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
                 logger.info(f"已为 Claude Code 写入 .env: api_key={'***' if api_key else ''}")
             except Exception as exc:
                 logger.warning(f"写入 Claude Code .env 失败: {exc}")

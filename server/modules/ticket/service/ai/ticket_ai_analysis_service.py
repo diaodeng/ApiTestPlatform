@@ -930,7 +930,12 @@ class TicketAiAnalysisService:
         """
         if not provider:
             return {}
-        env_overrides: dict[str, str] = {}
+        # 先合并扩展环境变量，再写入 Provider 的核心连接信息。
+        # workerEnv 只用于补充 Worker 参数，不能覆盖当前工单明确选择的 Provider
+        # 的密钥、地址和模型，否则会出现“界面选择了 Provider，但 Agent 仍调用旧地址”的问题。
+        env_overrides: dict[str, str] = cls._normalize_provider_worker_env(
+            getattr(provider, "worker_env", None)
+        )
         try:
             secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
         except Exception as exc:
@@ -963,7 +968,6 @@ class TicketAiAnalysisService:
             env_overrides["AI_PROVIDER_PLATFORM"] = platform_code
         if getattr(provider, "provider_level", None) is not None:
             env_overrides["AI_PROVIDER_LEVEL"] = str(provider.provider_level)
-        env_overrides.update(cls._normalize_provider_worker_env(getattr(provider, "worker_env", None)))
         return env_overrides
 
     @staticmethod

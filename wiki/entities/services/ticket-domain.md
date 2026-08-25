@@ -302,6 +302,7 @@ graph TD
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
 - 日志拉取后的自动 AI 已支持跨进程派发：Celery Worker 通过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 投递请求，QTR 域使用 Redis 共享队列和运行中租约控制单 Agent 并发；系统参数 `ticket.ai.agent.maxConcurrentTasks` 默认值为 `1`，超过上限的请求只会排队等待，不会直接失败。
+- 工单 AI 分析的 Provider 下发以当前选中 Provider 的核心连接配置为准：`apiKey/baseUrl/defaultModel` 覆盖同名 `workerEnv` 扩展变量；Agent 侧 Codex 任务级 `config.toml` 和 Claude Code 工作区 `.env` 也会覆盖旧 Provider 值，避免重试或切换 Provider 时继续访问旧地址。
 - AI 分析任务提交前会校验解析到的 Agent 是否已连接服务端；指定 Agent 离线时接口直接返回明确失败原因，不再创建必然失败的后台任务。提交或重试后若后台快速失败，前端会短轮询任务终态并弹出任务 `error_message`。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本中心 ID 匹配映射，未命中时拒绝提交。
 - 发起 AI 分析和协同/AI 表单的前端选择默认值采用“手动记忆 > 工单自动化配置 > 最近一次 AI 分析”优先级；Agent、Provider、追加提示词的手动选择保存在浏览器本地偏好中，Provider 绑定 Agent 时会在未手动指定 Agent 的情况下自动带入。
