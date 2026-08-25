@@ -1,7 +1,7 @@
 ########################################
 # Stage 1 — 前端构建阶段 (Vue Build)
 ########################################
-FROM node:20-alpine3.19 AS frontend-build
+FROM node:22-alpine AS frontend-build
 
 WORKDIR /qtr-frontend
 ARG VITE_APP_BASE_API
