@@ -296,6 +296,7 @@ export function useSyncConfig(proxy) {
       scoPatterns: [],
       versionPatterns: [],
       logPullDefaults: {
+        environment: '',
         commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500,
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
@@ -412,6 +413,7 @@ export function useSyncConfig(proxy) {
   function applyLogPullDefaultsConfig(payload = {}) {
     const logPullDefaults = payload || {}
     form.logPullDefaults = {
+      environment: String(logPullDefaults.environment || '').trim(),
       commandDataType: Number(logPullDefaults.commandDataType || 1),
       fileMaxSize: Number(logPullDefaults.fileMaxSize || 500),
       zipMaxSize: Number(logPullDefaults.zipMaxSize || 500),

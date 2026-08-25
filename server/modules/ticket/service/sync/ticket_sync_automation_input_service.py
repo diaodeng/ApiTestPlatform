@@ -58,10 +58,17 @@ class TicketSyncAutomationInputService:
         normalized_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(modify_time)
         if normalized_date:
             result["modifyTime"] = normalized_date
-        for key in ("path", "commandDataType", "fileMaxSize", "zipMaxSize", "storageMode"):
+        for key in (
+            "environment",
+            "path",
+            "commandDataType",
+            "fileMaxSize",
+            "zipMaxSize",
+            "storageMode",
+        ):
             value = cls._value(source, key)
             if value not in (None, ""):
-                result[key] = value
+                result[key] = str(value).strip() if key in {"environment", "path", "storageMode"} else value
         return result
 
     @classmethod
@@ -84,6 +91,14 @@ class TicketSyncAutomationInputService:
             hints = cls._canonicalize(sync_object.extra_data.get("log_pull_hints"))
         sync_config = cls._canonicalize(sync_object.log_pull_config)
         detected_config = cls._canonicalize(detected)
+        detected_store_mapping_ambiguous = bool(
+            isinstance(detected, dict) and detected.get("storeMappingAmbiguous")
+        )
+        detected_store_mapping_candidates = (
+            detected.get("storeMappingCandidates")
+            if isinstance(detected, dict) and isinstance(detected.get("storeMappingCandidates"), list)
+            else []
+        )
         ai_result: dict[str, Any] = {}
         if isinstance(ticket_extra_data, dict):
             state = ticket_extra_data.get("ai_sync_extract")
@@ -115,18 +130,31 @@ class TicketSyncAutomationInputService:
             merged.update(source)
         if source_store_code:
             merged["sourceStoreCode"] = source_store_code
+        if detected_store_mapping_ambiguous:
+            # 同一商家和外部编码命中多个 org_no 时必须中断自动提交，不能静默采用历史或任务参数。
+            merged.pop("storeId", None)
+            merged["storeMappingAmbiguous"] = True
+            merged["storeMappingCandidates"] = detected_store_mapping_candidates
+            merged["storeSelectionReason"] = "ambiguous_external_store_mapping"
+        elif source_store_code:
+            detected_store_id = TicketStoreResolutionUtil.normalize_store_value(detected_config.get("storeId"))
             ai_store = ai_result.get("storeId")
-            existing_store_id = sync_config.get("storeId") or hints.get("storeId") or detected_config.get("storeId")
-            selected_store_id, selection_reason = TicketStoreResolutionUtil.select_store_id(
-                source_store_code=source_store_code,
-                ai_store=ai_store,
-                existing_store_id=existing_store_id,
-            )
-            if "storeId" not in task_config and selected_store_id:
-                merged["storeId"] = selected_store_id
-            merged["storeSelectionReason"] = (
-                "task_store_id_override" if "storeId" in task_config else selection_reason
-            )
+            existing_store_id = sync_config.get("storeId") or hints.get("storeId") or detected_store_id
+            if "storeId" not in task_config and detected_store_id and detected_store_id != source_store_code:
+                # 字段识别已将外部编码映射为日志接口 org_no，不能再被原始来源编码覆盖。
+                merged["storeId"] = detected_store_id
+                merged["storeSelectionReason"] = "detected_mapped_store_id"
+            else:
+                selected_store_id, selection_reason = TicketStoreResolutionUtil.select_store_id(
+                    source_store_code=source_store_code,
+                    ai_store=ai_store,
+                    existing_store_id=existing_store_id,
+                )
+                if "storeId" not in task_config and selected_store_id:
+                    merged["storeId"] = selected_store_id
+                merged["storeSelectionReason"] = (
+                    "task_store_id_override" if "storeId" in task_config else selection_reason
+                )
         # 明确字段优先于检测结果，但不能将空值覆盖为旧值。
         merged["ticketId"] = ticket_id
         if "scoNo" in merged and "posNo" not in merged:

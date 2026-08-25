@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
@@ -41,7 +42,19 @@ def test_module_mapping_result_is_json_safe_for_automation_detail():
     json.dumps(safe, ensure_ascii=False)
 
 
-def test_store_resolution_prefers_matching_ai_and_falls_back_to_source_code():
+
+def test_automation_step_detail_converts_datetime_to_json_value():
+    """自动化步骤审计中的时间对象必须转换后才能写入 JSON 扩展字段。"""
+    meta: dict = {}
+    TicketSyncAutomationService.mark_automation_step(
+        meta,
+        step="log_pull",
+        status="submitted",
+        detail={"submittedAt": datetime(2026, 8, 25, 14, 2, 55)},
+    )
+    detail = meta["sync_state"]["automation"]["steps"]["log_pull"]["detail"]
+    assert detail["submittedAt"] == "2026-08-25T14:02:55"
+    json.dumps(meta, ensure_ascii=False)
     """来源编码只读，AI 仅在相等或被来源编码包含时成为最终门店。"""
     assert TicketStoreResolutionUtil.select_store_id(
         source_store_code="ORG-552283",
@@ -72,6 +85,17 @@ def test_store_resolution_without_source_allows_ai_to_replace_existing_store():
         ai_store="NEW",
         existing_store_id="OLD",
     ) == ("NEW", "ai_without_source")
+
+
+def test_store_resolution_keeps_existing_value_when_both_sources_are_empty():
+    """没有来源编码和有效 AI 值时保留已有日志门店。"""
+    assert TicketStoreResolutionUtil.select_store_id(
+        source_store_code="",
+        ai_store="",
+        existing_store_id="OLD",
+    ) == ("OLD", "keep_existing_store_id")
+
+
 def test_sync_ai_field_service_uses_source_store_rule_and_never_rewrites_source_code():
     """AI 新值按来源编码规则更新 storeId，但不反写 sourceStoreCode。"""
     from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel

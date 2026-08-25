@@ -170,6 +170,7 @@ class TicketSyncConfigService:
                 r"(?:版本|version|app[_\\s-]*version)[:：\\s-]*([A-Za-z0-9._/-]+)",
             ],
             "logPullDefaults": {
+                "environment": "",
                 "commandDataType": 1,
                 "fileMaxSize": 500,
                 "zipMaxSize": 500,
@@ -1298,6 +1299,14 @@ class TicketSyncConfigService:
         merged["externalFieldModel"] = cls.normalize_external_field_model_config(merged.get("externalFieldModel"))
         if not isinstance(merged.get("logPullDefaults"), dict):
             merged["logPullDefaults"] = cls.default_sync_config()["logPullDefaults"]
+        else:
+            merged["logPullDefaults"] = {
+                **cls.default_sync_config()["logPullDefaults"],
+                **merged["logPullDefaults"],
+            }
+        merged["logPullDefaults"]["environment"] = str(
+            merged["logPullDefaults"].get("environment") or ""
+        ).strip()
         # 最大并发数已迁移到日志拉取存储配置（maxWorkers），这里剔除历史遗留字段，避免两处配置不一致。
         merged["logPullDefaults"].pop("logPullConcurrency", None)
         if not isinstance(merged.get("promptTemplates"), dict):

@@ -2754,6 +2754,25 @@
             <el-form :model="form.logPullDefaults" label-width="150px">
               <el-row :gutter="16">
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="默认日志环境">
+                    <el-select
+                      v-model="form.logPullDefaults.environment"
+                      filterable
+                      clearable
+                      placeholder="选择环境分组和子环境"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in logPullExternalEnvironmentOptions"
+                        :key="item.value"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-tip">自动拉日志未单独指定环境时使用；格式为“分组:子环境”。</div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="命令类型">
                     <el-input-number
                       v-model="form.logPullDefaults.commandDataType"
@@ -3310,6 +3329,7 @@
     saving: logPullExternalSaving,
     groups: logPullExternalGroups,
     groupKeys: logPullExternalGroupKeys,
+    environmentOptions: logPullExternalEnvironmentOptions,
     vendorFilterOptions: logPullExternalVendorFilterOptions,
     credentialBindingOptions: logPullExternalCredentialBindingOptions,
     loadConfig: logPullExternalLoadConfig,

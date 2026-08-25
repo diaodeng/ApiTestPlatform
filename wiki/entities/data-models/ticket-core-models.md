@@ -107,7 +107,7 @@ erDiagram
 - `Ticket.issue_type_id/issue_type_name`、`Ticket.is_problem`、`Ticket.root_cause_type`、`Ticket.solution_type`、`Ticket.resolution_code/resolution_name` 是工单统计与后续 AI 分析的结构化维度，不能塞进 `extra_data` 替代；`Ticket.module_id/module_name` 继续承担业务域维度。
 - `Ticket.classification_source/classification_rule_id/classification_updated_at` 记录工单类型来源。人工编辑优先级最高，其次是外部字段规则映射，最后是 AI；规则命中详情写入 `extra_data.external_classification` 以便审计。
 - `Ticket.problem_pattern_code/problem_pattern_name` 是长期治理用的细分问题类型字段，承载“内存泄露”“280开头券为纸质券规则说明”等固定问题模式；`problem_pattern_confidence/source/verified/verified_by/verified_at` 记录 AI 置信度、来源和人工确认状态。人工确认后的细分问题默认不被 AI 自动分类覆盖。
-- `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。
+- `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。外部同步工单的 `extra_data.log_pull_hints.sourceStoreCode` 保存原始来源门店编码，`storeId` 保存经过商家门店配置映射并校验后的日志接口 `org_no`；两者语义独立，不能把 SAP 编码等来源值直接作为日志接口门店提交。若同一商家和同一外部编码命中多个不同 `org_no`，自动化审计保存 `storeMappingCandidates` 和跳过原因，不静默选择候选门店。
 - `Ticket.extra_data.ticket_automation.notifyConfig` 可记录自动化链路使用的推送配置，便于日志拉取失败、版本号缺失和 AI 结束时直接发送消息。
 - 版本文本不能写入 `Ticket.extra_data`；日志正文、Excel 和外部同步的版本文本只在当前输入处理过程中解析为 `version_id`。
 - `Ticket.current_assignee_*` 继续表示当前处理人；新增 `Ticket.first_line_assignee_*` 表示一线接单人员，`Ticket.internal_owner_*` 表示内部模块/工单负责人，三者语义分离，避免一个字段同时承载多种职责。

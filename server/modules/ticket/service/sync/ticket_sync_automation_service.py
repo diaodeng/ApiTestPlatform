@@ -5,7 +5,8 @@
 自动 AI 分析等同步自动化步骤。
 """
 import re
-from datetime import datetime
+from dataclasses import asdict, is_dataclass
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import func
@@ -279,11 +280,24 @@ class TicketSyncAutomationService:
             )
         else:
             store_id, store_name = "", ""
+        store_candidates = (
+            TicketSyncFieldMappingService.list_store_candidates_by_external_value(
+                db,
+                vendor_id=vendor_id,
+                ticket_store=ticket_store,
+            )
+            if apply_external_mappings
+            else []
+        )
+        store_mapping_ambiguous = len(store_candidates) > 1
+        if store_mapping_ambiguous:
+            # 多个 org_no 命中同一外部编码时禁止静默选值，交由自动日志参数校验中断。
+            store_id, store_name = "", ""
         if not store_name:
             store_name = str(log_pull_hints.get("storeName") or log_pull_hints.get("store_name") or "").strip()
-        if not store_id:
+        if not store_id and not store_mapping_ambiguous:
             store_id = str(log_pull_hints.get("storeId") or log_pull_hints.get("store_id") or "").strip()
-        if not store_id:
+        if not store_id and not store_mapping_ambiguous:
             store_id = str((sync_object.log_pull_config or {}).get("storeId") or "").strip()
         if apply_external_mappings:
             status_code = TicketSyncFieldMappingService.resolve_status_by_external_value(
@@ -411,6 +425,8 @@ class TicketSyncAutomationService:
             "vendorName": vendor_name,
             "storeId": store_id,
             "storeName": store_name,
+            "storeMappingAmbiguous": store_mapping_ambiguous,
+            "storeMappingCandidates": store_candidates,
             "status": status_code or str(sync_object.status or "").strip(),
             "assigneeId": assignee_id,
             "assigneeName": assignee_name,
@@ -444,7 +460,24 @@ class TicketSyncAutomationService:
         module_result = payload.get("moduleMappingResult")
         if isinstance(module_result, ModuleMappingResult):
             payload["moduleMappingResult"] = module_result.to_payload()
-        return payload
+        return cls._json_safe_value(payload)
+
+    @classmethod
+    def _json_safe_value(cls, value: Any) -> Any:
+        """递归转换自动化审计值，确保 JSON 扩展字段不包含 ORM 或时间对象。"""
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, ModuleMappingResult):
+            return cls._json_safe_value(value.to_payload())
+        if hasattr(value, "model_dump"):
+            return cls._json_safe_value(value.model_dump(mode="json"))
+        if is_dataclass(value):
+            return cls._json_safe_value(asdict(value))
+        if isinstance(value, dict):
+            return {str(key): cls._json_safe_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [cls._json_safe_value(item) for item in value]
+        return value
 
     @classmethod
     def mark_automation_step(
@@ -473,7 +506,7 @@ class TicketSyncAutomationService:
             **previous,
             "status": status,
             "updated_at": SyncUtil.now_iso(),
-            "detail": detail,
+            "detail": cls._json_safe_value(detail),
             "error": error,
         }
         automation["steps"] = steps
@@ -627,11 +660,18 @@ class TicketSyncAutomationService:
                     runtime_config["aiAgentCode"] = ai_agent_code
                     runtime_config["aiProviderCode"] = ai_provider_code
                 missing_log_pull_fields: list[str] = []
+                store_mapping_ambiguous = bool(runtime_config.get("storeMappingAmbiguous"))
+                store_mapping_candidates = runtime_config.get("storeMappingCandidates")
+                if store_mapping_ambiguous:
+                    # 同一商家和外部编码命中多个 org_no 时必须人工消歧，禁止静默提交任一门店。
+                    missing_log_pull_fields.append("storeId(外部门店编码匹配到多个org_no)")
                 if not resolved_vendor_id:
                     missing_log_pull_fields.append("vendorId")
-                if not resolved_store_id:
+                if not str(runtime_config.get("environment") or "").strip():
+                    missing_log_pull_fields.append("environment")
+                if not resolved_store_id and not store_mapping_ambiguous:
                     missing_log_pull_fields.append("storeId")
-                else:
+                elif resolved_store_id and not store_mapping_ambiguous:
                     # 按商家过滤后的门店中校验 org_no 是否匹配。
                     if resolved_vendor_id:
                         store_verified = TicketLogPullDao.verify_store_by_org_no(
@@ -646,13 +686,32 @@ class TicketSyncAutomationService:
                 if not resolved_modify_time:
                     missing_log_pull_fields.append("modifyTime")
                 if missing_log_pull_fields:
-                    skip_reason = f"自动拉日志参数不完整，缺少: {', '.join(missing_log_pull_fields)}"
+                    skip_reason = (
+                        "外部门店编码匹配到多个日志门店，无法自动选择"
+                        if store_mapping_ambiguous
+                        else f"自动拉日志参数不完整，缺少: {', '.join(missing_log_pull_fields)}"
+                    )
+                    audit_detail = {
+                        "reason": skip_reason,
+                        **runtime_config,
+                    }
+                    if store_mapping_ambiguous:
+                        audit_detail["storeMappingCandidates"] = store_mapping_candidates or []
+                    logger.warning(
+                        f"自动拉日志跳过: ticket_no={sync_object.ticket_no}, "
+                        f"ticket_id={ticket_id}, scene={sync_scene}, reason={skip_reason}, "
+                        f"vendorId={resolved_vendor_id}, sourceStoreCode={runtime_config.get('sourceStoreCode')}, "
+                        f"storeMappingCandidates={store_mapping_candidates or []}, "
+                        f"runtime_config={runtime_config}"
+                    )
                     summary["logPullSkipReason"] = skip_reason
+                    if store_mapping_ambiguous:
+                        summary["storeMappingCandidates"] = store_mapping_candidates or []
                     cls.mark_automation_step(
                         meta,
                         step="log_pull",
                         status="skipped",
-                        detail={"reason": skip_reason, **runtime_config},
+                        detail=audit_detail,
                     )
                     if auto_ai_analysis:
                         summary["aiAnalysisSkipReason"] = "自动拉日志未触发，自动AI分析跳过"
@@ -660,7 +719,10 @@ class TicketSyncAutomationService:
                             meta,
                             step="ai_analysis",
                             status="skipped",
-                            detail={"reason": "自动拉日志参数不完整，跳过自动AI分析"},
+                            detail={
+                                "reason": "自动拉日志参数不完整，跳过自动AI分析",
+                                "storeMappingCandidates": store_mapping_candidates or [],
+                            },
                         )
                 else:
                     try:

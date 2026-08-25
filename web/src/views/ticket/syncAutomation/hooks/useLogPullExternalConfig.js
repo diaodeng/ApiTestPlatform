@@ -24,6 +24,14 @@ export function useLogPullExternalConfig(proxy) {
   /** 生成的可用分组 key 列表，用于 UI 遍历 */
   const groupKeys = computed(() => Object.keys(groups));
 
+  /** 默认日志拉取环境选项，值使用后端记录格式 groupKey:itemKey。 */
+  const environmentOptions = computed(() => Object.entries(groups).flatMap(([groupKey, group]) =>
+    Object.entries(group.items || {}).map(([itemKey, item]) => ({
+      value: `${groupKey}:${itemKey}`,
+      label: `${group.label || groupKey} / ${item.label || itemKey}`,
+    }))
+  ));
+
   /**
    * 商家 vendorFilter 多选选项（用于 el-select multiple）。
    * 每个选项为 { label: '10001 - 商家A', value: '10001' }
@@ -241,6 +249,7 @@ export function useLogPullExternalConfig(proxy) {
     saving,
     groups,
     groupKeys,
+    environmentOptions,
     allVendorOptions,
     vendorFilterOptions,
     credentialBindingOptions,

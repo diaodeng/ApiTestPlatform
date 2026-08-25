@@ -65,6 +65,7 @@ from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
+from utils.metrics.task_memory import get_task_memory_observer
 
 
 class TicketLogContentTooLargeError(Exception):
@@ -2306,6 +2307,17 @@ class TicketLogPullService:
         :param record_id: 记录ID
         :return: 无
         """
+        observation = get_task_memory_observer("api").start(
+            {
+                "task_id": record_id,
+                "task_key": "ticket_log_pull",
+                "task_family": "ticket_log_pull",
+                "queue_name": "ticket-log-pull",
+                "owner_type": "ticket",
+                "trigger_type": "background",
+            }
+        )
+        status = "success"
         try:
             with SessionLocal() as db:
                 record = TicketLogPullDao.get_record_by_id(db, record_id)
@@ -2322,10 +2334,23 @@ class TicketLogPullService:
                 }:
                     cls._process_download(db, record_id)
         except Exception as exc:
-            logger.exception(exc)
+            status = "failed"
+            logger.exception(f"日志拉取记录执行失败: record_id={record_id}, error={exc}")
         finally:
             with cls._executor_lock:
                 cls._active_record_ids.discard(record_id)
+            get_task_memory_observer("api").finish(
+                {
+                    "task_id": record_id,
+                    "task_key": "ticket_log_pull",
+                    "task_family": "ticket_log_pull",
+                    "queue_name": "ticket-log-pull",
+                    "owner_type": "ticket",
+                    "trigger_type": "background",
+                },
+                observation,
+                status,
+            )
             gc.collect()
 
     @classmethod

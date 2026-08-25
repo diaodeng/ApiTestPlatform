@@ -61,6 +61,7 @@ from modules.ticket.service.notification.ticket_notify_service import TicketNoti
 from utils.api_key_util import ApiKeyUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
+from utils.metrics.task_memory import get_task_memory_observer
 from utils.page_util import PageResponseModel
 from utils.snowflake import snowIdWorker
 
@@ -2429,15 +2430,39 @@ class TicketAiAnalysisService:
         :param task_id: 任务ID
         :return: 无
         """
+        observation = get_task_memory_observer("api").start(
+            {
+                "task_id": task_id,
+                "task_key": "ticket_ai_analysis",
+                "task_family": "ticket_ai_analysis",
+                "queue_name": "ticket-ai-analysis",
+                "owner_type": "ticket",
+                "trigger_type": "background",
+            }
+        )
+        status = "success"
         try:
             with SessionLocal() as db:
                 cls._log_task_step(task_id, "RUN", "开始执行 AI 分析任务")
                 cls._process_task(db, task_id)
         except Exception as exc:
+            status = "failed"
             logger.exception(f"AI分析任务[{task_id}] 线程执行异常: {exc}")
         finally:
             with cls._executor_lock:
                 cls._active_task_ids.discard(task_id)
+            get_task_memory_observer("api").finish(
+                {
+                    "task_id": task_id,
+                    "task_key": "ticket_ai_analysis",
+                    "task_family": "ticket_ai_analysis",
+                    "queue_name": "ticket-ai-analysis",
+                    "owner_type": "ticket",
+                    "trigger_type": "background",
+                },
+                observation,
+                status,
+            )
 
     @classmethod
     def _finalize_sync_publish_after_ai(cls, db: Session, *, ticket_id: int, status: str) -> None:

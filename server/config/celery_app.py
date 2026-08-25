@@ -2,8 +2,11 @@ import os
 from urllib.parse import quote
 
 from celery import Celery
+from celery.signals import worker_ready
 
 from config.env import RedisConfig
+from utils.log_util import logger
+from utils.metrics import PushMetrics
 
 
 def build_redis_url(database: int) -> str:
@@ -50,6 +53,20 @@ celery_app.conf.update(
     beat_scheduler="config.celery_scheduler:DatabaseScheduler",
     beat_max_loop_interval=5,
 )
+
+_metrics_thread = None
+
+
+@worker_ready.connect
+def start_worker_metrics(**kwargs):
+    """Celery Worker 就绪后启动独立的进程指标采集线程。"""
+    global _metrics_thread
+    if _metrics_thread and _metrics_thread.is_alive():
+        return
+    _metrics_thread = PushMetrics(role="celery_worker")
+    _metrics_thread.start()
+    logger.info("Celery Worker 指标采集已启动: role=celery_worker")
+
 
 # Windows 上 prefork/spawn 池稳定性较差，默认切换为单进程池。
 if os.name == "nt":

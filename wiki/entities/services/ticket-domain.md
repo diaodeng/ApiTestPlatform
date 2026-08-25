@@ -176,7 +176,7 @@ graph TD
 - 公网外部推单更新已有工单时，若新 `ticketModle` 有文本但未命中有效 HRM 模块 ID，会清空旧 `module_id` 并用新模块文本覆盖 `module_name`，避免外部模块变化后仍展示旧模块；远端拉取入库也会兼容 `moduleName/module_name` 与外部字段 `ticketModle/ticketModel/ticket_model`。
 - 同步状态统一写入 `ticket.extra_data.external_sync`，不再依赖单一“是否已同步”布尔值，而是按 `revision + consumers.{consumer}.delivered_revision` 判断某个消费方是否已经拿到当前版本。
 - `/ticket/sync/pending` 只会返回真正带同步元数据的工单，避免把普通人工创建的工单误返回给内网同步系统。
-- 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。项目/模块识别顺序与备份分支 `master_params_ticket_back` 保持一致：先按 `ticketVender/ticketModle` 命中 `projectMappings/moduleMappings`，未命中再按 `projectCode/moduleCode` 业务码兜底，不按标题/描述全文匹配项目映射。
+- 外部同步后的自动化链路会统一解析项目、模块、商家、门店、POS/SCO、版本号；其中外部 `sourceStoreCode` 仅保留原始门店编码，若该值是 `sap_org_no` 等业务编码，字段识别会先按商家门店配置转换为日志接口使用的 `org_no`，自动日志运行参数优先使用映射后的 `storeId`，不会把原始编码直接提交给日志接口。若同一商家、同一外部编码匹配到多个不同 `org_no`，自动化会保留全部候选并跳过日志提交，不按修改时间静默选择。识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。项目/模块识别顺序与备份分支 `master_params_ticket_back` 保持一致：先按 `ticketVender/ticketModle` 命中 `projectMappings/moduleMappings`，未命中再按 `projectCode/moduleCode` 业务码兜底，不按标题/描述全文匹配项目映射。
 - 外部同步延后后处理会继承入库请求 tid：Celery 可用时随 `module_ticket.sync_deferred_post_process` 投递，Celery 不可用回退 FastAPI 本地后台任务时通过 `trace_context` 设置，保证入库、自动化、AI 和群推送日志可按同一个 tid 串联；定时任务主动拉取等非 HTTP 入口由 Celery Worker 生成 `job-xxxxxxxx`。
 - 外部同步识别项目失败时会保留 `ticketVender/projectName/merchantName` 原始文本到 `merchant_name`，模块识别失败时保留 `ticketModle/moduleName` 原始文本到 `module_name`，避免本地 HRM 未配置映射时入库数据丢失。
 - 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。

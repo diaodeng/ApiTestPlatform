@@ -108,8 +108,8 @@ class CgroupCPU:
 
         return {
             "mode": self.mode,
-            "cpu_limit_cores": round(cores, 2) if cores else None,
-            "cpu_usage_percent": round(usage, 2),
+            "cpu_limit_cores": round(cores, 2) if cores else 0.0,
+            "cpu_usage_percent": round(usage, 2) if usage is not None else 0.0,
             # "status": status,
         }
 

@@ -83,7 +83,6 @@ class MemoryCollector:
         except Exception:
             pass
 
-        cache = stat.get("file", 0)
         rss = stat.get("anon", 0)
 
         return rss
@@ -99,7 +98,6 @@ class MemoryCollector:
         except Exception:
             pass
 
-        cache = stat.get("cache", 0)
         rss = stat.get("rss", 0)
         slab_unrec = stat.get("slab_unreclaimable", 0)
         hard_used = rss + slab_unrec

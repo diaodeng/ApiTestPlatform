@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
         await RedisUtil.init_sys_config(app.state.redis)
         await startup_handler()
         TicketFeishuEventListenerService.start_from_config()
-        metrics_thread = PushMetrics()
+        metrics_thread = PushMetrics(role="api")
         metrics_thread.start()
         logger.info(f"{AppConfig.app_name}启动成功")
         yield

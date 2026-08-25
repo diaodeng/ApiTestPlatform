@@ -128,6 +128,7 @@ class TicketSyncPayloadService:
 
         raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
         hints = sync_object.extra_data.get("log_pull_hints") if isinstance(sync_object.extra_data, dict) else {}
+        hints = hints if isinstance(hints, dict) else {}
         hint_candidate = (
             SyncUtil.payload_field_value(hints, "modifyTime", "modify_time", default="")
             or SyncUtil.payload_field_value(hints, "logDate", "log_date", default="")

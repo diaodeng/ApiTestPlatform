@@ -40,6 +40,7 @@ from module_hrm.service.runner.run_error_service import build_run_error_records,
 from module_task.runtime_control import TaskStopRequestedError, is_task_stop_requested
 from utils.log_util import logger
 from utils.message_util import TestResultPushHandler
+from utils.metrics.task_memory import get_task_memory_observer
 from utils.snowflake import snowIdWorker
 
 logger.info(f"平台信息：{platform.platform()}")
@@ -408,6 +409,17 @@ async def run_by_async(
     start_time = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(timezone(timedelta(hours=8)))
     report_id = None
     report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    task_memory_observer = get_task_memory_observer("api")
+    task_memory_context = {
+        "task_id": int((run_info.global_vars or {}).get("_task_id") or 0),
+        "task_key": "case_execution",
+        "task_family": "case_execution",
+        "queue_name": "case-execution",
+        "owner_type": "hrm",
+        "trigger_type": "background",
+    }
+    task_memory_observation = task_memory_observer.start(task_memory_context)
+    task_memory_status = "success"
     try:
         report_data = ReportCreatModel(
             **{
@@ -447,6 +459,7 @@ async def run_by_async(
             TestResultPushHandler(run_info, report_info).push()
         return f"执行成功，执行了{run_info.repeat_num}次，请前往报告查看"
     except TaskStopRequestedError as e:
+        task_memory_status = "revoked"
         logger.warning(f"用例:{run_info.report_name}[{run_info.report_id}]执行已中止：{e}")
         if report_id:
             with SessionLocal() as query_db:
@@ -458,6 +471,7 @@ async def run_by_async(
                 await run_in_threadpool(query_db.commit)
         raise
     except Exception as e:
+        task_memory_status = "failed"
         logger.error(f"用例:{run_info.report_name}[{run_info.report_id}]执行失败，异常信息：{e}", exc_info=True)
         if report_id:  # 如果报告创建成功则更新报告状态
             with SessionLocal() as query_db:
@@ -474,7 +488,8 @@ async def run_by_async(
         TestResultPushHandler(run_info, report_info).push()
 
     finally:
-        pass
+        task_memory_observer.finish(task_memory_context, task_memory_observation, task_memory_status)
+        gc.collect()
 
 
 def get_report_content(report_path):

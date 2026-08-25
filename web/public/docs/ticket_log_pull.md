@@ -49,11 +49,11 @@
 
 - `vendorId`：商家编号；
 - `sourceStoreCode`：外部来源中的门店编码，只用于保留来源和与 AI 结果做一致性判断，不一定是日志接口可用的 `org_no`，AI 永远不会反写它；
-- `storeId`：日志接口使用的门店 `org_no`，由门店选择规则确定并在提交前按当前商家校验；
+- `storeId`：日志接口使用的门店 `org_no`，由门店选择规则确定并在提交前按当前商家校验；如果外部 `sourceStoreCode` 是 `sap_org_no` 等业务编码，系统会先按商家映射转换为对应的 `org_no`，不能直接把 SAP 编码提交给日志接口；
 - `posNo` / `scoNo`：机台编号；
 - `modifyTime`：日志日期，格式为 `YYYY-MM-DD`。
 
-AI 提取门店时，如果 AI 值与 `sourceStoreCode` 相等或 AI 值包含在 `sourceStoreCode` 中，则使用 AI 值更新 `storeId`；如果 AI 值为空或不匹配，则使用 `sourceStoreCode`。没有 `sourceStoreCode` 时，有效 AI 新值可以替换旧 `storeId`，无有效 AI 值时保留旧值。`sourceStoreCode` 始终保持外部原始值，不会被 AI 反写。最终 `storeId` 只有通过当前商家 `org_no` 校验后才会提交日志。
+AI 提取门店时，如果 AI 值与 `sourceStoreCode` 相等或 AI 值包含在 `sourceStoreCode` 中，则使用 AI 值更新 `storeId`；如果 AI 值为空或不匹配，则使用 `sourceStoreCode`。没有 `sourceStoreCode` 时，有效 AI 新值可以替换旧 `storeId`，无有效 AI 值时保留旧值。`sourceStoreCode` 始终保持外部原始值，不会被 AI 反写。最终 `storeId` 只有通过当前商家 `org_no` 校验后才会提交日志。若同一商家和同一 `sourceStoreCode` 命中多个不同的 `org_no`，系统会在自动化日志中记录商家、来源编码和全部候选门店（包括 `orgNo`、门店名称和 `sapOrgNo`），并中断自动日志提交，避免把日志发到错误门店；用户确认唯一门店后再手动或重新触发拉取。
 
 
 | 状态 | 说明 |
