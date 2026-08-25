@@ -90,6 +90,7 @@ class TicketAiAnalysisService:
     LOG_ANALYSIS_MODES = {"digest", "full_directory", "hybrid"}
     LOG_WINDOW_MISSING_STRATEGIES = {"server_extract", "agent_extract"}
     DEFAULT_CONTEXT_LOG_MAX_CHARS = 800_000
+    SNAPSHOT_OWNER_MAX_LENGTH = 100
     ACTIVE_STATUSES = {
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
@@ -133,6 +134,23 @@ class TicketAiAnalysisService:
             logger.info(f"AI分析任务[{task_id}] {stage}: {message} | {context}")
         else:
             logger.info(f"AI分析任务[{task_id}] {stage}: {message}")
+
+    @staticmethod
+    def _truncate_snapshot_owner(value: Any) -> str:
+        """
+        将 AI 建议负责人转换为快照字段可保存的长度。
+        :param value: AI 返回的负责人建议文本
+        :return: 最多 100 个字符的负责人建议；完整内容仍保留在结构化分析结果中
+        """
+        owner_text = str(value or "")
+        if len(owner_text) <= TicketAiAnalysisService.SNAPSHOT_OWNER_MAX_LENGTH:
+            return owner_text
+        truncated = owner_text[: TicketAiAnalysisService.SNAPSHOT_OWNER_MAX_LENGTH - 3] + "..."
+        logger.warning(
+            f"AI分析结果建议负责人字段超长，已截断写入快照 | "
+            f"original_length={len(owner_text)}, max_length={TicketAiAnalysisService.SNAPSHOT_OWNER_MAX_LENGTH}"
+        )
+        return truncated
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
@@ -1809,7 +1827,7 @@ class TicketAiAnalysisService:
                     result_payload.get("prevention_actions") or result_payload.get("next_steps") or []
                 ),
                 risk="\n".join(result_payload.get("risk_items") or []),
-                owner=str(result_payload.get("owner_suggestion") or ""),
+                owner=cls._truncate_snapshot_owner(result_payload.get("owner_suggestion")),
                 source_type="ai_analysis",
                 source_id=task.task_id,
                 structured_data=cls._json_safe_value(result_payload),
@@ -2797,6 +2815,9 @@ class TicketAiAnalysisService:
         except Exception as exc:
             cls._log_task_step(task_id, "ERROR", "AI 分析任务执行失败", error=str(exc))
             logger.exception(f"AI分析任务[{task_id}] 执行失败")
+            # 持久化阶段可能已经触发数据库 flush 失败，必须先回滚才能继续写入失败终态；
+            # 否则 SQLAlchemy 会拒绝后续状态更新，任务会长期停留在“执行中”。
+            db.rollback()
             failure_message = cls._summarize_worker_error(raw_stderr, raw_stdout, str(exc))
             cls._mark_task_status(
                 db,

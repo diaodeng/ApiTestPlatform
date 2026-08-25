@@ -1979,3 +1979,10 @@ updated: 2026-08-25
 - 创建的双向链接：0 对（沿用工单域与自动化流程既有双向关联）。
 - 变更传播链：`automationNotification` 配置 -> 自动化启动快照 -> 日志拉取记录/工单 extra_data -> `TicketNotifyService` 模板渲染 -> 既有推送配置投递。
 - 总共涉及页面：3。
+
+## [2026-08-25] 修复 | 工单 AI 分析结果回写事务
+
+- 触发：Agent 已在 2026-08-25 17:48:45 返回成功结果，但任务仍显示执行中，日志报 `Data too long for column 'owner'`。
+- 根因：AI 的 `owner_suggestion` 为长文本，写入 `ticket_snapshot.owner`（`String(100)`）时 flush 失败；异常分支未先回滚，导致后续失败状态更新继续命中已失效事务。
+- 修复：快照 owner 展示字段按 100 字符截断，完整结果保留在 `ticket.ai_analysis` 与快照结构化数据；异常处理先回滚数据库会话，再写入失败终态。
+- 更新页面：`flows/ticket-automation-flow.md`、`web/public/docs/ticket_detail.md`、`web/public/docs/updates/2026-08-25-ticket-ai-result-writeback.md`。
