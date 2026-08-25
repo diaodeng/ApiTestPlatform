@@ -8,6 +8,13 @@ updated: 2026-08-25
 
 # 操作日志
 
+## [2026-08-25] FEAT | 工单 AI Agent 跨进程派发与并发队列
+
+- 触发：`start.sh` 以 Supervisor 分进程启动 FastAPI、Celery Worker 和 Celery Beat，自动 AI 需要在 Worker 侧安全投递到 FastAPI 内的 Agent WebSocket 连接。
+- 实现：新增系统参数 `ticket.ai.agent.maxConcurrentTasks`，默认值 1；Celery Worker 通过内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 提交请求，QTR 域用 Redis 共享队列、运行中租约和短锁控制单 Agent 并发，超过上限的请求只排队等待。
+- 语义：队列等待和 Agent 执行共用同一个总超时边界，发给 Agent 的等待预算按剩余时间计算，避免并发队列把任务总超时拉长。
+- 验证：补充并发队列与剩余超时回归测试；未修改生产数据库。
+
 ## [2026-08-25] FIX | 自动 AI 提交失败原因写入通知与工单事件
 
 - 触发：日志拉取成功后自动 AI 提交被拒绝时，原通知只显示 `record_id/version_id`，无法判断是 Agent 未连接、版本映射还是其他前置校验失败。

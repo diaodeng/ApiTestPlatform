@@ -66,6 +66,14 @@ class AiConfigService:
             "section": "analysis_worker",
         },
         {
+            "field_name": "analysis_agent_max_concurrent_tasks",
+            "config_key": TicketAiAnalysisService.CONFIG_AGENT_MAX_CONCURRENT_TASKS,
+            "config_name": "工单AI分析Agent并发任务数",
+            "default_value": str(TicketAiAnalysisService.DEFAULT_AGENT_MAX_CONCURRENT_TASKS),
+            "remark": "单个Agent同时允许执行的AI分析任务数量，超出部分进入排队等待",
+            "section": "analysis_worker",
+        },
+        {
             "field_name": "analysis_log_mode",
             "config_key": TicketAiAnalysisService.CONFIG_LOG_ANALYSIS_MODE,
             "config_name": "工单AI日志分析模式",
@@ -251,6 +259,11 @@ class AiConfigService:
             analysis_agent_code=cls._get_config_text(
                 db, TicketAiAnalysisService.CONFIG_AGENT_CODE, TicketAiAnalysisService.DEFAULT_AGENT_CODE
             ),
+            analysis_agent_max_concurrent_tasks=cls._get_config_int(
+                db,
+                TicketAiAnalysisService.CONFIG_AGENT_MAX_CONCURRENT_TASKS,
+                TicketAiAnalysisService.DEFAULT_AGENT_MAX_CONCURRENT_TASKS,
+            ),
             analysis_log_mode=TicketAiAnalysisService._normalize_log_analysis_mode(
                 cls._get_config_text(
                     db,
@@ -293,6 +306,14 @@ class AiConfigService:
                 if field_name not in field_to_config:
                     continue
                 config_def = field_to_config[field_name]
+                if field_name == "analysis_agent_max_concurrent_tasks":
+                    try:
+                        normalized_value = int(value)
+                    except Exception as exc:
+                        raise ValueError("工单AI分析Agent并发任务数必须是正整数") from exc
+                    if normalized_value < 1:
+                        raise ValueError("工单AI分析Agent并发任务数必须大于等于 1")
+                    value = normalized_value
                 cls._upsert_config(
                     query_db,
                     config_key=config_def["config_key"],

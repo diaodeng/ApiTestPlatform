@@ -117,7 +117,7 @@
 
 当自动 AI 在提交阶段被服务拒绝时，通知中的 `${reason}` 会显示服务返回的实际 `result.message`（例如指定 Agent 未连接），不会只显示记录 ID；工单时间线也会记录 `auto-ai:failed` 事件及同一原因，便于定位失败发生在创建 AI 任务之前。
 
-部署注意：`start.sh` 使用 Supervisor 将 FastAPI 与 Celery Worker 分成独立进程。当前 Agent WebSocket 连接只保存在 FastAPI 进程内存中，Celery Worker 触发自动 AI 时可能无法看到已连接 Agent。生产环境如遇“Agent 已连接但自动 AI 提示未连接”，需要先按部署方案接入跨进程消息网关或受保护的 FastAPI 内部中转接口；该跨进程派发能力尚未在本次改动中实现。
+部署注意：`start.sh` 使用 Supervisor 将 FastAPI 与 Celery Worker 分成独立进程。自动 AI 现在会通过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 进行跨进程派发，并按 AI 配置中心中的“Agent 并发数”做排队控制。Agent WebSocket 仍只在 FastAPI 进程内维护，但 Celery Worker 不再直接依赖进程内连接表。
 
 ### 6.1 通知模板变量
 

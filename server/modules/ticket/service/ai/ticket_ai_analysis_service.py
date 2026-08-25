@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -13,10 +12,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 from dotenv import dotenv_values
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
+from config.env import AppConfig
 from module_admin.dao.ai_provider_dao import AiProviderDao
 from module_admin.dao.ai_provider_model_dao import AiProviderModelDao
 from module_admin.entity.do.config_do import SysConfig
@@ -24,10 +25,11 @@ from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
+from module_hrm.dao.agent_dao import AgentDao
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum, TstepTypeEnum
-from module_qtr.service.agent_service import agents as connected_agents
-from module_qtr.service.agent_service import send_message as agent_send_message
+from module_qtr.service.agent_service import HandleResponse
+from module_qtr.util.agent_dispatch_config import AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_CONFIG_KEY
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
@@ -77,6 +79,7 @@ class TicketAiAnalysisService:
     CONFIG_WORKER_TIMEOUT = "ticket.ai.worker.timeoutSec"
     CONFIG_WORKSPACE_ROOT = "ticket.ai.workspace.root"
     CONFIG_AGENT_CODE = "ticket.ai.agent.code"
+    CONFIG_AGENT_MAX_CONCURRENT_TASKS = AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_CONFIG_KEY
     CONFIG_LOG_ANALYSIS_MODE = "ticket.ai.logAnalysis.mode"
     CONFIG_LOG_WINDOW_MISSING_STRATEGY = "ticket.ai.logAnalysis.windowMissingStrategy"
     DEFAULT_WORKER_COMMAND = "codex exec"
@@ -85,6 +88,7 @@ class TicketAiAnalysisService:
     DEFAULT_WORKER_TIMEOUT = 3600
     DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[4] / "logs" / "ticket_ai_analysis"
     DEFAULT_AGENT_CODE = ""
+    DEFAULT_AGENT_MAX_CONCURRENT_TASKS = 1
     DEFAULT_LOG_ANALYSIS_MODE = "digest"
     DEFAULT_LOG_WINDOW_MISSING_STRATEGY = "agent_extract"
     LOG_ANALYSIS_MODES = {"digest", "full_directory", "hybrid"}
@@ -487,6 +491,12 @@ class TicketAiAnalysisService:
                 "AI分析任务优先投递的Agent编码，留空则自动选择在线Agent",
             ),
             (
+                cls.CONFIG_AGENT_MAX_CONCURRENT_TASKS,
+                "工单AI分析Agent并发任务数",
+                str(cls.DEFAULT_AGENT_MAX_CONCURRENT_TASKS),
+                "单个Agent同时允许执行的AI分析任务数量，超出部分进入排队等待",
+            ),
+            (
                 cls.CONFIG_LOG_ANALYSIS_MODE,
                 "工单AI日志分析模式",
                 cls.DEFAULT_LOG_ANALYSIS_MODE,
@@ -647,29 +657,116 @@ class TicketAiAnalysisService:
         :param requested_agent_code: 请求指定的 Agent 编码
         :return: Agent 编码
         """
-        if str(requested_agent_code or "").strip():
-            return str(requested_agent_code).strip()
+        requested_code = str(requested_agent_code or "").strip()
+        if requested_code:
+            if AgentDao.get_agent_by_code(db, requested_code):
+                return requested_code
+            return ""
         configured_agent_code = cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE)
-        if configured_agent_code:
+        if configured_agent_code and AgentDao.get_agent_by_code(db, configured_agent_code):
             return configured_agent_code
-        if connected_agents:
-            return next(iter(connected_agents.keys()))
+        agent_model = cls._agent_model()
+        online_agent = (
+            db.query(agent_model.agent_code)
+            .filter(
+                agent_model.del_flag == 1,
+                agent_model.status == 2,
+                agent_model.agent_code.isnot(None),
+                agent_model.agent_code != "",
+            )
+            .order_by(agent_model.agent_id)
+            .first()
+        )
+        if online_agent and online_agent[0]:
+            return str(online_agent[0]).strip()
         return ""
 
     @classmethod
     def _validate_agent_connected(cls, db: Session, requested_agent_code: str | None = None) -> tuple[bool, str, str]:
         """
-        校验 AI 分析任务提交时是否存在可用在线 Agent。
+        校验 AI 分析任务提交时是否存在可用 Agent。
         :param db: 数据库会话
         :param requested_agent_code: 请求或 Provider 指定的 Agent 编码
         :return: (是否可用, 错误信息, 实际解析到的 Agent 编码)
         """
+        requested_code = str(requested_agent_code or "").strip()
+        if requested_code and not AgentDao.get_agent_by_code(db, requested_code):
+            return False, f"Agent[{requested_code}]不存在，请先在 Agent 管理中创建记录", ""
         agent_code = cls._resolve_agent_code(db, requested_agent_code)
         if not agent_code:
-            return False, "未找到可用的在线 Agent，请先启动本地 Agent 并连接到服务端", ""
-        if agent_code not in connected_agents:
-            return False, f"Agent[{agent_code}]未连接服务端，请先启动本地 Agent 并确认连接正常", agent_code
+            return False, "未找到可用的 Agent，请先启动本地 Agent 并连接到服务端", ""
         return True, "", agent_code
+
+    @staticmethod
+    def _agent_model():
+        """
+        返回 Agent ORM 模型，避免循环导入时提前实例化。
+        :return: Agent ORM 模型
+        """
+        from module_hrm.entity.do.agent_do import QtrAgent
+
+        return QtrAgent
+
+    @classmethod
+    def _count_online_agents(cls, db: Session) -> int:
+        """
+        统计当前数据库里标记为在线的 Agent 数量。
+        :param db: 数据库会话
+        :return: 在线 Agent 数量
+        """
+        agent_model = cls._agent_model()
+        return (
+            db.query(agent_model)
+            .filter(
+                agent_model.del_flag == 1,
+                agent_model.status == 2,
+                agent_model.agent_code.isnot(None),
+                agent_model.agent_code != "",
+            )
+            .count()
+        )
+
+    @classmethod
+    def _build_agent_gateway_url(cls, path: str) -> str:
+        """
+        构建本机 FastAPI 网关地址。
+        :param path: 访问路径
+        :return: 完整 URL
+        """
+        root_path = str(AppConfig.app_root_path or "").strip()
+        if root_path in {"", "/"}:
+            root_path = ""
+        elif not root_path.startswith("/"):
+            root_path = f"/{root_path}"
+        return f"http://127.0.0.1:{AppConfig.app_port}{root_path}{path}"
+
+    @classmethod
+    def _send_agent_request_via_gateway(
+        cls,
+        agent_code: str,
+        request_payload: dict[str, Any],
+        request_id: str,
+        timeout_seconds: int | float,
+    ) -> HandleResponse:
+        """
+        通过本机 FastAPI 网关发送 AI 分析请求。
+        :param agent_code: Agent 编码
+        :param request_payload: 发给 Agent 的请求内容
+        :param request_id: 请求ID
+        :param timeout_seconds: 请求超时时间
+        :return: 网关返回结果
+        """
+        gateway_url = cls._build_agent_gateway_url(f"/qtr/agent/ai-analysis/send/{agent_code}")
+        request_timeout = max(float(timeout_seconds or 120), 60.0) + 120.0
+        payload = {
+            "message": request_payload,
+            "requestId": request_id,
+            "timeoutSeconds": timeout_seconds,
+        }
+        with httpx.Client(timeout=request_timeout) as client:
+            response = client.post(gateway_url, json=payload)
+            response.raise_for_status()
+            return HandleResponse.model_validate_json(response.text)
 
     @classmethod
     def _normalize_log_analysis_mode(cls, mode: str | None) -> str:
@@ -2006,7 +2103,10 @@ class TicketAiAnalysisService:
                                 f"from={resume_from_workspace_path}"
                             )
             if not request.agent_code and str(selected_provider.preferred_agent_code or "").strip():
-                context_payload["selectedAgentCode"] = str(selected_provider.preferred_agent_code).strip()
+                provider_agent_code = str(selected_provider.preferred_agent_code).strip()
+                context_payload["selectedAgentCode"] = (
+                    provider_agent_code if AgentDao.get_agent_by_code(db, provider_agent_code) else ""
+                )
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
         agent_available, agent_error_message, resolved_agent_code = cls._validate_agent_connected(
@@ -2641,16 +2741,16 @@ class TicketAiAnalysisService:
             agent_code=agent_code or "<none>",
             provider_code=requested_provider_code or "<none>",
             configured_agent_code=cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE) or "<auto>",
-            connected_agent_count=len(connected_agents),
+            online_agent_count=cls._count_online_agents(db),
         )
         if not agent_code:
-            cls._log_task_step(task_id, "FAIL", "未找到可用的在线 Agent")
+            cls._log_task_step(task_id, "FAIL", "未找到可用的 Agent")
             cls._mark_task_status(
                 db,
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="未找到Agent",
-                error_message="未找到可用的在线 Agent，请先启动本地 Agent 并连接到服务端",
+                error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
                 finished_at=datetime.now(),
                 command_line="agent:<none>",
             )
@@ -2701,20 +2801,21 @@ class TicketAiAnalysisService:
                 result_path=result_file,
                 timeout_sec=timeout_sec,
             )
+            request_id = f"ticket-ai-analysis:{task_id}"
             cls._log_task_step(
                 task_id,
                 "EXEC",
                 "发送 AI 分析任务到 Agent",
                 agent_code=agent_code,
                 request_type=TstepTypeEnum.ai_analysis.value,
+                request_id=request_id,
                 timeout_sec=timeout_sec,
             )
-            agent_response = asyncio.run(
-                agent_send_message(
-                    agent_code,
-                    request_payload,
-                    timeout_seconds=timeout_sec,
-                )
+            agent_response = cls._send_agent_request_via_gateway(
+                agent_code,
+                request_payload,
+                request_id,
+                timeout_sec,
             )
             response_object = getattr(agent_response, "response", None)
             if isinstance(response_object, dict):

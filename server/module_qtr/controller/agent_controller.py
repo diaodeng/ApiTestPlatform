@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, WebSocket
+from fastapi import APIRouter, Depends, Request, WebSocket
 from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
@@ -15,10 +15,14 @@ from module_hrm.service.agent_service import AgentService
 from module_hrm.service.desktop_case_service import DesktopCaseService
 from module_hrm.service.web_case_service import WebCaseService
 from module_hrm.utils.util import decompress_str_to_dict
+from module_qtr.entity.vo.agent_dispatch_vo import AgentAiDispatchRequestModel
 from module_qtr.service.agent_bootstrap_service import AgentBootstrapService
+from module_qtr.service.agent_dispatch_service import AgentDispatchService
 from module_qtr.service.agent_service import (
-    agents,
+    AgentResponseEnum,
     agent_loops,
+    agents,
+    handle_response,
     response_futures,
 )
 from module_qtr.service.agent_service import (
@@ -465,6 +469,33 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
 @agentController.post("/send/{agent_code}")
 async def send_message(agent_code: str, message: dict, request_id: str = None):
     return await agent_service_send_message(agent_code, message, request_id)
+
+
+@agentController.post("/ai-analysis/send/{agent_code}")
+async def send_ai_analysis_message(
+    agent_code: str,
+    payload: AgentAiDispatchRequestModel,
+    request: Request,
+):
+    """
+    将 AI 分析请求按 Agent 并发上限排队后发送到本地 Agent。
+    :param agent_code: 目标 Agent 编码
+    :param payload: AI 分析请求、请求ID和超时参数
+    :param request: 当前请求对象，用于读取 Redis
+    :return: Agent 响应结果
+    """
+    try:
+        result = await AgentDispatchService.send_ai_analysis_message(
+            request.app.state.redis,
+            agent_code,
+            payload.message,
+            payload.request_id,
+            payload.timeout_seconds,
+        )
+        return result
+    except Exception as exc:
+        logger.exception(exc)
+        return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(exc)))
 
 
 
