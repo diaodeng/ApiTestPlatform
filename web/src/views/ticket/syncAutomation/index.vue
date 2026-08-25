@@ -1570,6 +1570,49 @@
               </div>
             </template>
 
+            <el-alert
+              title="指定工单手动自动化"
+              type="info"
+              :closable="false"
+              show-icon
+              description="可在关闭定时主动拉取时补跑指定工单。查询多维表格模式仅按工单号查询，忽略主动拉取开关、常规过滤条件和时间窗口；数据库快照模式不覆盖工单字段，只重新执行后处理自动化。"
+            />
+            <el-form :model="manualAutomationForm" label-width="150px" style="margin-top: 16px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="10">
+                  <el-form-item label="工单号" required>
+                    <el-input
+                      v-model="manualAutomationForm.ticketNo"
+                      clearable
+                      placeholder="输入要补跑的精确工单号"
+                      @keyup.enter="handleRunManualAutomation"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="10">
+                  <el-form-item label="数据来源">
+                    <el-radio-group v-model="manualAutomationForm.source">
+                      <el-radio value="bitable">查询多维表格</el-radio>
+                      <el-radio value="database">使用数据库快照</el-radio>
+                    </el-radio-group>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="4">
+                  <el-form-item label-width="0">
+                    <el-button
+                      type="primary"
+                      :loading="manualAutomationLoading"
+                      v-hasPermi="['ticket:sync:config:edit']"
+                      @click="handleRunManualAutomation"
+                    >
+                      执行自动化
+                    </el-button>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+
+            <el-divider content-position="left">主动拉取定时任务配置</el-divider>
             <el-form :model="form.bitablePull" label-width="150px">
               <el-row :gutter="16">
                 <el-col :xs="24" :md="12">
@@ -3309,6 +3352,7 @@
     listTicketSyncNotifyPushOptions,
     previewTicketSyncBitablePullFields,
     previewTicketSyncPersonReminder,
+    runTicketManualAutomation,
     runTicketSyncPersonReminder,
     runTicketSyncSummaryReport,
     runTicketCustomStatistics,
@@ -3447,6 +3491,7 @@ const lightModelOptionsMap = ref({});
   const autoCategoryStatsLoading = ref(false);
   const autoCategoryRunLoading = ref(false);
   const bitablePullFieldsLoading = ref(false);
+  const manualAutomationLoading = ref(false);
   const bitablePullFieldsLoaded = ref(false);
   const personPreviewResult = ref(null);
   const autoCategoryStats = ref(null);
@@ -3455,6 +3500,10 @@ const lightModelOptionsMap = ref({});
   const groupSendForm = reactive({
     ticketNo: '',
     forcePush: false,
+  });
+  const manualAutomationForm = reactive({
+    ticketNo: '',
+    source: 'bitable',
   });
   const personQueryForm = reactive({
     userId: '',
@@ -3753,6 +3802,32 @@ const lightModelOptionsMap = ref({});
         appSecret: String(form.feishuAuth.appSecret || '').trim(),
       },
     };
+  }
+
+  /**
+   * 按输入工单号手动执行多维表格拉取后的自动化流程。
+   */
+  function handleRunManualAutomation() {
+    const ticketNo = String(manualAutomationForm.ticketNo || '').trim();
+    if (!ticketNo) {
+      proxy.$modal.msgWarning('请先输入工单号');
+      return;
+    }
+    manualAutomationLoading.value = true;
+    runTicketManualAutomation({
+      ticketNo,
+      source: manualAutomationForm.source,
+    })
+      .then((response) => {
+        const sourceLabel = manualAutomationForm.source === 'database' ? '数据库快照' : '多维表格';
+        proxy.$modal.msgSuccess(`${sourceLabel}工单自动化已执行完成：${response.data?.ticketNo || ticketNo}`);
+      })
+      .catch((error) => {
+        proxy.$modal.msgError(error?.message || '工单自动化执行失败');
+      })
+      .finally(() => {
+        manualAutomationLoading.value = false;
+      });
   }
 
   function handlePreviewBitablePullFields() {

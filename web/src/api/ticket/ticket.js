@@ -292,6 +292,15 @@ export function previewTicketSyncBitablePullFields(data) {
   });
 }
 
+// 按指定工单手动执行同步自动化
+export function runTicketManualAutomation(data) {
+  return request({
+    url: '/ticket/sync/automation/manual-run',
+    method: 'post',
+    data,
+  });
+}
+
 // 查询同步通知推送配置选项
 export function listTicketSyncNotifyPushOptions() {
   return request({

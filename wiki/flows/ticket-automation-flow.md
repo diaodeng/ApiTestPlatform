@@ -15,6 +15,10 @@ entry_points:
     method: POST
     path: /ticket/{ticket_id}/ai-analysis
     trigger: 手工或日志拉取成功后触发AI分析任务
+  - type: http
+    method: POST
+    path: /ticket/sync/automation/manual-run
+    trigger: 在同步配置页按工单号手动补跑 bitable_pull 场景自动化
 created: 2026-05-22
 updated: 2026-08-25
 ---
@@ -71,6 +75,7 @@ sequenceDiagram
 | http | POST | `/ticket` | 创建工单时可同时填写日志拉取与自动 AI 配置 |
 | http | POST | `/ticket/{ticket_id}/log-pulls` | 工单详情页手工提交日志拉取，或工单创建后自动触发 |
 | http | POST | `/ticket/{ticket_id}/ai-analysis` | 手工发起 AI 分析，或日志拉取成功后自动触发 |
+| http | POST | `/ticket/sync/automation/manual-run` | 在同步配置页按工单号手动补跑 `bitable_pull` 场景自动化 |
 
 ## 详细步骤
 
@@ -102,6 +107,8 @@ sequenceDiagram
 | 12 | 相似工单配置页面可保存 `sceneTriggers`；外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按开关决定是否自动调用向量化。 |
 | 13 | 工单详情页相似推荐优先读取当前工单已保存向量并查询库内向量或 Qdrant；当前工单向量缺失或过期时，会按当前 Provider 配置同步刷新向量后再查询相似工单。 |
 
+| 11 | `POST /ticket/sync/automation/manual-run` 按精确工单号手动重放 `bitable_pull` 场景：飞书模式忽略定时开关、常规筛选和时间窗口，仅查询唯一精确匹配的多维表格记录后入库并执行后处理；数据库模式从现有 ORM 工单构造同步模型，只执行后处理，不重新入库或覆盖工单字段。两种模式仍受自动化关注范围和各自动化子开关约束。 |
+
 ## 错误处理
 
 | 场景 | 处理方式 |
@@ -118,6 +125,10 @@ sequenceDiagram
 | Codex/OpenAI 返回 `bad_response_status_code` | Agent 返回更明确的上游异常摘要；服务端通过日志截断和放宽增强字段必填约束降低重试失败概率。 |
 | Codex 启动返回 `os error 2` | Agent 在启动 Worker 前校验并复制任务级 Codex Home 引用的模型目录文件；引用缺失时返回包含 `model_catalog_json` 路径的明确错误。 |
 | Codex 返回 401/Unauthorized/Invalid token | Agent 记录脱敏认证指纹并执行一次无推理的 `/models` 鉴权探测；任务级 `config.toml` 的 `experimental_bearer_token` 优先于 `auth.json`，启动 Worker 时会由 Provider key 覆盖；若探测 401 则优先检查 Provider key，若探测 200 则携带 Worker 与探测 request ID 排查 Provider Responses 链路。 |
+
+| 手动多维表格补跑找不到记录 | 返回失败；检查工单号、飞书连接、工单号字段映射及 `viewId` 的视图筛选。 |
+| 手动多维表格补跑出现重复工单号 | 返回失败，不会从多条精确匹配记录中任意选择一条。 |
+| 手动数据库快照补跑找不到工单 | 返回失败，不执行任何入库或后处理。 |
 
 ## 进程边界注意事项
 

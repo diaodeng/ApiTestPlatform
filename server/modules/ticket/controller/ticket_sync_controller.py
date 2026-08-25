@@ -14,6 +14,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketBatchReclassifyRequestModel,
     TicketCustomStatisticsRunModel,
     TicketExternalSyncUpsertModel,
+    TicketManualAutomationRunModel,
     TicketSyncAckRequestModel,
     TicketSyncGroupPushSendModel,
     TicketSyncPersonReminderPreviewModel,
@@ -28,6 +29,7 @@ from modules.ticket.service.stats.ticket_custom_statistics_service import Ticket
 from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_external_sync_request_service import TicketExternalSyncRequestService
+from modules.ticket.service.sync.ticket_manual_automation_service import TicketManualAutomationService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_delivery_service import TicketSyncDeliveryService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
@@ -236,6 +238,38 @@ async def preview_bitable_pull_fields(
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@ticketSyncController.post(
+    "/sync/automation/manual-run",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def run_manual_ticket_automation(
+    request: Request,
+    query_object: TicketManualAutomationRunModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    按指定工单号手动重放多维表格主动拉取后的自动化流程。
+
+    多维表格模式只按工单号查询记录，不依赖主动拉取定时任务开关；
+    数据库模式不会覆盖本地工单字段，只重新执行后处理自动化。
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketManualAutomationService.run_services,
+            query_db,
+            query_object,
+            current_user,
+        )
+        return ResponseUtil.success(data=result, msg="工单自动化执行完成")
+    except ValueError as exc:
+        logger.warning(f"手动工单自动化参数或数据校验失败: {exc}")
+        return ResponseUtil.failure(msg=str(exc))
+    except Exception as exc:
+        logger.exception(f"手动工单自动化执行失败: {exc}")
+        return ResponseUtil.error(msg=str(exc))
 
 
 @ticketSyncController.get(

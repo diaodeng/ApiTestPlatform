@@ -1993,3 +1993,14 @@ updated: 2026-08-25
 - 根因：AI 的 `owner_suggestion` 为长文本，写入 `ticket_snapshot.owner`（`String(100)`）时 flush 失败；异常分支未先回滚，导致后续失败状态更新继续命中已失效事务。
 - 修复：快照 owner 展示字段按 100 字符截断，完整结果保留在 `ticket.ai_analysis` 与快照结构化数据；异常处理先回滚数据库会话，再写入失败终态。
 - 更新页面：`flows/ticket-automation-flow.md`、`web/public/docs/ticket_detail.md`、`web/public/docs/updates/2026-08-25-ticket-ai-result-writeback.md`。
+
+## [2026-08-25] INGEST-CODE | 指定工单手动自动化补跑
+
+- 触发：需要在飞书多维表格主动拉取定时任务关闭时，按指定工单号模拟拉取并重放既有自动化。
+- 架构层：工单同步控制器、`TicketManualAutomationService`、Pydantic 请求模型与 Web 同步配置页。
+- 创建的页面：无。
+- 更新的页面：`flows/ticket-automation-flow.md`、`flows/ticket-external-sync-flow.md`、`log.md`、`web/public/docs/ticket-sync-automation.md`。
+- 创建的双向链接：0 对（沿用工单域、外部同步流程和自动化流程既有双向关联）。
+- 变更传播链：同步配置页 -> `POST /ticket/sync/automation/manual-run` -> 手动自动化服务 -> 飞书单工单同步入库或本地 `Ticket` ORM 快照 -> `bitable_pull` 后处理。
+- 关键约束：飞书模式忽略定时开关、常规筛选和时间窗口，但仍要求连接与字段映射完整且精确匹配唯一记录；数据库模式不重新入库、不覆盖工单字段；两种模式均服从自动化范围与现有场景开关。
+- 总共涉及页面：4。

@@ -19,8 +19,12 @@ entry_points:
     method: lark_oapi.ws
     path: im.message.receive_v1
     trigger: 飞书官方 SDK 长连接接收群消息事件
+  - type: http
+    method: POST
+    path: /ticket/sync/automation/manual-run
+    trigger: 按工单号手动模拟多维表格拉取或重放本地工单快照自动化
 created: 2026-05-31
-updated: 2026-07-27
+updated: 2026-08-25
 ---
 
 # 工单外部同步与内网拉取流程
@@ -59,6 +63,7 @@ sequenceDiagram
 | http | POST | `/ticket/sync/external` | 外部系统推送工单，或内部系统把拉到的工单重新入站 |
 | http | GET | `/ticket/sync/pending` | 内网消费方按 `consumer` 拉取当前未交付版本 |
 | http | POST | `/ticket/sync/ack` | 内网消费方需要可选回写本批次处理结果 |
+| http | POST | `/ticket/sync/automation/manual-run` | 按工单号手动模拟多维表格拉取或重放本地工单快照自动化 |
 
 ## 详细步骤
 
@@ -104,6 +109,8 @@ sequenceDiagram
 | 19 | `POST /ticket/sync/auto-category/reclassify` 和 `GET /ticket/sync/auto-category/stats` 属于手动管理链路，由 `TicketBatchReclassificationService` 编排批量筛选、正则分类、AI 分类调度和未归类统计，不参与外部入库事务主路径。 |
 | 20 | `POST /ticket/sync/external` 的请求体读取、外部字段必填校验、人员字段拆分、`external_field_mapping` 与 `raw_payload` 构造已下沉到 `TicketExternalSyncRequestService`；`TicketSyncService` 只接收已通过模型校验的同步对象执行入库主编排。 |
 
+| 21 | `POST /ticket/sync/automation/manual-run` 是指定单工单的独立手动入口：`source=bitable` 仅按工单号查询飞书多维表格，忽略主动拉取定时开关、常规筛选和时间窗口，唯一精确匹配后复用外部同步入库与 `bitable_pull` 后处理；`source=database` 从本地 `Ticket` ORM 实体构造后处理模型，不调用同步入库，不覆盖工单字段。 |
+
 ## 错误处理
 
 | 场景 | 处理方式 |
@@ -115,6 +122,9 @@ sequenceDiagram
 | 飞书事件重复投递 | 使用飞书 `message_id` 构造 `source_segment_key`，重复事件只会命中已存在评论并跳过 |
 | 飞书写回多维后被主动拉取 | 同一工单相同 `source_content_hash` 的评论不再重复新增 |
 | 历史工单未记录话题锚点 | 飞书入站会回退按文本工单号匹配；系统评论回发话题会跳过并返回 `missing_group_message_anchor` |
+
+| 手动多维表格补跑未找到记录或存在重复精确匹配 | 请求失败；系统不会同步相似工单号，也不会在重复记录中随机选择。 |
+| 手动数据库快照补跑未找到工单 | 请求失败；不会触发入库覆盖或后处理。 |
 
 ## 参见
 

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
@@ -670,6 +670,32 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
         self.title = str(self.title or "").strip() or None
         self.sync_consumer = str(self.sync_consumer or "").strip() or None
         self.step_reason = str(self.step_reason or "").strip() or None
+        if not self.ticket_no:
+            raise ValueError("ticketNo 不能为空")
+        return self
+
+
+class TicketManualAutomationRunModel(BaseModel):
+    """
+    指定工单手动执行同步自动化的请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_no: str = Field(description="要执行自动化的工单号")
+    source: Literal["bitable", "database"] = Field(
+        default="bitable",
+        description="数据来源：bitable 查询飞书多维表格，database 使用本地工单快照",
+    )
+
+    @model_validator(mode="after")
+    def validate_manual_automation_run(self):
+        """
+        归一化手动自动化请求中的工单号。
+
+        :return: 当前请求模型。
+        """
+        self.ticket_no = str(self.ticket_no or "").strip()
         if not self.ticket_no:
             raise ValueError("ticketNo 不能为空")
         return self
