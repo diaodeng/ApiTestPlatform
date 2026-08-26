@@ -6,6 +6,9 @@ title: 更新历史
 
 ## 2026-08-26
 
+- 补充工单 AI 分析 Worker 提示词约束，明确禁止用 shell/PowerShell heredoc 自行写结果文件，要求直接输出最终 JSON，降低 Windows 下 `<<`/heredoc 语法误触发概率。
+- 修复工单 AI 分析通过本机 Agent 网关回收结果时，服务端对 `HandleResponse` 误用 `model_validate_json` 导致任务被错误标记为失败，页面只看到 `Cannot check isinstance when validating from json`；现在改为先解析传输 JSON，再按 Python 对象校验，并保留 Agent 返回的真实失败信息。详见：[工单 AI Agent 响应 JSON 校验修复](2026-08-26-ticket-ai-agent-response-json-fix.md)。
+- 修复工单 AI 分析在 Agent 无活动任务时仍被历史陈旧队列头阻塞的问题；服务端现在会按排队租约、终态和总超时自动清理失效队列头，并减少排队阶段的大请求内存占用。详见：[工单 AI Agent 队列陈旧请求自动恢复](2026-08-26-ticket-ai-agent-queue-stale-recovery.md)。
 - 修复工单自动拉日志在相同拉取参数已成功时仍重复提交的问题；自动化现在会直接复用已有成功日志记录。
 - 修复只开启自动 AI 或命中历史成功日志时，未重新拉日志也无法继续自动分析的问题；系统会复用最近成功日志继续版本回填和自动 AI。
 - 任务日志新增 `TID / trace_id` 持久化与查询展示，支持按同一次链路排查完整日志。详见：[工单自动日志去重与任务 TID](2026-08-26-ticket-log-pull-dedupe-and-job-tid.md)。
@@ -189,3 +192,4 @@ title: 更新历史
 
 ### 通知与群消息
 - 消息 @ 变量模板、必填字段配置、中文乱码修复。
+

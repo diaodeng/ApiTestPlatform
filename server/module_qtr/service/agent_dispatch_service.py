@@ -21,11 +21,14 @@ from module_qtr.util.agent_dispatch_config import (
     AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_DEFAULT,
     AGENT_AI_ANALYSIS_POLL_INTERVAL_SECONDS,
     AGENT_AI_ANALYSIS_QUEUE_PREFIX,
+    AGENT_AI_ANALYSIS_QUEUED_LEASE_RENEW_INTERVAL_SECONDS,
+    AGENT_AI_ANALYSIS_QUEUED_LEASE_SECONDS,
     AGENT_AI_ANALYSIS_REQUEST_PREFIX,
     AGENT_AI_ANALYSIS_REQUEST_TTL_SECONDS,
     AGENT_AI_ANALYSIS_RESULT_PREFIX,
     AGENT_AI_ANALYSIS_RESULT_TTL_SECONDS,
     AGENT_AI_ANALYSIS_STATE_PREFIX,
+    AGENT_AI_ANALYSIS_WAIT_LOG_INTERVAL_SECONDS,
 )
 from utils.log_util import logger
 
@@ -37,6 +40,8 @@ class AgentDispatchService:
     负责 AI 分析任务的排队、并发配额和请求转发，保证 Celery/后台任务与 FastAPI WebSocket 网关之间的
     交互不再依赖进程内内存状态。
     """
+
+    TERMINAL_REQUEST_STATUSES = frozenset({"completed", "failed", "timeout", "cancelled"})
 
     @classmethod
     def _queue_key(cls, agent_code: str) -> str:
@@ -73,6 +78,28 @@ class AgentDispatchService:
         """规范化请求ID。"""
         normalized = str(request_id or "").strip()
         return normalized or uuid.uuid4().hex
+
+    @classmethod
+    def _build_state_message(cls, message: dict[str, Any], timeout_seconds: int | float | None) -> dict[str, Any]:
+        """
+        提取状态缓存所需的轻量请求元数据，避免排队协程长期持有完整大请求。
+        :param message: 原始请求消息
+        :param timeout_seconds: 总超时时间
+        :return: 轻量消息字典
+        """
+        return {
+            "requestType": message.get("requestType"),
+            "command": message.get("command"),
+            "timeoutSeconds": timeout_seconds,
+        }
+
+    @classmethod
+    def _build_queue_lease_until(cls) -> int:
+        """
+        生成排队请求的心跳租约截止时间戳。
+        :return: Unix 时间戳（秒）
+        """
+        return int(time.time()) + AGENT_AI_ANALYSIS_QUEUED_LEASE_SECONDS
 
     @classmethod
     async def _resolve_max_concurrent_tasks(cls, redis) -> int:
@@ -142,6 +169,128 @@ class AgentDispatchService:
             await redis.hdel(active_key, *expired_request_ids)
 
     @classmethod
+    async def _load_json_cache(cls, redis, cache_key: str) -> dict[str, Any] | None:
+        """
+        读取并解析 JSON 格式的 Redis 缓存。
+        :param redis: Redis 连接
+        :param cache_key: 缓存键
+        :return: 解析后的字典，异常或不存在时返回 None
+        """
+        raw_payload = await redis.get(cache_key)
+        if not raw_payload:
+            return None
+        try:
+            payload = json.loads(raw_payload)
+        except Exception as exc:
+            logger.warning(f"解析 Agent 分发缓存失败 | cache_key={cache_key}, error={exc}")
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @classmethod
+    def _to_int(cls, value: Any) -> int | None:
+        """
+        将输入安全转换为整数。
+        :param value: 任意输入值
+        :return: 转换后的整数，失败时返回 None
+        """
+        try:
+            return int(str(value or "").strip())
+        except Exception:
+            return None
+
+    @classmethod
+    def _to_float(cls, value: Any) -> float | None:
+        """
+        将输入安全转换为浮点数。
+        :param value: 任意输入值
+        :return: 转换后的浮点数，失败时返回 None
+        """
+        try:
+            return float(str(value or "").strip())
+        except Exception:
+            return None
+
+    @classmethod
+    async def _resolve_stale_queue_head_reason(cls, redis, agent_code: str, request_id: str) -> str | None:
+        """
+        判断队列头请求是否已经失效。
+        :param redis: Redis 连接
+        :param agent_code: Agent 编码
+        :param request_id: 队列头请求ID
+        :return: 失效原因；仍然有效时返回 None
+        """
+        if not request_id:
+            return "empty-request-id"
+
+        request_key = cls._request_key(request_id)
+        if not await redis.exists(request_key):
+            return "request-cache-missing"
+
+        now_ts = time.time()
+        state_payload = await cls._load_json_cache(redis, cls._state_key(request_id))
+        status = str((state_payload or {}).get("status") or "").strip()
+        if status in cls.TERMINAL_REQUEST_STATUSES:
+            return f"terminal-status:{status}"
+
+        active_items = await redis.hgetall(cls._active_key(agent_code))
+        active_expires_at = (active_items or {}).get(request_id)
+        if active_expires_at is not None:
+            expires_at = cls._to_int(active_expires_at)
+            if expires_at is None:
+                return "active-lease-invalid"
+            if expires_at <= int(now_ts):
+                return "active-lease-expired"
+            return None
+
+        queued_lease_until = cls._to_int((state_payload or {}).get("queueLeaseUntil"))
+        state_updated_at = cls._to_int((state_payload or {}).get("updatedAt"))
+        if status == "queued":
+            if queued_lease_until is not None and queued_lease_until <= int(now_ts):
+                return "queued-lease-expired"
+            if (
+                queued_lease_until is None
+                and state_updated_at is not None
+                and state_updated_at + AGENT_AI_ANALYSIS_QUEUED_LEASE_SECONDS <= now_ts
+            ):
+                return "queued-heartbeat-expired"
+
+        request_payload = await cls._load_json_cache(redis, request_key)
+        created_at = cls._to_int((request_payload or {}).get("createdAt")) or state_updated_at
+        timeout_seconds = cls._to_float((request_payload or {}).get("timeoutSeconds"))
+        if timeout_seconds is None:
+            timeout_seconds = cls._to_float((state_payload or {}).get("timeoutSeconds"))
+        if timeout_seconds is None:
+            timeout_seconds = 120.0
+        if created_at is None:
+            return None
+        if created_at + max(timeout_seconds, 1.0) <= now_ts:
+            return "request-timeout-elapsed-without-active-lease"
+        return None
+
+    @classmethod
+    async def _cleanup_stale_queue_head(cls, redis, agent_code: str) -> str | None:
+        """
+        清理队列头部已经失效的请求，避免陈旧任务永久阻塞后续分析。
+        :param redis: Redis 连接
+        :param agent_code: Agent 编码
+        :return: 清理后的有效队列头请求ID；队列为空时返回 None
+        """
+        queue_key = cls._queue_key(agent_code)
+        while True:
+            queue_head = await redis.lindex(queue_key, 0)
+            if not queue_head:
+                return None
+            stale_reason = await cls._resolve_stale_queue_head_reason(redis, agent_code, queue_head)
+            if not stale_reason:
+                return queue_head
+            await redis.lpop(queue_key)
+            await redis.hdel(cls._active_key(agent_code), queue_head)
+            logger.warning(
+                f"AI 分析请求队列头已自动清理 | agent_code={agent_code}, "
+                f"stale_request_id={queue_head}, reason={stale_reason}"
+            )
+
+    @classmethod
     async def _serialize_state(
         cls,
         *,
@@ -150,8 +299,18 @@ class AgentDispatchService:
         status: str,
         timeout_seconds: int | float | None,
         message: dict[str, Any],
+        queued_lease_until: int | None = None,
     ) -> str:
-        """序列化请求状态。"""
+        """
+        序列化请求状态。
+        :param request_id: 请求ID
+        :param agent_code: Agent 编码
+        :param status: 状态值
+        :param timeout_seconds: 总超时时间
+        :param message: 轻量消息体
+        :param queued_lease_until: 排队续租截止时间戳；非排队状态传 None
+        :return: JSON 字符串
+        """
         payload = {
             "requestId": request_id,
             "agentCode": agent_code,
@@ -161,6 +320,8 @@ class AgentDispatchService:
             "command": message.get("command"),
             "updatedAt": int(time.time()),
         }
+        if queued_lease_until is not None:
+            payload["queueLeaseUntil"] = queued_lease_until
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
@@ -178,7 +339,7 @@ class AgentDispatchService:
         :param redis: Redis 连接
         :param request_id: 请求ID
         :param agent_code: Agent 编码
-        :param message: 请求消息体
+        :param message: 完整请求消息体
         :param timeout_seconds: 请求超时时间
         :return: 无
         """
@@ -198,16 +359,11 @@ class AgentDispatchService:
         )
         current_state = await redis.get(state_key)
         if not current_state:
-            await redis.set(
-                state_key,
-                await cls._serialize_state(
-                    request_id=request_id,
-                    agent_code=agent_code,
-                    status="queued",
-                    timeout_seconds=timeout_seconds,
-                    message=message,
-                ),
-                ex=AGENT_AI_ANALYSIS_REQUEST_TTL_SECONDS,
+            await cls._mark_queued_state(
+                redis,
+                request_id=request_id,
+                agent_code=agent_code,
+                state_message=cls._build_state_message(message, timeout_seconds),
             )
             await redis.rpush(cls._queue_key(agent_code), request_id)
 
@@ -223,10 +379,22 @@ class AgentDispatchService:
         if not cached_result:
             return None
         try:
-            return HandleResponse.model_validate_json(cached_result)
+            return HandleResponse.validate_transport_payload(cached_result)
         except Exception:
             logger.warning(f"解析缓存的 Agent 响应失败，request_id={request_id}")
             return None
+
+    @classmethod
+    async def _load_cached_request_message(cls, redis, request_id: str) -> dict[str, Any] | None:
+        """
+        读取缓存中的完整请求消息体，仅在真正转发给 Agent 时恢复，减少排队阶段内存占用。
+        :param redis: Redis 连接
+        :param request_id: 请求ID
+        :return: 完整请求消息字典，缺失时返回 None
+        """
+        request_payload = await cls._load_json_cache(redis, cls._request_key(request_id))
+        message = (request_payload or {}).get("message")
+        return dict(message) if isinstance(message, dict) else None
 
     @classmethod
     async def _store_result(cls, redis, request_id: str, response: HandleResponse) -> None:
@@ -252,14 +420,23 @@ class AgentDispatchService:
         await redis.set(cls._result_key(request_id), serialized, ex=AGENT_AI_ANALYSIS_RESULT_TTL_SECONDS)
 
     @classmethod
-    async def _mark_state(cls, redis, request_id: str, agent_code: str, status: str, message: dict[str, Any]) -> None:
+    async def _mark_state(
+        cls,
+        redis,
+        request_id: str,
+        agent_code: str,
+        status: str,
+        message: dict[str, Any],
+        queued_lease_until: int | None = None,
+    ) -> None:
         """
         更新请求状态缓存。
         :param redis: Redis 连接
         :param request_id: 请求ID
         :param agent_code: Agent 编码
         :param status: 状态值
-        :param message: 请求消息体
+        :param message: 轻量请求消息体
+        :param queued_lease_until: 排队续租截止时间戳；非排队状态传 None
         :return: 无
         """
         await redis.set(
@@ -270,8 +447,35 @@ class AgentDispatchService:
                 status=status,
                 timeout_seconds=message.get("timeoutSeconds"),
                 message=message,
+                queued_lease_until=queued_lease_until,
             ),
             ex=AGENT_AI_ANALYSIS_REQUEST_TTL_SECONDS,
+        )
+
+    @classmethod
+    async def _mark_queued_state(
+        cls,
+        redis,
+        *,
+        request_id: str,
+        agent_code: str,
+        state_message: dict[str, Any],
+    ) -> None:
+        """
+        将请求标记为排队中，并续租排队心跳。
+        :param redis: Redis 连接
+        :param request_id: 请求ID
+        :param agent_code: Agent 编码
+        :param state_message: 轻量请求消息体
+        :return: 无
+        """
+        await cls._mark_state(
+            redis,
+            request_id,
+            agent_code,
+            "queued",
+            state_message,
+            queued_lease_until=cls._build_queue_lease_until(),
         )
 
     @classmethod
@@ -301,7 +505,8 @@ class AgentDispatchService:
             return False
         try:
             await cls._cleanup_expired_active_requests(redis, agent_code)
-            if request_id == await redis.lindex(cls._queue_key(agent_code), 0):
+            queue_head = await cls._cleanup_stale_queue_head(redis, agent_code)
+            if request_id == queue_head:
                 active_count = await redis.hlen(cls._active_key(agent_code))
                 if active_count >= max_concurrent_tasks:
                     return False
@@ -339,6 +544,7 @@ class AgentDispatchService:
         request_message = dict(message or {})
         request_message["request_id"] = request_id
         request_message["timeoutSeconds"] = timeout_seconds
+        state_message = cls._build_state_message(request_message, timeout_seconds)
 
         cached_response = await cls._load_cached_result(redis, request_id)
         if cached_response:
@@ -356,14 +562,20 @@ class AgentDispatchService:
         )
         logger.info(
             f"AI 分析请求进入 Agent 队列 | agent_code={agent_code}, request_id={request_id}, "
-            f"timeout_seconds={timeout_seconds}, request_type={request_message.get('requestType')}"
+            f"timeout_seconds={timeout_seconds}, request_type={state_message.get('requestType')}"
         )
+        # 排队阶段只保留轻量状态元数据；完整请求消息在真正拿到槽位时再从 Redis 恢复，
+        # 避免多个等待协程在内存中同时持有大体积 prompt / context / schema。
+        request_message = None
+        next_queue_renew_at = 0.0
+        next_wait_log_at = 0.0
 
         while True:
-            if time.monotonic() >= deadline:
+            now_mono = time.monotonic()
+            if now_mono >= deadline:
                 await redis.lrem(cls._queue_key(agent_code), 0, request_id)
                 await redis.hdel(cls._active_key(agent_code), request_id)
-                await cls._mark_state(redis, request_id, agent_code, "timeout", request_message)
+                await cls._mark_state(redis, request_id, agent_code, "timeout", state_message)
                 logger.warning(
                     f"AI 分析请求排队超时 | agent_code={agent_code}, request_id={request_id}, "
                     f"timeout_seconds={timeout_seconds}"
@@ -380,27 +592,38 @@ class AgentDispatchService:
             if cached_response:
                 return cached_response
 
+            if now_mono >= next_queue_renew_at:
+                await cls._mark_queued_state(
+                    redis,
+                    request_id=request_id,
+                    agent_code=agent_code,
+                    state_message=state_message,
+                )
+                next_queue_renew_at = now_mono + AGENT_AI_ANALYSIS_QUEUED_LEASE_RENEW_INTERVAL_SECONDS
+
             if agent_code not in connected_agents:
                 await asyncio.sleep(AGENT_AI_ANALYSIS_POLL_INTERVAL_SECONDS)
                 continue
 
+            max_concurrent_tasks = await cls._resolve_max_concurrent_tasks(redis)
             admitted = await cls._try_admit_request(
                 redis,
                 agent_code=agent_code,
                 request_id=request_id,
-                message=request_message,
-                max_concurrent_tasks=await cls._resolve_max_concurrent_tasks(redis),
+                message=state_message,
+                max_concurrent_tasks=max_concurrent_tasks,
                 lease_seconds=lease_seconds,
             )
             if not admitted:
-                queue_head = await redis.lindex(cls._queue_key(agent_code), 0)
-                if queue_head and not await redis.exists(cls._request_key(queue_head)):
-                    await redis.lpop(cls._queue_key(agent_code))
-                logger.info(
-                    f"AI 分析请求等待 Agent 槽位 | agent_code={agent_code}, request_id={request_id}, "
-                    f"queue_head={queue_head or '-'}, active_count={await redis.hlen(cls._active_key(agent_code))}, "
-                    f"max_concurrent={await cls._resolve_max_concurrent_tasks(redis)}"
-                )
+                if now_mono >= next_wait_log_at:
+                    queue_head = await redis.lindex(cls._queue_key(agent_code), 0)
+                    active_count = await redis.hlen(cls._active_key(agent_code))
+                    logger.info(
+                        f"AI 分析请求等待 Agent 槽位 | agent_code={agent_code}, request_id={request_id}, "
+                        f"queue_head={queue_head or '-'}, active_count={active_count}, "
+                        f"max_concurrent={max_concurrent_tasks}"
+                    )
+                    next_wait_log_at = now_mono + AGENT_AI_ANALYSIS_WAIT_LOG_INTERVAL_SECONDS
                 await asyncio.sleep(AGENT_AI_ANALYSIS_POLL_INTERVAL_SECONDS)
                 continue
             logger.info(
@@ -409,6 +632,21 @@ class AgentDispatchService:
             )
 
             try:
+                request_message = await cls._load_cached_request_message(redis, request_id)
+                if not request_message:
+                    await redis.hdel(cls._active_key(agent_code), request_id)
+                    await cls._mark_state(redis, request_id, agent_code, "failed", state_message)
+                    logger.warning(
+                        f"AI 分析请求消息缓存缺失，无法转发到 Agent | "
+                        f"agent_code={agent_code}, request_id={request_id}"
+                    )
+                    return handle_response(
+                        (
+                            AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                            None,
+                            f"Agent[{agent_code}] AI 分析请求消息缓存不存在，request_id={request_id}",
+                        )
+                    )
                 remaining_timeout_seconds = max(deadline - time.monotonic(), 1.0)
                 request_message["timeoutSeconds"] = remaining_timeout_seconds
                 response = await agent_send_message(
@@ -423,11 +661,18 @@ class AgentDispatchService:
                     )
                     await redis.hdel(cls._active_key(agent_code), request_id)
                     await redis.lpush(cls._queue_key(agent_code), request_id)
-                    await cls._mark_state(redis, request_id, agent_code, "queued", request_message)
+                    await cls._mark_queued_state(
+                        redis,
+                        request_id=request_id,
+                        agent_code=agent_code,
+                        state_message=state_message,
+                    )
+                    next_queue_renew_at = 0.0
+                    next_wait_log_at = 0.0
                     await asyncio.sleep(AGENT_AI_ANALYSIS_POLL_INTERVAL_SECONDS)
                     continue
                 await cls._store_result(redis, request_id, response)
-                await cls._mark_state(redis, request_id, agent_code, "completed", request_message)
+                await cls._mark_state(redis, request_id, agent_code, "completed", state_message)
                 logger.info(
                     f"AI 分析请求完成 | agent_code={agent_code}, request_id={request_id}, "
                     f"status_code={response.status_code}"
@@ -436,7 +681,7 @@ class AgentDispatchService:
             except asyncio.CancelledError as exc:
                 await redis.lrem(cls._queue_key(agent_code), 0, request_id)
                 await redis.hdel(cls._active_key(agent_code), request_id)
-                await cls._mark_state(redis, request_id, agent_code, "cancelled", request_message)
+                await cls._mark_state(redis, request_id, agent_code, "cancelled", state_message)
                 logger.warning(
                     f"AI 分析请求被取消 | agent_code={agent_code}, request_id={request_id}, error={exc}"
                 )
@@ -444,7 +689,7 @@ class AgentDispatchService:
             except Exception as exc:
                 await redis.hdel(cls._active_key(agent_code), request_id)
                 await redis.lrem(cls._queue_key(agent_code), 0, request_id)
-                await cls._mark_state(redis, request_id, agent_code, "failed", request_message)
+                await cls._mark_state(redis, request_id, agent_code, "failed", state_message)
                 logger.exception(f"Agent[{agent_code}] AI 分析请求执行异常，request_id={request_id}, error={exc}")
                 return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(exc)))
             finally:

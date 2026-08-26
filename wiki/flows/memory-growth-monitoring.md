@@ -34,9 +34,10 @@
 3. 如果 RSS 增长而 USS 基本稳定，优先检查文件页缓存、cgroup file/cache 和外部子进程。
 4. 将指标时间窗口与日志中的 `event=task_memory_start`、`event=task_memory_finish` 对齐，再使用 `task_id`、`celery_task_id`、`trace_id` 定位具体任务。
 5. 如果只有 `celery_worker` 阶梯增长，优先检查线程池复用、任务结果保留、HTTP/Redis 连接和任务子进程清理。
-6. 如果只有 `api` 在工单日志或 AI 任务期间增长，优先检查压缩包、搜索管道、工作区文件和外部 Agent 生命周期。
+6. 如果只有 `api` 在工单日志或 AI 任务期间增长，优先检查压缩包、搜索管道、工作区文件和外部 Agent 生命周期；若同一时段反复出现 “等待 Agent 槽位” 且 `active_count=0`、`queue_head` 长时间不变，还要检查 Agent 分发队列是否存在陈旧队列头，以及排队中的 AI 请求是否持续持有大体积 prompt/context。
 7. cgroup 的 `oom` 或 `oom_kill` 增长时，再结合容器/Pod 事件确认是否发生系统级 OOM；应用日志中的 `SIGKILL` 单独不能证明 OOM。
 
 ## 注意事项
 
 `gc.collect()` 只用于任务结束后的诊断对比，不代表已经修复内存泄漏。USS、文件句柄和网络连接在权限不足或平台不支持时可能为 0。不要将完整任务载荷、日志正文或响应正文写入内存诊断日志。
+

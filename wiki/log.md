@@ -1,3 +1,11 @@
+## [2026-08-26] FIX | 工单 AI Agent 队列陈旧请求自动恢复
+
+- 触发：Agent 实际没有执行任务时，工单手动/自动 AI 仍持续打印“等待 Agent 槽位”，`queue_head` 长时间停留在历史请求，`active_count=0`；排队协程同时会持有完整 AI 请求，积压后放大 API 进程内存。
+- 根因：旧实现主要在请求缓存缺失或总超时后才清理队列头；若请求在 FastAPI/Celery 断连、重启或 WebSocket 断开前已入队，但请求缓存仍保留 24 小时，就会被历史 `queue_head` 长时间卡住；排队阶段也会持续持有完整 prompt/context。
+- 修复：`AgentDispatchService` 新增排队心跳租约与队列头自愈逻辑，抢占槽位前会自动清理已终态、排队租约过期、请求缓存缺失或总超时且无运行租约的队列头；排队阶段仅保留轻量状态，真正发给 Agent 时再从 Redis 恢复完整请求，并对等待日志做固定间隔节流。
+- 验证：执行 `uv run pytest tests/test_agent_dispatch_service.py` 与 `uv run ruff check module_qtr/service/agent_dispatch_service.py module_qtr/util/agent_dispatch_config.py tests/test_agent_dispatch_service.py` 通过；补充回归测试覆盖陈旧队列头、排队租约过期和缓存消息恢复场景。
+- 排查：只读查询工单 `INC00001882932` 的 AI 任务发现 `queue_head=ticket-ai-analysis:2043457233009664` 对应任务已于 2026-08-26 15:26:13 失败，但 2026-08-26 18:06:22 的后续请求仍被它阻塞。
+
 ## [2026-08-26] 工单自动日志去重、自动 AI 复用成功日志、任务日志补齐 TID
 
 - 触发原因：工单修改后会反复自动拉取同一份日志；已有成功日志时自动 AI 有时因为未新建日志记录或缺少版本回填入口而被跳过；任务日志缺少可查询的 TID/trace_id，链路排查困难。
@@ -113,6 +121,22 @@ updated: 2026-08-25
 - 用户说明：`server/docs/ticket_read_api.md`。
 - 验证：新增文件 compileall 与 Ruff 通过；本环境虚拟环境未安装 pytest，相关测试未能执行。
 
+
+## [2026-08-26] FIX | 工单AI分析 Agent 响应 JSON 校验误报失败
+
+- 现象：工单 AI 分析实际已由本机 Agent 执行并回传结果，但服务端任务记录被写成 `Cannot check isinstance when validating from json, use a JsonOrPython validator instead.`，页面无法看到真实的 Worker 失败摘要。
+- 根因：`HandleResponse.response` 联合类型包含依赖 Python `isinstance` 判定的对象，服务端在工单网关调用和 Redis 缓存回读时误用 `model_validate_json` 直接校验原始 JSON 字符串，Pydantic 在 JSON 校验阶段抛出框架异常。
+- 修复：为 `HandleResponse` 增加统一传输负载解析入口，先把 JSON 字符串/字节反序列化为 Python 字典，再执行 `model_validate`；工单 AI 网关与分发缓存统一复用该入口。
+- 验证：新增 3 个回归测试，覆盖 `HandleResponse` 传输负载恢复、工单 AI 网关结果解析、Agent 分发缓存读取。
+- 影响：修复后页面会优先展示 Agent/Worker 的真实失败原因，例如 PowerShell heredoc 语法不兼容、鉴权失败等，便于继续定位真正的执行问题。
+
+## [2026-08-26] FIX | 工单AI分析提示词约束 Worker 直接输出 JSON
+
+- 现象：Windows Agent 上的 Codex Worker 在部分任务中没有直接返回最终 JSON，而是尝试调用 PowerShell 用 heredoc 写入结果文件，触发 `PowerShell doesn't support heredoc with <<`。
+- 根因：当前提示词只要求“输出严格 JSON”，但没有明确禁止 Worker 自行用 shell/python/PowerShell 写结果文件；在 `workspace-write` 沙箱下，模型可能把“产出结构化结果”误解为“需要落盘 JSON 文件”。
+- 修复：服务端主提示词与 Agent 本地 fallback 提示词同步增加约束，明确禁止用 shell/heredoc 写结果文件，要求直接把最终 JSON 作为最后一条回复输出，由 CLI/服务自动保存。
+- 验证：新增提示词回归测试，校验禁止 shell 文件写入、禁止 heredoc、声明系统自动保存结果文件。
+- 影响：优先降低 Windows PowerShell 下 heredoc 误触发概率；若后续仍有个别模型不遵守提示词，再考虑进一步收紧工具权限。
 
 ## [2026-08-20] FIX | Provider模型下拉预览字段和工单分析初始化加载
 

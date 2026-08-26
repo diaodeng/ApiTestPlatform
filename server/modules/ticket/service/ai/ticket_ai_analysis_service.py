@@ -769,7 +769,7 @@ class TicketAiAnalysisService:
         with httpx.Client(timeout=request_timeout) as client:
             response = client.post(gateway_url, json=payload)
             response.raise_for_status()
-            return HandleResponse.model_validate_json(response.text)
+            return HandleResponse.validate_transport_payload(response.text)
 
     @classmethod
     def _normalize_log_analysis_mode(cls, mode: str | None) -> str:
@@ -1518,7 +1518,9 @@ class TicketAiAnalysisService:
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
    - similarTickets 是历史相似工单，若可复用经验，请写入 similar_cases、sop_suggestion、
      owner_suggestion、monitoring_suggestion。
-5. 输出严格 JSON，不要输出多余说明文本。
+5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
+   去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
+   写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
 6. 结果必须包含以下核心字段，输出严格按 schema 返回：
    - ticket_id
    - project_id

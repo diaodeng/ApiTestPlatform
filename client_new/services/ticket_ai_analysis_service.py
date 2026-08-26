@@ -2092,7 +2092,9 @@ class TicketAiAnalysisService:
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
    - similarTickets 是历史相似工单，若可复用经验，请写入 similar_cases、sop_suggestion、
      owner_suggestion、monitoring_suggestion。
-5. 输出严格 JSON，不要输出多余说明文本。
+5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
+   去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
+   写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
 6. 结果必须包含以下字段；如果某些扩展字段暂时无法确定，请用空字符串、空数组或 false 占位，不要省略：
    - ticket_id
    - project_id
