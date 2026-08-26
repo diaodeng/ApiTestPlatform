@@ -1,3 +1,11 @@
+## [2026-08-27] FEAT | 工单 AI Token 用量记录与汇总展示
+
+- 触发：工单 AI 分析历史、工单概览和 AI 执行审计之前都无法直接看到每次分析消耗了多少 Token，排查成本和模型费用复盘成本较高。
+- 方案：`ticket_ai_analysis_task` 新增 `audit_execution_id`、`input_token_count`、`output_token_count`、`total_token_count` 四个字段；`sys_ai_task_execution` 继续保留原始 `token_usage` JSON，不新增重复列。
+- 展示：工单 AI 历史列表和详情弹窗显示输入/输出/总 Token，工单概览通过 `GET /ticket/{ticket_id}/summary` 返回 `aiTokenSummary` 显示整单聚合值，AI 执行审计列表新增“总 Token”列，详情页保留原始 `tokenUsage` JSON。
+- 性能取舍：只在单工单概览接口内按 `ticket_id` 做一次 SQL 聚合，不把 Token 汇总扩散到工单列表、分页摘要或批量接口，因此不会对列表性能造成明显影响。
+- 验证计划：补充服务层与 Token 归一化测试，并执行定向 `ruff` / `pytest` 校验。
+
 ## [2026-08-26] FIX | 工单 AI Agent 队列陈旧请求自动恢复
 
 - 触发：Agent 实际没有执行任务时，工单手动/自动 AI 仍持续打印“等待 Agent 槽位”，`queue_head` 长时间停留在历史请求，`active_count=0`；排队协程同时会持有完整 AI 请求，积压后放大 API 进程内存。

@@ -4,6 +4,10 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
+## 2026-08-27
+
+- 工单 AI 历史、工单概览和 AI 执行审计新增 Token 用量展示，支持查看输入 Token、输出 Token、总 Token，以及单工单维度的累计汇总。详见：[工单 AI Token 用量记录与展示](2026-08-27-ticket-ai-token-usage.md)。
+
 ## 2026-08-26
 
 - 补充工单 AI 分析 Worker 提示词约束，明确禁止用 shell/PowerShell heredoc 自行写结果文件，要求直接输出最终 JSON，降低 Windows 下 `<<`/heredoc 语法误触发概率。

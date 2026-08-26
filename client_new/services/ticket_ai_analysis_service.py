@@ -888,6 +888,55 @@ class TicketAiAnalysisService:
             return None
 
     @classmethod
+    def _find_token_usage_payload(cls, candidate: Any) -> dict[str, Any] | None:
+        """
+        递归查找结果结构中的 Token 用量对象。
+        :param candidate: 待查找对象
+        :return: Token 用量字典
+        """
+        if isinstance(candidate, dict):
+            direct_keys = {
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "input_tokens",
+                "output_tokens",
+                "inputTokens",
+                "outputTokens",
+                "totalTokens",
+            }
+            if any(key in candidate for key in direct_keys):
+                return candidate
+            for key in ("usage", "token_usage", "tokenUsage"):
+                payload = candidate.get(key)
+                if isinstance(payload, dict):
+                    return payload
+            for value in candidate.values():
+                payload = cls._find_token_usage_payload(value)
+                if payload is not None:
+                    return payload
+            return None
+        if isinstance(candidate, (list, tuple)):
+            for item in candidate:
+                payload = cls._find_token_usage_payload(item)
+                if payload is not None:
+                    return payload
+        return None
+
+    @classmethod
+    def _extract_token_usage_payload(cls, *candidates: Any) -> dict[str, Any] | None:
+        """
+        从多个候选对象中提取 Token 用量。
+        :param candidates: 候选对象列表
+        :return: Token 用量字典
+        """
+        for candidate in candidates:
+            payload = cls._find_token_usage_payload(candidate)
+            if payload is not None:
+                return payload
+        return None
+
+    @classmethod
     def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
         """
         从 Claude Code 输出文本中提取 JSON 结果块。
@@ -2299,6 +2348,7 @@ class TicketAiAnalysisService:
                         "command_line": "cached:result.json",
                         "stdout_path": str(workspace_dir / "worker.stdout.txt"),
                         "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                        "token_usage": token_usage_payload,
                     },
                 }
             lock_payload = cls._read_json_file(task_lock_file)
@@ -2669,6 +2719,12 @@ class TicketAiAnalysisService:
                     }
 
                 normalized_result = parsed_result
+                token_usage_payload = cls._extract_token_usage_payload(
+                    normalized_result,
+                    parsed_result,
+                    cls._extract_json_from_text(raw_stdout) if raw_stdout.strip() else None,
+                    cls._extract_json_from_text(raw_stderr) if raw_stderr.strip() else None,
+                )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_finished",
@@ -2682,6 +2738,7 @@ class TicketAiAnalysisService:
                     "success": True,
                     "status": "success",
                     "message": "AI 分析完成",
+                    "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": normalized_result,
                         "raw_output": raw_stdout or raw_stderr,

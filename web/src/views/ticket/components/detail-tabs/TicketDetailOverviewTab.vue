@@ -56,6 +56,7 @@
     return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined;
   });
   const latestAiAnalysisTask = computed(() => detail.value.latestAiAnalysis || null);
+  const aiTokenSummary = computed(() => detail.value.aiTokenSummary || null);
   const latestSnapshot = computed(
     () => detail.value.latestSnapshot || detail.value.snapshots?.[0] || null
   );
@@ -139,6 +140,15 @@
     if (status === 'running') return '执行中';
     if (status === 'created') return '待执行';
     return status || '-';
+  }
+
+  /**
+   * 格式化 Token 数量。
+   * @param {number|string|null|undefined} value Token 数值。
+   * @returns {string} 展示文本。
+   */
+  function formatTokenCount(value) {
+    return Number.isFinite(Number(value)) ? String(Number(value)) : '-';
   }
 
   /**
@@ -309,6 +319,21 @@
           </el-descriptions-item>
           <el-descriptions-item label="创建人">
             {{ latestSnapshot?.createdByName || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="AI任务数">
+            {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.taskCount) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="成功任务数">
+            {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.successTaskCount) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="输入 Token">
+            {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.inputTokenCount) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="输出 Token">
+            {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.outputTokenCount) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="总 Token">
+            {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.totalTokenCount) : '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="摘要" :span="2">{{
             latestConclusion.summary || '-'

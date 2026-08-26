@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum
+from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_issue_dao import TicketIssueDao
 from modules.ticket.entity.do.ticket_do import Ticket
@@ -113,6 +114,7 @@ class TicketReadService:
         # 仅读取已有摘要表中的最新一条，不触发日志、AI、向量或提示词计算。
         data["latestLogPull"] = TicketLogPullService.get_latest_summary(db, ticket_id)
         data["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(db, ticket_id)
+        data["aiTokenSummary"] = TicketAiDao.get_ticket_token_summary(db, ticket_id)
         data["aiPromptLayers"] = TicketPromptService.resolve_prompt_layers(db, ticket)
         for key in (
             "ticketId",

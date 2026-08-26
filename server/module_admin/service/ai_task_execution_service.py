@@ -14,6 +14,64 @@ class AiTaskExecutionService:
     AI 任务执行审计服务层。
     """
 
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        """
+        将 Token 值安全转换为整数。
+        :param value: 原始值
+        :return: 整数或 None
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        try:
+            return int(str(value).strip().replace(",", ""))
+        except Exception:
+            try:
+                return int(float(str(value).strip().replace(",", "")))
+            except Exception:
+                return None
+
+    @classmethod
+    def _resolve_total_token_count(cls, token_usage: Any) -> int | None:
+        """
+        从原始 token_usage 中提取总 Token 数。
+        优先使用 total；若没有 total 且能明确拿到输入/输出，则返回两者之和。
+        :param token_usage: 原始 token_usage
+        :return: 总 Token 数
+        """
+        if not isinstance(token_usage, dict):
+            return None
+        total_token_count = cls._to_optional_int(
+            token_usage.get("total_tokens")
+            if token_usage.get("total_tokens") is not None
+            else token_usage.get("totalTokens")
+        )
+        if total_token_count is not None:
+            return total_token_count
+        input_token_count = cls._to_optional_int(
+            token_usage.get("input_tokens")
+            if token_usage.get("input_tokens") is not None
+            else token_usage.get("inputTokens")
+        )
+        if input_token_count is None:
+            input_token_count = cls._to_optional_int(token_usage.get("prompt_tokens"))
+        output_token_count = cls._to_optional_int(
+            token_usage.get("output_tokens")
+            if token_usage.get("output_tokens") is not None
+            else token_usage.get("outputTokens")
+        )
+        if output_token_count is None:
+            output_token_count = cls._to_optional_int(token_usage.get("completion_tokens"))
+        if input_token_count is None or output_token_count is None:
+            return None
+        return input_token_count + output_token_count
+
     @classmethod
     def build_ai_task_execution_model(cls, execution_info) -> AiTaskExecutionDetailModel:
         """
@@ -21,7 +79,10 @@ class AiTaskExecutionService:
         :param execution_info: AI任务执行数据库对象
         :return: 返回模型
         """
-        return AiTaskExecutionDetailModel.model_validate(execution_info)
+        model = AiTaskExecutionDetailModel.model_validate(execution_info)
+        return model.model_copy(
+            update={"total_token_count": cls._resolve_total_token_count(model.token_usage)}
+        )
 
     @classmethod
     def get_ai_task_execution_list_services(

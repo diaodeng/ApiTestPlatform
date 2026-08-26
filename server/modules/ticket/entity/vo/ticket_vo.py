@@ -577,6 +577,10 @@ class TicketAiAnalysisTaskModel(BaseModel):
     raw_output: str | None = None
     analysis_result: dict[str, Any] | None = None
     analysis_context: dict[str, Any] | None = None
+    audit_execution_id: int | None = None
+    input_token_count: int | None = None
+    output_token_count: int | None = None
+    total_token_count: int | None = None
     source_log_pull_record_id: int | None = None
     source_log_view_mode: str | None = None
     submitted_by_id: int | None = None

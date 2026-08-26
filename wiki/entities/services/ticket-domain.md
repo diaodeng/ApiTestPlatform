@@ -335,6 +335,9 @@ graph TD
 - 工单列表页和流转弹窗的状态选项优先读取 `/ticket/workflow/config` 的动态工作流状态节点；流转弹窗只展示当前状态已配置流转规则的目标状态。新增状态节点后必须配置对应流转规则，才会出现在目标状态下拉中。
 - 2026-07-04 对照备份分支 `master_params_ticket_new` 完成工单前端拆分逻辑审计：工单 API 拆分保持 80 个函数 method/url 一致；工单管理页和同步自动化页旧函数无遗漏；已恢复日志拉取表单字段、提交签名、详情预填、下载来源、日志查看器请求参数、列表查询逗号序列化、列配置结构、版本选项数据源、AI Provider 回填 Agent，以及同步自动化 JSON 校验失败即阻止保存的语义。
 - 2026-08-21 起，工单列表详情弹窗使用 `TicketReadService` 的轻量读取链路：`GET /ticket/{ticket_id}/summary` 只返回基础信息、版本、Issue 和最新摘要，不读取消息、快照、相似工单或提示词层；相似工单通过 `GET /ticket/{ticket_id}/similar-tickets` 独立加载，协同/AI 标签按需读取 `/messages/page` 和 `/snapshots/page`，分别默认限制 20 和 10 条、最大 100 条。相似结果使用摘要白名单，新增读取接口的 BIGINT 主键按字符串返回，旧完整详情和旧消息接口保持兼容。
+- 2026-08-27 起，工单 AI 分析任务在服务端创建审计记录后，会把 `sys_ai_task_execution.execution_id` 回填到 `TicketAiAnalysisTask.audit_execution_id`；任务成功后优先回写原始 `token_usage` JSON 到 AI 审计表，再把可聚合的 `input/output/total` Token 统计写入工单 AI 任务表，供历史列表和概览直接读取。
+- 同日起，`GET /ticket/{ticket_id}/summary` 增加 `aiTokenSummary`，只在单工单维度按 `ticket_id` 进行一次 SQL 聚合，用于展示整单 AI Token 合计；该聚合不会扩散到工单列表或批量摘要接口，因此不引入列表查询性能回退。
+- AI 执行审计服务保留 `tokenUsage` 原始 JSON 作为详情追溯依据；审计列表仅派生 `totalTokenCount` 展示摘要，避免在审计表和任务表双写重复统计字段。
 - 同一详情弹窗切换工单前会清空概览、相似工单、AI 任务和问题操作状态，并通过工单 ID、请求 generation 和弹窗打开状态校验异步响应；关闭详情时停止日志列表自动刷新、日志准备进度查询和 AI 短轮询，清理日志查看器和历史临时表单状态。前端用户说明见 `web/public/docs/ticket_detail.md`，接口契约见 `server/docs/ticket_read_api.md`。
 
 ## 参见

@@ -154,6 +154,18 @@ class TicketSnapshotsPageResponseModel(BaseModel):
     has_more: bool = False
 
 
+class TicketAiTokenSummaryModel(BaseModel):
+    """工单 AI Token 汇总信息。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    input_token_count: int = 0
+    output_token_count: int = 0
+    total_token_count: int = 0
+    task_count: int = 0
+    success_task_count: int = 0
+
+
 class TicketSummaryModel(BaseModel):
     """工单轻量概览响应模型，只保留基础、版本、Issue、关系码和必要摘要。"""
 
@@ -223,4 +235,5 @@ class TicketSummaryModel(BaseModel):
     processing_conclusion_status: str | None = None
     latest_log_pull: dict[str, Any] | None = None
     latest_ai_analysis: dict[str, Any] | None = None
+    ai_token_summary: TicketAiTokenSummaryModel | None = None
     ai_prompt_layers: dict[str, Any] | None = None

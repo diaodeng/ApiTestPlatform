@@ -532,6 +532,10 @@ class TicketAiAnalysisTask(Base):
     raw_output: Mapped[str] = mapped_column(long_text_type(), nullable=False, default="", comment="AI原始输出")
     analysis_result: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="结构化分析结果")
     analysis_context: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="任务上下文快照")
+    audit_execution_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="AI审计执行ID")
+    input_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输入Token数")
+    output_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输出Token数")
+    total_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="总Token数")
     source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
     source_log_view_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="stored", comment="日志来源模式"

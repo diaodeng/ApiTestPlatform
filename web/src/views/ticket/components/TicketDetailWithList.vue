@@ -1193,6 +1193,15 @@
     return JSON.stringify(value, null, 2);
   }
 
+  /**
+   * 格式化 Token 数量，空值时返回占位符。
+   * @param {number|string|null|undefined} value Token 数值。
+   * @returns {string} 展示文本。
+   */
+  function formatTokenCount(value) {
+    return Number.isFinite(Number(value)) ? String(Number(value)) : '-';
+  }
+
   function getAiStatusTagType(value) {
     const status = String(value || '');
     if (status === 'success') return 'success';
@@ -1781,7 +1790,7 @@
   <el-dialog
     v-model="aiTaskHistoryOpen"
     title="AI任务历史"
-    width="1100px"
+    width="1380px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
@@ -1810,6 +1819,15 @@
       <el-table-column label="提交人" prop="submittedByName" width="120" show-overflow-tooltip />
       <el-table-column label="完成时间" prop="finishedAt" width="170">
         <template #default="scope">{{ parseTime(scope.row.finishedAt) }}</template>
+      </el-table-column>
+      <el-table-column label="输入 Token" width="120" align="center">
+        <template #default="scope">{{ formatTokenCount(scope.row.inputTokenCount) }}</template>
+      </el-table-column>
+      <el-table-column label="输出 Token" width="120" align="center">
+        <template #default="scope">{{ formatTokenCount(scope.row.outputTokenCount) }}</template>
+      </el-table-column>
+      <el-table-column label="总 Token" width="120" align="center">
+        <template #default="scope">{{ formatTokenCount(scope.row.totalTokenCount) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="180" align="center" fixed="right">
         <template #default="scope">
@@ -1861,6 +1879,9 @@
         </el-tag>
         <span v-else>-</span>
       </el-descriptions-item>
+      <el-descriptions-item label="审计ID">{{
+        aiTaskDetailPayload.auditExecutionId || '-'
+      }}</el-descriptions-item>
       <el-descriptions-item label="版本">{{
         aiTaskDetailPayload.versionKey || '-'
       }}</el-descriptions-item>
@@ -1872,6 +1893,15 @@
       }}</el-descriptions-item>
       <el-descriptions-item label="完成时间">{{
         parseTime(aiTaskDetailPayload.finishedAt || aiTaskDetailPayload.updateTime) || '-'
+      }}</el-descriptions-item>
+      <el-descriptions-item label="输入 Token">{{
+        formatTokenCount(aiTaskDetailPayload.inputTokenCount)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="输出 Token">{{
+        formatTokenCount(aiTaskDetailPayload.outputTokenCount)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="总 Token">{{
+        formatTokenCount(aiTaskDetailPayload.totalTokenCount)
       }}</el-descriptions-item>
       <el-descriptions-item label="仓库地址" :span="2">{{
         aiTaskDetailPayload.repoUrl || '-'
