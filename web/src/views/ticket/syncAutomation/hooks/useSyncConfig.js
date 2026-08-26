@@ -300,6 +300,7 @@ export function useSyncConfig(proxy) {
         commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500,
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
+        autoAiAnalysisCondition: { analysisMode: 'always', statusFilterEnabled: false, statusCodes: [] },
       },
       promptTemplates: { classificationHint: '' },
       aiClassification: {
@@ -430,6 +431,23 @@ export function useSyncConfig(proxy) {
       autoAiEnabled: Boolean(logPullDefaults.autoAiEnabled),
       aiAgentCode: logPullDefaults.aiAgentCode || '',
       aiProviderCode: logPullDefaults.aiProviderCode || '',
+      autoAiAnalysisCondition: {
+        analysisMode: ['always', 'not_successful'].includes(
+          String(logPullDefaults.autoAiAnalysisCondition?.analysisMode || '').trim()
+        )
+          ? String(logPullDefaults.autoAiAnalysisCondition.analysisMode).trim()
+          : 'always',
+        statusFilterEnabled: Boolean(logPullDefaults.autoAiAnalysisCondition?.statusFilterEnabled),
+        statusCodes: Array.isArray(logPullDefaults.autoAiAnalysisCondition?.statusCodes)
+          ? Array.from(
+              new Set(
+                logPullDefaults.autoAiAnalysisCondition.statusCodes
+                  .map((item) => String(item || '').trim())
+                  .filter(Boolean)
+              )
+            )
+          : [],
+      },
     }
   }
 
@@ -922,6 +940,16 @@ export function useSyncConfig(proxy) {
     ])
     if (!basicValid || !remoteValid) return
 
+    const condition = form.logPullDefaults?.autoAiAnalysisCondition || {}
+    if (
+      form.logPullDefaults?.autoAiEnabled &&
+      condition.statusFilterEnabled &&
+      (!Array.isArray(condition.statusCodes) || condition.statusCodes.length === 0)
+    ) {
+      proxy.$modal.msgWarning('启用工单状态过滤时，至少选择一个内部工单状态')
+      return
+    }
+
     saving.value = true
     try {
       const payload = JSON.parse(JSON.stringify(form))
@@ -1031,6 +1059,29 @@ export function useSyncConfig(proxy) {
               }))
               .filter((item) => item.sourceField && item.targetField)
           : [],
+      }
+      payload.logPullDefaults = {
+        ...payload.logPullDefaults,
+        autoAiEnabled: Boolean(payload.logPullDefaults?.autoAiEnabled),
+        aiAgentCode: String(payload.logPullDefaults?.aiAgentCode || '').trim(),
+        aiProviderCode: String(payload.logPullDefaults?.aiProviderCode || '').trim(),
+        autoAiAnalysisCondition: {
+          analysisMode: ['always', 'not_successful'].includes(
+            String(payload.logPullDefaults?.autoAiAnalysisCondition?.analysisMode || '').trim()
+          )
+            ? String(payload.logPullDefaults.autoAiAnalysisCondition.analysisMode).trim()
+            : 'always',
+          statusFilterEnabled: Boolean(payload.logPullDefaults?.autoAiAnalysisCondition?.statusFilterEnabled),
+          statusCodes: Array.isArray(payload.logPullDefaults?.autoAiAnalysisCondition?.statusCodes)
+            ? Array.from(
+                new Set(
+                  payload.logPullDefaults.autoAiAnalysisCondition.statusCodes
+                    .map((item) => String(item || '').trim())
+                    .filter(Boolean)
+                )
+              )
+            : [],
+        },
       }
       payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
       payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()

@@ -2966,6 +2966,49 @@
                     </el-select>
                   </el-form-item>
                 </el-col>
+                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
+                  <el-form-item label="历史分析条件">
+                    <el-radio-group v-model="form.logPullDefaults.autoAiAnalysisCondition.analysisMode">
+                      <el-radio-button label="always">允许重复分析</el-radio-button>
+                      <el-radio-button label="not_successful">仅无成功记录</el-radio-button>
+                    </el-radio-group>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
+                  <el-form-item label="状态过滤">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">仅自动分析受影响；手动分析不受影响</div>
+                  </el-form-item>
+                </el-col>
+                <el-col
+                  v-if="form.logPullDefaults.autoAiEnabled && form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
+                  :span="24"
+                >
+                  <el-form-item label="允许的工单状态" required>
+                    <el-select
+                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusCodes"
+                      multiple
+                      filterable
+                      collapse-tags
+                      collapse-tags-tooltip
+                      placeholder="请选择内部工作流状态（多选）"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in workflowStatusOptions"
+                        :key="`auto-ai-status-${item.value}`"
+                        :label="`${item.label} [${item.value}]`"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-help-text">工单状态需先映射为内部状态；未满足条件时不会消耗 Token</div>
+                  </el-form-item>
+                </el-col>
               </el-row>
             </el-form>
           </el-card>

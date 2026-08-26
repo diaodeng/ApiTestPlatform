@@ -20,7 +20,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 在同步配置页按工单号手动补跑 bitable_pull 场景自动化
 created: 2026-05-22
-updated: 2026-08-25
+updated: 2026-08-26
 ---
 
 # 工单自动化链路流程
@@ -54,7 +54,12 @@ sequenceDiagram
   S->>S: 按快照配置推送日志拉取成功、失败或跳过结果
   S->>S: 日志成功后从文本提取版本号
   S->>S: 日志成功后检查 _automation 配置
-  S->>C: 提交 AI 分析任务请求（含 agentCode）
+  S->>S: 自动 AI 按快照检查历史成功记录、活动任务和内部工单状态
+  alt 条件不满足
+    S->>S: 记录 auto-ai skipped 原因，不提交 AI 任务
+  else 条件满足
+    S->>C: 提交 AI 分析任务请求（含 agentCode）
+  end
   C->>GW: 通过内部网关提交 AI 分析请求
   GW->>R: 申请队列位置并检查并发租约
   GW->>A: 按 Agent 并发上限转发 AI 分析任务
@@ -145,3 +150,7 @@ sequenceDiagram
 - [内容目录](../index.md)
 - [工单域](../entities/services/ticket-domain.md)
 - [工单核心数据模型](../entities/data-models/ticket-core-models.md)
+
+## 自动 AI 前置条件
+
+日志拉取记录会保存创建时的 `autoAiAnalysisCondition` 快照。后台自动触发 AI 前，先读取工单 ORM 的内部 `status`，再按配置检查状态允许列表、历史成功分析记录和 `created/running` 活动任务；这些条件全部满足后才创建 AI 任务。失败或取消的历史任务不视为成功，可继续自动重试。手动 AI 分析入口不经过该过滤。 条件归一化和检查由 `TicketAutoAiAnalysisConditionService` 统一提供，日志拉取成功后的自动触发与未拉日志的同步自动化直提路径共用该能力。

@@ -22,6 +22,7 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel, TicketExternalSyncUpsertModel
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
@@ -554,6 +555,12 @@ class TicketSyncAutomationService:
             if isinstance(config.get("automationNotification"), dict)
             else {}
         )
+        log_pull_defaults = config.get("logPullDefaults") if isinstance(config.get("logPullDefaults"), dict) else {}
+        auto_ai_analysis_condition = (
+            dict(log_pull_defaults.get("autoAiAnalysisCondition"))
+            if isinstance(log_pull_defaults.get("autoAiAnalysisCondition"), dict)
+            else {"analysisMode": "always", "statusFilterEnabled": False, "statusCodes": []}
+        )
         # 优先级: 任务级 automation > automationConfig 页面配置
         if automation is not None:
             auto_log_pull = bool(automation.auto_log_pull)
@@ -571,8 +578,8 @@ class TicketSyncAutomationService:
             scene_suffix = scene_map.get(sync_scene, "")
             auto_log_pull = bool(auto_config.get(f"autoLogPullOn{scene_suffix}"))
             auto_ai_analysis = bool(auto_config.get(f"autoAiAnalysisOn{scene_suffix}"))
-            ai_agent_code = str(config.get("logPullDefaults", {}).get("aiAgentCode") or "").strip() or None
-            ai_provider_code = str(config.get("logPullDefaults", {}).get("aiProviderCode") or "").strip() or None
+            ai_agent_code = str(log_pull_defaults.get("aiAgentCode") or "").strip() or None
+            ai_provider_code = str(log_pull_defaults.get("aiProviderCode") or "").strip() or None
         extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
         ticket_automation = (
             dict(extra_data.get("ticket_automation"))
@@ -677,6 +684,8 @@ class TicketSyncAutomationService:
                     runtime_config["autoAiEnabled"] = True
                     runtime_config["aiAgentCode"] = ai_agent_code
                     runtime_config["aiProviderCode"] = ai_provider_code
+                    # 将自动分析条件一并写入日志拉取记录，保证后台执行使用创建时快照。
+                    runtime_config["autoAiAnalysisCondition"] = auto_ai_analysis_condition
                 missing_log_pull_fields: list[str] = []
                 store_mapping_ambiguous = bool(runtime_config.get("storeMappingAmbiguous"))
                 store_mapping_candidates = runtime_config.get("storeMappingCandidates")
@@ -800,53 +809,72 @@ class TicketSyncAutomationService:
                             stage="log_pull",
                         )
             elif auto_ai_analysis:
-                version_id = ticket.affected_version_id
-                latest_log = TicketLogPullService.get_latest_summary(db, ticket_id)
-                if version_id and latest_log and latest_log.get("id"):
-                    ai_request = TicketAiAnalysisRequestModel(
-                        version_id=version_id,
-                        log_pull_record_id=int(latest_log["id"]),
-                        agent_code=ai_agent_code,
-                        ai_provider_code=ai_provider_code,
-                        extra_instruction=(
-                            automation.extra_instruction
-                            if automation is not None and automation.extra_instruction
-                            else ""
-                        ),
+                condition_skip = TicketAutoAiAnalysisConditionService.check_conditions(
+                    db, ticket, auto_ai_analysis_condition
+                )
+                if condition_skip:
+                    skip_reason, skip_detail = condition_skip
+                    summary["aiAnalysisSkipReason"] = skip_reason
+                    logger.info(
+                        f"工单[{ticket_id}]同步自动AI分析跳过 | reason={skip_reason}, detail={skip_detail}"
                     )
-                    ai_result = TicketAiAnalysisService.create_analysis_task_services(
-                        db, ticket_id, ai_request, current_user
+                    cls.mark_automation_step(
+                        meta,
+                        step="ai_analysis",
+                        status="skipped",
+                        detail={"reason": skip_reason, **skip_detail},
                     )
-                    if ai_result.is_success:
-                        summary["aiAnalysis"] = ai_result.result
-                        cls.mark_automation_step(meta, step="ai_analysis", status="submitted", detail=ai_result.result)
+                else:
+                    version_id = ticket.affected_version_id
+                    latest_log = TicketLogPullService.get_latest_summary(db, ticket_id)
+                    if version_id and latest_log and latest_log.get("id"):
+                        ai_request = TicketAiAnalysisRequestModel(
+                            version_id=version_id,
+                            log_pull_record_id=int(latest_log["id"]),
+                            agent_code=ai_agent_code,
+                            ai_provider_code=ai_provider_code,
+                            extra_instruction=(
+                                automation.extra_instruction
+                                if automation is not None and automation.extra_instruction
+                                else ""
+                            ),
+                        )
+                        ai_result = TicketAiAnalysisService.create_analysis_task_services(
+                            db, ticket_id, ai_request, current_user
+                        )
+                        if ai_result.is_success:
+                            summary["aiAnalysis"] = ai_result.result
+                            cls.mark_automation_step(
+                                meta, step="ai_analysis", status="submitted", detail=ai_result.result
+                            )
+                        else:
+                            summary["aiAnalysisError"] = ai_result.message
+                            cls.mark_automation_step(meta, step="ai_analysis", status="failed", error=ai_result.message)
+                            TicketNotifyService.send_ticket_notification(
+                                db,
+                                ticket,
+                                title="工单自动化结果通知",
+                                status="failed",
+                                message="自动 AI 分析任务创建失败",
+                                detail=ai_result.message,
+                                notify_config=notification_config,
+                                stage="ai_analysis",
+                            )
                     else:
-                        summary["aiAnalysisError"] = ai_result.message
-                        cls.mark_automation_step(meta, step="ai_analysis", status="failed", error=ai_result.message)
+                        reason = "缺少版本中心记录或可用日志记录，跳过自动 AI"
+                        summary["aiAnalysisSkipReason"] = reason
+                        cls.mark_automation_step(meta, step="ai_analysis", status="skipped", detail={"reason": reason})
                         TicketNotifyService.send_ticket_notification(
                             db,
                             ticket,
                             title="工单自动化结果通知",
                             status="failed",
-                            message="自动 AI 分析任务创建失败",
-                            detail=ai_result.message,
+                            message="自动 AI 分析已跳过",
+                            detail=reason,
                             notify_config=notification_config,
                             stage="ai_analysis",
                         )
-                else:
-                    reason = "缺少版本中心记录或可用日志记录，跳过自动 AI"
-                    summary["aiAnalysisSkipReason"] = reason
-                    cls.mark_automation_step(meta, step="ai_analysis", status="skipped", detail={"reason": reason})
-                    TicketNotifyService.send_ticket_notification(
-                        db,
-                        ticket,
-                        title="工单自动化结果通知",
-                        status="failed",
-                        message="自动 AI 分析已跳过",
-                        detail=reason,
-                        notify_config=notification_config,
-                        stage="ai_analysis",
-                    )
+
         except Exception as exc:
             cls.mark_automation_step(meta, step="automation", status="failed", error=str(exc))
             logger.exception(f"工单[{ticket_id}]同步自动化执行异常: {exc}")

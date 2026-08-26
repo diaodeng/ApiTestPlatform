@@ -181,6 +181,11 @@ class TicketSyncConfigService:
                 "autoAiEnabled": False,
                 "aiAgentCode": "",
                 "aiProviderCode": "",
+                "autoAiAnalysisCondition": {
+                    "analysisMode": "always",
+                    "statusFilterEnabled": False,
+                    "statusCodes": [],
+                },
             },
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
@@ -1323,6 +1328,24 @@ class TicketSyncConfigService:
         merged["logPullDefaults"]["environment"] = str(
             merged["logPullDefaults"].get("environment") or ""
         ).strip()
+        # 自动 AI 条件使用内部状态编码快照，避免运行时再次依赖外部状态文案。
+        raw_ai_condition = merged["logPullDefaults"].get("autoAiAnalysisCondition")
+        raw_ai_condition = raw_ai_condition if isinstance(raw_ai_condition, dict) else {}
+        analysis_mode = str(raw_ai_condition.get("analysisMode") or "always").strip()
+        if analysis_mode not in {"always", "not_successful"}:
+            analysis_mode = "always"
+        status_codes: list[str] = []
+        raw_status_codes = raw_ai_condition.get("statusCodes")
+        if isinstance(raw_status_codes, list):
+            for item in raw_status_codes:
+                status_code = str(item or "").strip()
+                if status_code and status_code not in status_codes:
+                    status_codes.append(status_code)
+        merged["logPullDefaults"]["autoAiAnalysisCondition"] = {
+            "analysisMode": analysis_mode,
+            "statusFilterEnabled": bool(raw_ai_condition.get("statusFilterEnabled")),
+            "statusCodes": status_codes,
+        }
         # 最大并发数已迁移到日志拉取存储配置（maxWorkers），这里剔除历史遗留字段，避免两处配置不一致。
         merged["logPullDefaults"].pop("logPullConcurrency", None)
         if not isinstance(merged.get("promptTemplates"), dict):

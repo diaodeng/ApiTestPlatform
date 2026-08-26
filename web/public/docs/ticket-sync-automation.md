@@ -86,6 +86,28 @@
 | `logPullDefaults.environment` | 默认日志环境，格式为 `分组:子环境`；必须来自日志拉取外部接口配置 |
 | `logPullDefaults.commandDataType` | 外部日志命令数据类型 |
 | `logPullDefaults.storageMode` | 日志归档方式，如 `local` 或 `ftp` |
+| `logPullDefaults.autoAiEnabled` | 日志拉取成功后是否自动发起 AI 分析 | `false` |
+| `logPullDefaults.aiAgentCode` / `aiProviderCode` | 自动 AI 使用的 Agent / Provider 编码，至少配置一个 | 空字符串 |
+| `logPullDefaults.autoAiAnalysisCondition.analysisMode` | 历史分析条件：`always` 每次允许，`not_successful` 仅工单没有成功分析记录时允许 | `always` |
+| `logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled` | 是否启用内部工单状态过滤 | `false` |
+| `logPullDefaults.autoAiAnalysisCondition.statusCodes` | 允许自动分析的内部状态编码列表，由页面下拉多选生成 | `[]` |
+
+自动 AI 条件只有在“自动 AI 分析”开启时生效，并按 AND 关系检查：自动 AI 已开启、工单状态命中允许列表（启用状态过滤时）、历史分析条件满足、没有正在执行的 AI 任务。状态配置使用系统内部状态编码，不直接填写外部状态文案；外部状态必须先通过“状态映射”转换为内部状态。状态为空、未映射或不在允许列表时，只跳过自动 AI，不影响日志拉取，也不会消耗 Token。
+
+页面入口为“工单同步自动化 → 日志拉取配置 → 拉日志默认值”。启用状态过滤后，在“允许的工单状态”中多选内部工作流状态；保存时至少选择一个状态。手动发起 AI 分析和手动重试不受这些自动分析条件限制。
+
+示例：
+
+```json
+{
+  "autoAiEnabled": true,
+  "autoAiAnalysisCondition": {
+    "analysisMode": "not_successful",
+    "statusFilterEnabled": true,
+    "statusCodes": ["pending", "processing", "wait_dev"]
+  }
+}
+```
 
 其中“默认日志环境”在“工单同步自动化 → 日志拉取配置 → 拉日志默认值”中选择，选项来自“外部接口”已保存的环境分组和子环境，保存格式为 `分组:子环境`，例如 `PROD:PROD`。自动拉日志未在任务级单独指定环境时使用该值；未配置时会记录缺少 `environment` 并跳过提交，避免创建必然失败的后台任务。
 

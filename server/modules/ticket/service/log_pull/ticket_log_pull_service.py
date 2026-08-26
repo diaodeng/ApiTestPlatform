@@ -57,7 +57,12 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullVendorOptionModel,
     TicketLogPullVendorStoreOptionsModel,
 )
-from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
+from modules.ticket.enums.ticket_enums import (
+    TicketEventType,
+    TicketLogDataType,
+    TicketLogPullStatus,
+)
+from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
@@ -2938,6 +2943,24 @@ class TicketLogPullService:
                 step="auto-ai",
                 status="skipped",
                 reason="未启用自动AI",
+            )
+            return
+        auto_ai_condition = TicketAutoAiAnalysisConditionService.resolve_condition(record.command_content)
+        condition_skip = TicketAutoAiAnalysisConditionService.check_conditions(db, ticket, auto_ai_condition)
+        if condition_skip:
+            skip_reason, skip_detail = condition_skip
+            logger.info(
+                f"日志拉取记录[{record_id}] 自动AI分析跳过 | ticket_id={record.ticket_id}, "
+                f"reason={skip_reason}, detail={skip_detail}"
+            )
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason=skip_reason,
+                detail=skip_detail,
             )
             return
         if not agent_code and not provider_code:

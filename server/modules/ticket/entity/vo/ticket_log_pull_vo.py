@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -285,6 +285,31 @@ class TicketLogPullProjectVendorMapUpsertModel(TicketLogPullProjectVendorMapBase
     vender_no: str = Field(description="商户编号")
 
 
+class TicketAutoAiAnalysisConditionModel(TicketLogPullBaseModel):
+    """
+    自动 AI 分析前置条件配置模型。
+    """
+
+    analysis_mode: Literal["always", "not_successful"] = Field(
+        default="always", description="历史分析条件：always 每次允许，not_successful 仅无成功记录时允许"
+    )
+    status_filter_enabled: bool = Field(default=False, description="是否启用工单内部状态过滤")
+    status_codes: list[str] = Field(default_factory=list, description="允许自动分析的工单内部状态编码")
+
+    @model_validator(mode="after")
+    def normalize_condition(self):
+        """归一化自动分析条件，避免配置快照中出现空状态或重复状态。"""
+        self.analysis_mode = self.analysis_mode if self.analysis_mode in {"always", "not_successful"} else "always"
+        self.status_filter_enabled = bool(self.status_filter_enabled)
+        normalized_codes: list[str] = []
+        for item in self.status_codes or []:
+            code = str(item or "").strip()
+            if code and code not in normalized_codes:
+                normalized_codes.append(code)
+        self.status_codes = normalized_codes
+        return self
+
+
 class TicketLogPullCreateModel(TicketLogPullBaseModel):
     """
     提交工单日志拉取申请模型。
@@ -309,6 +334,9 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     auto_ai_enabled: bool = Field(default=False, description="日志拉取成功后是否自动发起AI分析")
     ai_agent_code: str | None = Field(default=None, description="自动AI分析使用的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="自动AI分析使用的Provider编码")
+    auto_ai_analysis_condition: TicketAutoAiAnalysisConditionModel = Field(
+        default_factory=TicketAutoAiAnalysisConditionModel, description="自动AI分析条件快照"
+    )
     notify_config: dict[str, Any] | None = Field(default=None, description="日志拉取后的通知配置")
 
     @model_validator(mode="before")

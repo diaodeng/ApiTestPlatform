@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
+from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 
 
@@ -105,6 +106,7 @@ def test_auto_ai_submit_failure_records_reason_in_event_and_notification(monkeyp
         lambda db, ticket_id: ticket,
     )
     monkeypatch.setattr(TicketLogPullService, "_extract_record_notify_config", lambda record: {})
+    monkeypatch.setattr(TicketAutoAiAnalysisConditionService, "check_conditions", lambda *args, **kwargs: None)
     monkeypatch.setattr(TicketLogPullService, "_log_chain_step", lambda *args, **kwargs: chain_steps.append(kwargs))
     monkeypatch.setattr(
         TicketLogPullService,
@@ -140,3 +142,63 @@ def test_auto_ai_submit_failure_records_reason_in_event_and_notification(monkeyp
     assert notifications[0]["message"] == "日志拉取后自动AI提交失败"
     assert notifications[0]["detail"] == "Agent[agent-prod]未连接服务端"
     assert db.commit_count == 1
+
+
+def test_auto_ai_condition_uses_internal_ticket_status(monkeypatch):
+    """启用状态过滤时只允许匹配内部状态编码。"""
+    ticket = SimpleNamespace(ticket_id=1001, status="resolved")
+    assert TicketAutoAiAnalysisConditionService.check_conditions(
+        object(),
+        ticket,
+        {"analysisMode": "always", "statusFilterEnabled": True, "statusCodes": ["pending"]},
+    )[0] == "工单状态不满足自动AI分析条件"
+
+
+def test_auto_ai_condition_skips_after_successful_task(monkeypatch):
+    """历史成功分析条件开启时，有成功记录则跳过自动分析。"""
+    ticket = SimpleNamespace(ticket_id=1001, status="pending")
+    monkeypatch.setattr(
+        "modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service.TicketAiDao.get_last_successful_task_by_ticket",
+        lambda db, ticket_id: SimpleNamespace(task_id=9001),
+    )
+    assert TicketAutoAiAnalysisConditionService.check_conditions(
+        object(),
+        ticket,
+        {"analysisMode": "not_successful", "statusFilterEnabled": False, "statusCodes": []},
+    )[0] == "工单已有成功的AI分析记录"
+
+
+def test_auto_ai_condition_allows_failed_task_retry(monkeypatch):
+    """最近一次任务失败时，自动分析仍允许重新提交。"""
+    ticket = SimpleNamespace(ticket_id=1001, status="pending")
+    monkeypatch.setattr(
+        "modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service.TicketAiDao.get_last_successful_task_by_ticket",
+        lambda db, ticket_id: None,
+    )
+    monkeypatch.setattr(
+        "modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service.TicketAiDao.get_latest_task_by_ticket_id",
+        lambda db, ticket_id: SimpleNamespace(task_id=9002, status="failed"),
+    )
+    assert TicketAutoAiAnalysisConditionService.check_conditions(
+        object(),
+        ticket,
+        {"analysisMode": "not_successful", "statusFilterEnabled": False, "statusCodes": []},
+    ) is None
+
+
+def test_auto_ai_condition_skips_active_task(monkeypatch):
+    """已有创建中或运行中的任务时，不重复提交自动分析。"""
+    ticket = SimpleNamespace(ticket_id=1001, status="pending")
+    monkeypatch.setattr(
+        "modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service.TicketAiDao.get_latest_task_by_ticket_id",
+        lambda db, ticket_id: SimpleNamespace(task_id=9003, status="running"),
+    )
+
+    result = TicketAutoAiAnalysisConditionService.check_conditions(
+        object(),
+        ticket,
+        {"analysisMode": "always", "statusFilterEnabled": False, "statusCodes": []},
+    )
+
+    assert result is not None
+    assert result[0] == "工单已有正在执行的AI分析任务"
