@@ -1,3 +1,13 @@
+## [2026-08-26] 工单自动日志去重、自动 AI 复用成功日志、任务日志补齐 TID
+
+- 触发原因：工单修改后会反复自动拉取同一份日志；已有成功日志时自动 AI 有时因为未新建日志记录或缺少版本回填入口而被跳过；任务日志缺少可查询的 TID/trace_id，链路排查困难。
+- 影响范围：`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/service/sync/ticket_sync_automation_service.py`、`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/module_task/*`、`web/src/views/*/job/log.vue`、`web/public/docs/*`。
+- 关键改动：
+  - 新增“相同拉取参数成功记录”匹配逻辑，自动化命中后直接跳过重复拉取；
+  - 自动 AI 统一改为可复用成功日志记录触发，并继续走版本回填、条件检查和通知链路；
+  - Celery 任务执行日志表新增 `trace_id` 持久化与查询展示，系统/QTR 任务日志页支持按 TID 检索。
+- 验证：新增自动日志去重、自动 AI 复用、任务日志 trace_id 的定向测试，并执行 `uv run pytest tests/test_ticket_sync_automation_reuse.py tests/test_ticket_log_pull_retry_guard.py tests/test_celery_job_trace_id.py` 通过。
+
 ## [2026-08-26] INGEST-CODE | 自动 AI 历史与内部状态条件过滤
 
 - 触发：同步入库的工单可能已处理或已完成 AI 分析，继续自动分析会浪费 Token。

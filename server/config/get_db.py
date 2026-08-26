@@ -65,6 +65,7 @@ async def init_create_table():
     _ensure_large_sys_config_value_column()
     _ensure_ticket_log_pull_ticket_id_nullable()
     _ensure_ticket_log_pull_record_poll_deadline_column()
+    _ensure_celery_task_execution_log_trace_id_column()
     _ensure_celery_periodic_task_execution_mode_column()
     _ensure_hrm_project_business_code_column()
     _ensure_hrm_module_business_code_column()
@@ -192,6 +193,54 @@ def _ensure_ticket_log_pull_record_poll_deadline_column():
             )
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_log_pull_record.poll_deadline_at 字段失败: {exc}")
+
+
+def _ensure_celery_task_execution_log_trace_id_column():
+    """
+    为 celery_task_execution_log 补齐 trace_id 字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                result = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'celery_task_execution_log'
+                              AND COLUMN_NAME = 'trace_id'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if result:
+                    return
+                logger.info("检测到 celery_task_execution_log 缺少 trace_id 列，自动补齐")
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE celery_task_execution_log
+                        ADD COLUMN trace_id VARCHAR(64) NULL COMMENT '任务链路追踪ID' AFTER celery_task_id
+                        """
+                    )
+                )
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(celery_task_execution_log)")).mappings().all()
+            existing_columns = {str(row.get("name") or "") for row in rows}
+            if "trace_id" in existing_columns:
+                return
+            logger.info("检测到 sqlite celery_task_execution_log.trace_id 缺少，自动补齐")
+            connection.execute(text("ALTER TABLE celery_task_execution_log ADD COLUMN trace_id VARCHAR(64)"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 celery_task_execution_log.trace_id 字段失败: {exc}")
 
 
 def _ensure_celery_periodic_task_execution_mode_column():

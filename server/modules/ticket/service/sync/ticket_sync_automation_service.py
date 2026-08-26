@@ -20,8 +20,7 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
-from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel, TicketExternalSyncUpsertModel
-from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
@@ -526,6 +525,30 @@ class TicketSyncAutomationService:
         return meta
 
     @classmethod
+    def apply_auto_ai_result(cls, meta: dict[str, Any], summary: dict[str, Any], result: dict[str, Any]) -> None:
+        """
+        将自动 AI 触发结果同步到自动化摘要和审计步骤。
+        :param meta: 自动化元数据
+        :param summary: 自动化执行摘要
+        :param result: 自动 AI 处理结果
+        :return: 无
+        """
+        safe_result = cls._json_safe_value(result if isinstance(result, dict) else {})
+        status = str((safe_result or {}).get("status") or "").strip().lower()
+        reason = str((safe_result or {}).get("reason") or "").strip()
+        if status == "submitted":
+            summary["aiAnalysis"] = safe_result
+            cls.mark_automation_step(meta, step="ai_analysis", status="submitted", detail=safe_result)
+            return
+        if status == "skipped":
+            summary["aiAnalysisSkipReason"] = reason or "自动 AI 分析已跳过"
+            cls.mark_automation_step(meta, step="ai_analysis", status="skipped", detail=safe_result)
+            return
+        failure_reason = reason or "自动 AI 分析执行失败"
+        summary["aiAnalysisError"] = failure_reason
+        cls.mark_automation_step(meta, step="ai_analysis", status="failed", detail=safe_result, error=failure_reason)
+
+    @classmethod
     def run_sync_automation(
         cls,
         db: Session,
@@ -764,37 +787,72 @@ class TicketSyncAutomationService:
                 else:
                     try:
                         create_model = TicketLogPullCreateModel.model_validate(runtime_config)
-                        log_result = TicketLogPullService.create_log_pull_services(
-                            db, ticket_id, create_model, current_user
+                        existing_success_record = TicketLogPullService.find_matching_success_record(
+                            db, ticket_id, create_model
                         )
-                        if log_result.is_success:
-                            summary["logPull"] = log_result.result
+                        if existing_success_record:
+                            reuse_reason = (
+                                f"已存在相同拉取参数且成功的日志记录，跳过自动拉取并复用记录[{existing_success_record.id}]"
+                            )
+                            summary["logPull"] = {
+                                "recordId": str(existing_success_record.id),
+                                "status": str(existing_success_record.status or ""),
+                                "statusDesc": str(existing_success_record.status_desc or ""),
+                                "reused": True,
+                            }
+                            summary["logPullSkipReason"] = reuse_reason
                             cls.mark_automation_step(
                                 meta,
                                 step="log_pull",
-                                status="submitted",
-                                detail={"runtimeConfig": runtime_config, "result": log_result.result},
+                                status="skipped",
+                                detail={
+                                    "reason": reuse_reason,
+                                    "runtimeConfig": runtime_config,
+                                    "existingRecordId": str(existing_success_record.id),
+                                },
                             )
                             if auto_ai_analysis:
+                                ai_result = TicketLogPullService.trigger_auto_ai_analysis(
+                                    db, existing_success_record.id
+                                )
+                                cls.apply_auto_ai_result(meta, summary, ai_result)
+                        else:
+                            log_result = TicketLogPullService.create_log_pull_services(
+                                db, ticket_id, create_model, current_user
+                            )
+                            if log_result.is_success:
+                                summary["logPull"] = log_result.result
                                 cls.mark_automation_step(
                                     meta,
-                                    step="ai_analysis",
-                                    status="queued",
-                                    detail={"via": "log_pull_auto_ai", "agentCode": ai_agent_code},
+                                    step="log_pull",
+                                    status="submitted",
+                                    detail={"runtimeConfig": runtime_config, "result": log_result.result},
                                 )
-                        else:
-                            summary["logPullError"] = log_result.message
-                            cls.mark_automation_step(meta, step="log_pull", status="failed", error=log_result.message)
-                            TicketNotifyService.send_ticket_notification(
-                                db,
-                                ticket,
-                                title="工单自动化结果通知",
-                                status="failed",
-                                message="自动日志拉取任务创建失败",
-                                detail=log_result.message,
-                                notify_config=notification_config,
-                                stage="log_pull",
-                            )
+                                if auto_ai_analysis:
+                                    cls.mark_automation_step(
+                                        meta,
+                                        step="ai_analysis",
+                                        status="queued",
+                                        detail={"via": "log_pull_auto_ai", "agentCode": ai_agent_code},
+                                    )
+                            else:
+                                summary["logPullError"] = log_result.message
+                                cls.mark_automation_step(
+                                    meta,
+                                    step="log_pull",
+                                    status="failed",
+                                    error=log_result.message,
+                                )
+                                TicketNotifyService.send_ticket_notification(
+                                    db,
+                                    ticket,
+                                    title="工单自动化结果通知",
+                                    status="failed",
+                                    message="自动日志拉取任务创建失败",
+                                    detail=log_result.message,
+                                    notify_config=notification_config,
+                                    stage="log_pull",
+                                )
                     except Exception as exc:
                         summary["logPullError"] = str(exc)
                         cls.mark_automation_step(meta, step="log_pull", status="failed", error=str(exc))
@@ -825,43 +883,12 @@ class TicketSyncAutomationService:
                         detail={"reason": skip_reason, **skip_detail},
                     )
                 else:
-                    version_id = ticket.affected_version_id
-                    latest_log = TicketLogPullService.get_latest_summary(db, ticket_id)
-                    if version_id and latest_log and latest_log.get("id"):
-                        ai_request = TicketAiAnalysisRequestModel(
-                            version_id=version_id,
-                            log_pull_record_id=int(latest_log["id"]),
-                            agent_code=ai_agent_code,
-                            ai_provider_code=ai_provider_code,
-                            extra_instruction=(
-                                automation.extra_instruction
-                                if automation is not None and automation.extra_instruction
-                                else ""
-                            ),
-                        )
-                        ai_result = TicketAiAnalysisService.create_analysis_task_services(
-                            db, ticket_id, ai_request, current_user
-                        )
-                        if ai_result.is_success:
-                            summary["aiAnalysis"] = ai_result.result
-                            cls.mark_automation_step(
-                                meta, step="ai_analysis", status="submitted", detail=ai_result.result
-                            )
-                        else:
-                            summary["aiAnalysisError"] = ai_result.message
-                            cls.mark_automation_step(meta, step="ai_analysis", status="failed", error=ai_result.message)
-                            TicketNotifyService.send_ticket_notification(
-                                db,
-                                ticket,
-                                title="工单自动化结果通知",
-                                status="failed",
-                                message="自动 AI 分析任务创建失败",
-                                detail=ai_result.message,
-                                notify_config=notification_config,
-                                stage="ai_analysis",
-                            )
+                    latest_success_record = TicketLogPullDao.get_latest_success_record_by_ticket_id(db, ticket_id)
+                    if latest_success_record:
+                        ai_result = TicketLogPullService.trigger_auto_ai_analysis(db, latest_success_record.id)
+                        cls.apply_auto_ai_result(meta, summary, ai_result)
                     else:
-                        reason = "缺少版本中心记录或可用日志记录，跳过自动 AI"
+                        reason = "缺少成功日志记录，跳过自动 AI"
                         summary["aiAnalysisSkipReason"] = reason
                         cls.mark_automation_step(meta, step="ai_analysis", status="skipped", detail={"reason": reason})
                         TicketNotifyService.send_ticket_notification(

@@ -418,6 +418,7 @@ def _build_execution_log_fields(
         "queue_name": str(payload.get("queue_name") or "celery"),
         "trigger_type": str(payload.get("trigger_type") or "scheduler"),
         "celery_task_id": celery_task_id,
+        "trace_id": str(payload.get("trace_id") or "").strip() or None,
         "schedule_desc": str(payload.get("schedule_desc") or ""),
         "status": status,
         "message": message,

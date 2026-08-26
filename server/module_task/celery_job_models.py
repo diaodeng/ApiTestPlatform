@@ -88,6 +88,7 @@ class CeleryTaskExecutionLog(Base):
 
     trigger_type = Column(String(16), nullable=False, default="scheduler", comment="触发方式")
     celery_task_id = Column(String(64), nullable=True, comment="Celery Task ID")
+    trace_id = Column(String(64), nullable=True, comment="任务链路追踪ID")
     schedule_desc = Column(String(255), nullable=True, comment="触发时的调度描述")
 
     status = Column(String(16), nullable=False, default="success", comment="执行状态")

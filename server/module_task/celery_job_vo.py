@@ -147,6 +147,7 @@ class JobLogModel(BaseModel):
     queue_name: Optional[str] = None
     trigger_type: Optional[str] = None
     celery_task_id: Optional[str] = None
+    trace_id: Optional[str] = None
     schedule_desc: Optional[str] = None
     status: Optional[str] = None
     message: Optional[str] = None
@@ -198,6 +199,7 @@ class JobLogQueryModel(BaseModel):
     task_name: Optional[str] = None
     status: Optional[str] = None
     trigger_type: Optional[str] = None
+    trace_id: Optional[str] = None
     begin_time: Optional[str] = None
     end_time: Optional[str] = None
 

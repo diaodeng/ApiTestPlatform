@@ -1,8 +1,10 @@
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
+from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 
@@ -202,3 +204,78 @@ def test_auto_ai_condition_skips_active_task(monkeypatch):
 
     assert result is not None
     assert result[0] == "工单已有正在执行的AI分析任务"
+
+
+def test_find_matching_success_record_ignores_automation_snapshot(monkeypatch):
+    """相同拉取参数即使命令内容中的通知和自动 AI 快照不同，也应命中成功记录。"""
+    payload = TicketLogPullCreateModel.model_validate(
+        {
+            "ticketId": 1001,
+            "environment": "prod",
+            "vendorId": 11,
+            "storeId": "552283",
+            "posNo": 2,
+            "commandDataType": 1,
+            "modifyTime": "2026-08-20",
+            "logBeginTime": "2026-08-20 10:00:00",
+            "logEndTime": "2026-08-20 10:30:00",
+            "autoAiEnabled": True,
+            "aiAgentCode": "agent-a",
+            "aiProviderCode": "provider-a",
+            "notifyConfig": {"channel": "a"},
+        }
+    )
+    matching_record = SimpleNamespace(
+        id=2011730395835393,
+        ticket_id=1001,
+        status="success",
+        environment="prod",
+        vendor_id=11,
+        store_id="552283",
+        pos_no=2,
+        command_data_type=1,
+        command_content={
+            "modifyTime": "2026-08-20",
+            "logBeginTime": "2026-08-20 10:00:00",
+            "logEndTime": "2026-08-20 10:30:00",
+            "fileMaxSize": 500,
+            "zipMaxSize": 500,
+            "notifyConfig": {"channel": "b"},
+            "_automation": {
+                "autoAiEnabled": False,
+                "aiAgentCode": "agent-b",
+                "aiProviderCode": "provider-b",
+            },
+        },
+        log_begin_time=datetime(2026, 8, 20, 10, 0, 0),
+        log_end_time=datetime(2026, 8, 20, 10, 30, 0),
+    )
+    mismatched_record = SimpleNamespace(
+        id=2011730395835394,
+        ticket_id=1001,
+        status="success",
+        environment="prod",
+        vendor_id=11,
+        store_id="552283",
+        pos_no=2,
+        command_data_type=1,
+        command_content={
+            "modifyTime": "2026-08-21",
+            "logBeginTime": "2026-08-21 10:00:00",
+            "logEndTime": "2026-08-21 10:30:00",
+            "fileMaxSize": 500,
+            "zipMaxSize": 500,
+        },
+        log_begin_time=datetime(2026, 8, 21, 10, 0, 0),
+        log_end_time=datetime(2026, 8, 21, 10, 30, 0),
+    )
+
+    monkeypatch.setattr(
+        TicketLogPullDao,
+        "list_success_records_by_pull_identity",
+        lambda *args, **kwargs: [mismatched_record, matching_record],
+    )
+
+    result = TicketLogPullService.find_matching_success_record(object(), 1001, payload)
+
+    assert result is matching_record

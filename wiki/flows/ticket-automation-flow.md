@@ -91,8 +91,9 @@ sequenceDiagram
 | 3 | 若勾选“日志后自动 AI”，前端同时要求选择 Agent；后端会把 Agent 编码与通知配置一并写入日志拉取记录的内部自动化配置。 |
 | 4 | `TicketService.create_ticket` 在保存工单后可同步创建日志拉取任务，并把自动化配置写入工单 `extra_data.ticket_automation` 便于追溯；日志拉取服务先查外部列表，已可下载时直接进入下载流程，否则提交申请后由后台周期任务批量探测（提交申请与轮询探测解耦，不再阻塞后台线程）。 |
 | 5 | 日志拉取下载解析阶段（`TicketLogPullService._process_download`）成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
-| 6 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
-| 7 | 若自动化配置开启 AI 且存在 Agent 编码，服务端构造 `TicketAiAnalysisRequestModel` 并触发分析任务。 |
+| 6 | 自动拉日志正式创建记录前，会先按工单、环境、商家、门店、POS、数据类型和实际日志范围等关键参数检查是否已有成功记录；若命中则跳过重复拉取并复用该成功记录。 |
+| 7 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
+| 8 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。 |
 | 8 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；日志拉取后的自动 AI 先经过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}`，再按 Redis 队列和 `ticket.ai.agent.maxConcurrentTasks` 控制单 Agent 并发；Provider 下发时服务端先合并 `workerEnv` 扩展项，再写入当前 Provider 的密钥、地址和模型；Codex/Claude Worker 初始化任务级配置时覆盖旧工作区值。Agent 并发由 `ticket.ai.agent.maxConcurrentTasks` 控制，默认 `1`，超出上限进入 Redis 队列。任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
 | 9 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
 | 10 | `TicketNotifyService` 以 `${ticket_no}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}` 等变量渲染通知模板；日志拉取和 AI 分析的成功、失败与因前置条件跳过都会投递到选定的推送配置。 |

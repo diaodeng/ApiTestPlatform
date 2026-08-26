@@ -1814,6 +1814,124 @@ class TicketLogPullService:
                     logger.warning(f"删除重新截取产生的临时文件失败: {archive_path}")
 
     @classmethod
+    def _normalize_pull_identity(cls, raw_identity: dict[str, Any]) -> str:
+        """
+        归一化影响日志内容的拉取参数签名，忽略通知和自动 AI 等自动化元数据。
+        :param raw_identity: 原始拉取参数字典
+        :return: 稳定可比较的签名字符串
+        """
+        normalized: dict[str, Any] = {}
+        for key in sorted(raw_identity):
+            value = raw_identity.get(key)
+            if isinstance(value, datetime):
+                normalized[key] = value.replace(microsecond=0).isoformat(sep=" ")
+            elif isinstance(value, date):
+                normalized[key] = value.isoformat()
+            elif value in (None, ""):
+                normalized[key] = None
+            elif isinstance(value, str):
+                normalized[key] = value.strip()
+            else:
+                normalized[key] = value
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def _build_pull_identity_from_payload(cls, payload: TicketLogPullCreateModel) -> str:
+        """
+        基于创建参数生成拉取签名，用于自动化去重。
+        :param payload: 拉取创建模型
+        :return: 当前请求的参数签名
+        """
+        log_begin_time, log_end_time = cls._resolve_log_time_range(payload)
+        raw_identity = {
+            "environment": str(payload.environment or "").strip() or None,
+            "vendorId": int(payload.vendor_id),
+            "storeId": str(payload.store_id or "").strip(),
+            "posNo": int(payload.pos_no),
+            "commandDataType": int(payload.command_data_type or 1),
+            "modifyTime": payload.modify_time,
+            "path": payload.path,
+            "fileMaxSize": cls._parse_positive_int(payload.file_max_size, 500),
+            "zipMaxSize": cls._parse_positive_int(payload.zip_max_size, 500),
+            "logBeginTime": log_begin_time,
+            "logEndTime": log_end_time,
+        }
+        return cls._normalize_pull_identity(raw_identity)
+
+    @classmethod
+    def _build_pull_identity_from_record(cls, record: TicketLogPullRecord) -> str:
+        """
+        基于历史成功记录生成拉取签名，供自动化复用时比对。
+        :param record: 成功的日志拉取记录
+        :return: 历史记录的参数签名
+        """
+        command_content = (
+            dict(record.command_content)
+            if isinstance(record.command_content, dict)
+            else cls._json_loads(record.command_content, {})
+        )
+        if not isinstance(command_content, dict):
+            command_content = {}
+        raw_identity = {
+            "environment": str(record.environment or "").strip() or None,
+            "vendorId": int(record.vendor_id),
+            "storeId": str(record.store_id or "").strip(),
+            "posNo": int(record.pos_no),
+            "commandDataType": int(record.command_data_type or 1),
+            "modifyTime": cls._first_present_value(command_content, "modifyTime", "modify_time"),
+            "path": cls._first_present_value(command_content, "path"),
+            "fileMaxSize": cls._parse_positive_int(
+                cls._first_present_value(command_content, "fileMaxSize", "file_max_size"), 500
+            ),
+            "zipMaxSize": cls._parse_positive_int(
+                cls._first_present_value(command_content, "zipMaxSize", "zip_max_size"), 500
+            ),
+            "logBeginTime": (
+                cls._first_present_value(command_content, "logBeginTime", "log_begin_time") or record.log_begin_time
+            ),
+            "logEndTime": (
+                cls._first_present_value(command_content, "logEndTime", "log_end_time") or record.log_end_time
+            ),
+        }
+        return cls._normalize_pull_identity(raw_identity)
+
+    @classmethod
+    def find_matching_success_record(
+        cls, query_db: Session, ticket_id: int, payload: TicketLogPullCreateModel
+    ) -> TicketLogPullRecord | None:
+        """
+        查询相同拉取参数下最近一条成功记录，供自动化跳过重复拉取。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param payload: 当前拉取参数
+        :return: 命中的成功记录，未命中返回 None
+        """
+        target_signature = cls._build_pull_identity_from_payload(payload)
+        candidates = TicketLogPullDao.list_success_records_by_pull_identity(
+            query_db,
+            ticket_id=ticket_id,
+            environment=payload.environment,
+            vendor_id=int(payload.vendor_id),
+            store_id=str(payload.store_id or "").strip(),
+            pos_no=int(payload.pos_no),
+            command_data_type=int(payload.command_data_type or 1),
+        )
+        for record in candidates:
+            if cls._build_pull_identity_from_record(record) == target_signature:
+                return record
+        return None
+
+    @classmethod
+    def trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> dict[str, Any]:
+        """
+        触发指定日志记录的自动 AI 分析，并返回结构化结果。
+        :param db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :return: 自动 AI 处理结果摘要
+        """
+        return cls._trigger_auto_ai_analysis(db, record_id)
+
+    @classmethod
     def create_log_pull_services(
         cls, query_db: Session, ticket_id: int | None, payload: TicketLogPullCreateModel, current_user: CurrentUserModel
     ) -> CrudResponseModel:
@@ -2884,36 +3002,39 @@ class TicketLogPullService:
 
 
     @classmethod
-    def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> None:
+    def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> dict[str, Any]:
         """
-        根据日志拉取记录中的自动化配置触发 AI 分析。
+        根据日志拉取记录中的自动化配置触发 AI 分析，并返回结构化结果。
         :param db: 数据库会话
         :param record_id: 日志拉取记录ID
-        :return: 无
+        :return: 自动 AI 处理结果摘要
         """
         record = TicketLogPullDao.get_record_by_id(db, record_id)
         if not record or not isinstance(record.command_content, dict):
+            reason = "缺少可用的命令内容"
             cls._log_chain_step(
                 db,
                 ticket_id=getattr(record, "ticket_id", None),
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="缺少可用的命令内容",
+                reason=reason,
             )
-            return
+            return {"status": "skipped", "reason": reason, "recordId": str(record_id)}
         if not record.ticket_id:
+            reason = "未关联工单"
             cls._log_chain_step(
                 db,
                 ticket_id=None,
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="未关联工单",
+                reason=reason,
             )
-            return
+            return {"status": "skipped", "reason": reason, "recordId": str(record.id)}
         ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
         if not ticket:
+            reason = "工单不存在"
             logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单不存在")
             cls._log_chain_step(
                 db,
@@ -2921,9 +3042,14 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="工单不存在",
+                reason=reason,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         version_id = ticket.affected_version_id
         record_notify_config = cls._extract_record_notify_config(record)
         automation = record.command_content.get("_automation")
@@ -2936,15 +3062,21 @@ class TicketLogPullService:
             agent_code = str(record.command_content.get("aiAgentCode") or "").strip()
             provider_code = str(record.command_content.get("aiProviderCode") or "").strip()
         if not auto_ai_enabled:
+            reason = "未启用自动AI"
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="未启用自动AI",
+                reason=reason,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         auto_ai_condition = TicketAutoAiAnalysisConditionService.resolve_condition(record.command_content)
         condition_skip = TicketAutoAiAnalysisConditionService.check_conditions(db, ticket, auto_ai_condition)
         if condition_skip:
@@ -2962,8 +3094,15 @@ class TicketLogPullService:
                 reason=skip_reason,
                 detail=skip_detail,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": skip_reason,
+                "detail": skip_detail,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         if not agent_code and not provider_code:
+            reason = "未填写Provider或Agent"
             logger.warning(f"日志拉取记录[{record_id}] 已配置自动AI但未填写Provider或Agent")
             cls._log_chain_step(
                 db,
@@ -2971,7 +3110,7 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="未填写Provider或Agent",
+                reason=reason,
             )
             cls._notify_automation(
                 db,
@@ -2981,7 +3120,12 @@ class TicketLogPullService:
                 detail=f"record_id={record_id}",
                 notify_config=record_notify_config,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         if not version_id:
             version_id = cls.ensure_ticket_version_id_from_log(db, record.ticket_id, record.id)
             if version_id:
@@ -2991,6 +3135,7 @@ class TicketLogPullService:
                     f"ticket_id={record.ticket_id}, version_id={version_id}"
                 )
         if not version_id:
+            reason = "工单缺少发生版本"
             logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单缺少发生版本")
             cls._log_chain_step(
                 db,
@@ -2998,7 +3143,7 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="工单缺少发生版本",
+                reason=reason,
             )
             cls._notify_automation(
                 db,
@@ -3008,7 +3153,12 @@ class TicketLogPullService:
                 detail=f"record_id={record_id}",
                 notify_config=record_notify_config,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         try:
             from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel
             from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
@@ -3030,8 +3180,6 @@ class TicketLogPullService:
                     f"日志拉取记录[{record_id}] 自动AI分析未成功提交 | "
                     f"ticket_id={record.ticket_id}, reason={failure_reason}"
                 )
-                # 自动提交在创建 AI 任务前被拒绝时，任务表不会留下记录；因此需在工单事件中
-                # 固化返回原因，避免只靠通知详情中的记录 ID 排查。
                 cls._log_chain_step(
                     db,
                     ticket_id=record.ticket_id,
@@ -3054,25 +3202,44 @@ class TicketLogPullService:
                     detail=failure_reason,
                     notify_config=record_notify_config,
                 )
-                # _process_download 已在触发前提交日志成功状态；本次失败事件需单独提交，
-                # 否则线程池会话关闭时会回滚，导致时间线中没有自动 AI 的失败原因。
                 db.commit()
-            else:
-                cls._log_chain_step(
-                    db,
-                    ticket_id=record.ticket_id,
-                    record_id=record_id,
-                    step="auto-ai",
-                    status="submitted",
-                    reason="自动AI分析已提交",
-                    detail={
-                        "versionId": version_id,
-                        "agentCode": agent_code,
-                        "providerCode": provider_code,
-                        "taskId": getattr(result.result, "task_id", None),
-                    },
-                )
+                return {
+                    "status": "failed",
+                    "reason": failure_reason,
+                    "failureStage": "submit",
+                    "recordId": str(record.id),
+                    "ticketId": str(record.ticket_id),
+                    "versionId": str(version_id),
+                    "agentCode": agent_code or None,
+                    "providerCode": provider_code or None,
+                }
+
+            task_id = getattr(result.result, "task_id", None)
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="submitted",
+                reason="自动AI分析已提交",
+                detail={
+                    "versionId": version_id,
+                    "agentCode": agent_code,
+                    "providerCode": provider_code,
+                    "taskId": task_id,
+                },
+            )
+            return {
+                "status": "submitted",
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+                "versionId": str(version_id),
+                "agentCode": agent_code or None,
+                "providerCode": provider_code or None,
+                "taskId": str(task_id) if task_id is not None else None,
+            }
         except Exception as exc:
+            failure_reason = str(exc)
             logger.exception(f"日志拉取记录[{record_id}] 触发自动AI分析失败: {exc}")
             cls._log_chain_step(
                 db,
@@ -3080,7 +3247,7 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="failed",
-                reason=str(exc),
+                reason=failure_reason,
             )
             cls._notify_automation(
                 db,
@@ -3090,6 +3257,12 @@ class TicketLogPullService:
                 detail=f"record_id={record_id}, error={exc}",
                 notify_config=record_notify_config,
             )
+            return {
+                "status": "failed",
+                "reason": failure_reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
 
     @classmethod
     def _submit_external_request(cls, db: Session, record: TicketLogPullRecord) -> None:
