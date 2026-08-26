@@ -15,6 +15,14 @@ updated: 2026-08-25
 - 语义：队列等待和 Agent 执行共用同一个总超时边界，发给 Agent 的等待预算按剩余时间计算，避免并发队列把任务总超时拉长。
 - 验证：补充并发队列与剩余超时回归测试；未修改生产数据库。
 
+## [2026-08-25] FIX | 自动 AI 内部网关错误拼接生产代理前缀导致 404
+
+- 触发：生产 `.env.prod` 使用 `APP_ROOT_PATH=/prod-api` 时，Celery Worker 通过 `127.0.0.1:8080` 访问内部 Agent 网关仍携带 `/prod-api`，自动 AI 连续收到 404。
+- 根因：本机直连不经过反向代理，内部路由实际为 `/qtr/agent/ai-analysis/send/{agent_code}`；外部代理前缀不应拼接到本机 URL。
+- 排查：只读查询 `ticket_ai_analysis_task`、`ticket`、`ticket_event`、`ticket_log_pull_record`；任务 `2043210025327616` 于数据库记录为失败，错误为内部网关 404；同一工单后续自动任务仍复现相同 URL。未修改数据库数据。
+- 修复：`TicketAiAnalysisService._build_agent_gateway_url` 仅拼接本机端口和业务路径，并新增 URL 回归测试；同时补充生产发布后统一重启 FastAPI/Celery 进程的运维说明。
+- 验证：定向 pytest 通过（3 passed）；当前工作区静态路由包含 `POST /qtr/agent/ai-analysis/send/{agent_code}`。
+
 ## [2026-08-25] FIX | 自动 AI 提交失败原因写入通知与工单事件
 
 - 触发：日志拉取成功后自动 AI 提交被拒绝时，原通知只显示 `record_id/version_id`，无法判断是 Agent 未连接、版本映射还是其他前置校验失败。

@@ -730,15 +730,18 @@ class TicketAiAnalysisService:
     def _build_agent_gateway_url(cls, path: str) -> str:
         """
         构建本机 FastAPI 网关地址。
+
+        该请求通过 127.0.0.1 直连当前 FastAPI 进程，不经过反向代理，
+        因此不能拼接面向浏览器的 ``app_root_path``。``root_path`` 只由
+        反向代理转发外部请求时使用；拼接到本机请求会在未配置同样
+        ``root_path`` 的 API 进程中直接命中 404。
         :param path: 访问路径
         :return: 完整 URL
         """
-        root_path = str(AppConfig.app_root_path or "").strip()
-        if root_path in {"", "/"}:
-            root_path = ""
-        elif not root_path.startswith("/"):
-            root_path = f"/{root_path}"
-        return f"http://127.0.0.1:{AppConfig.app_port}{root_path}{path}"
+        normalized_path = str(path or "").strip()
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        return f"http://127.0.0.1:{AppConfig.app_port}{normalized_path}"
 
     @classmethod
     def _send_agent_request_via_gateway(

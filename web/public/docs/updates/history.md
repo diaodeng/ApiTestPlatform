@@ -6,6 +6,7 @@ title: 更新历史
 
 ## 2026-08-25
 
+- 修复生产环境自动 AI 通过本机 Agent 网关时错误拼接 `/prod-api` 代理前缀导致 404；内部直连改用 `/qtr/agent/ai-analysis/send/{agent_code}`，详见：[自动 AI 内部网关 404 修复](2026-08-25-ticket-ai-agent-gateway-root-path.md)。
 - 修复工单 AI 分析结果回写失败后任务长期停留在“执行中”的问题；超长建议负责人字段按快照列长度安全截断，并在异常时先回滚事务再写入失败终态。
 - 新增工单 AI Agent 并发配置 `Agent 并发数`，自动 AI 通过 FastAPI 内部网关跨进程派发，超过上限的请求进入 Redis 队列等待。
 - 修复工单 AI 分析选择 Claude Code/Codex Provider 后仍使用旧 `workerEnv` 或任务工作区配置的问题，Provider 核心连接配置现在会覆盖旧值。详见：[工单 AI 分析 Provider 下发修复](2026-08-25-ticket-ai-provider-override.md)。

@@ -132,7 +132,7 @@ sequenceDiagram
 
 ## 进程边界注意事项
 
-生产 `start.sh` 由 Supervisor 分别启动 FastAPI、Celery Worker 和 Celery Beat。日志扫描与下载后的自动 AI 触发运行在 Celery Worker；Agent WebSocket 连接及 `connected_agents` 注册表运行在 FastAPI 进程内，普通 Python 内存字典不会跨进程共享。当前实现已通过受保护的 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 做跨进程投递，并由 Redis 共享队列和运行中租约控制单 Agent 并发数；Worker 不再直接依赖进程内连接表。
+生产 `start.sh` 由 Supervisor 分别启动 FastAPI、Celery Worker 和 Celery Beat。日志扫描与下载后的自动 AI 触发运行在 Celery Worker；Agent WebSocket 连接及 `connected_agents` 注册表运行在 FastAPI 进程内，普通 Python 内存字典不会跨进程共享。当前实现已通过受保护的 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 做跨进程投递，并由 Redis 共享队列和运行中租约控制单 Agent 并发数；Worker 不再直接依赖进程内连接表。该内部直连地址不拼接外部代理前缀（例如 `/prod-api`），外部前缀只由反向代理处理。
 
 ## 参见
 
