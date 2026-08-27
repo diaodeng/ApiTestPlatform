@@ -39,7 +39,7 @@ def test_retry_log_pull_services_rejects_missing_environment(monkeypatch):
     payload = SimpleNamespace(environment="")
     log_steps: list[dict[str, str]] = []
 
-    monkeypatch.setattr(TicketLogPullDao, "get_record_by_id", lambda db, record_id: record)
+    monkeypatch.setattr(TicketLogPullDao, "get_record_meta_by_id", lambda db, record_id: record)
     monkeypatch.setattr(TicketLogPullService, "_build_retry_payload", lambda record: payload)
     monkeypatch.setattr(TicketLogPullService, "_log_chain_step", lambda *args, **kwargs: log_steps.append(kwargs))
     monkeypatch.setattr(
@@ -102,7 +102,7 @@ def test_auto_ai_submit_failure_records_reason_in_event_and_notification(monkeyp
     chain_steps: list[dict] = []
     notifications: list[dict] = []
 
-    monkeypatch.setattr(TicketLogPullDao, "get_record_by_id", lambda db, record_id: record)
+    monkeypatch.setattr(TicketLogPullDao, "get_record_meta_by_id", lambda db, record_id: record)
     monkeypatch.setattr(
         "modules.ticket.service.log_pull.ticket_log_pull_service.TicketDao.get_ticket_by_id",
         lambda db, ticket_id: ticket,

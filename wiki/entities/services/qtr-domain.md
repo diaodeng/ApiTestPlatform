@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-08-25
+freshness: 2026-08-27
 created: 2026-05-20
-updated: 2026-08-25
+updated: 2026-08-27
 related_files:
   - server/module_qtr/controller/agent_controller.py
   - server/module_qtr/service/agent_service.py
@@ -39,6 +39,22 @@ graph TD
 - 根据请求类型选择 HTTP、WebSocket、WebUI 或桌面 UI 处理逻辑。
 - 为跨进程 AI 分析提供内部网关、Redis 队列、运行中租约和失败回退。
 - 作为后端与客户端执行端之间的桥梁。
+
+## 分片注册表与内存治理（2026-08-27）
+
+WebSocket 大消息按 5KB 分片传输，控制器使用两个进程内注册表暂存分片：
+
+- `event_chunks`：事件消息分片组，键为 `{agent_code}:{chunk_id}`，附带 `first_seen_at` 首见时间戳。
+- `response_futures`：请求-响应 Future 注册表，响应分片挂在条目的 `chunks` 字段上，附带 `chunks_first_seen_at`。
+
+两者历史上只在"凑齐分片"或"连接关闭"时清理；一旦分片丢失、断流或未来不回帧，条目会永久驻留，
+是工单模块内存缓慢增长的真实泄漏点之一。治理规则：
+
+- 未凑齐且首见时间超过 `CHUNK_REGISTRY_EXPIRE_SECONDS`（10 分钟）的分片组，由心跳任务每 30 秒
+  调用 `_sweep_stale_event_chunks` / `_prune_response_future_chunks` 清理；
+- 响应分片回收时若 Future 仍在等待则只释放分片内容、保留条目，Future 已结束则整体移除；
+- 单个事件分组收到超过 `EVENT_CHUNK_MAX_PIECES`（2048）片时整组丢弃；
+- 等待方已消失的孤儿响应分片直接丢弃，不为孤儿请求重建注册表条目。
 
 ## 参见
 

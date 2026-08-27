@@ -1261,7 +1261,7 @@ class TicketLogPullService:
         :param current_user: 当前登录用户
         :return: 重新提交结果
         """
-        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(query_db, record_id)
         if not record:
             cls._log_chain_step(
                 query_db,
@@ -1519,7 +1519,7 @@ class TicketLogPullService:
         :param current_user: 当前登录用户
         :return: 重新下载结果
         """
-        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(query_db, record_id)
         if not record:
             cls._log_chain_step(
                 query_db,
@@ -1613,7 +1613,7 @@ class TicketLogPullService:
         :param current_user: 当前登录用户
         :return: 删除结果
         """
-        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(query_db, record_id)
         if not record:
             cls._log_chain_step(
                 query_db,
@@ -1688,7 +1688,7 @@ class TicketLogPullService:
         :param current_user: 当前登录用户
         :return: 重新截取结果
         """
-        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(query_db, record_id)
         if not record:
             cls._log_chain_step(
                 query_db,
@@ -2114,7 +2114,7 @@ class TicketLogPullService:
         :param source: 下载来源，auto 优先本服务归档并回退原始地址，service 仅本服务归档，original 仅原始地址
         :return: 文件路径、是否需要清理临时文件、下载文件名
         """
-        record = TicketLogPullDao.get_record_by_id(query_db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(query_db, record_id)
         if not record:
             cls._log_chain_step(
                 query_db,
@@ -2445,7 +2445,9 @@ class TicketLogPullService:
         status = "success"
         try:
             with SessionLocal() as db:
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
+                # 仅读取状态用于阶段分发，轻量查询避免提前加载压缩正文；
+                # 各处理阶段内部会按需重新获取完整记录。
+                record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
                 if not record:
                     return
                 if record.status in {
@@ -2501,7 +2503,8 @@ class TicketLogPullService:
             created_records = TicketLogPullDao.list_created_records(db, 100)
             for record in created_records:
                 cls.queue_record(record.id)
-                current = TicketLogPullDao.get_record_by_id(db, record.id)
+                # 只需要确认状态是否离开 created，使用轻量查询避免加载压缩正文。
+                current = TicketLogPullDao.get_record_meta_by_id(db, record.id)
                 if current is not None and current.status != TicketLogPullStatus.CREATED.value:
                     summary["submitted"] += 1
 
@@ -2566,7 +2569,7 @@ class TicketLogPullService:
         :param current_user: 当前登录用户
         :return: 操作结果
         """
-        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
         if not record:
             return CrudResponseModel(is_success=False, message="日志拉取记录不存在")
         if record.status not in cls.ACTIVE_STATUSES:
@@ -2606,7 +2609,7 @@ class TicketLogPullService:
         :param record_id: 记录ID
         :return: 无
         """
-        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
         if not record:
             return
         if record.status not in {
@@ -2661,7 +2664,7 @@ class TicketLogPullService:
                         command_result_url=command_result_url,
                         source_created_at=cls._parse_external_datetime(matched_row),
                     )
-                    record = TicketLogPullDao.get_record_by_id(db, record_id)
+                    record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
                     if record is None:
                         return
                     cls._process_download(db, record_id)
@@ -2675,7 +2678,7 @@ class TicketLogPullService:
                     is_error=False,
                     update_by="system",
                 )
-            record = TicketLogPullDao.get_record_by_id(db, record_id)
+            record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
             if record is None:
                 return
             cls._submit_external_request(db, record)
@@ -2801,7 +2804,7 @@ class TicketLogPullService:
         :param record_id: 记录ID
         :return: 无
         """
-        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
         if not record or record.status == TicketLogPullStatus.SUCCESS.value:
             return
 
@@ -2819,7 +2822,7 @@ class TicketLogPullService:
                     is_error=False,
                     update_by="system",
                 )
-            record = TicketLogPullDao.get_record_by_id(db, record_id)
+            record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
             if record is None or record.status == TicketLogPullStatus.CANCELLED.value:
                 return
             temp_file_path, file_size = cls._download_archive(record, db)
@@ -2830,7 +2833,7 @@ class TicketLogPullService:
                 "storage_path": storage_path,
             }
             if has_log_time_range:
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
+                record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
                 if record is None or record.status == TicketLogPullStatus.CANCELLED.value:
                     return
                 cls._update_status(
@@ -2842,7 +2845,7 @@ class TicketLogPullService:
                     update_by="system",
                     **update_kwargs,
                 )
-                record = TicketLogPullDao.get_record_by_id(db, record_id)
+                record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
                 if record is None:
                     return
                 try:
@@ -3009,7 +3012,7 @@ class TicketLogPullService:
         :param record_id: 日志拉取记录ID
         :return: 自动 AI 处理结果摘要
         """
-        record = TicketLogPullDao.get_record_by_id(db, record_id)
+        record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
         if not record or not isinstance(record.command_content, dict):
             reason = "缺少可用的命令内容"
             cls._log_chain_step(
@@ -4703,7 +4706,7 @@ class TicketLogPullService:
                 finished_at=datetime.now(),
                 update_by="system",
             )
-            record = TicketLogPullDao.get_record_by_id(db, record_id)
+            record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
             if record:
                 cls._add_ticket_event(
                     db,
