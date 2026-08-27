@@ -15,6 +15,10 @@
       type: Boolean,
       default: false,
     },
+    detailOpen: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emit = defineEmits(['changed']);
@@ -153,6 +157,18 @@
       }
     },
     { immediate: true }
+  );
+
+  watch(
+    () => props.detailOpen,
+    (open) => {
+      if (open) return;
+      historyActiveTab.value = 'timeline';
+      timeline.value = {};
+      eventDataText.value = '';
+      eventForm.value = { eventType: 'ANALYSIS', content: '' };
+      rcaForm.value = {};
+    }
   );
 
   loadStatClassificationOptions();

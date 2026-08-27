@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -7,11 +8,14 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.ticket.entity.vo.ticket_issue_vo import (
+    TicketIssueBatchBindModel,
+    TicketIssueBindByTicketNoModel,
     TicketIssueBindModel,
     TicketIssueCreateAndBindModel,
     TicketIssueCreateModel,
     TicketIssueQueryModel,
     TicketIssueSimilarBindModel,
+    TicketIssueTicketOptionQueryModel,
     TicketIssueUpdateModel,
     TicketRelationCreateModel,
 )
@@ -37,10 +41,68 @@ async def get_ticket_issue_list(
     :return: 问题实例分页列表
     """
     try:
-        query_result = TicketIssueService.get_issue_list_services(query_db, query)
+        query_result = await run_in_threadpool(TicketIssueService.get_issue_list_services, query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=query_result)
         return ResponseUtil.success(data=query_result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketIssueController.get(
+    "/issues/ticket-options",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:issue:query"))],
+)
+async def get_ticket_issue_ticket_options(
+    request: Request,
+    query: TicketIssueTicketOptionQueryModel = Depends(TicketIssueTicketOptionQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    查询问题实例绑定工单的轻量选择器选项。
+    :param request: 请求对象
+    :param query: 工单号/标题及项目、模块筛选条件
+    :param query_db: 数据库会话
+    :return: 工单选项列表
+    """
+    try:
+        result = await run_in_threadpool(TicketIssueService.search_tickets_for_issue, query_db, query)
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketIssueController.post(
+    "/issues/bind-batch",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:issue:bind"))],
+)
+@log_decorator(title="批量工单问题归因", business_type=2)
+async def batch_bind_ticket_issues(
+    request: Request,
+    bind_object: TicketIssueBatchBindModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    将多张业务工单号一次性关联到已有问题实例。
+    :param request: 请求对象
+    :param bind_object: 批量绑定参数
+    :param query_db: 数据库会话
+    :param current_user: 当前用户
+    :return: 批量绑定结果
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketIssueService.batch_bind_tickets_to_issue,
+            query_db,
+            bind_object,
+            current_user,
+        )
+        if result.is_success:
+            return ResponseUtil.success(data=result.result, msg=result.message)
+        return ResponseUtil.failure(data=result.result, msg=result.message)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -59,7 +121,7 @@ async def get_ticket_issue_detail(request: Request, issue_id: int, query_db: Ses
     :return: 问题实例详情和绑定工单列表
     """
     try:
-        result = TicketIssueService.get_issue_detail_services(query_db, issue_id)
+        result = await run_in_threadpool(TicketIssueService.get_issue_detail_services, query_db, issue_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="问题实例不存在")
     except Exception as e:
         logger.exception(e)
@@ -83,7 +145,7 @@ async def add_ticket_issue(
     :return: 创建结果
     """
     try:
-        result = TicketIssueService.create_issue(query_db, issue_object, current_user)
+        result = await run_in_threadpool(TicketIssueService.create_issue, query_db, issue_object, current_user)
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -109,9 +171,46 @@ async def edit_ticket_issue(
     :return: 编辑结果
     """
     try:
-        result = TicketIssueService.update_issue(query_db, issue_object, current_user)
+        result = await run_in_threadpool(TicketIssueService.update_issue, query_db, issue_object, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
+        return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketIssueController.post(
+    "/issues/{issue_id:int}/tickets/bind",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:issue:bind"))],
+)
+@log_decorator(title="按工单号绑定问题实例", business_type=2)
+async def bind_ticket_issue_by_no(
+    request: Request,
+    issue_id: int,
+    bind_object: TicketIssueBindByTicketNoModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    按业务工单号绑定工单到已有问题实例。
+    :param request: 请求对象
+    :param issue_id: 目标问题实例ID
+    :param bind_object: 工单号绑定参数
+    :param query_db: 数据库会话
+    :param current_user: 当前用户
+    :return: 绑定结果
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketIssueService.bind_ticket_by_no,
+            query_db,
+            issue_id,
+            bind_object,
+            current_user,
+        )
+        if result.is_success:
+            return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -140,7 +239,9 @@ async def bind_ticket_issue(
     :return: 绑定结果
     """
     try:
-        result = TicketIssueService.bind_ticket_to_issue(query_db, ticket_id, bind_object, current_user)
+        result = await run_in_threadpool(
+            TicketIssueService.bind_ticket_to_issue, query_db, ticket_id, bind_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -171,7 +272,9 @@ async def create_ticket_issue_and_bind(
     :return: 绑定结果
     """
     try:
-        result = TicketIssueService.create_issue_and_bind(query_db, ticket_id, issue_object, current_user)
+        result = await run_in_threadpool(
+            TicketIssueService.create_issue_and_bind, query_db, ticket_id, issue_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -202,7 +305,9 @@ async def bind_ticket_issue_from_similar(
     :return: 绑定结果
     """
     try:
-        result = TicketIssueService.bind_from_similar(query_db, ticket_id, bind_object, current_user)
+        result = await run_in_threadpool(
+            TicketIssueService.bind_from_similar, query_db, ticket_id, bind_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -231,7 +336,7 @@ async def unbind_ticket_issue(
     :return: 解绑结果
     """
     try:
-        result = TicketIssueService.unbind_ticket_issue(query_db, ticket_id, current_user)
+        result = await run_in_threadpool(TicketIssueService.unbind_ticket_issue, query_db, ticket_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -257,7 +362,7 @@ async def add_ticket_relation(
     :return: 创建结果
     """
     try:
-        result = TicketRelationService.create_relation(query_db, relation_object, current_user)
+        result = await run_in_threadpool(TicketRelationService.create_relation, query_db, relation_object, current_user)
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -286,7 +391,7 @@ async def confirm_ticket_relation(
     :return: 确认结果
     """
     try:
-        result = TicketRelationService.confirm_relation(query_db, relation_id, current_user)
+        result = await run_in_threadpool(TicketRelationService.confirm_relation, query_db, relation_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -315,7 +420,7 @@ async def delete_ticket_relation(
     :return: 删除结果
     """
     try:
-        result = TicketRelationService.delete_relation(query_db, relation_id, current_user)
+        result = await run_in_threadpool(TicketRelationService.delete_relation, query_db, relation_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)

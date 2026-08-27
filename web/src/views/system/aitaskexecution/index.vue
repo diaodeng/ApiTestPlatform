@@ -58,6 +58,9 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="总 Token" align="center" min-width="120">
+        <template #default="scope">{{ formatTokenCount(scope.row.totalTokenCount) }}</template>
+      </el-table-column>
       <el-table-column label="创建时间" align="center" prop="createTime" min-width="180">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
@@ -94,6 +97,7 @@
         <el-descriptions-item label="状态">
           <el-tag :type="statusTagType(detailData.status)">{{ formatStatus(detailData.status) }}</el-tag>
         </el-descriptions-item>
+        <el-descriptions-item label="总 Token">{{ formatTokenCount(detailData.totalTokenCount) }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ detailData.createTime ? parseTime(detailData.createTime) : '-' }}</el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ detailData.updateTime ? parseTime(detailData.updateTime) : '-' }}</el-descriptions-item>
         <el-descriptions-item label="错误信息">{{ detailData.errorMessage || '-' }}</el-descriptions-item>
@@ -185,6 +189,10 @@ function statusTagType(status) {
   if (status === 'running' || status === 'pending') return 'warning'
   if (status === 'failed') return 'danger'
   return 'info'
+}
+
+function formatTokenCount(value) {
+  return Number.isFinite(Number(value)) ? String(Number(value)) : '-'
 }
 
 function formatJson(value) {

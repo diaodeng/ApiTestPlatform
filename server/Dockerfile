@@ -25,6 +25,8 @@ RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     dumb-init \
+    ripgrep \
+    libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 #    curl ca-certificates gnupg \
 

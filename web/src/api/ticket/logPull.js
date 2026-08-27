@@ -328,3 +328,13 @@ export function getTicketLogErrors(data) {
   });
 }
 
+// 获取工单日志单行完整原始内容（纯文本，不做截断，用于前端展开超大行）
+export function getTicketLogLineContent(query) {
+  return request({
+    url: '/ticket/logs/line-content',
+    method: 'get',
+    params: query,
+    responseType: 'text',
+  });
+}
+

@@ -8,12 +8,14 @@ from module_task.scheduler_maintenance import (
     _build_bitable_pull_config_override,
 )
 from modules.ticket.dao.ticket_dao import TicketDao
+from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketSyncAutomationModel
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
 from modules.ticket.service.sync.ticket_external_bitable_email_service import TicketExternalBitableEmailService
@@ -378,37 +380,38 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
 
         self.assertEqual(extra_data["version_key"], "1.2.3")
 
-    def test_ai_analysis_extracts_version_from_log_when_request_missing(self):
-        """AI分析未传版本号时，应从日志记录提取版本号并返回该日志记录。"""
-        ticket = SimpleNamespace(ticket_id=1001, extra_data={})
+    def test_ai_analysis_backfills_version_id_from_log_when_request_missing(self):
+        """AI分析未传版本ID时，应从成功日志记录提取并返回版本中心ID。"""
+        ticket = SimpleNamespace(ticket_id=1001, affected_version_id=None)
         log_record = SimpleNamespace(id=2001)
 
         with (
             patch.object(TicketAiAnalysisService, "_resolve_log_pull_record", return_value=log_record),
-            patch.object(TicketAiAnalysisService, "_resolve_version_key", return_value=""),
-            patch.object(TicketSyncAutomationService, "extract_pattern", return_value=None),
-            patch(
-                "modules.ticket.service.ai.ticket_ai_analysis_service."
-                "TicketLogPullService._ensure_ticket_version_key_from_log",
-                return_value="2.0.1",
-            ),
-            patch(
-                "modules.ticket.service.ai.ticket_ai_analysis_service."
-                "TicketLogPullDao.get_latest_success_record_by_ticket_id",
+            patch.object(TicketAiAnalysisService, "_resolve_version_id", return_value=None),
+            patch.object(
+                TicketLogPullService,
+                "ensure_ticket_version_id_from_log",
+                return_value=202,
+            ) as ensure_version,
+            patch.object(
+                TicketLogPullDao,
+                "get_latest_success_record_by_ticket_id",
                 return_value=None,
             ),
-            patch(
-                "modules.ticket.service.ai.ticket_ai_analysis_service.TicketDao.get_ticket_by_id",
-                return_value=SimpleNamespace(extra_data={"version_key": "2.0.1"}),
+            patch.object(
+                TicketDao,
+                "get_ticket_by_id",
+                return_value=SimpleNamespace(affected_version_id=202),
             ),
         ):
-            version_key, selected_record = TicketAiAnalysisService._ensure_version_key_for_analysis(
+            version_id, selected_record = TicketAiAnalysisService._ensure_version_id_for_analysis(
                 SimpleNamespace(),
                 ticket,
                 SimpleNamespace(log_pull_record_id=None),
             )
 
-        self.assertEqual(version_key, "2.0.1")
+        ensure_version.assert_called_once_with(SimpleNamespace(), 1001, 2001)
+        self.assertEqual(version_id, 202)
         self.assertEqual(selected_record, log_record)
 
     def test_external_upsert_fills_empty_module_name_from_detected_text(self):

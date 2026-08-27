@@ -18,7 +18,7 @@
       <el-descriptions-item label="当前处理人">{{ detail.currentAssigneeName || '-' }}</el-descriptions-item>
       <el-descriptions-item label="一线人员">{{ detail.firstLineAssigneeName || '-' }}</el-descriptions-item>
       <el-descriptions-item label="内部负责人">{{ detail.internalOwnerName || '-' }}</el-descriptions-item>
-      <el-descriptions-item label="提交时间">{{ formatDateTime(detail.submitTime || detail.createTime) }}</el-descriptions-item>
+      <el-descriptions-item label="提交时间">{{ formatDateTime(detail.submitTime) }}</el-descriptions-item>
       <el-descriptions-item label="根因分类">{{ detail.rootCauseType || '-' }}</el-descriptions-item>
       <el-descriptions-item label="解决方式">{{ detail.solutionType || '-' }}</el-descriptions-item>
       <el-descriptions-item label="关闭结果">{{ detail.resolutionName || detail.resolutionCode || '-' }}</el-descriptions-item>
@@ -159,17 +159,33 @@
 
   const detailOriginalDescription = computed(() => {
     const extraData = detail.value.extraData || {};
-    return (
+    const originalText = String(
       detail.value.originalDescription ||
       extraData.originDescription ||
       extraData.origin_description ||
-      detail.value.description ||
       ''
-    );
+    ).trim();
+    if (originalText) return originalText;
+    const description = String(detail.value.description || '').trim();
+    return description.includes('【AI翻译】')
+      ? description.split('【AI翻译】')[0].trim()
+      : description;
   });
   const detailAiTranslation = computed(() => {
     const extraData = detail.value.extraData || {};
-    return detail.value.aiTranslation || extraData.aiTranslation || extraData.ai_translation || '';
+    const raw = String(
+      detail.value.aiTranslation || extraData.aiTranslation || extraData.ai_translation || ''
+    ).trim();
+    if (!raw) return '';
+    // 移除可能混入的【AI翻译】标记，确保只展示纯译文
+    if (raw.startsWith('【AI翻译】')) {
+      return raw.slice('【AI翻译】'.length).trim();
+    }
+    const markerIndex = raw.indexOf('【AI翻译】');
+    if (markerIndex >= 0) {
+      return raw.slice(markerIndex + '【AI翻译】'.length).trim();
+    }
+    return raw;
   });
   const latestSummary = computed(
     () =>

@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-01
 created: 2026-05-20
-updated: 2026-07-01
+updated: 2026-08-21
 related_files:
   - server/modules/ticket/enums/ticket_enums.py
   - web/src/views/ticket/constants.js
@@ -51,7 +51,7 @@ mindmap
 
 ## 本次关注项
 
-- `TicketEventType` 新增 `NOTIFY_PENDING`，用于在状态流转后记录“待通知”的占位事件。
+- `TicketEventType` 新增 `NOTIFY_PENDING`，用于在状态流转后记录“待通知”的占位事件；新增 `ISSUE_ATTRIBUTED`，用于记录问题实例绑定、重新归因和解绑审计。
 - `TicketLogPullStatus` 继续覆盖 `created -> submitting/polling/downloading/processing -> success/failed/exception/cancelled` 全链路状态，供工单列表和详情页直接展示；`cancelled` 为用户手动停止（协作式取消），保留已有进度且可重新拉取。
 - 前端 `ticketProcessStatusOptions` 在 AI 状态外新增日志拉取过程状态：`log_pull_created`、`log_pull_running`、`log_pull_submitting`、`log_pull_polling`、`log_pull_downloading`、`log_pull_processing`，后端列表查询按这些编码过滤最新日志拉取状态。
 - `TicketAiAnalysisStatus` 用于 AI 分析任务流转，覆盖 `created -> running -> success/failed/canceled`。

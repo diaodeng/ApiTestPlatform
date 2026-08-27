@@ -5,10 +5,13 @@ from sqlalchemy.orm import Session
 from config.get_db import get_db
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.ai_provider_vo import (
+    AddProviderModelCatalogItemRequest,
     AiProviderPageQueryModel,
     CreateAiProviderModel,
     PreviewAiProviderModelCatalogRequest,
+    ProviderModelOptionModel,
     TestAiProviderConnectionRequest,
+    ToggleProviderModelCatalogItemRequest,
     UpdateAiProviderModel,
     ViewAiProviderSecretModel,
 )
@@ -110,7 +113,8 @@ async def preview_ai_provider_models(
     """
     try:
         models = await run_in_threadpool(AiProviderConnectionService.preview_models, query_db, preview_object)
-        return ResponseUtil.success(data=models)
+        model_options = [ProviderModelOptionModel.model_validate(model) for model in models]
+        return ResponseUtil.success(data=[model.model_dump(by_alias=True) for model in model_options])
     except Exception as exc:
         return ResponseUtil.error(msg=str(exc))
 
@@ -121,14 +125,185 @@ async def preview_ai_provider_models(
 )
 async def get_ai_provider_model_catalog(request: Request, provider_id: int, query_db: Session = Depends(get_db)):
     """
-    获取已保存Provider的模型目录缓存。
+    获取已保存Provider的模型目录缓存（仅已启用）。
     :param request: 请求对象
     :param provider_id: Provider主键
     :param query_db: 数据库会话
     :return: 模型目录列表
     """
     try:
-        models = AiProviderModelCatalogService.list_models(query_db, provider_id)
+        models = await run_in_threadpool(
+            AiProviderModelCatalogService.list_models,
+            query_db,
+            provider_id,
+        )
+        return ResponseUtil.success(data=models)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.get(
+    "/{provider_id}/model-catalog/all",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:query"))],
+)
+async def get_ai_provider_all_model_catalog(request: Request, provider_id: int, query_db: Session = Depends(get_db)):
+    """
+    获取已保存Provider的全部模型目录缓存（含已禁用），供管理页面使用。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param query_db: 数据库会话
+    :return: 全部模型目录列表
+    """
+    try:
+        models = await run_in_threadpool(
+            AiProviderModelCatalogService.list_all_models,
+            query_db,
+            provider_id,
+        )
+        return ResponseUtil.success(data=models)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.put(
+    "/{provider_id}/model-catalog/refresh",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
+)
+async def refresh_ai_provider_model_catalog(request: Request, provider_id: int, query_db: Session = Depends(get_db)):
+    """
+    从远端API拉取模型列表并持久化到数据库。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param query_db: 数据库会话
+    :return: 刷新后的全部模型目录
+    """
+    try:
+        models = await run_in_threadpool(
+            AiProviderModelCatalogService.refresh_and_persist_models,
+            query_db,
+            provider_id,
+        )
+        return ResponseUtil.success(data=models)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.post(
+    "/{provider_id}/model-catalog/items",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
+)
+async def add_ai_provider_model_catalog_item(
+    request: Request,
+    provider_id: int,
+    add_object: AddProviderModelCatalogItemRequest,
+    query_db: Session = Depends(get_db),
+):
+    """
+    手动添加模型目录项。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param add_object: 模型信息
+    :param query_db: 数据库会话
+    :return: 新增的模型目录项
+    """
+    try:
+        model = await run_in_threadpool(
+            AiProviderModelCatalogService.add_manual_model,
+            query_db,
+            provider_id,
+            add_object.model_id,
+            add_object.display_name,
+        )
+        return ResponseUtil.success(data=model)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.put(
+    "/{provider_id}/model-catalog/items/{model_id}/toggle",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
+)
+async def toggle_ai_provider_model_catalog_item(
+    request: Request,
+    provider_id: int,
+    model_id: str,
+    toggle_object: ToggleProviderModelCatalogItemRequest,
+    query_db: Session = Depends(get_db),
+):
+    """
+    启用/禁用模型目录项。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param model_id: 模型标识
+    :param toggle_object: 启用/禁用请求
+    :param query_db: 数据库会话
+    :return: 更新后的模型目录项
+    """
+    try:
+        model = await run_in_threadpool(
+            AiProviderModelCatalogService.toggle_model,
+            query_db,
+            provider_id,
+            model_id,
+            toggle_object.enabled,
+        )
+        return ResponseUtil.success(data=model)
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.delete(
+    "/{provider_id}/model-catalog/items/{model_id}",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:edit"))],
+)
+async def delete_ai_provider_model_catalog_item(
+    request: Request,
+    provider_id: int,
+    model_id: str,
+    query_db: Session = Depends(get_db),
+):
+    """
+    删除人工添加的模型目录项。
+    :param request: 请求对象
+    :param provider_id: Provider主键
+    :param model_id: 模型标识
+    :param query_db: 数据库会话
+    :return: 删除结果
+    """
+    try:
+        await run_in_threadpool(
+            AiProviderModelCatalogService.delete_manual_model,
+            query_db,
+            provider_id,
+            model_id,
+        )
+        return ResponseUtil.success(msg="删除成功")
+    except Exception as exc:
+        return ResponseUtil.error(msg=str(exc))
+
+
+@aiProviderController.get(
+    "/options/{provider_code}/models",
+    dependencies=[Depends(CheckUserInterfaceAuth("system:aiprovider:query"))],
+)
+async def get_ai_provider_model_options(
+    request: Request,
+    provider_code: str,
+    query_db: Session = Depends(get_db),
+):
+    """
+    按Provider编码获取可用模型下拉选项，供使用方页面选择模型。
+    :param request: 请求对象
+    :param provider_code: Provider编码
+    :param query_db: 数据库会话
+    :return: 模型下拉选项列表
+    """
+    try:
+        models = await run_in_threadpool(
+            AiProviderModelCatalogService.list_model_options_by_provider_code,
+            query_db,
+            provider_code,
+        )
         return ResponseUtil.success(data=models)
     except Exception as exc:
         return ResponseUtil.error(msg=str(exc))

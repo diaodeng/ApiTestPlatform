@@ -44,6 +44,11 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
+            <el-form-item label="Agent 并发数" prop="analysisAgentMaxConcurrentTasks">
+              <el-input-number v-model="form.analysisAgentMaxConcurrentTasks" :min="1" :step="1" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
             <el-form-item label="日志分析模式" prop="analysisLogMode">
               <el-select v-model="form.analysisLogMode" placeholder="请选择日志分析模式">
                 <el-option label="生成摘要" value="digest" />
@@ -132,6 +137,7 @@ const defaultForm = () => ({
   analysisWorkerTimeoutSec: 3600,
   analysisWorkspaceRoot: '',
   analysisAgentCode: '',
+  analysisAgentMaxConcurrentTasks: 1,
   analysisLogMode: 'digest',
   analysisLogWindowMissingStrategy: 'agent_extract'
 })
@@ -139,7 +145,8 @@ const defaultForm = () => ({
 const form = reactive(defaultForm())
 
 const rules = {
-  analysisWorkerTimeoutSec: [{ required: true, message: '超时秒数不能为空', trigger: 'change' }]
+  analysisWorkerTimeoutSec: [{ required: true, message: '超时秒数不能为空', trigger: 'change' }],
+  analysisAgentMaxConcurrentTasks: [{ required: true, message: 'Agent 并发数不能为空', trigger: 'change' }]
 }
 
 function normalizePayload(payload) {
@@ -154,6 +161,9 @@ function applyFormData(payload) {
   form.analysisWorkerTimeoutSec = Number(timeoutValue) || 3600
   form.analysisWorkspaceRoot = payload.analysisWorkspaceRoot ?? payload.analysis_workspace_root ?? ''
   form.analysisAgentCode = payload.analysisAgentCode ?? payload.analysis_agent_code ?? ''
+  form.analysisAgentMaxConcurrentTasks = Number(
+    payload.analysisAgentMaxConcurrentTasks ?? payload.analysis_agent_max_concurrent_tasks ?? 1
+  ) || 1
   form.analysisLogMode = payload.analysisLogMode ?? payload.analysis_log_mode ?? 'digest'
   form.analysisLogWindowMissingStrategy = payload.analysisLogWindowMissingStrategy
     ?? payload.analysis_log_window_missing_strategy

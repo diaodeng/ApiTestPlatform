@@ -85,7 +85,24 @@ export function rebuildTicketSimilarity(data) {
   });
 }
 
-// 查询工单详情
+// 查询工单轻量详情
+export function getTicketSummary(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/summary`,
+    method: 'get',
+  });
+}
+
+// 查询工单相似工单
+export function getTicketSimilarTickets(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/similar-tickets`,
+    method: 'get',
+    params: sanitizeQueryParams(params),
+  });
+}
+
+// 查询工单详情（兼容旧完整详情契约）
 export function getTicket(ticketId) {
   return request({
     url: `/ticket/${ticketId}`,
@@ -93,12 +110,56 @@ export function getTicket(ticketId) {
   });
 }
 
+// 查询工单分页协同消息
+export function getTicketMessagesPage(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/messages/page`,
+    method: 'get',
+    params: sanitizeQueryParams(params),
+  });
+}
+
+// 查询工单分页快照
+export function getTicketSnapshotsPage(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/snapshots/page`,
+    method: 'get',
+    params: sanitizeQueryParams(params),
+  });
+}
 // 查询问题实例列表
 export function listTicketIssues(query) {
   return request({
     url: '/ticket/issues/list',
     method: 'get',
     params: query,
+  });
+}
+
+// 查询问题实例可绑定的工单号/标题选项
+export function searchTicketIssueTicketOptions(query) {
+  return request({
+    url: '/ticket/issues/ticket-options',
+    method: 'get',
+    params: query,
+  });
+}
+
+// 按工单号绑定工单到问题实例
+export function bindTicketIssueByNo(issueId, data) {
+  return request({
+    url: `/ticket/issues/${issueId}/tickets/bind`,
+    method: 'post',
+    data,
+  });
+}
+
+// 批量绑定工单到问题实例
+export function batchBindTicketIssues(data) {
+  return request({
+    url: '/ticket/issues/bind-batch',
+    method: 'post',
+    data,
   });
 }
 
@@ -226,6 +287,15 @@ export function saveTicketSyncAutomationConfig(data) {
 export function previewTicketSyncBitablePullFields(data) {
   return request({
     url: '/ticket/sync/automation/bitable-pull/fields-preview',
+    method: 'post',
+    data,
+  });
+}
+
+// 按指定工单手动执行同步自动化
+export function runTicketManualAutomation(data) {
+  return request({
+    url: '/ticket/sync/automation/manual-run',
     method: 'post',
     data,
   });
@@ -792,6 +862,16 @@ export function getTicketLogErrors(data) {
     url: '/ticket/logs/errors',
     method: 'post',
     data,
+  });
+}
+
+// 获取工单日志单行完整原始内容（纯文本，不做截断，用于前端展开超大行）
+export function getTicketLogLineContent(query) {
+  return request({
+    url: '/ticket/logs/line-content',
+    method: 'get',
+    params: query,
+    responseType: 'text',
   });
 }
 

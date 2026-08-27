@@ -35,6 +35,7 @@ class AiTaskExecutionBaseModel(BaseModel):
     response_payload: dict[str, Any] | list[Any] | str | None = Field(default=None, description="响应载荷")
     response_text: str | None = Field(default=None, description="原始响应文本")
     token_usage: dict[str, Any] | None = Field(default=None, description="Token用量")
+    total_token_count: int | None = Field(default=None, description="总Token数")
     error_message: str | None = Field(default=None, description="错误信息")
     created_by_id: int | None = Field(default=None, description="创建人ID")
     created_by_name: str | None = Field(default=None, description="创建人名称")

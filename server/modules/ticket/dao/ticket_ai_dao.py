@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, defer
 
 from modules.ticket.entity.do.ticket_do import TicketAiAnalysisTask, TicketAiRepoMapping
@@ -222,6 +222,41 @@ class TicketAiDao:
             .order_by(TicketAiAnalysisTask.create_time.desc(), TicketAiAnalysisTask.task_id.desc())
             .first()
         )
+
+    @classmethod
+    def get_ticket_token_summary(cls, db: Session, ticket_id: int) -> dict[str, int]:
+        """
+        按工单聚合 AI Token 使用量。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: Token 汇总字典
+        """
+        row = (
+            db.query(
+                func.coalesce(func.sum(TicketAiAnalysisTask.input_token_count), 0).label("input_token_count"),
+                func.coalesce(func.sum(TicketAiAnalysisTask.output_token_count), 0).label("output_token_count"),
+                func.coalesce(func.sum(TicketAiAnalysisTask.total_token_count), 0).label("total_token_count"),
+                func.count(TicketAiAnalysisTask.task_id).label("task_count"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (TicketAiAnalysisTask.status == TicketAiAnalysisStatus.SUCCESS.value, 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("success_task_count"),
+            )
+            .filter(TicketAiAnalysisTask.ticket_id == ticket_id)
+            .one()
+        )
+        return {
+            "input_token_count": int(getattr(row, "input_token_count", 0) or 0),
+            "output_token_count": int(getattr(row, "output_token_count", 0) or 0),
+            "total_token_count": int(getattr(row, "total_token_count", 0) or 0),
+            "task_count": int(getattr(row, "task_count", 0) or 0),
+            "success_task_count": int(getattr(row, "success_task_count", 0) or 0),
+        }
 
     @classmethod
     def list_recoverable_tasks(cls, db: Session, statuses: list[str]) -> list[TicketAiAnalysisTask]:

@@ -24,6 +24,7 @@ case_data
 server/caches
 server/case_data
 logs
+.codebase-memory
 
 .gitnexus
 .claude

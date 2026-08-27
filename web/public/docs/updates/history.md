@@ -4,7 +4,101 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
-## 2026-08 月（5 天，12 项变更）
+## 2026-08-27
+
+- 工单 AI 历史、工单概览和 AI 执行审计新增 Token 用量展示，支持查看输入 Token、输出 Token、总 Token，以及单工单维度的累计汇总。详见：[工单 AI Token 用量记录与展示](2026-08-27-ticket-ai-token-usage.md)。
+
+## 2026-08-26
+
+- 补充工单 AI 分析 Worker 提示词约束，明确禁止用 shell/PowerShell heredoc 自行写结果文件，要求直接输出最终 JSON，降低 Windows 下 `<<`/heredoc 语法误触发概率。
+- 修复工单 AI 分析通过本机 Agent 网关回收结果时，服务端对 `HandleResponse` 误用 `model_validate_json` 导致任务被错误标记为失败，页面只看到 `Cannot check isinstance when validating from json`；现在改为先解析传输 JSON，再按 Python 对象校验，并保留 Agent 返回的真实失败信息。详见：[工单 AI Agent 响应 JSON 校验修复](2026-08-26-ticket-ai-agent-response-json-fix.md)。
+- 修复工单 AI 分析在 Agent 无活动任务时仍被历史陈旧队列头阻塞的问题；服务端现在会按排队租约、终态和总超时自动清理失效队列头，并减少排队阶段的大请求内存占用。详见：[工单 AI Agent 队列陈旧请求自动恢复](2026-08-26-ticket-ai-agent-queue-stale-recovery.md)。
+- 修复工单自动拉日志在相同拉取参数已成功时仍重复提交的问题；自动化现在会直接复用已有成功日志记录。
+- 修复只开启自动 AI 或命中历史成功日志时，未重新拉日志也无法继续自动分析的问题；系统会复用最近成功日志继续版本回填和自动 AI。
+- 任务日志新增 `TID / trace_id` 持久化与查询展示，支持按同一次链路排查完整日志。详见：[工单自动日志去重与任务 TID](2026-08-26-ticket-log-pull-dedupe-and-job-tid.md)。
+
+## 2026-08-25
+
+- 修复生产环境自动 AI 通过本机 Agent 网关时错误拼接 `/prod-api` 代理前缀导致 404；内部直连改用 `/qtr/agent/ai-analysis/send/{agent_code}`，详见：[自动 AI 内部网关 404 修复](2026-08-25-ticket-ai-agent-gateway-root-path.md)。
+- 修复工单 AI 分析结果回写失败后任务长期停留在“执行中”的问题；超长建议负责人字段按快照列长度安全截断，并在异常时先回滚事务再写入失败终态。
+- 新增工单 AI Agent 并发配置 `Agent 并发数`，自动 AI 通过 FastAPI 内部网关跨进程派发，超过上限的请求进入 Redis 队列等待。
+- 修复工单 AI 分析选择 Claude Code/Codex Provider 后仍使用旧 `workerEnv` 或任务工作区配置的问题，Provider 核心连接配置现在会覆盖旧值。详见：[工单 AI 分析 Provider 下发修复](2026-08-25-ticket-ai-provider-override.md)。
+
+## 2026-08 月（8 天，23 项变更）
+
+### 自动日志门店编码映射修复
+- 修复外部同步自动拉日志时将 SAP 门店编码直接作为日志接口 `storeId`，导致门店校验失败、未创建日志拉取记录的问题。
+- 自动日志优先使用按商家门店配置映射后的 `org_no`，并保留 `sourceStoreCode` 原始值；参数校验跳过时增加明确告警日志。
+- 详见：[自动日志门店编码映射修复](2026-08-25-ticket-log-pull-store-mapping.md)。
+
+### 内存增长监控接入
+- 新增 API、Celery Worker、Celery Beat 的进程和 cgroup 内存趋势指标。
+- 新增 Celery、用例执行、工单日志拉取、工单 AI 分析的任务前后内存快照和结构化日志。
+- Prometheus/VictoriaMetrics 使用低基数标签，具体任务 ID 通过日志关联；补充运维说明和诊断测试。
+- 详见：[内存增长监控接入](2026-08-25-memory-growth-monitoring.md)。
+
+
+### 工单详情页翻译内容显示修复
+- 修复工单详情页翻译区域有时显示"原文 + 【AI翻译】标记 + 译文"拼接内容的问题。
+- 后端 `ai_translation` 字段去掉了危险的 `translated_description` fallback，确保只存储纯译文。
+- 前端两个详情组件的 `detailAiTranslation` 增加防御性 `【AI翻译】` 标记剥离逻辑；`TicketDetailView.vue` 的 `detailOriginalDescription` 补齐分割处理。
+- 详见：[工单详情页翻译内容显示修复](2026-08-24-ticket-translation-display-fix.md)。
+
+
+### 问题实例详情查询回归修复
+- 恢复问题实例按 `issue_id` 查询绑定工单的 DAO 方法，修复详情、编辑和绑定区域报 `TicketIssueDao has no attribute list_tickets_by_issue_id` 的问题。
+- 详见：[问题实例详情查询回归修复](2026-08-21-ticket-issue-dao-regression.md)。
+
+
+### 问题实例新增可选字段校验修复
+- 修复问题实例新增时未选择负责人，空字符串 `ownerId` 触发整数参数校验错误的问题。
+- 后端归一化可选整数空值，前端提交前过滤空的可选字段。
+- 详见：[问题实例新增可选字段校验修复](2026-08-21-ticket-issue-create-optional-fields.md)。
+
+
+### 工单问题实例关联增强
+- 问题实例绑定工单改为按业务工单号/标题搜索，首张工单不再展示内部 ID。
+- 工单详情新增直接关联或更换已有问题实例，工单列表新增当前页多选批量关联问题。
+- 批量归因默认不覆盖已有问题归属，服务端全量校验并在事务中更新；问题详情绑定工单展示四类版本信息。
+- 详见：[工单问题实例关联增强](2026-08-21-ticket-issue-association.md)。
+
+
+### 工单模块通用提示词
+- 新增 HRM「模块通用提示词」管理入口，按 `module_code` 跨项目复用 AI 分析说明，同时保留各项目模块的专属说明。
+- 工单详情和分析任务按项目默认、模块通用、项目模块的顺序展示和组装提示词层；历史任务继续使用原始快照。
+- 详见：[工单模块通用提示词](2026-08-23-module-common-prompt.md)。
+
+### 工单日志查看器横向滚动修复
+- 修复日志上下文关闭换行时无法左右查看较长日志内容的问题。
+- 关闭换行时保留单行布局并支持横向滚动，开启换行时按可视区域折行；超长行仍可通过独立阅读区查看完整内容。
+- 详见：[工单日志查看器横向滚动修复](2026-08-21-ticket-log-viewer-horizontal-scroll-fix.md)。
+
+### 工单日志拉取门店回填修复
+- 修复工单详情轻量概览响应过滤 `extraData` 导致日志拉取弹窗无法回填商家、门店和 POS 的问题。
+- 兼容历史 `external_field_mapping.ticketStore` 原始门店值；命中门店配置时按 `org_no` 提交并展示名称、`org_no`、`sap_org_no`，未命中则保留原值。
+- 详见：[工单日志拉取门店回填修复](2026-08-21-ticket-log-pull-store-prefill.md)。
+
+### 工单列表提交时间与性能索引调整
+- 工单列表和详情的提交时间展示、筛选和排序统一使用主表 `submit_time`，不再以同步 JSON 时间或本地创建时间回退。
+- ORM 同步声明模块业务码列表索引，以及按工单查询最新日志拉取/AI 分析状态的复合索引；生产物理索引需由运维手工创建。
+- 详见：[工单列表提交时间与性能索引调整](2026-08-21-ticket-list-submit-time-performance.md)。
+
+### 工单模块 Controller 异步阻塞修复
+- 修复工单模块 6 个 Controller 文件中共 64 个 `async def` 接口在事件循环中直接执行同步 DB 操作导致阻塞的问题。
+- 统一使用 `run_in_threadpool` 将同步 Service 调用包装到线程池执行，避免阻塞 FastAPI 主事件循环。
+- 修复 `extract_ticket_knowledge` 接口在 async 函数中直接调用 `query_db.commit()`/`rollback()` 的错误。
+- 仅改动 Controller 层，不涉及 Service/DAO 层，不影响接口契约和行为语义。
+
+### 工单日志搜索内存优化
+- 每次 rg 搜索完成后对搜索文件调用 `posix_fadvise(POSIX_FADV_DONTNEED)` 释放 OS 页缓存，避免多次搜索不同工单日志后内存持续增长。
+- 移除 rg 搜索路径中 Python 侧的 `_match_keywords` 二次校验和 `_truncate_search_content` 冗余截断，rg 管道链已确保输出正确性。
+- 优化 `_run_rg_pipeline` 子进程/线程清理：显式关闭 stdout 管道、join 超时从 200ms 延长至 3s、增加双重关闭异常保护。
+- 文件编码检测优先从 `.lineidx` 索引读取缓存值，减少 `charset_normalizer` 实时探测。
+
+### 修复 Codex Worker 使用旧 bearer token 导致的误报鉴权失败
+- 修复工单 AI 分析 Agent 复制本机 Codex 配置后，仍沿用 `config.toml` 中旧的 `experimental_bearer_token`，导致 Provider API Key 实际可用但 Worker 请求 `/responses` 返回 `401 Unauthorized`。
+- Provider 下发时现在同步覆盖任务级 `config.toml` 的 bearer token，并让鉴权诊断按 Codex CLI 实际优先级读取该配置，避免把 `auth.json` 的有效密钥误判为实际请求密钥。
+- 补充 AI Provider 管理说明与故障排查指引。
 
 ### 工单模块映射修复脚本
 - 新增一次性数据修复脚本 `server/scripts/sync_ticket_module_mapping.py`：按「工单同步配置」的 `moduleMappings` 将 `ticket.module_name`（现有模块名）与模块映射配置匹配，解析出正确模块后更新 `ticket.module_id`/`module_code`，不改 `module_name`。
@@ -37,6 +131,12 @@ title: 更新历史
 ### 凭证刷新与脱敏
 - HTTP 刷新凭证支持 Cookie/Header 敏感脱敏日志、高级变量 `${secret.headerValue}`、变量插入按钮和保存前校验。
 - 修复 Cookie Header 中 `${secret.cookie}` 未替换及结构化 cookies 写回矛盾；新增"刷新失败→自动登录→再刷新"兜底链路和对应配置入口。
+
+### 工单日志查看器超长行展开优化
+- 日志上下文区对单行内容继续保留截断展示，但”展开完整内容”后改为当前行下方的独立阅读块，不再挤在原始行内，避免展开后仍然字号太小、内容难以看清。
+- 展开块增加更大的内边距、加粗标题、独立滚动和更大的正文行高，提升超长日志行的可读性。
+- 展开块新增**全宽**按钮（撑满上下文面板宽度）、**全屏**按钮（固定全屏阅读）和**复制**按钮，支持一键复制完整内容到剪贴板。
+- 用户说明同步补充超长行展开的使用方式，避免误以为展开后只是原地放大一小段文本。
 
 ## 2026-07 月（28 天，122 项变更）
 
@@ -96,3 +196,4 @@ title: 更新历史
 
 ### 通知与群消息
 - 消息 @ 变量模板、必填字段配置、中文乱码修复。
+

@@ -8,7 +8,7 @@ knowledge_state: stable
 confidence: high
 freshness: 2026-07-11
 created: 2026-05-20
-updated: 2026-07-15
+updated: 2026-08-23
 related_files:
   - server/modules/ticket/entity/do/ticket_do.py
   - server/modules/ticket/entity/do/ticket_log_pull_do.py
@@ -94,33 +94,35 @@ erDiagram
 
 - `Ticket.project_id` 与 `Ticket.module_id` 直接引用 HRM 项目/模块主键，工单归属不再维护独立“商户/模块”字典。
 - `Ticket.ticket_no` 作为外部系统工单号，手动录入且全局唯一；问题发生、计划修复、实际修复和实际发版均通过对应 `*_version_id` 关联 `TicketVersion`。
-- 2026-07-08 第一阶段已新增 `Ticket.submit_time` 作为统计主时间，外部同步工单取外部 `createTime`，手工创建工单取本地 `create_time`；查询过渡期优先 `submit_time`，为空再回退 `extra_data.external_sync.externalCreateTime` 和 `create_time`。
+- 2026-07-08 第一阶段已新增 `Ticket.submit_time` 作为业务提交时间，外部同步工单取外部 `createTime`，手工创建工单取本地 `create_time`；2026-08-21 起工单列表、详情响应和实时统计的提交时间筛选、排序、展示只读取主表 `submit_time`，`extra_data.external_sync.externalCreateTime` 仅保留同步来源与审计语义。
 - 2026-07-08 第一阶段已新增 `Ticket.processed_at` 作为“首次形成有效排查结论时间”，用它统计已处理数、处理率、首次处理耗时和未处理存量；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。
 - 2026-07-08 待实施方案确认 `Ticket.resolved_at` 保留当前终态写入逻辑，语义为“工单处置完成时间”；真实 Bug 修复统计应结合 `is_problem/solution_type/resolution_code/fixed_version_id/released_at/verified_at`。
 - 版本号提取会过滤 `version`、`版本号` 等字段名误识别结果，输入文本解析成功后只写入相应的 `*_version_id`；计划修复、实际修复和实际发版同样只保存版本中心 ID。
 - 2026-07-11 版本治理批量维护已启用这些字段：批量发版会写入 `released_version_id/released_at`，批量验证会写入 `verified_at`，并分别生成 `TicketEventType.DEPLOYED/VERIFIED` 事件。版本统计暂不新增数据表，直接按 `ticket` 当前态实时聚合；需要冻结历史版本周报时再新增版本统计快照表。
 - 2026-07-29 起，`TicketVersion` 是项目级版本唯一来源，使用 `project_id + version_key` 唯一约束；`TicketVersionRelease` 单独记录环境和批次维度的发布事实。`Ticket` 仅保存 `affected_version_id/planned_fix_version_id/fixed_version_id/released_version_id`；`TicketAiRepoMapping` 与 `TicketAiAnalysisTask` 同样只保存 `version_id`。手工创建、外部同步、Excel 导入和日志提取发现未知版本时创建 `lifecycle_status=discovered` 候选版本，不阻断工单链路。
-- `Ticket` 新增索引 `idx_ticket_del_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version`，支撑提交时间、处理时间、处置/关闭时间和计划版本筛选。
+- `Ticket` 已声明 `idx_ticket_del_submit_time`、`idx_ticket_del_module_code_submit_time`、`idx_ticket_del_processed_time`、`idx_ticket_del_resolved_time`、`idx_ticket_del_closed_time`、`idx_ticket_del_planned_fix_version` 等索引，分别支撑提交时间、模块业务码加提交时间、处理时间、处置/关闭时间和计划版本筛选；`TicketLogPullRecord` 的 `idx_ticket_log_pull_ticket_created_status` 与 `TicketAiAnalysisTask` 的 `idx_ticket_ai_task_ticket_created_status` 支撑按工单读取最新日志拉取和 AI 分析状态。
+- 2026-08-27 起，`TicketAiAnalysisTask` 额外挂载 `audit_execution_id`、`input_token_count`、`output_token_count`、`total_token_count`：前者关联 `sys_ai_task_execution.execution_id`，后三者只保存单次任务可聚合的 Token 统计值，用于工单历史和概览展示；无法拆分输入/输出时只写 `total_token_count`，不做估算。
+- 同日起，`TicketSummaryModel` 新增 `ai_token_summary`（对外别名 `aiTokenSummary`），字段包含 `input_token_count`、`output_token_count`、`total_token_count`、`task_count`、`success_task_count`，由单工单 SQL 聚合生成，不新增独立汇总表。
 - 2026-07-10 第三阶段维度快照已补齐：`TicketStatisticsDaily.snapshot_scope='all'` 保存全局自然日快照，`snapshot_scope='leaf'` 保存 `project_id + module_id + issue_type_id` 叶子维度快照；唯一键为 `statistics_date/snapshot_scope/project_id/module_id/issue_type_id`。快照口径支持项目、模块、模块 Code 和工单类型筛选，细分问题 `problem_pattern_code` 暂不冻结。
 - 2026-07-08 第二阶段已新增 `TicketIssue`、`Ticket.issue_id/issue_relation_type/issue_confirmed` 和 `TicketRelation`：`Ticket.issue_id` 是主归因字段，`TicketRelation` 只保存补充关系，不替代主归因。
 - `TicketIssue.affected_ticket_count` 由 `TicketIssueService.refresh_affected_ticket_count` 按有效工单实时刷新，软删除工单不计入；解绑工单只清空主归因，不删除 Issue。
 - `Ticket.issue_type_id/issue_type_name`、`Ticket.is_problem`、`Ticket.root_cause_type`、`Ticket.solution_type`、`Ticket.resolution_code/resolution_name` 是工单统计与后续 AI 分析的结构化维度，不能塞进 `extra_data` 替代；`Ticket.module_id/module_name` 继续承担业务域维度。
 - `Ticket.classification_source/classification_rule_id/classification_updated_at` 记录工单类型来源。人工编辑优先级最高，其次是外部字段规则映射，最后是 AI；规则命中详情写入 `extra_data.external_classification` 以便审计。
 - `Ticket.problem_pattern_code/problem_pattern_name` 是长期治理用的细分问题类型字段，承载“内存泄露”“280开头券为纸质券规则说明”等固定问题模式；`problem_pattern_confidence/source/verified/verified_by/verified_at` 记录 AI 置信度、来源和人工确认状态。人工确认后的细分问题默认不被 AI 自动分类覆盖。
-- `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。
+- `Ticket.extra_data.ticket_automation` 可记录创建工单时的自动拉日志与自动 AI 配置，便于后续追溯和重试。外部同步工单的 `extra_data.log_pull_hints.sourceStoreCode` 保存原始来源门店编码，`storeId` 保存经过商家门店配置映射并校验后的日志接口 `org_no`；两者语义独立，不能把 SAP 编码等来源值直接作为日志接口门店提交。若同一商家和同一外部编码命中多个不同 `org_no`，自动化审计保存 `storeMappingCandidates` 和跳过原因，不静默选择候选门店。
 - `Ticket.extra_data.ticket_automation.notifyConfig` 可记录自动化链路使用的推送配置，便于日志拉取失败、版本号缺失和 AI 结束时直接发送消息。
 - 版本文本不能写入 `Ticket.extra_data`；日志正文、Excel 和外部同步的版本文本只在当前输入处理过程中解析为 `version_id`。
 - `Ticket.current_assignee_*` 继续表示当前处理人；新增 `Ticket.first_line_assignee_*` 表示一线接单人员，`Ticket.internal_owner_*` 表示内部模块/工单负责人，三者语义分离，避免一个字段同时承载多种职责。
 - `Ticket.merchant_name` 继续作为兼容字段保存项目名称，保证旧前端字段 `merchantName` 和历史数据可平滑读取。
 - `WorkflowTransition.allowed_roles` 现承载扩展 JSON，内部包含 `roles`、`assignee`、`notification` 三类配置。
 - `TicketLogPullRecord` 只保存每次拉取任务过程与结果，外部地址、Cookie、归档与轮询参数不进该表，而是进入系统参数表。`poll_deadline_at` 在提交外部申请成功时写入（= now + pollTimeoutSec），供后台周期任务做轮询超时判定；`last_polled_at` 为最近一次探测时间。
-- `ticket.logPull.storage` 除保存归档目录、FTP、轮询和下载配置外，还保存日志查看运行保护阈值：`maxContentChars` 控制入库文本字符数，`maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes` 控制日志查看准备解压，`maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes` 控制日志搜索和 Python 降级扫描。
+- `ticket.logPull.storage` 除保存归档目录、FTP、轮询和下载配置外，还保存日志查看运行保护阈值：`maxContentChars` 控制入库文本字符数，`maxExtractSeconds/maxExtractFileCount/maxExtractTotalBytes` 控制日志查看准备解压，`maxSearchSeconds/maxSearchFileCount/maxPythonSearchBytes` 控制日志搜索和 Python 降级扫描，`maxConcurrentSearches`（默认 2）限制单进程搜索并发，`maxSearchLineBytes`（默认 524288）限制 rg 最终输出和 Python 降级结果的单行 UTF-8 字节数。
 - 日志上下文行索引会记录文件编码；上下文读取前会重新探测文件编码，若与索引缓存不一致则重建索引，确保搜索结果和详情区对 UTF-8、GB18030 等中文日志使用一致解码。
-- `TicketLogSearchRequestModel` 支持 `keywords` 与 `searchMode`，并继续兼容旧 `keyword`；模型会去重、截断最多 20 个搜索关键字，每个关键字最多 200 字符。日志高亮关键字也已同步放宽到前端最多 20 个，并按关键字轮换不同颜色。`TicketLogSearchHitModel` 增加 `matchedKeywords`，标识当前命中行包含哪些搜索关键字；`/ticket/logs/search` 的 `content` 默认只返回行首 500 个字符，并通过 `contentLength/contentTruncated` 说明原始长度和截断状态，完整内容仍从上下文接口按文件和行号读取。
+- `TicketLogSearchRequestModel` 支持 `keywords` 与 `searchMode`，并继续兼容旧 `keyword`；模型会去重、截断最多 20 个搜索关键字，每个关键字最多 200 字符。日志高亮关键字也已同步放宽到前端最多 20 个，并按关键字轮换不同颜色。`TicketLogSearchHitModel` 增加 `matchedKeywords`，标识当前命中行包含哪些搜索关键字；搜索接口直接返回按 `maxSearchLineBytes` 限制的命中内容，并通过 `contentLength/contentTruncated` 说明返回长度和截断状态，完整内容仍从上下文接口按文件和行号读取。
 - `TicketLogPullRecord.command_content` 会携带内部 `_automation` 扩展字段，用于记录日志拉取成功后是否自动触发 AI 以及目标 Agent 编码，外部提交前会自动剥离。
 - `TicketLogPullRecord.command_content` 还可携带 `notifyConfig`，用于在日志拉取成功、版本号提取失败或 AI 分析结束时继续沿用同一套通知配置。
 - `TicketAiRepoMapping` 记录项目、版本、仓库地址、分支、本地仓库路径和工作区根目录的兼容映射，用于历史任务审计和兜底；当前 AI Worker 执行时优先读取 Agent 本地配置中的仓库路径和工作区根目录。
-- `TicketAiAnalysisTask.analysis_context` 仅保留 `selectedAgentCode`、`forceRefresh`、`extraInstruction`、`promptLayers`、日志记录ID等轻量任务快照，完整工单/日志上下文落到工作区 `context.json`，避免任务表因超大日志包触发 MySQL `max_allowed_packet`；`Ticket.ai_analysis` 则保存最新一次分析结论。
+- `TicketAiAnalysisTask.analysis_context` 仅保留 `selectedAgentCode`、`forceRefresh`、`extraInstruction`、`promptLayers`、`selectedPromptTemplates`、日志记录ID等轻量任务快照，`promptLayers` 明确记录 `project`、`moduleCommon`、`moduleProject` 三层及 `defaultPromptText/hasDefaultPrompt`；完整工单/日志上下文落到工作区 `context.json`，避免任务表因超大日志包触发 MySQL `max_allowed_packet`；`Ticket.ai_analysis` 则保存最新一次分析结论。
 - `TicketMessage` 是持续协同和追问的上下文来源，字段包含 `role`、`message_type`、`content`、`attachments`、来源对象和创建人信息。
 - `TicketSnapshot` 是 ACR 当前快照版本，字段包含 `version`、`summary`、`root_cause`、`solution`、`prevention`、`risk`、`owner`、`source_type` 和结构化数据。
 - `EmbeddingRecord` 继续保存工单本地向量兜底索引，唯一键为 `object_type/object_id/embedding_model/embedding_version`；当 `ticket.similarity.config.provider=qdrant` 时，Qdrant 作为主检索索引，本表仍用于回退和审计。
@@ -128,6 +130,9 @@ erDiagram
 - 2026-07-11 起，工单详情页相似查询优先复用当前工单已保存的 `EmbeddingRecord.embedding`。查询前会按当前配置重新计算标准文本 `content_hash`，并校验模型、版本和维度；缺失或过期时同步刷新当前工单向量，刷新成功后继续使用新向量查询相似工单。
 - `ticket.similarity.config` 是系统参数 JSON，不新增业务表；其中 `sceneTriggers` 控制外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀是否自动刷新向量。
 - `ticket.statistics.time.config` 是系统参数 JSON，用于配置统计页默认时间范围和周趋势分桶；自然日快照由 `TicketStatisticsDaily` 承载，业务周快照由 `TicketStatisticsPeriodSnapshot` 承载。
+
+- `ticket_issue` 的业务号绑定和批量归因不改变 `first_ticket_id`、`ticket.issue_id` 等内部主键关联：接口新增 `firstTicketNo` 和 `ticketNos` 业务字段，问题详情按工单关联的版本中心 ID 展示发生、计划修复、实际修复和实际发版版本。
+- 批量归因默认全量预校验且不覆盖其他 Issue；显式重新归因后在一个事务内更新工单，并刷新目标及旧 Issue 的 `affected_ticket_count`。归因和解绑会写入 `TicketEventType.ISSUE_ATTRIBUTED` 审计事件。
 
 ## 参见
 

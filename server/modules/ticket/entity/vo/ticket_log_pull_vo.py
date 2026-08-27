@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -55,6 +55,8 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
     max_search_seconds: int = Field(default=30, description="日志关键字搜索最大执行秒数")
     max_search_file_count: int = Field(default=1000, description="日志关键字搜索最大扫描文件数")
     max_python_search_bytes: int = Field(default=268435456, description="Python降级搜索最大扫描字节数")
+    max_concurrent_searches: int = Field(default=2, description="日志搜索最大并发数，范围1-8")
+    max_search_line_bytes: int = Field(default=524288, description="日志搜索单行最大输出字节数，范围1KB-4MB")
     post_download_extract_enabled: bool = Field(default=False, description="日志下载完成后是否自动解压到查看目录")
     post_download_version_extract_enabled: bool = Field(
         default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
@@ -283,6 +285,31 @@ class TicketLogPullProjectVendorMapUpsertModel(TicketLogPullProjectVendorMapBase
     vender_no: str = Field(description="商户编号")
 
 
+class TicketAutoAiAnalysisConditionModel(TicketLogPullBaseModel):
+    """
+    自动 AI 分析前置条件配置模型。
+    """
+
+    analysis_mode: Literal["always", "not_successful"] = Field(
+        default="always", description="历史分析条件：always 每次允许，not_successful 仅无成功记录时允许"
+    )
+    status_filter_enabled: bool = Field(default=False, description="是否启用工单内部状态过滤")
+    status_codes: list[str] = Field(default_factory=list, description="允许自动分析的工单内部状态编码")
+
+    @model_validator(mode="after")
+    def normalize_condition(self):
+        """归一化自动分析条件，避免配置快照中出现空状态或重复状态。"""
+        self.analysis_mode = self.analysis_mode if self.analysis_mode in {"always", "not_successful"} else "always"
+        self.status_filter_enabled = bool(self.status_filter_enabled)
+        normalized_codes: list[str] = []
+        for item in self.status_codes or []:
+            code = str(item or "").strip()
+            if code and code not in normalized_codes:
+                normalized_codes.append(code)
+        self.status_codes = normalized_codes
+        return self
+
+
 class TicketLogPullCreateModel(TicketLogPullBaseModel):
     """
     提交工单日志拉取申请模型。
@@ -307,6 +334,9 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     auto_ai_enabled: bool = Field(default=False, description="日志拉取成功后是否自动发起AI分析")
     ai_agent_code: str | None = Field(default=None, description="自动AI分析使用的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="自动AI分析使用的Provider编码")
+    auto_ai_analysis_condition: TicketAutoAiAnalysisConditionModel = Field(
+        default_factory=TicketAutoAiAnalysisConditionModel, description="自动AI分析条件快照"
+    )
     notify_config: dict[str, Any] | None = Field(default=None, description="日志拉取后的通知配置")
 
     @model_validator(mode="before")
@@ -507,6 +537,8 @@ class TicketLogContextLineModel(TicketLogPullBaseModel):
     file: str | None = Field(default=None, description="相对日志文件路径，跨文件上下文时用于标识来源")
     line: int = Field(description="行号")
     content: str = Field(default="", description="行内容")
+    content_length: int = Field(default=0, description="原始行内容的字符数，未截断时为 0")
+    content_truncated: bool = Field(default=False, description="行内容是否因超长被截断")
 
 
 class TicketLogContextModel(TicketLogPullBaseModel):
@@ -537,9 +569,9 @@ class TicketLogSearchHitModel(TicketLogPullBaseModel):
 
     file: str = Field(description="相对日志文件路径")
     line: int = Field(description="命中行号")
-    content: str = Field(default="", description="命中行内容；搜索接口返回时最多保留行首 500 个字符")
-    content_length: int = Field(default=0, description="命中行原始字符数")
-    content_truncated: bool = Field(default=False, description="搜索接口中的命中行内容是否已截断")
+    content: str = Field(default="", description="命中行内容，按日志搜索单行字节上限返回")
+    content_length: int = Field(default=0, description="命中行返回内容的字符数")
+    content_truncated: bool = Field(default=False, description="命中行内容是否达到单行字节上限")
     matched_keywords: list[str] = Field(default_factory=list, description="当前命中行匹配到的关键字")
     context: TicketLogContextModel | None = Field(default=None, description="命中上下文")
 

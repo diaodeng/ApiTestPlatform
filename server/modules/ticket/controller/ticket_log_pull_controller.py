@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -31,7 +31,6 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
 from modules.ticket.service.log_pull.ticket_log_prepare_progress_service import TicketLogPrepareProgressService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.log_pull.ticket_log_service import LogService
-from modules.ticket.util.ticket_log_preview_util import build_ticket_log_search_hit_previews
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -118,7 +117,11 @@ async def get_ticket_log_pull_storage_config(request: Request, query_db: Session
     :return: 日志压缩包本地/FTP 保存与轮询配置
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_storage_config_services(query_db))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_storage_config_services, query_db
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -141,7 +144,9 @@ async def get_ticket_log_pull_vendor_store_options(
     :return: 脱敏后的商家与门店选项
     """
     try:
-        result = TicketLogPullService.get_vendor_store_options_services(query_db, vender_no=vender_no)
+        result = await run_in_threadpool(
+            TicketLogPullService.get_vendor_store_options_services, query_db, vender_no=vender_no
+        )
         return ResponseUtil.success(data=result.model_dump(by_alias=True))
     except Exception as e:
         logger.exception(e)
@@ -167,7 +172,9 @@ async def resolve_ticket_log_pull_env_item(
     :return: 匹配到的子环境列表
     """
     try:
-        result = TicketLogPullService.resolve_env_item_services(query_db, group_key=group_key, vender_no=vender_no)
+        result = await run_in_threadpool(
+            TicketLogPullService.resolve_env_item_services, query_db, group_key=group_key, vender_no=vender_no
+        )
         return ResponseUtil.success(data=[r.model_dump(by_alias=True) for r in result])
     except Exception as e:
         logger.exception(e)
@@ -459,7 +466,7 @@ async def search_ticket_logs(
             search_object.ignore_case,
             search_object.word_regexp,
         )
-        return ResponseUtil.success(data=build_ticket_log_search_hit_previews(result))
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -557,6 +564,35 @@ async def get_ticket_log_errors(
 
 
 @ticketLogPullController.get(
+    "/logs/line-content",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_line_content(
+    request: Request,
+    file: str,
+    line: int,
+    ticket_id: int = 0,
+    record_id: int | None = None,
+):
+    """
+    获取指定日志文件单行完整原始内容接口，不做截断，用于前端展开超大行的完整内容。
+    返回纯文本，避免 JSON 序列化超大行内容。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param file: 相对日志文件路径
+    :param line: 行号
+    :param record_id: 日志拉取记录ID
+    :return: 纯文本行内容
+    """
+    try:
+        content = await run_in_threadpool(LogService.read_line_content, ticket_id, file, line, record_id)
+        return PlainTextResponse(content=content, media_type="text/plain; charset=utf-8")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
     "/log-pull/store-config/template",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
 )
@@ -598,7 +634,11 @@ async def get_ticket_log_pull_store_configs(
     :return: 门店配置分页列表
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_store_config_list_services(query_db, query))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_store_config_list_services, query_db, query
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -609,7 +649,7 @@ async def get_ticket_log_pull_store_configs(
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:config"))],
 )
 @log_decorator(title="门店配置导入", business_type=1)
-def import_ticket_log_pull_store_configs(
+async def import_ticket_log_pull_store_configs(
     request: Request,
     file: UploadFile = File(...),
     import_mode: str = Form(default="incremental"),
@@ -617,7 +657,7 @@ def import_ticket_log_pull_store_configs(
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
     """
-    导入门店配置接口。
+    导入门店配置接口（异步）。
     :param request: 请求对象
     :param file: 门店配置 Excel 文件
     :param import_mode: 导入方式，incremental 为增量，overwrite 为覆盖
@@ -628,8 +668,12 @@ def import_ticket_log_pull_store_configs(
     try:
         if not file.filename.lower().endswith(".xlsx"):
             return ResponseUtil.failure(msg="仅支持 xlsx 文件")
-        result = TicketLogPullService.import_store_config_services(
-            query_db, file.file.read(), import_mode, current_user
+        result = await run_in_threadpool(
+            TicketLogPullService.import_store_config_services,
+            query_db,
+            file.file.read(),
+            import_mode,
+            current_user,
         )
         return (
             ResponseUtil.success(data=result.result, msg=result.message)
@@ -658,7 +702,11 @@ async def get_ticket_log_pull_project_vendor_maps(
     :return: 项目商家映射列表
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_project_vendor_map_list_services(query_db, query))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_project_vendor_map_list_services, query_db, query
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -676,7 +724,11 @@ async def get_ticket_log_pull_project_vendor_map_options(request: Request, query
     :return: 项目商家映射选项列表
     """
     try:
-        return ResponseUtil.success(data=TicketLogPullService.get_project_vendor_map_options_services(query_db))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketLogPullService.get_project_vendor_map_options_services, query_db
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -699,7 +751,9 @@ async def get_ticket_log_pull_project_vendor_map_by_project(
     :return: 映射信息
     """
     try:
-        result = TicketLogPullService.get_project_vendor_map_by_project_services(query_db, project_id)
+        result = await run_in_threadpool(
+            TicketLogPullService.get_project_vendor_map_by_project_services, query_db, project_id
+        )
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="映射不存在")
     except Exception as e:
         logger.exception(e)
@@ -726,7 +780,9 @@ async def save_ticket_log_pull_project_vendor_map(
     :return: 保存结果
     """
     try:
-        result = TicketLogPullService.save_project_vendor_map_services(query_db, config_object, current_user)
+        result = await run_in_threadpool(
+            TicketLogPullService.save_project_vendor_map_services, query_db, config_object, current_user
+        )
         return (
             ResponseUtil.success(data=result.result, msg=result.message)
             if result.is_success

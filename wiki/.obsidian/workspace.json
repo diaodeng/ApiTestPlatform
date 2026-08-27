@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "purpose.md",
+                "file": "concepts/architecture-overview.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "purpose"
+              "title": "architecture-overview"
             }
           }
         ]
@@ -185,6 +185,7 @@
   },
   "active": "4c7ec8a52d7767e3",
   "lastOpenFiles": [
+    "purpose.md",
     "overview.md",
     "schema.md",
     "log.md",
@@ -210,7 +211,6 @@
     "entities/components/legacy-client-runtime.md",
     "entities/components/legacy-client-shell.md",
     "entities/services/web-feature-domains.md",
-    "entities/services/task-scheduler-domain.md",
-    "entities/services/qtr-domain.md"
+    "entities/services/task-scheduler-domain.md"
   ]
 }

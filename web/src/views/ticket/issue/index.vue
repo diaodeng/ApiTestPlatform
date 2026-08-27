@@ -251,7 +251,12 @@
             <el-descriptions-item label="根因分类">{{ detail.rootCauseType || '-' }}</el-descriptions-item>
             <el-descriptions-item label="细分问题">{{ detail.problemPatternName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="负责人">{{ detail.ownerName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="首张工单">{{ detail.firstTicketId || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="首张工单">
+              <el-link v-if="detail.firstTicketNo" type="primary" @click="openTicketDetail(detail.firstTicketId)">
+                {{ detail.firstTicketNo }}
+              </el-link>
+              <span v-else>-</span>
+            </el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ parseTime(detail.createTime) }}</el-descriptions-item>
             <el-descriptions-item label="更新时间">{{ parseTime(detail.updateTime) }}</el-descriptions-item>
             <el-descriptions-item label="摘要" :span="3">{{ detail.summary || '-' }}</el-descriptions-item>
@@ -268,6 +273,10 @@
               <el-table-column label="工单编号" prop="ticketNo" width="180" show-overflow-tooltip />
               <el-table-column label="标题" prop="title" min-width="220" show-overflow-tooltip />
               <el-table-column label="状态" prop="status" width="120" />
+              <el-table-column label="发生版本" prop="affectedVersion" width="130" show-overflow-tooltip />
+              <el-table-column label="计划修复版本" prop="plannedFixVersion" width="130" show-overflow-tooltip />
+              <el-table-column label="实际修复版本" prop="fixedVersion" width="130" show-overflow-tooltip />
+              <el-table-column label="实际发版版本" prop="releasedVersion" width="130" show-overflow-tooltip />
               <el-table-column label="当前处理人" prop="currentAssigneeName" min-width="140" show-overflow-tooltip />
               <el-table-column label="提交时间" prop="submitTime" width="170">
                 <template #default="scope">{{ parseTime(scope.row.submitTime) }}</template>
@@ -296,8 +305,26 @@
               <span>绑定已有工单</span>
             </template>
             <el-form :inline="true" :model="bindForm" label-width="90px">
-              <el-form-item label="工单ID">
-                <el-input-number v-model="bindForm.ticketId" :min="1" :controls="false" style="width: 180px" />
+              <el-form-item label="工单号">
+                <el-select
+                  v-model="bindForm.ticketNo"
+                  filterable
+                  remote
+                  reserve-keyword
+                  clearable
+                  placeholder="输入工单号或标题搜索"
+                  :remote-method="searchBindTickets"
+                  :loading="ticketOptionLoading"
+                  style="width: 300px"
+                  @focus="searchBindTickets(bindForm.ticketNo)"
+                >
+                  <el-option
+                    v-for="item in ticketOptions"
+                    :key="item.ticketId"
+                    :label="formatTicketOption(item)"
+                    :value="item.ticketNo"
+                  />
+                </el-select>
               </el-form-item>
               <el-form-item label="归因类型">
                 <el-select v-model="bindForm.relationType" style="width: 160px">
@@ -447,7 +474,7 @@
 import {
   addTicketIssue,
   addTicketRelation,
-  bindTicketIssue,
+  bindTicketIssueByNo,
   confirmTicketRelation,
   delTicketRelation,
   getTicketIssue,
@@ -456,6 +483,7 @@ import {
   listTicketModuleOptions,
   listTicketProjectOptions,
   listTicketUserOptions,
+  searchTicketIssueTicketOptions,
   unbindTicketIssue,
   updateTicketIssue,
 } from '@/api/ticket/ticket'
@@ -470,6 +498,8 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const binding = ref(false)
+const ticketOptionLoading = ref(false)
+const ticketOptions = ref([])
 const relationSaving = ref(false)
 const detailLoading = ref(false)
 const open = ref(false)
@@ -593,7 +623,7 @@ function createDefaultForm() {
 
 function createDefaultBindForm() {
   return {
-    ticketId: undefined,
+    ticketNo: '',
     relationType: 'manual',
     confirmed: true,
     remark: '',
@@ -858,7 +888,9 @@ function submitForm() {
     proxy.$modal.msgWarning('问题标题不能为空')
     return
   }
-  const payload = { ...form.value }
+  const payload = Object.fromEntries(
+    Object.entries(form.value).filter(([, value]) => value !== '' && value !== undefined && value !== null)
+  )
   saving.value = true
   const request = isEdit.value ? updateTicketIssue(payload) : addTicketIssue(payload)
   request.then((response) => {
@@ -901,10 +933,34 @@ function handlePatternChange(value) {
   form.value.problemPatternName = option?.label || ''
 }
 
+function formatTicketOption(item) {
+  return [item.ticketNo, item.title, item.status ? `【${item.status}】` : ''].filter(Boolean).join(' ')
+}
+
+function searchBindTickets(keyword) {
+  const text = String(keyword || '').trim()
+  if (!text) {
+    ticketOptions.value = []
+    return Promise.resolve([])
+  }
+  ticketOptionLoading.value = true
+  return searchTicketIssueTicketOptions({
+    keyword: text,
+    projectId: detail.value.projectId || undefined,
+    moduleId: detail.value.moduleId || undefined,
+    limit: 20,
+  }).then((response) => {
+    ticketOptions.value = Array.isArray(response.data) ? response.data : []
+    return ticketOptions.value
+  }).finally(() => {
+    ticketOptionLoading.value = false
+  })
+}
+
 function handleBindTicket() {
-  const ticketId = Number(bindForm.value.ticketId)
-  if (!Number.isFinite(ticketId) || ticketId <= 0) {
-    proxy.$modal.msgWarning('请输入有效工单ID')
+  const ticketNo = String(bindForm.value.ticketNo || '').trim()
+  if (!ticketNo) {
+    proxy.$modal.msgWarning('请选择有效工单号')
     return
   }
   if (!detail.value.issueId) {
@@ -912,14 +968,15 @@ function handleBindTicket() {
     return
   }
   binding.value = true
-  bindTicketIssue(ticketId, {
-    issueId: detail.value.issueId,
+  bindTicketIssueByNo(detail.value.issueId, {
+    ticketNo,
     relationType: bindForm.value.relationType || 'manual',
     confirmed: bindForm.value.confirmed !== false,
     remark: bindForm.value.remark || '',
   }).then(() => {
     proxy.$modal.msgSuccess('工单绑定成功')
     bindForm.value = createDefaultBindForm()
+    ticketOptions.value = []
     openIssueDetail(detail.value.issueId)
     getList()
   }).finally(() => {
@@ -1000,9 +1057,9 @@ function handleUnbindTicket(ticketId) {
 }
 
 function openTicketDetail(ticketId) {
-  const resolvedTicketId = Number(ticketId)
-  if (!Number.isFinite(resolvedTicketId) || resolvedTicketId <= 0) {
-    proxy.$modal.msgWarning('工单ID无效')
+  const resolvedTicketId = String(ticketId || '').trim()
+  if (!/^\d+$/.test(resolvedTicketId) || resolvedTicketId === '0') {
+    proxy.$modal.msgWarning('工单号无效')
     return
   }
   const resolved = router.resolve({

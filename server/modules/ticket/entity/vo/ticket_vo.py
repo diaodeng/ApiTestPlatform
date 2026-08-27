@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
@@ -160,8 +160,8 @@ class TicketQueryModel(QueryModel):
     reporter_id: int | None = Field(default=None, description="提单人ID")
     keyword: str | None = Field(default=None, description="关键字，匹配标题、描述、根因、解决方案")
     ticket_ids: str | None = Field(default=None, description="工单ID列表，逗号分隔字符串，用于自然语言搜索后的过滤")
-    submit_begin_time: datetime | None = Field(default=None, description="提交时间筛选开始，优先使用外部createTime")
-    submit_end_time: datetime | None = Field(default=None, description="提交时间筛选结束，优先使用外部createTime")
+    submit_begin_time: datetime | None = Field(default=None, description="工单业务提交时间筛选开始（submit_time）")
+    submit_end_time: datetime | None = Field(default=None, description="工单业务提交时间筛选结束（submit_time）")
     processing_conclusion_status: str | None = Field(default=None, description="处理结论状态：processed/unprocessed")
     processed_begin_time: datetime | None = Field(default=None, description="处理完成时间筛选开始")
     processed_end_time: datetime | None = Field(default=None, description="处理完成时间筛选结束")
@@ -330,6 +330,7 @@ class TicketMessageCreateModel(BaseModel):
     version_id: int | None = Field(default=None, description="发起 AI 追问时使用的版本中心ID")
     agent_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Agent 编码")
     ai_provider_code: str | None = Field(default=None, description="发起 AI 追问时使用的 Provider 编码")
+    ai_model_name: str | None = Field(default=None, description="发起 AI 追问时使用的模型标识")
 
 
 class TicketMessageModel(BaseModel):
@@ -501,6 +502,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
     log_pull_record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
     agent_code: str | None = Field(default=None, description="执行AI分析的Agent编码")
     ai_provider_code: str | None = Field(default=None, description="执行AI分析的Provider编码")
+    ai_model_name: str | None = Field(default=None, description="执行AI分析的模型标识")
     executor: str | None = Field(default=None, description="执行AI分析的执行器，如 codex/claude_code")
     force_refresh: bool = Field(default=False, description="是否强制重新分析")
     resume: bool = Field(default=False, description="是否复用上次 AI 分析会话继续分析")
@@ -528,6 +530,7 @@ class TicketAiAnalysisRequestModel(BaseModel):
         """
         self.agent_code = str(self.agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        self.ai_model_name = str(self.ai_model_name or "").strip() or None
         self.executor = str(self.executor or "").strip() or None
         self.log_analysis_mode = str(self.log_analysis_mode or "").strip() or None
         self.log_window_missing_strategy = str(self.log_window_missing_strategy or "").strip() or None
@@ -574,6 +577,10 @@ class TicketAiAnalysisTaskModel(BaseModel):
     raw_output: str | None = None
     analysis_result: dict[str, Any] | None = None
     analysis_context: dict[str, Any] | None = None
+    audit_execution_id: int | None = None
+    input_token_count: int | None = None
+    output_token_count: int | None = None
+    total_token_count: int | None = None
     source_log_pull_record_id: int | None = None
     source_log_view_mode: str | None = None
     submitted_by_id: int | None = None
@@ -667,6 +674,32 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
         self.title = str(self.title or "").strip() or None
         self.sync_consumer = str(self.sync_consumer or "").strip() or None
         self.step_reason = str(self.step_reason or "").strip() or None
+        if not self.ticket_no:
+            raise ValueError("ticketNo 不能为空")
+        return self
+
+
+class TicketManualAutomationRunModel(BaseModel):
+    """
+    指定工单手动执行同步自动化的请求模型。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_no: str = Field(description="要执行自动化的工单号")
+    source: Literal["bitable", "database"] = Field(
+        default="bitable",
+        description="数据来源：bitable 查询飞书多维表格，database 使用本地工单快照",
+    )
+
+    @model_validator(mode="after")
+    def validate_manual_automation_run(self):
+        """
+        归一化手动自动化请求中的工单号。
+
+        :return: 当前请求模型。
+        """
+        self.ticket_no = str(self.ticket_no or "").strip()
         if not self.ticket_no:
             raise ValueError("ticketNo 不能为空")
         return self

@@ -403,6 +403,17 @@
         <el-col :span="1.5">
           <el-button
             plain
+            icon="Connection"
+            :disabled="selectedTicketRows.length === 0"
+            @click="openIssueBatchBindDialog"
+            v-hasPermi="['ticket:issue:bind']"
+          >
+            批量关联问题
+          </el-button>
+        </el-col>
+        <el-col :span="1.5">
+          <el-button
+            plain
             icon="EditPen"
             :disabled="selectedTicketRows.length === 0"
             @click="openReleaseBatchDialog"
@@ -712,9 +723,7 @@
           width="170"
           sortable="custom"
         >
-          <template #default="scope">{{
-            parseTime(scope.row.submitTime || scope.row.externalCreateTime || scope.row.createTime)
-          }}</template>
+          <template #default="scope">{{ parseTime(scope.row.submitTime) }}</template>
         </el-table-column>
         <el-table-column
           v-if="isTicketColumnVisible('firstResponseAt')"
@@ -876,12 +885,78 @@
       </el-dialog>
 
       <el-dialog
-        title="版本批量维护"
-        v-model="releaseBatchOpen"
-        width="720px"
+        title="批量关联问题"
+        v-model="issueBatchBindOpen"
+        width="780px"
         append-to-body
-        @closed="resetReleaseBatchForm"
+        @closed="resetIssueBatchBindForm"
       >
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          :title="`当前页已选择 ${selectedTicketRows.length} 张工单，默认不会覆盖已有问题归属`"
+          class="mb12"
+        />
+        <el-table :data="selectedTicketRows" max-height="220" border class="mb12">
+          <el-table-column label="工单号" prop="ticketNo" width="190" show-overflow-tooltip />
+          <el-table-column label="标题" prop="title" min-width="240" show-overflow-tooltip />
+          <el-table-column label="当前问题" min-width="180" show-overflow-tooltip>
+            <template #default="scope">{{ scope.row.issueNo || '未归因' }}</template>
+          </el-table-column>
+        </el-table>
+        <el-form :model="issueBatchBindForm" label-width="120px">
+          <el-form-item label="目标问题实例" required>
+            <el-select
+              v-model="issueBatchBindForm.issueId"
+              filterable
+              remote
+              reserve-keyword
+              clearable
+              placeholder="输入问题编号或标题搜索"
+              :remote-method="searchIssueBatchOptions"
+              :loading="issueBatchBindOptionLoading"
+              style="width: 100%"
+              @focus="searchIssueBatchOptions('')"
+            >
+              <el-option
+                v-for="item in issueBatchOptions"
+                :key="item.issueId"
+                :label="formatIssueBatchOption(item)"
+                :value="item.issueId"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="允许重新归因">
+            <el-checkbox v-model="issueBatchBindForm.allowReassign">
+              覆盖已归属其他问题实例的工单
+            </el-checkbox>
+          </el-form-item>
+          <el-form-item label="归因说明">
+            <el-input
+              v-model="issueBatchBindForm.remark"
+              type="textarea"
+              :rows="3"
+              maxlength="500"
+              show-word-limit
+              placeholder="可选，说明本次批量归因依据"
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button :disabled="issueBatchBindSubmitting" @click="issueBatchBindOpen = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="issueBatchBindSubmitting"
+            :disabled="issueBatchBindSubmitting"
+            @click="submitIssueBatchBind"
+          >
+            确认关联
+          </el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog title="版本批量维护" v-model="releaseBatchOpen" width="720px" append-to-body @closed="resetReleaseBatchForm">
         <el-alert
           type="info"
           :closable="false"
@@ -1615,6 +1690,7 @@
   import {
     addTicket,
     assignTicket,
+    batchBindTicketIssues,
     batchUpdateTicketRelease,
     changeTicketStatus,
     delTicket,
@@ -1622,6 +1698,7 @@
     getTicket,
     getTicketVersionStatistics,
     importTicketExcel,
+    listTicketIssues,
     updateTicket,
   } from '@/api/ticket/ticket';
   import {
@@ -1752,6 +1829,11 @@
   const { openTicketLogViewer } = useLogViewer(proxy, currentTicketId);
   const releaseBatchOpen = ref(false);
   const releaseBatchSubmitting = ref(false);
+  const issueBatchBindOpen = ref(false);
+  const issueBatchBindSubmitting = ref(false);
+  const issueBatchBindOptionLoading = ref(false);
+  const issueBatchOptions = ref([]);
+  const issueBatchBindForm = ref(createDefaultIssueBatchBindForm());
   const releaseBatchForm = ref(createDefaultReleaseBatchForm());
   const releaseVersionOptions = ref([]);
   const versionStatisticsOpen = ref(false);
@@ -1842,6 +1924,95 @@
       autoTranslate: false,
       logPullConfig: createDefaultLogPullForm(),
     };
+  }
+
+  function createDefaultIssueBatchBindForm() {
+    return {
+      issueId: undefined,
+      allowReassign: false,
+      remark: '',
+    };
+  }
+
+  function formatIssueBatchOption(item) {
+    return [item.issueNo || item.issueId, item.title, item.status ? `【${item.status}】` : '']
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function searchIssueBatchOptions(keyword) {
+    const text = String(keyword || '').trim();
+    if (!text) {
+      return Promise.resolve(issueBatchOptions.value);
+    }
+    issueBatchBindOptionLoading.value = true;
+    return listTicketIssues({ keyword: text, pageNum: 1, pageSize: 20 })
+      .then((response) => {
+        issueBatchOptions.value = response.rows || response.data || [];
+        return issueBatchOptions.value;
+      })
+      .finally(() => {
+        issueBatchBindOptionLoading.value = false;
+      });
+  }
+
+  function openIssueBatchBindDialog() {
+    if (!selectedTicketRows.value.length) {
+      proxy.$modal.msgWarning('请先选择需要关联的工单');
+      return;
+    }
+    issueBatchBindForm.value = createDefaultIssueBatchBindForm();
+    issueBatchOptions.value = [];
+    issueBatchBindOpen.value = true;
+  }
+
+  function resetIssueBatchBindForm() {
+    issueBatchBindForm.value = createDefaultIssueBatchBindForm();
+    issueBatchOptions.value = [];
+    issueBatchBindSubmitting.value = false;
+  }
+
+  function submitIssueBatchBind() {
+    const issueId = issueBatchBindForm.value.issueId;
+    const ticketNos = selectedTicketRows.value
+      .map((item) => String(item.ticketNo || item.ticket_no || '').trim())
+      .filter(Boolean);
+    if (!issueId) {
+      proxy.$modal.msgWarning('请选择目标问题实例');
+      return;
+    }
+    if (!ticketNos.length) {
+      proxy.$modal.msgWarning('选中的工单缺少业务工单号，无法批量关联');
+      return;
+    }
+    const submit = () => {
+      issueBatchBindSubmitting.value = true;
+      return batchBindTicketIssues({
+        ticketNos,
+        issueId,
+        relationType: 'manual',
+        confirmed: true,
+        allowReassign: issueBatchBindForm.value.allowReassign === true,
+        remark: String(issueBatchBindForm.value.remark || '').trim() || undefined,
+      })
+        .then((response) => {
+          const result = response.data || {};
+          proxy.$modal.msgSuccess(result.successCount != null
+            ? `批量关联成功，共 ${result.successCount} 张工单`
+            : '批量关联成功');
+          issueBatchBindOpen.value = false;
+          selectedTicketRows.value = [];
+          getList();
+        })
+        .finally(() => {
+          issueBatchBindSubmitting.value = false;
+        });
+    };
+    if (issueBatchBindForm.value.allowReassign) {
+      proxy.$modal.confirm('已勾选覆盖已有问题归属，是否确认继续？').then(submit);
+      return;
+    }
+    submit();
   }
 
   function createDefaultReleaseBatchForm() {

@@ -34,6 +34,13 @@ class Ticket(Base):
         Index("idx_ticket_del_solution_create", "del_flag", "solution_type", "create_time", "ticket_id"),
         Index("idx_ticket_del_resolution_create", "del_flag", "resolution_code", "create_time", "ticket_id"),
         Index("idx_ticket_del_submit_time", "del_flag", "submit_time", "ticket_id"),
+        Index(
+            "idx_ticket_del_module_code_submit_time",
+            "del_flag",
+            "module_code",
+            "submit_time",
+            "ticket_id",
+        ),
         Index("idx_ticket_del_processed_time", "del_flag", "processed_at", "ticket_id"),
         Index("idx_ticket_del_resolved_time", "del_flag", "resolved_at", "ticket_id"),
         Index("idx_ticket_del_closed_time", "del_flag", "closed_at", "ticket_id"),
@@ -494,6 +501,15 @@ class TicketAiAnalysisTask(Base):
     """
 
     __tablename__ = "ticket_ai_analysis_task"
+    __table_args__ = (
+        Index(
+            "idx_ticket_ai_task_ticket_created_status",
+            "ticket_id",
+            "create_time",
+            "task_id",
+            "status",
+        ),
+    )
 
     task_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="任务ID")
     ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="工单ID")
@@ -516,6 +532,10 @@ class TicketAiAnalysisTask(Base):
     raw_output: Mapped[str] = mapped_column(long_text_type(), nullable=False, default="", comment="AI原始输出")
     analysis_result: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="结构化分析结果")
     analysis_context: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="任务上下文快照")
+    audit_execution_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="AI审计执行ID")
+    input_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输入Token数")
+    output_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输出Token数")
+    total_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="总Token数")
     source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
     source_log_view_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="stored", comment="日志来源模式"

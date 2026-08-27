@@ -11,7 +11,7 @@
   import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue';
   import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
-  import { getTicket } from '@/api/ticket/ticket';
+  import { getTicketSummary } from '@/api/ticket/ticket';
   import {
     getLogPullStatusTagType,
     getOptionLabel,
@@ -35,6 +35,10 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
       type: Object,
       default: null,
     },
+    detailOpen: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emit = defineEmits(['changed']);
@@ -42,7 +46,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
   const currentTicketId = ref();
   const detail = ref({});
   const detailRef = computed(() => detail.value || {});
-  const detailOpenRef = computed(() => Boolean(props.active));
+  const detailOpenRef = computed(() => Boolean(props.detailOpen));
   const hasExternalDetail = computed(() =>
     Boolean(props.detail?.ticketId || props.detail?.ticket_id)
   );
@@ -85,7 +89,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
       return Promise.resolve();
     }
     if (!currentTicketId.value) return Promise.resolve();
-    return getTicket(currentTicketId.value).then((response) => {
+    return getTicketSummary(currentTicketId.value).then((response) => {
       detail.value = response.data || {};
     });
   }
@@ -444,6 +448,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
       detail.value = hasExternalDetail.value ? props.detail || {} : {};
       logPullQuery.value.pageNum = 1;
       resetLogPullForm();
+      handleLogPullDialogClosed();
       if (props.active && currentTicketId.value) {
         loadTicketDetail().then(() => loadLogPullList());
       }
@@ -461,8 +466,21 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         stopLogPullAutoRefresh();
         logPullContentOpen.value = false;
         logPullSubmitOpen.value = false;
+        handleLogPullDialogClosed();
         clearNativeLogViewerHighlights();
       }
+    }
+  );
+
+  watch(
+    () => props.detailOpen,
+    (open) => {
+      if (open) return;
+      stopLogPullAutoRefresh();
+      logPullContentOpen.value = false;
+      logPullSubmitOpen.value = false;
+      handleLogPullDialogClosed();
+      clearNativeLogViewerHighlights();
     }
   );
 
@@ -686,8 +704,11 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
     </el-form>
   </el-dialog>
 
-  <LogViewerDialog v-model="logPullContentOpen" :record="selectedLogPullRecord">
-    <template #toolbar-actions>
+  <LogViewerDialog
+    v-model="logPullContentOpen"
+    :record="selectedLogPullRecord"
+    @closed="handleLogPullDialogClosed"
+  >    <template #toolbar-actions>
       <el-button
         type="warning"
         @click="retryLogPull(selectedLogPullRecord)"

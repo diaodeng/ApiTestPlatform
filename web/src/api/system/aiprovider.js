@@ -35,10 +35,60 @@ export function previewAiProviderModelCatalog(data) {
   })
 }
 
-// 查询已保存 Provider 的模型目录缓存
+// 查询已保存 Provider 的模型目录缓存（仅已启用）
 export function listAiProviderModelCatalog(providerId) {
   return request({
     url: `/system/aiprovider/${providerId}/model-catalog`,
+    method: 'get'
+  })
+}
+
+// 查询已保存 Provider 的全部模型目录（含已禁用）
+export function listAiProviderAllModelCatalog(providerId) {
+  return request({
+    url: `/system/aiprovider/${providerId}/model-catalog/all`,
+    method: 'get'
+  })
+}
+
+// 从远端API拉取并持久化模型目录
+export function refreshAiProviderModelCatalog(providerId) {
+  return request({
+    url: `/system/aiprovider/${providerId}/model-catalog/refresh`,
+    method: 'put'
+  })
+}
+
+// 手动添加模型目录项
+export function addAiProviderModelCatalogItem(providerId, data) {
+  return request({
+    url: `/system/aiprovider/${providerId}/model-catalog/items`,
+    method: 'post',
+    data
+  })
+}
+
+// 启用/禁用模型目录项
+export function toggleAiProviderModelCatalogItem(providerId, modelId, data) {
+  return request({
+    url: `/system/aiprovider/${providerId}/model-catalog/items/${modelId}/toggle`,
+    method: 'put',
+    data
+  })
+}
+
+// 删除人工添加的模型目录项
+export function delAiProviderModelCatalogItem(providerId, modelId) {
+  return request({
+    url: `/system/aiprovider/${providerId}/model-catalog/items/${modelId}`,
+    method: 'delete'
+  })
+}
+
+// 按Provider编码获取可用模型下拉选项
+export function listAiProviderModelOptions(providerCode) {
+  return request({
+    url: `/system/aiprovider/options/${providerCode}/models`,
     method: 'get'
   })
 }

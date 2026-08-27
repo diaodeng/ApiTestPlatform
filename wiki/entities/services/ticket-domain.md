@@ -6,12 +6,13 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-08-04
+freshness: 2026-08-25
 created: 2026-05-20
-updated: 2026-08-04
+updated: 2026-08-25
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
-  - server/modules/ticket/service/core/ticket_service.py
+  - server/modules/ticket/service/core/ticket_read_service.py
+  - server/modules/ticket/entity/vo/ticket_read_vo.py
   - server/modules/ticket/service/core/ticket_import_service.py
   - server/modules/ticket/service/core/ticket_processing_metric_service.py
   - server/modules/ticket/service/stats/ticket_processing_stats_service.py
@@ -98,8 +99,21 @@ graph TD
 - 自动化关注范围：`TicketAutomationScopeService` 在外部字段映射得到当前系统模块后，以模块 ID 精确匹配或模块名称关键字包含判定是否允许自动化。结果写入 `ticket.extra_data.automation_scope`；范围外工单仍执行同步、普通映射和外部规则分类，跳过标题/翻译/提取/分类 AI、自动日志与 AI 分析、向量刷新和自动群推送。统计默认范围和自动群推送复用同一配置，群推送原有条件表达式保持不变。
 - 可配置趋势：固定问题性质趋势已删除，工单类型趋势按 `issue_type_id/issue_type_name` 聚合；`TicketCustomMetricService` 仅按白名单字段计算管理员定义的指标，并可读取日/业务周通用快照。
 - 当前系统自定义统计：`TicketCustomStatisticsService` 按 `ticket.sync.automation.customStatisticsProfiles` 的白名单字段、单一时间口径和范围过滤实时查询工单，再按字段或规则分组聚合。结果只用于本次接口响应或通知，不写入 `ticket_statistics_*`；规则中的 `hasConclusion` 由 `processed_at` 是否为空派生。方案可使用系统推送、飞书应用文本或飞书卡片通知。
+- 自动化结果通知：`TicketSyncAutomationService` 读取 `ticket.sync.automation.automationNotification` 并在自动化启动时快照到 `ticket.extra_data.ticket_automation.notifyConfig` 和自动日志任务。`TicketNotifyService` 统一渲染工单、商家、门店、阶段、状态和原因变量，日志拉取与 AI 分析的成功、失败或跳过结果均可按成功/失败开关投递到既有推送配置。
 - 问题实例归因：`service/issue/TicketIssueService` 承接 Issue 创建、绑定、解绑、相似工单确认和影响工单数刷新；`TicketRelationService` 只维护补充关系。
 - 项目版本中心：`service/core/TicketVersionService` 承接版本主数据、候选版本、发布事实和工单版本关联；AI 仓库映射只维护仓库和分支配置。
+
+## 问题实例关联与批量归因
+
+问题实例管理以 `ticket_issue` 为主数据，工单通过 `ticket.issue_id/issue_relation_type/issue_confirmed` 保存主归因，`ticket_relation` 继续只承载相似、重复和相关等补充关系。
+
+- `GET /ticket/issues/ticket-options` 按工单号或标题返回最多 20 条轻量候选，问题管理页面使用业务工单号绑定，不要求输入内部 `ticket_id`。
+- `POST /ticket/issues/{issue_id}/tickets/bind` 按业务工单号绑定单张工单；原有按工单 ID 的绑定接口继续保留。
+- `POST /ticket/issues/bind-batch` 只允许批量绑定到已有 Issue，不按问题类型或相似度自动强绑定。
+- 批量绑定先全量校验工单、目标 Issue、项目一致性和已有归属，再在同一事务中更新；默认拒绝覆盖其他 Issue，显式允许重新归因后才转移，并刷新所有受影响 Issue 的工单数。
+- 问题管理页面使用远程搜索选择器，不加载全量可关联工单列表；工单详情支持直接关联或更换已有 Issue，工单列表支持当前页多选批量关联。
+- Issue 详情的 `firstTicketNo` 由 `first_ticket_id` 反查生成；绑定工单表展示四类工单版本（发生、计划修复、实际修复、实际发版），版本事实仍以工单和版本中心为准。
+- 归因和解绑操作写入 `TicketEventType.ISSUE_ATTRIBUTED` 事件，保留操作人、原 Issue、目标 Issue、关系类型和备注，便于审计。
 
 ## 2026-06-16 分类统计维度
 
@@ -116,7 +130,7 @@ graph TD
 - `GET /ticket/statistics/trend` 按 `day/week/month` 返回新增、关闭、净增、周期末未关闭存量、工单类型、Top 模块和 Top 细分问题；自定义指标只在请求显式传入 `metricCodes` 时计算或读取快照。
 - 用户级偏好采用通用表 `sys_user_config`，以 `user_id + config_type + config_key` 唯一定位，`config_value` 保存少量 JSON 配置；后续用户级 AI prompt/provider 等零散配置优先复用该模型。
 - 工单列表页和统计页的模块筛选规则统一：未选择项目时模块候选为全部有效模块，选择项目后候选收敛为所选项目下的模块；列表页新增按 `module_code` 下拉筛选，统计页新增按 `moduleCodes` 多选筛选，`GET /ticket/statistics/overview` 接收 `projectIds/moduleIds/moduleCodes` 参数，后端所有统计维度和状态流转统计都共用该过滤条件。
-- 工单列表页支持服务端表头排序，默认 `submitTime desc`；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。
+- 工单列表页支持服务端表头排序，默认 `submitTime desc`，实际按主表 `submit_time DESC, ticket_id DESC` 执行；点击表头会传 `sortField/sortOrder` 重新分页查询。当前可排序列覆盖列表展示字段：工单编号、标题、状态、处理状态、项目、模块、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、优先级、来源、1线人员、内部负责人、当前处理人、提交时间和创建时间。
 - 2026-07-02 起，工单列表页主要下拉筛选项支持多选：状态、处理状态、项目、模块、模块Code、工单类型、问题性质、根因分类、解决方式、关闭结果、细分问题、内部优先级和三类负责人；前端按逗号分隔提交多值参数（通过 `joinQueryList` 将数组拼成逗号分隔字符串，由 `tansParams` 序列化为 `key=val1%2Cval2` 格式），后端兼容旧单值参数并使用 `IN` 过滤。`Ticket` 模型同步声明常用筛选组合索引，数据库侧已手动创建对应索引。
 - 2026-07-16 起，工单列表根因分类和解决方式筛选在 `TicketService` 层会将枚举编码扩展为“编码 + 中文标签”，兼容历史 AI 分类把中文标签写入 `ticket.root_cause_type/solution_type` 的数据；后续 `TicketLightAiService` 自动分类归一化统一回填枚举 `value`，避免继续写 label。
 - **注意**：多选查询字段在 `TicketQueryModel` 和 `TicketStatisticsQueryModel` 中的类型必须为 `str | None`（不能是 `str | list[X] | None`）。因为 FastAPI 的 `Query()` 检测到类型含 `list[...]` 时会自动将标量查询值包装成列表（如 `"3,2"` → `["3,2"]`），导致 DAO 的 `_normalize_*_list` 收到已包装的列表后不再拆分，文本字段用 `.in_(["open,closed"])` 查不到数据，整数人员字段则直接触发 Pydantic 验证错误。
@@ -163,7 +177,7 @@ graph TD
 - 公网外部推单更新已有工单时，若新 `ticketModle` 有文本但未命中有效 HRM 模块 ID，会清空旧 `module_id` 并用新模块文本覆盖 `module_name`，避免外部模块变化后仍展示旧模块；远端拉取入库也会兼容 `moduleName/module_name` 与外部字段 `ticketModle/ticketModel/ticket_model`。
 - 同步状态统一写入 `ticket.extra_data.external_sync`，不再依赖单一“是否已同步”布尔值，而是按 `revision + consumers.{consumer}.delivered_revision` 判断某个消费方是否已经拿到当前版本。
 - `/ticket/sync/pending` 只会返回真正带同步元数据的工单，避免把普通人工创建的工单误返回给内网同步系统。
-- 外部同步后的自动化链路支持规则化识别项目、模块、商家、门店、POS/SCO、版本号，识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。项目/模块识别顺序与备份分支 `master_params_ticket_back` 保持一致：先按 `ticketVender/ticketModle` 命中 `projectMappings/moduleMappings`，未命中再按 `projectCode/moduleCode` 业务码兜底，不按标题/描述全文匹配项目映射。
+- 外部同步后的自动化链路会统一解析项目、模块、商家、门店、POS/SCO、版本号；其中外部 `sourceStoreCode` 仅保留原始门店编码，若该值是 `sap_org_no` 等业务编码，字段识别会先按商家门店配置转换为日志接口使用的 `org_no`，自动日志运行参数优先使用映射后的 `storeId`，不会把原始编码直接提交给日志接口。若同一商家、同一外部编码匹配到多个不同 `org_no`，自动化会保留全部候选并跳过日志提交，不按修改时间静默选择。识别结果与自动化步骤状态都回写到 `extra_data.external_sync.sync_state.automation`。项目/模块识别顺序与备份分支 `master_params_ticket_back` 保持一致：先按 `ticketVender/ticketModle` 命中 `projectMappings/moduleMappings`，未命中再按 `projectCode/moduleCode` 业务码兜底，不按标题/描述全文匹配项目映射。
 - 外部同步延后后处理会继承入库请求 tid：Celery 可用时随 `module_ticket.sync_deferred_post_process` 投递，Celery 不可用回退 FastAPI 本地后台任务时通过 `trace_context` 设置，保证入库、自动化、AI 和群推送日志可按同一个 tid 串联；定时任务主动拉取等非 HTTP 入口由 Celery Worker 生成 `job-xxxxxxxx`。
 - 外部同步识别项目失败时会保留 `ticketVender/projectName/merchantName` 原始文本到 `merchant_name`，模块识别失败时保留 `ticketModle/moduleName` 原始文本到 `module_name`，避免本地 HRM 未配置映射时入库数据丢失。
 - 识别和自动化配置统一由系统参数 `ticket.sync.automation` 驱动，优先通过映射规则、正则和默认参数适配不同工单系统，避免把定制话术写死在服务代码里。
@@ -200,6 +214,7 @@ graph TD
 - `ticket.logPull.external` 的大体量门店基础数据已拆分到 `ticket_log_pull_store_config` 独立表，支持模板导入、增量覆盖、整表覆盖和 `org_no/sap_org_no` 搜索；同时新增 `ticket_log_pull_project_vendor_map` 保存项目 ID 到 `vender_no` 的映射，日志拉取弹窗会优先按项目自动回填商家编号。
 - 门店配置增量导入的判重逻辑已经改为 `vender_no + org_no + sap_org_no` 三字段联合唯一键精确匹配，只有三者同时一致才会覆盖，不再按任意单字段命中就覆盖；导入时也会先批量加载已有配置并在内存中 upsert，减少大文件导入的查库压力。
 - 日志拉取页面和工单日志拉取记录页的商家/门店联动选项已改为直接聚合 `ticket_log_pull_store_config` 表，不再依赖系统参数里的商家门店配置；接口仍返回 `vendorId/vendorCode/vendorName` 与 `storeId/storeCode/sapOrgNo/storeName` 的联动结构，其中 `storeId` 实际回填为 `org_no` 字符串，前端下拉可按 `org_no`、`sap_org_no` 和门店名称搜索。
+- 工单详情的轻量概览响应显式保留 `extraData`，供日志拉取弹窗读取 `external_sync.source`、`log_pull_hints`、`ticket_automation.log_pull_config` 和历史 `external_field_mapping.ticketStore`；门店值命中配置时归一化为 `org_no` 提交，选项展示名称、`org_no` 与 `sap_org_no`，未命中则保留原始值供人工修正。
 - 日志拉取查看入口改为弹窗模式，默认返回入库内容；切换为原始文档后可显示当前截取范围并按时间范围实时重截。
 - 日志拉取提交入口改为弹窗，标签页默认只保留记录列表，减少页面占用；后台会先查外部列表，命中可下载结果时只比较 `modifyTime/path`，且双方参数个数必须一致，满足时会跳过重新提交申请。
 - 日志拉取链路补充步骤级日志，提交、轮询、下载、解析、导入以及跳过原因都会写入系统日志和工单事件，方便定位工单号执行到哪一步。
@@ -210,6 +225,9 @@ graph TD
 - 日志拉取成功后会优先从日志正文直接提取版本号，命中后创建或关联版本中心记录并写入工单发生版本 ID；未提取到则发送通知并终止后续自动 AI。
 - 手动发起 AI 分析可选择版本中心 ID；未选择时后端使用工单发生版本 ID，再尝试从指定日志记录或最近成功日志记录中提取版本并关联后提交分析。
 - 工单自动化通知统一复用已有推送配置，页面侧可选择具体推送项和成功/失败通知开关；自动 AI 成功和失败都会发送消息，便于业务闭环确认。
+- 2026-08-25 起，同步自动化结果通知支持模板变量；配置在自动化启动时冻结，后续变更不会影响已创建的日志拉取或 AI 分析任务。模板变量包含 `${ticket_no}`、`${ticket_title}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}`、`${detail}` 和 `${ticket_url}`。
+- 自动 AI 提交在创建任务前被拒绝时，服务返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知原因；失败事件在日志拉取线程会话中单独提交，确保时间线可追溯。
+- 生产 `start.sh` 通过 Supervisor 分离 FastAPI 与 Celery Worker 进程；Agent WebSocket 的进程内连接表不会被 Celery Worker 读取，跨进程 Agent 派发仍需 Redis 消息网关或受保护的 FastAPI 内部中转接口。
 - 参数配置说明改为通用提示按钮组件 `PromptButton`，后续可在其他页面复用。
 - 日志拉取时间范围支持可空：有时间范围时按“开始/结束时间”或“时间点+前后分钟范围”提取入库；未填时间范围时只下载整包压缩文件，不落日志正文，供 AI 分析时由 Agent 基于 `commandResultUrl` 在本地工作区下载并解压整包。
 - AI 整包日志分析支持三种模式：`digest` 允许优先读取受控大小的 `logs_ai_digest.txt`，证据不足时定点读取原始日志；`full_directory` 不生成摘要，要求直接检索 `source_logs/`；`hybrid` 会生成摘要但摘要只作为定位索引，Agent 必须查看 `source_logs_manifest.json` 或文件清单，并至少对 `source_logs/` 执行一次 `rg` 关键词检索，最终证据尽量引用原始日志文件路径和行号。
@@ -250,7 +268,7 @@ graph TD
 - 新增工单时可勾选自动拉日志和日志后自动 AI 分析，日志拉取配置与 Agent 编码会跟随工单/日志记录一起保存。
 - 工单详情页的顶层入口已收敛为 `概览`、`日志拉取`、`协同/AI`、`历史` 四块；概览区的“最新AI结论”优先展示最新快照，日志拉取前置到 AI 分析前面，详情页从右侧抽屉改为全屏弹窗，任务历史和任务原文改为弹窗查看，仓库映射不再占用详情页主视图。
 - AI 分析成功后只更新 `ai_analysis`、RCA 和快照，不自动覆盖工单主根因/解决方案；主结论建议由人工确认后再写回，避免多轮追问把中间结论误当最终结论。
-- AI 分析提示词采用三层组装：项目默认提示词、模块默认提示词和用户额外说明；项目/模块默认提示词来源于工单关联项目/模块的基础描述字段，用户额外说明只补充本次分析重点，不覆盖系统约束和输出 schema。
+- AI 分析提示词采用三层默认说明组装：项目默认提示词、按 `module_code` 跨项目复用的模块通用说明、当前项目模块说明；随后追加用户选择的通用模板和本次临时说明。模块通用说明维护在 HRM 的独立入口中，项目模块仍保留自身专属描述；系统固定约束和输出 schema 始终由服务端追加，不会被用户说明覆盖。
 - 概览区只保留工单主信息和最新 AI 结论，不再重复展示一个独立的“工单概览”卡片；协同区默认沿用工单版本号，不允许单独改版本，避免和 AI 分析入口职责混淆。
 - 工单详情页的时间线、日志拉取、RCA 和 AI 分析改为按需加载，避免打开详情页时一次性拉取过多数据。
 - 工单事件的 `event_data` 写入前会做 JSON 安全转换，避免 `datetime` 等对象直接写入 JSON 列时报错。
@@ -283,6 +301,8 @@ graph TD
 - `sceneTriggers` 当前支持 `externalSync`、`bitablePull`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 七类场景；外部同步延后后处理、多维主动拉取入库、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。多维主动拉取入库使用独立 `bitablePull`，不再被 `externalSync` 隐式控制；旧配置缺少 `bitablePull` 时继承 `externalSync`，避免升级后重新打开已关闭链路。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
 - 当前执行链路改为服务端只做任务编排，真正的 `codex exec` 由本地 `client_new` agent 执行并回传结果；服务端通过 `ticket.ai.agent.code` 优先指定目标 Agent，未配置时自动选择在线 Agent。
+- 日志拉取后的自动 AI 已支持跨进程派发：Celery Worker 通过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 投递请求，QTR 域使用 Redis 共享队列和运行中租约控制单 Agent 并发；系统参数 `ticket.ai.agent.maxConcurrentTasks` 默认值为 `1`，超过上限的请求只会排队等待，不会直接失败。
+- 工单 AI 分析的 Provider 下发以当前选中 Provider 的核心连接配置为准：`apiKey/baseUrl/defaultModel` 覆盖同名 `workerEnv` 扩展变量；Agent 侧 Codex 任务级 `config.toml` 和 Claude Code 工作区 `.env` 也会覆盖旧 Provider 值，避免重试或切换 Provider 时继续访问旧地址。
 - AI 分析任务提交前会校验解析到的 Agent 是否已连接服务端；指定 Agent 离线时接口直接返回明确失败原因，不再创建必然失败的后台任务。提交或重试后若后台快速失败，前端会短轮询任务终态并弹出任务 `error_message`。
 - AI 分析任务提交时需要先维护项目版本和仓库/分支映射；当前版本按工单项目 + 版本中心 ID 匹配映射，未命中时拒绝提交。
 - 发起 AI 分析和协同/AI 表单的前端选择默认值采用“手动记忆 > 工单自动化配置 > 最近一次 AI 分析”优先级；Agent、Provider、追加提示词的手动选择保存在浏览器本地偏好中，Provider 绑定 Agent 时会在未手动指定 Agent 的情况下自动带入。
@@ -302,7 +322,7 @@ graph TD
 - 任务级 `CODEX_HOME` 会同步复制 `config.toml` 中相对 `model_catalog_json` 引用的模型目录；绝对路径直接复用，引用缺失或越界时在启动 Worker 前明确失败，避免 Codex 仅返回不易定位的 `os error 2`。
 - AI 分析 Worker 的认证环境优先从 Codex 配置目录 `.env` 读取，再回退进程环境变量，避免开发机密钥只配置在 Codex 目录时失效。
 - AI 分析 Agent 会在任务工作区落盘 `worker.stdout.txt` 和 `worker.stderr.txt`，并在系统日志中记录环境快照，便于对比手工终端与后端线程的运行差异。
-- Codex Worker 失败时会附带脱敏鉴权诊断：实际 Provider、模型、任务级 `config.toml` 解析的基础地址、任务级 `auth.json` 或环境变量认证来源，以及 API Key 的存在状态、长度和 SHA-256 前 16 位；不记录 API Key 明文。仅当输出命中 401、`Unauthorized` 或 `Invalid token` 时，Agent 才异步调用同一 Provider 的 `GET /models`，不执行模型推理也不重试任务；探测 401 指向当前 key/权限问题，探测 200 则保留两个 request ID 供 Provider 排查 Responses 链路瞬态异常。
+- Codex Worker 失败时会附带脱敏鉴权诊断：实际 Provider、模型、任务级 `config.toml` 解析的基础地址、任务级 `config.toml` 的 `experimental_bearer_token`、`auth.json` 或环境变量认证来源，以及 API Key 的存在状态、长度和 SHA-256 前 16 位；不记录 API Key 明文。仅当输出命中 401、`Unauthorized` 或 `Invalid token` 时，Agent 才异步调用同一 Provider 的 `GET /models`，不执行模型推理也不重试任务；探测 401 指向当前 key/权限问题，探测 200 则保留两个 request ID 供 Provider 排查 Responses 链路瞬态异常。
 - AI 分析 Agent 通过工作区内 `analysis.lock` 规避同任务重复并发执行；锁文件存在且未过期时会直接返回运行中提示，锁文件异常或过期会自动放行重试。
 - `client_new` Agent 执行工单 AI 分析时必须使用 Codex CLI；可执行文件通过 `codex --version` 校验，返回 `codex-cli` 才允许执行，即使入口位于 OpenAI Codex 安装目录也可使用；可通过本地配置 `ticket_ai_codex_cli_path` 显式指定 CLI 路径，Windows 子进程会隐藏控制台窗口。
 - 工单 AI Worker 失败时只向服务端返回错误摘要和工作区日志路径；Codex 账号并发限制会归一提示 `Concurrency limit exceeded`，完整 stdout/stderr 保留在任务工作区文件中。
@@ -314,7 +334,11 @@ graph TD
 - 工作流流转规则会把允许角色、默认处理人和通知预留统一压到 `workflow_transition.allowed_roles` JSON 中，避免引入额外表结构迁移。
 - 工单列表页和流转弹窗的状态选项优先读取 `/ticket/workflow/config` 的动态工作流状态节点；流转弹窗只展示当前状态已配置流转规则的目标状态。新增状态节点后必须配置对应流转规则，才会出现在目标状态下拉中。
 - 2026-07-04 对照备份分支 `master_params_ticket_new` 完成工单前端拆分逻辑审计：工单 API 拆分保持 80 个函数 method/url 一致；工单管理页和同步自动化页旧函数无遗漏；已恢复日志拉取表单字段、提交签名、详情预填、下载来源、日志查看器请求参数、列表查询逗号序列化、列配置结构、版本选项数据源、AI Provider 回填 Agent，以及同步自动化 JSON 校验失败即阻止保存的语义。
-- 2026-07-17 起，工单详情全屏弹窗由 `web/src/views/ticket/components/TicketDetailWithList.vue` 自闭环承接；`web/src/views/ticket/index.vue` 只传 `ticketId/open`，详情组件内部自行拉取详情、评论、时间线、日志拉取、AI 任务和选项数据，并管理 AI 分析、任务历史、仓库映射、商家映射、问题绑定和日志查看器弹窗。
+- 2026-08-21 起，工单列表详情弹窗使用 `TicketReadService` 的轻量读取链路：`GET /ticket/{ticket_id}/summary` 只返回基础信息、版本、Issue 和最新摘要，不读取消息、快照、相似工单或提示词层；相似工单通过 `GET /ticket/{ticket_id}/similar-tickets` 独立加载，协同/AI 标签按需读取 `/messages/page` 和 `/snapshots/page`，分别默认限制 20 和 10 条、最大 100 条。相似结果使用摘要白名单，新增读取接口的 BIGINT 主键按字符串返回，旧完整详情和旧消息接口保持兼容。
+- 2026-08-27 起，工单 AI 分析任务在服务端创建审计记录后，会把 `sys_ai_task_execution.execution_id` 回填到 `TicketAiAnalysisTask.audit_execution_id`；任务成功后优先回写原始 `token_usage` JSON 到 AI 审计表，再把可聚合的 `input/output/total` Token 统计写入工单 AI 任务表，供历史列表和概览直接读取。
+- 同日起，`GET /ticket/{ticket_id}/summary` 增加 `aiTokenSummary`，只在单工单维度按 `ticket_id` 进行一次 SQL 聚合，用于展示整单 AI Token 合计；该聚合不会扩散到工单列表或批量摘要接口，因此不引入列表查询性能回退。
+- AI 执行审计服务保留 `tokenUsage` 原始 JSON 作为详情追溯依据；审计列表仅派生 `totalTokenCount` 展示摘要，避免在审计表和任务表双写重复统计字段。
+- 同一详情弹窗切换工单前会清空概览、相似工单、AI 任务和问题操作状态，并通过工单 ID、请求 generation 和弹窗打开状态校验异步响应；关闭详情时停止日志列表自动刷新、日志准备进度查询和 AI 短轮询，清理日志查看器和历史临时表单状态。前端用户说明见 `web/public/docs/ticket_detail.md`，接口契约见 `server/docs/ticket_read_api.md`。
 
 ## 参见
 

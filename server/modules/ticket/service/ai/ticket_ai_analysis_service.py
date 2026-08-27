@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -13,20 +12,25 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 from dotenv import dotenv_values
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
+from config.env import AppConfig
 from module_admin.dao.ai_provider_dao import AiProviderDao
+from module_admin.dao.ai_provider_model_dao import AiProviderModelDao
+from module_admin.dao.ai_task_execution_dao import AiTaskExecutionDao
 from module_admin.entity.do.config_do import SysConfig
 from module_admin.entity.vo.common_vo import CrudResponseModel
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.ai_prompt_template_service import AiPromptTemplateService
 from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
+from module_hrm.dao.agent_dao import AgentDao
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum, TstepTypeEnum
-from module_qtr.service.agent_service import agents as connected_agents
-from module_qtr.service.agent_service import send_message as agent_send_message
+from module_qtr.service.agent_service import HandleResponse
+from module_qtr.util.agent_dispatch_config import AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_CONFIG_KEY
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
@@ -60,6 +64,7 @@ from modules.ticket.service.notification.ticket_notify_service import TicketNoti
 from utils.api_key_util import ApiKeyUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
+from utils.metrics.task_memory import get_task_memory_observer
 from utils.page_util import PageResponseModel
 from utils.snowflake import snowIdWorker
 
@@ -75,6 +80,7 @@ class TicketAiAnalysisService:
     CONFIG_WORKER_TIMEOUT = "ticket.ai.worker.timeoutSec"
     CONFIG_WORKSPACE_ROOT = "ticket.ai.workspace.root"
     CONFIG_AGENT_CODE = "ticket.ai.agent.code"
+    CONFIG_AGENT_MAX_CONCURRENT_TASKS = AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_CONFIG_KEY
     CONFIG_LOG_ANALYSIS_MODE = "ticket.ai.logAnalysis.mode"
     CONFIG_LOG_WINDOW_MISSING_STRATEGY = "ticket.ai.logAnalysis.windowMissingStrategy"
     DEFAULT_WORKER_COMMAND = "codex exec"
@@ -83,11 +89,13 @@ class TicketAiAnalysisService:
     DEFAULT_WORKER_TIMEOUT = 3600
     DEFAULT_WORKSPACE_ROOT = Path(__file__).resolve().parents[4] / "logs" / "ticket_ai_analysis"
     DEFAULT_AGENT_CODE = ""
+    DEFAULT_AGENT_MAX_CONCURRENT_TASKS = 1
     DEFAULT_LOG_ANALYSIS_MODE = "digest"
     DEFAULT_LOG_WINDOW_MISSING_STRATEGY = "agent_extract"
     LOG_ANALYSIS_MODES = {"digest", "full_directory", "hybrid"}
     LOG_WINDOW_MISSING_STRATEGIES = {"server_extract", "agent_extract"}
     DEFAULT_CONTEXT_LOG_MAX_CHARS = 800_000
+    SNAPSHOT_OWNER_MAX_LENGTH = 100
     ACTIVE_STATUSES = {
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
@@ -131,6 +139,23 @@ class TicketAiAnalysisService:
             logger.info(f"AI分析任务[{task_id}] {stage}: {message} | {context}")
         else:
             logger.info(f"AI分析任务[{task_id}] {stage}: {message}")
+
+    @staticmethod
+    def _truncate_snapshot_owner(value: Any) -> str:
+        """
+        将 AI 建议负责人转换为快照字段可保存的长度。
+        :param value: AI 返回的负责人建议文本
+        :return: 最多 100 个字符的负责人建议；完整内容仍保留在结构化分析结果中
+        """
+        owner_text = str(value or "")
+        if len(owner_text) <= TicketAiAnalysisService.SNAPSHOT_OWNER_MAX_LENGTH:
+            return owner_text
+        truncated = owner_text[: TicketAiAnalysisService.SNAPSHOT_OWNER_MAX_LENGTH - 3] + "..."
+        logger.warning(
+            f"AI分析结果建议负责人字段超长，已截断写入快照 | "
+            f"original_length={len(owner_text)}, max_length={TicketAiAnalysisService.SNAPSHOT_OWNER_MAX_LENGTH}"
+        )
+        return truncated
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
@@ -467,6 +492,12 @@ class TicketAiAnalysisService:
                 "AI分析任务优先投递的Agent编码，留空则自动选择在线Agent",
             ),
             (
+                cls.CONFIG_AGENT_MAX_CONCURRENT_TASKS,
+                "工单AI分析Agent并发任务数",
+                str(cls.DEFAULT_AGENT_MAX_CONCURRENT_TASKS),
+                "单个Agent同时允许执行的AI分析任务数量，超出部分进入排队等待",
+            ),
+            (
                 cls.CONFIG_LOG_ANALYSIS_MODE,
                 "工单AI日志分析模式",
                 cls.DEFAULT_LOG_ANALYSIS_MODE,
@@ -627,29 +658,119 @@ class TicketAiAnalysisService:
         :param requested_agent_code: 请求指定的 Agent 编码
         :return: Agent 编码
         """
-        if str(requested_agent_code or "").strip():
-            return str(requested_agent_code).strip()
+        requested_code = str(requested_agent_code or "").strip()
+        if requested_code:
+            if AgentDao.get_agent_by_code(db, requested_code):
+                return requested_code
+            return ""
         configured_agent_code = cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE)
-        if configured_agent_code:
+        if configured_agent_code and AgentDao.get_agent_by_code(db, configured_agent_code):
             return configured_agent_code
-        if connected_agents:
-            return next(iter(connected_agents.keys()))
+        agent_model = cls._agent_model()
+        online_agent = (
+            db.query(agent_model.agent_code)
+            .filter(
+                agent_model.del_flag == 1,
+                agent_model.status == 2,
+                agent_model.agent_code.isnot(None),
+                agent_model.agent_code != "",
+            )
+            .order_by(agent_model.agent_id)
+            .first()
+        )
+        if online_agent and online_agent[0]:
+            return str(online_agent[0]).strip()
         return ""
 
     @classmethod
     def _validate_agent_connected(cls, db: Session, requested_agent_code: str | None = None) -> tuple[bool, str, str]:
         """
-        校验 AI 分析任务提交时是否存在可用在线 Agent。
+        校验 AI 分析任务提交时是否存在可用 Agent。
         :param db: 数据库会话
         :param requested_agent_code: 请求或 Provider 指定的 Agent 编码
         :return: (是否可用, 错误信息, 实际解析到的 Agent 编码)
         """
+        requested_code = str(requested_agent_code or "").strip()
+        if requested_code and not AgentDao.get_agent_by_code(db, requested_code):
+            return False, f"Agent[{requested_code}]不存在，请先在 Agent 管理中创建记录", ""
         agent_code = cls._resolve_agent_code(db, requested_agent_code)
         if not agent_code:
-            return False, "未找到可用的在线 Agent，请先启动本地 Agent 并连接到服务端", ""
-        if agent_code not in connected_agents:
-            return False, f"Agent[{agent_code}]未连接服务端，请先启动本地 Agent 并确认连接正常", agent_code
+            return False, "未找到可用的 Agent，请先启动本地 Agent 并连接到服务端", ""
         return True, "", agent_code
+
+    @staticmethod
+    def _agent_model():
+        """
+        返回 Agent ORM 模型，避免循环导入时提前实例化。
+        :return: Agent ORM 模型
+        """
+        from module_hrm.entity.do.agent_do import QtrAgent
+
+        return QtrAgent
+
+    @classmethod
+    def _count_online_agents(cls, db: Session) -> int:
+        """
+        统计当前数据库里标记为在线的 Agent 数量。
+        :param db: 数据库会话
+        :return: 在线 Agent 数量
+        """
+        agent_model = cls._agent_model()
+        return (
+            db.query(agent_model)
+            .filter(
+                agent_model.del_flag == 1,
+                agent_model.status == 2,
+                agent_model.agent_code.isnot(None),
+                agent_model.agent_code != "",
+            )
+            .count()
+        )
+
+    @classmethod
+    def _build_agent_gateway_url(cls, path: str) -> str:
+        """
+        构建本机 FastAPI 网关地址。
+
+        该请求通过 127.0.0.1 直连当前 FastAPI 进程，不经过反向代理，
+        因此不能拼接面向浏览器的 ``app_root_path``。``root_path`` 只由
+        反向代理转发外部请求时使用；拼接到本机请求会在未配置同样
+        ``root_path`` 的 API 进程中直接命中 404。
+        :param path: 访问路径
+        :return: 完整 URL
+        """
+        normalized_path = str(path or "").strip()
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        return f"http://127.0.0.1:{AppConfig.app_port}{normalized_path}"
+
+    @classmethod
+    def _send_agent_request_via_gateway(
+        cls,
+        agent_code: str,
+        request_payload: dict[str, Any],
+        request_id: str,
+        timeout_seconds: int | float,
+    ) -> HandleResponse:
+        """
+        通过本机 FastAPI 网关发送 AI 分析请求。
+        :param agent_code: Agent 编码
+        :param request_payload: 发给 Agent 的请求内容
+        :param request_id: 请求ID
+        :param timeout_seconds: 请求超时时间
+        :return: 网关返回结果
+        """
+        gateway_url = cls._build_agent_gateway_url(f"/qtr/agent/ai-analysis/send/{agent_code}")
+        request_timeout = max(float(timeout_seconds or 120), 60.0) + 120.0
+        payload = {
+            "message": request_payload,
+            "requestId": request_id,
+            "timeoutSeconds": timeout_seconds,
+        }
+        with httpx.Client(timeout=request_timeout) as client:
+            response = client.post(gateway_url, json=payload)
+            response.raise_for_status()
+            return HandleResponse.validate_transport_payload(response.text)
 
     @classmethod
     def _normalize_log_analysis_mode(cls, mode: str | None) -> str:
@@ -813,7 +934,12 @@ class TicketAiAnalysisService:
         """
         if not provider:
             return {}
-        env_overrides: dict[str, str] = {}
+        # 先合并扩展环境变量，再写入 Provider 的核心连接信息。
+        # workerEnv 只用于补充 Worker 参数，不能覆盖当前工单明确选择的 Provider
+        # 的密钥、地址和模型，否则会出现“界面选择了 Provider，但 Agent 仍调用旧地址”的问题。
+        env_overrides: dict[str, str] = cls._normalize_provider_worker_env(
+            getattr(provider, "worker_env", None)
+        )
         try:
             secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
         except Exception as exc:
@@ -846,7 +972,6 @@ class TicketAiAnalysisService:
             env_overrides["AI_PROVIDER_PLATFORM"] = platform_code
         if getattr(provider, "provider_level", None) is not None:
             env_overrides["AI_PROVIDER_LEVEL"] = str(provider.provider_level)
-        env_overrides.update(cls._normalize_provider_worker_env(getattr(provider, "worker_env", None)))
         return env_overrides
 
     @staticmethod
@@ -924,6 +1049,268 @@ class TicketAiAnalysisService:
         if isinstance(result, dict):
             return result
         return {}
+
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        """
+        将 Token 计数字段安全转换为整数。
+        :param value: 原始值
+        :return: 整数值，无法转换时返回 None
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        text_value = str(value).strip().replace(",", "")
+        if not text_value:
+            return None
+        try:
+            return int(text_value)
+        except Exception:
+            try:
+                return int(float(text_value))
+            except Exception:
+                return None
+
+    @classmethod
+    def _find_token_usage_payload(cls, candidate: Any) -> dict[str, Any] | None:
+        """
+        递归查找结构中的 Token 用量对象。
+        :param candidate: 待查找对象
+        :return: Token 用量字典
+        """
+        if isinstance(candidate, dict):
+            direct_keys = {
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "input_tokens",
+                "output_tokens",
+                "inputTokens",
+                "outputTokens",
+                "totalTokens",
+            }
+            if any(key in candidate for key in direct_keys):
+                return candidate
+            for key in ("usage", "token_usage", "tokenUsage"):
+                payload = candidate.get(key)
+                if isinstance(payload, dict):
+                    return payload
+            for key in ("result", "data", "message", "response", "structured_output", "structuredOutput"):
+                payload = cls._find_token_usage_payload(candidate.get(key))
+                if payload is not None:
+                    return payload
+            for value in candidate.values():
+                payload = cls._find_token_usage_payload(value)
+                if payload is not None:
+                    return payload
+            return None
+        if isinstance(candidate, (list, tuple)):
+            for item in candidate:
+                payload = cls._find_token_usage_payload(item)
+                if payload is not None:
+                    return payload
+        return None
+
+    @classmethod
+    def _extract_token_usage_payload(cls, *candidates: Any) -> dict[str, Any] | None:
+        """
+        从多个候选对象中提取原始 Token 用量。
+        :param candidates: 候选对象列表
+        :return: 原始 Token 用量字典
+        """
+        for candidate in candidates:
+            payload = cls._find_token_usage_payload(candidate)
+            if payload is not None:
+                return payload
+        return None
+
+    @classmethod
+    def _normalize_token_usage(cls, token_usage: Any) -> dict[str, int | None] | None:
+        """
+        归一化 Token 用量字段，统一输入/输出/总量键名。
+        :param token_usage: 原始 Token 用量对象
+        :return: 归一化后的 Token 统计
+        """
+        if not isinstance(token_usage, dict):
+            return None
+        input_token_count = cls._to_optional_int(
+            token_usage.get("input_tokens")
+            if token_usage.get("input_tokens") is not None
+            else token_usage.get("inputTokens")
+        )
+        if input_token_count is None:
+            input_token_count = cls._to_optional_int(token_usage.get("prompt_tokens"))
+
+        output_token_count = cls._to_optional_int(
+            token_usage.get("output_tokens")
+            if token_usage.get("output_tokens") is not None
+            else token_usage.get("outputTokens")
+        )
+        if output_token_count is None:
+            output_token_count = cls._to_optional_int(token_usage.get("completion_tokens"))
+
+        total_token_count = cls._to_optional_int(
+            token_usage.get("total_tokens")
+            if token_usage.get("total_tokens") is not None
+            else token_usage.get("totalTokens")
+        )
+        if total_token_count is None and input_token_count is not None and output_token_count is not None:
+            total_token_count = input_token_count + output_token_count
+
+        if input_token_count is None and output_token_count is None and total_token_count is None:
+            return None
+        return {
+            "input_token_count": input_token_count,
+            "output_token_count": output_token_count,
+            "total_token_count": total_token_count,
+        }
+
+    @classmethod
+    def _build_execution_payload(
+        cls,
+        *,
+        task_type: str,
+        task_name: str,
+        source_type: str | None = None,
+        source_id: int | None = None,
+        source_ref: str | None = None,
+        provider_code: str | None = None,
+        model_name: str | None = None,
+        base_url: str | None = None,
+        request_payload: Any = None,
+        response_payload: Any = None,
+        response_text: str | None = None,
+        token_usage: dict[str, Any] | None = None,
+        status: str = "pending",
+        error_message: str | None = None,
+        created_by_id: int | None = None,
+        created_by_name: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        构建工单 AI 审计记录载荷。
+        :return: 审计记录字典
+        """
+        return {
+            "task_type": task_type,
+            "task_name": task_name,
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_ref": source_ref,
+            "provider_code": provider_code,
+            "model_name": model_name,
+            "base_url": base_url,
+            "status": status,
+            "request_payload": cls._json_safe_value(request_payload) if request_payload is not None else None,
+            "response_payload": cls._json_safe_value(response_payload) if response_payload is not None else None,
+            "response_text": response_text,
+            "token_usage": cls._json_safe_value(token_usage) if token_usage is not None else None,
+            "error_message": error_message,
+            "created_by_id": created_by_id,
+            "created_by_name": created_by_name or "system",
+        }
+
+    @classmethod
+    def _ensure_task_execution_record(
+        cls,
+        db: Session,
+        task: TicketAiAnalysisTask,
+        ticket: Ticket | None = None,
+    ) -> int | None:
+        """
+        为工单 AI 任务补齐审计记录，并回写审计ID。
+        :param db: 数据库会话
+        :param task: AI任务
+        :param ticket: 工单对象
+        :return: 审计ID
+        """
+        if getattr(task, "audit_execution_id", None):
+            return int(task.audit_execution_id)
+
+        context_payload = (
+            task.analysis_context
+            if isinstance(task.analysis_context, dict)
+            else cls._loads(task.analysis_context, {})
+        )
+        provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip() or None
+        selected_provider = AiProviderDao.get_ai_provider_by_code(db, provider_code) if provider_code else None
+        model_name = str((context_payload or {}).get("selectedWorkerModel") or "").strip() or None
+        if not model_name and selected_provider and str(selected_provider.default_model or "").strip():
+            model_name = str(selected_provider.default_model).strip()
+
+        execution = AiTaskExecutionDao.add_ai_task_execution_dao(
+            db,
+            cls._build_execution_payload(
+                task_type="ticket_ai_analysis",
+                task_name="工单AI分析",
+                source_type="ticket",
+                source_id=int(getattr(ticket, "ticket_id", None) or task.ticket_id),
+                source_ref=str(getattr(ticket, "ticket_no", "") or getattr(task, "ticket_id", "") or ""),
+                provider_code=provider_code,
+                model_name=model_name,
+                base_url=(str(getattr(selected_provider, "base_url", "") or "").strip() or None),
+                request_payload={
+                    "task_id": task.task_id,
+                    "ticket_id": task.ticket_id,
+                    "version_id": task.version_id,
+                    "agent_code": (context_payload or {}).get("selectedAgentCode"),
+                },
+                status="pending",
+                created_by_id=getattr(task, "submitted_by_id", None),
+                created_by_name=getattr(task, "submitted_by_name", None),
+            ),
+        )
+        TicketAiDao.update_task(
+            db,
+            task.task_id,
+            {
+                "audit_execution_id": execution.execution_id,
+                "update_time": datetime.now(),
+            },
+        )
+        task.audit_execution_id = execution.execution_id
+        return int(execution.execution_id)
+
+    @classmethod
+    def _update_execution_record(
+        cls,
+        db: Session,
+        execution_id: int | None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        更新工单 AI 审计记录。
+        :param db: 数据库会话
+        :param execution_id: 审计ID
+        :param kwargs: 更新字段
+        :return: 无
+        """
+        if not execution_id:
+            return
+        update_data: dict[str, Any] = {}
+        for key in (
+            "status",
+            "provider_code",
+            "model_name",
+            "base_url",
+            "response_text",
+            "error_message",
+        ):
+            if key in kwargs:
+                value = kwargs.get(key)
+                update_data[key] = str(value).strip() if value not in (None, "") else None
+        for key in ("request_payload", "response_payload", "token_usage"):
+            if key in kwargs:
+                value = kwargs.get(key)
+                update_data[key] = cls._json_safe_value(value) if value is not None else None
+        if not update_data:
+            return
+        update_data["update_time"] = datetime.now()
+        AiTaskExecutionDao.edit_ai_task_execution_dao(db, execution_id, update_data)
 
     @classmethod
     def _decode_log_text(cls, text: str | None) -> str:
@@ -1309,7 +1696,7 @@ class TicketAiAnalysisService:
         mapping: TicketAiRepoMapping,
         ticket: Ticket,
         *,
-        version_key: str,
+        version_key: str = "",
         prompt_layers: dict[str, Any] | None = None,
         prompt_templates: list[dict[str, Any]] | None = None,
         extra_instruction: str = "",
@@ -1394,7 +1781,9 @@ class TicketAiAnalysisService:
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
    - similarTickets 是历史相似工单，若可复用经验，请写入 similar_cases、sop_suggestion、
      owner_suggestion、monitoring_suggestion。
-5. 输出严格 JSON，不要输出多余说明文本。
+5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
+   去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
+   写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
 6. 结果必须包含以下核心字段，输出严格按 schema 返回：
    - ticket_id
    - project_id
@@ -1807,7 +2196,7 @@ class TicketAiAnalysisService:
                     result_payload.get("prevention_actions") or result_payload.get("next_steps") or []
                 ),
                 risk="\n".join(result_payload.get("risk_items") or []),
-                owner=str(result_payload.get("owner_suggestion") or ""),
+                owner=cls._truncate_snapshot_owner(result_payload.get("owner_suggestion")),
                 source_type="ai_analysis",
                 source_id=task.task_id,
                 structured_data=cls._json_safe_value(result_payload),
@@ -1851,6 +2240,9 @@ class TicketAiAnalysisService:
         analysis_result: dict[str, Any] | None = None,
         raw_output: str | None = None,
         command_line: str | None = None,
+        input_token_count: int | None = None,
+        output_token_count: int | None = None,
+        total_token_count: int | None = None,
     ) -> None:
         """
         更新 AI 分析任务状态。
@@ -1872,13 +2264,21 @@ class TicketAiAnalysisService:
             "error_message": error_message,
             "started_at": started_at,
             "finished_at": finished_at,
-            "command_line": command_line,
+            # 数据库字段 command_line 为非空字段；历史任务恢复时可能没有执行命令，
+            # 此时统一写入空字符串，避免批量更新显式写入 NULL 导致启动失败。
+            "command_line": command_line if command_line is not None else "",
             "update_time": datetime.now(),
         }
         if analysis_result is not None:
             update_data["analysis_result"] = analysis_result
         if raw_output is not None:
             update_data["raw_output"] = raw_output
+        if input_token_count is not None:
+            update_data["input_token_count"] = input_token_count
+        if output_token_count is not None:
+            update_data["output_token_count"] = output_token_count
+        if total_token_count is not None:
+            update_data["total_token_count"] = total_token_count
         TicketAiDao.update_task(db, task_id, update_data)
 
     @classmethod
@@ -1953,7 +2353,17 @@ class TicketAiAnalysisService:
             context_payload["selectedAiProviderName"] = selected_provider.provider_name
             context_payload["selectedAiProviderPlatform"] = selected_provider.platform_code
             context_payload["selectedAiProviderProtocol"] = selected_provider.api_protocol
-            context_payload["selectedWorkerModel"] = selected_provider.default_model
+            requested_model_name = str(request.ai_model_name or "").strip()
+            if requested_model_name:
+                selected_model = AiProviderModelDao.get_provider_model_by_id(
+                    db, selected_provider.provider_id, requested_model_name
+                )
+                if not selected_model or not bool(selected_model.enabled):
+                    return CrudResponseModel(
+                        is_success=False,
+                        message=f"模型[{requested_model_name}]不属于当前Provider的启用模型目录",
+                    )
+            context_payload["selectedWorkerModel"] = requested_model_name or selected_provider.default_model
             context_payload["selectedExecutor"] = selected_executor
             # 判断是否需要 resume
             resume_from_workspace_path: str | None = None
@@ -1974,7 +2384,10 @@ class TicketAiAnalysisService:
                                 f"from={resume_from_workspace_path}"
                             )
             if not request.agent_code and str(selected_provider.preferred_agent_code or "").strip():
-                context_payload["selectedAgentCode"] = str(selected_provider.preferred_agent_code).strip()
+                provider_agent_code = str(selected_provider.preferred_agent_code).strip()
+                context_payload["selectedAgentCode"] = (
+                    provider_agent_code if AgentDao.get_agent_by_code(db, provider_agent_code) else ""
+                )
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
         agent_available, agent_error_message, resolved_agent_code = cls._validate_agent_connected(
@@ -2004,6 +2417,35 @@ class TicketAiAnalysisService:
         )
 
         now = datetime.now()
+        audit_execution = AiTaskExecutionDao.add_ai_task_execution_dao(
+            db,
+            cls._build_execution_payload(
+                task_type="ticket_ai_analysis",
+                task_name="工单AI分析",
+                source_type="ticket",
+                source_id=ticket.ticket_id,
+                source_ref=ticket.ticket_no or str(ticket.ticket_id),
+                provider_code=(
+                    selected_provider.provider_code
+                    if selected_provider
+                    else (selected_provider_code or None)
+                ),
+                model_name=requested_model_name or (selected_provider.default_model if selected_provider else None),
+                base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
+                request_payload={
+                    "task_id": task_id,
+                    "ticket_id": ticket.ticket_id,
+                    "version_id": version_id,
+                    "mapping_id": mapping.mapping_id,
+                    "agent_code": context_payload.get("selectedAgentCode"),
+                    "source_log_pull_record_id": context_payload.get("sourceLogPullRecordId"),
+                    "prompt_template_codes": list(request.prompt_template_codes or []),
+                },
+                status="pending",
+                created_by_id=cls._user_id(current_user),
+                created_by_name=cls._user_name(current_user),
+            ),
+        )
         task = TicketAiAnalysisTask(
             task_id=task_id,
             ticket_id=ticket.ticket_id,
@@ -2026,6 +2468,7 @@ class TicketAiAnalysisService:
             raw_output="",
             analysis_result=None,
             analysis_context=task_context_payload,
+            audit_execution_id=audit_execution.execution_id,
             source_log_pull_record_id=context_payload.get("sourceLogPullRecordId"),
             source_log_view_mode=str(context_payload.get("sourceLogViewMode") or "stored"),
             submitted_by_id=cls._user_id(current_user),
@@ -2325,6 +2768,18 @@ class TicketAiAnalysisService:
         for item in items:
             version_id = int(item["versionId"]) if item.get("versionId") else None
             version = version_map.get(version_id)
+            for field_name in (
+                "taskId",
+                "ticketId",
+                "projectId",
+                "mappingId",
+                "auditExecutionId",
+                "sourceLogPullRecordId",
+                "submittedById",
+            ):
+                if item.get(field_name) not in (None, ""):
+                    item[field_name] = str(item[field_name])
+            version = version_map.get(version_id)
             if version_id:
                 item["versionId"] = str(version_id)
             item["versionKey"] = version.version_key if version else ""
@@ -2416,15 +2871,39 @@ class TicketAiAnalysisService:
         :param task_id: 任务ID
         :return: 无
         """
+        observation = get_task_memory_observer("api").start(
+            {
+                "task_id": task_id,
+                "task_key": "ticket_ai_analysis",
+                "task_family": "ticket_ai_analysis",
+                "queue_name": "ticket-ai-analysis",
+                "owner_type": "ticket",
+                "trigger_type": "background",
+            }
+        )
+        status = "success"
         try:
             with SessionLocal() as db:
                 cls._log_task_step(task_id, "RUN", "开始执行 AI 分析任务")
                 cls._process_task(db, task_id)
         except Exception as exc:
+            status = "failed"
             logger.exception(f"AI分析任务[{task_id}] 线程执行异常: {exc}")
         finally:
             with cls._executor_lock:
                 cls._active_task_ids.discard(task_id)
+            get_task_memory_observer("api").finish(
+                {
+                    "task_id": task_id,
+                    "task_key": "ticket_ai_analysis",
+                    "task_family": "ticket_ai_analysis",
+                    "queue_name": "ticket-ai-analysis",
+                    "owner_type": "ticket",
+                    "trigger_type": "background",
+                },
+                observation,
+                status,
+            )
 
     @classmethod
     def _finalize_sync_publish_after_ai(cls, db: Session, *, ticket_id: int, status: str) -> None:
@@ -2472,6 +2951,12 @@ class TicketAiAnalysisService:
                 error_message="工单不存在或已删除",
                 finished_at=datetime.now(),
             )
+            cls._update_execution_record(
+                db,
+                getattr(task, "audit_execution_id", None),
+                status="failed",
+                error_message="工单不存在或已删除",
+            )
             db.commit()
             return
         source_log_pull_record = None
@@ -2482,6 +2967,7 @@ class TicketAiAnalysisService:
             notify_config = source_log_pull_record.command_content.get(
                 "notifyConfig"
             ) or source_log_pull_record.command_content.get("notify_config")
+        audit_execution_id = cls._ensure_task_execution_record(db, task, ticket)
         cls._log_task_step(
             task_id,
             "RESOLVE",
@@ -2507,6 +2993,12 @@ class TicketAiAnalysisService:
                 status_desc="未找到仓库映射",
                 error_message="未找到可用的项目版本仓库映射",
                 finished_at=datetime.now(),
+            )
+            cls._update_execution_record(
+                db,
+                audit_execution_id,
+                status="failed",
+                error_message="未找到可用的项目版本仓库映射",
             )
             db.commit()
             cls._finalize_sync_publish_after_ai(
@@ -2534,14 +3026,25 @@ class TicketAiAnalysisService:
         result_file = str(task.result_path or workspace_dir / "result.json")
         # 优先使用任务创建时生成的 prompt；若缺失则重建，从紧凑快照中取 logAnalysisMode
         fallback_log_mode = "digest"
+        fallback_prompt_layers: dict[str, Any] = {}
+        fallback_prompt_templates: list[dict[str, Any]] = []
+        fallback_extra_instruction = ""
         if isinstance(task.analysis_context, dict):
             fallback_log_mode = str(task.analysis_context.get("logAnalysisMode") or "digest")
+            if isinstance(task.analysis_context.get("promptLayers"), dict):
+                fallback_prompt_layers = task.analysis_context.get("promptLayers")
+            if isinstance(task.analysis_context.get("selectedPromptTemplates"), list):
+                fallback_prompt_templates = task.analysis_context.get("selectedPromptTemplates")
+            fallback_extra_instruction = str(task.analysis_context.get("extraInstruction") or "").strip()
         version_key = cls._get_version_key(db, task.version_id)
         prompt_template = task.prompt_text or cls._build_prompt(
             "{workspace_path}",
             mapping,
             ticket,
             version_key=version_key,
+            prompt_layers=fallback_prompt_layers,
+            prompt_templates=fallback_prompt_templates,
+            extra_instruction=fallback_extra_instruction,
             log_analysis_mode=fallback_log_mode,
             source_logs_path="{source_logs_path}",
         )
@@ -2574,18 +3077,27 @@ class TicketAiAnalysisService:
             agent_code=agent_code or "<none>",
             provider_code=requested_provider_code or "<none>",
             configured_agent_code=cls._get_config_text(db, cls.CONFIG_AGENT_CODE, cls.DEFAULT_AGENT_CODE) or "<auto>",
-            connected_agent_count=len(connected_agents),
+            online_agent_count=cls._count_online_agents(db),
         )
         if not agent_code:
-            cls._log_task_step(task_id, "FAIL", "未找到可用的在线 Agent")
+            cls._log_task_step(task_id, "FAIL", "未找到可用的 Agent")
             cls._mark_task_status(
                 db,
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="未找到Agent",
-                error_message="未找到可用的在线 Agent，请先启动本地 Agent 并连接到服务端",
+                error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
                 finished_at=datetime.now(),
                 command_line="agent:<none>",
+            )
+            cls._update_execution_record(
+                db,
+                audit_execution_id,
+                status="failed",
+                provider_code=requested_provider_code or None,
+                model_name=worker_model_override or None,
+                base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
+                error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
             )
             db.commit()
             cls._finalize_sync_publish_after_ai(
@@ -2620,6 +3132,9 @@ class TicketAiAnalysisService:
         raw_stdout = ""
         raw_stderr = ""
         result_text = ""
+        request_payload: dict[str, Any] | None = None
+        response_payload: dict[str, Any] = {}
+        token_usage_payload: dict[str, Any] | None = None
         try:
             request_payload = cls._build_agent_request_payload(
                 task_id=task_id,
@@ -2634,20 +3149,30 @@ class TicketAiAnalysisService:
                 result_path=result_file,
                 timeout_sec=timeout_sec,
             )
+            request_id = f"ticket-ai-analysis:{task_id}"
+            cls._update_execution_record(
+                db,
+                audit_execution_id,
+                status="running",
+                provider_code=requested_provider_code or None,
+                model_name=worker_model_override or None,
+                base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
+                request_payload=request_payload,
+            )
             cls._log_task_step(
                 task_id,
                 "EXEC",
                 "发送 AI 分析任务到 Agent",
                 agent_code=agent_code,
                 request_type=TstepTypeEnum.ai_analysis.value,
+                request_id=request_id,
                 timeout_sec=timeout_sec,
             )
-            agent_response = asyncio.run(
-                agent_send_message(
-                    agent_code,
-                    request_payload,
-                    timeout_seconds=timeout_sec,
-                )
+            agent_response = cls._send_agent_request_via_gateway(
+                agent_code,
+                request_payload,
+                request_id,
+                timeout_sec,
             )
             response_object = getattr(agent_response, "response", None)
             if isinstance(response_object, dict):
@@ -2708,6 +3233,8 @@ class TicketAiAnalysisService:
                     or "AI Agent 未返回可解析的分析结果"
                 )
                 raise ValueError(failure_message)
+            token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump, response_object)
+            normalized_token_usage = cls._normalize_token_usage(token_usage_payload)
             normalized = cls._normalize_analysis_result(
                 result_payload=parsed_result,
                 ticket=ticket,
@@ -2726,6 +3253,20 @@ class TicketAiAnalysisService:
                 analysis_result=normalized,
                 raw_output=result_text or raw_stdout,
                 command_line=f"agent:{agent_code}",
+                input_token_count=(normalized_token_usage or {}).get("input_token_count"),
+                output_token_count=(normalized_token_usage or {}).get("output_token_count"),
+                total_token_count=(normalized_token_usage or {}).get("total_token_count"),
+            )
+            cls._update_execution_record(
+                db,
+                audit_execution_id,
+                status="success",
+                provider_code=requested_provider_code or None,
+                model_name=worker_model_override or None,
+                base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
+                response_payload=response_payload or response_dump,
+                response_text=result_text or raw_stdout,
+                token_usage=token_usage_payload,
             )
             db.commit()
             cls._finalize_sync_publish_after_ai(
@@ -2741,12 +3282,16 @@ class TicketAiAnalysisService:
                 message="AI分析已完成",
                 detail=f"task_id={task_id}, version_id={task.version_id}",
                 notify_config=notify_config,
+                stage="ai_analysis",
             )
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
             return
         except Exception as exc:
             cls._log_task_step(task_id, "ERROR", "AI 分析任务执行失败", error=str(exc))
             logger.exception(f"AI分析任务[{task_id}] 执行失败")
+            # 持久化阶段可能已经触发数据库 flush 失败，必须先回滚才能继续写入失败终态；
+            # 否则 SQLAlchemy 会拒绝后续状态更新，任务会长期停留在“执行中”。
+            db.rollback()
             failure_message = cls._summarize_worker_error(raw_stderr, raw_stdout, str(exc))
             cls._mark_task_status(
                 db,
@@ -2756,6 +3301,22 @@ class TicketAiAnalysisService:
                 error_message=failure_message,
                 finished_at=datetime.now(),
                 command_line=f"agent:{agent_code}",
+            )
+            cls._update_execution_record(
+                db,
+                audit_execution_id,
+                status="failed",
+                provider_code=locals().get("requested_provider_code") or None,
+                model_name=locals().get("worker_model_override") or None,
+                base_url=(
+                    str(selected_provider.base_url or "").strip() or None
+                    if "selected_provider" in locals() and selected_provider
+                    else None
+                ),
+                response_payload=response_payload or None,
+                response_text=result_text or raw_stdout or raw_stderr,
+                token_usage=token_usage_payload,
+                error_message=failure_message,
             )
             db.commit()
             if "ticket" in locals() and ticket:
@@ -2773,5 +3334,6 @@ class TicketAiAnalysisService:
                     message="AI分析执行失败",
                     detail=f"task_id={task_id}, error={failure_message}",
                     notify_config=notify_config,
+                    stage="ai_analysis",
                 )
             return

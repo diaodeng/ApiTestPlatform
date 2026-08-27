@@ -95,6 +95,7 @@ class AiProviderProtocolService:
         temperature: float = 0.2,
         timeout_sec: int | None = None,
         api_key: str | None = None,
+        model_name: str | None = None,
     ) -> str:
         """
         使用Provider声明的协议生成文本。
@@ -104,10 +105,11 @@ class AiProviderProtocolService:
         :param temperature: 生成温度
         :param timeout_sec: 超时时间秒数
         :param api_key: 可选明文密钥，仅用于未保存草稿测试
+        :param model_name: 可选覆盖模型名称，为空时使用Provider默认模型
         :return: 解析后的模型文本
         """
         protocol = cls._get_protocol(provider)
-        model = str(getattr(provider, "default_model", "") or "").strip()
+        model = (model_name or "").strip() or str(getattr(provider, "default_model", "") or "").strip()
         if not model:
             raise ValueError("Provider默认模型不能为空")
         headers = cls._build_headers(provider, api_key)

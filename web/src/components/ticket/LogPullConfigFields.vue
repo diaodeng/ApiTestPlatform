@@ -81,7 +81,7 @@
       <el-form-item label="门店" :prop="getProp('storeId')">
         <el-select
           v-model="model.storeId"
-          placeholder="先选择商家"
+          :placeholder="storePlaceholder"
           clearable
           filterable
           allow-create
@@ -97,6 +97,17 @@
             :value="item.storeId"
           />
         </el-select>
+      </el-form-item>
+    </el-col>
+    <!-- 门店匹配状态提示 -->
+    <el-col v-if="storeHintMessage" :span="24">
+      <el-form-item label="" :prop="getProp('storeId')">
+        <el-alert
+          :title="storeHintMessage"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
       </el-form-item>
     </el-col>
     <el-col :span="24">
@@ -396,6 +407,41 @@ const filteredStoreOptions = computed(() => {
   )
 })
 
+/**
+ * 门店匹配状态提示：当已选商家但门店无法匹配时给出警告。
+ * @returns {string|null} 提示文案，无需提示时返回 null
+ */
+const storeHintMessage = computed(() => {
+  const vendorId = String(model.value?.vendorId || '').trim()
+  if (!vendorId) return null
+  const storeId = String(model.value?.storeId || '').trim()
+  // 商家已选但门店列表为空（当前商家下无匹配门店）
+  if (!resolvedStoreOptions.value.length) {
+    return storeId
+      ? `当前商家下未找到匹配门店，输入的 "${storeId}" 可能无效，请确认 org_no 是否正确`
+      : '当前商家下未找到匹配门店，请手动输入正确的 org_no'
+  }
+  // 门店列表不为空，但用户输入的值不在列表中
+  if (storeId) {
+    const matched = resolvedStoreOptions.value.some(
+      item => item.storeId === storeId || item.storeCode === storeId || item.sapOrgNo === storeId
+    )
+    if (!matched) {
+      return `输入的门店 "${storeId}" 未在配置中找到，请确认 org_no 是否正确`
+    }
+  }
+  return null
+})
+
+/**
+ * 门店选择器 placeholder：根据是否有匹配门店动态调整。
+ */
+const storePlaceholder = computed(() => {
+  if (!model.value?.vendorId) return '先选择商家'
+  if (!resolvedStoreOptions.value.length) return '当前商家无匹配门店，请手动输入 org_no'
+  return '请选择门店'
+})
+
 function getProp(name) {
   return props.fieldPrefix ? `${props.fieldPrefix}.${name}` : name
 }
@@ -441,15 +487,16 @@ function syncStoreSelection() {
   if (!resolvedStoreOptions.value.length) {
     return
   }
-  // 只按 sap_org_no 精确匹配，匹配成功则替换为对应的 storeId (org_no)
-  const sapMatch = resolvedStoreOptions.value.find(
-    item => String(item.sapOrgNo || '').trim() === storeId
-  )
-  if (sapMatch) {
-    model.value.storeId = sapMatch.storeId
-    return
+  // 先按规范门店编号匹配，再按 SAP 编号兼容历史工单值；未命中时保留原始输入。
+  const matchedStore = resolvedStoreOptions.value.find(item => {
+    const candidates = [item.storeId, item.storeCode, item.sapOrgNo]
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+    return candidates.includes(storeId)
+  })
+  if (matchedStore) {
+    model.value.storeId = matchedStore.storeId
   }
-  // 不匹配则保留原值作为自由文本，供手动参考
 }
 
 function handleEnvironmentChange(value) {

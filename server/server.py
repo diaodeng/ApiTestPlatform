@@ -48,6 +48,7 @@ from module_hrm.controller.desktop_case_controller import (
 )
 from module_hrm.controller.env_controller import envController
 from module_hrm.controller.forward_rules_controller import forwardRulesController
+from module_hrm.controller.module_common_prompt_controller import moduleCommonPromptController
 from module_hrm.controller.module_controler import moduleController
 from module_hrm.controller.project_controller import projectController
 from module_hrm.controller.push_controller import pushController
@@ -104,7 +105,7 @@ async def lifespan(app: FastAPI):
         await RedisUtil.init_sys_config(app.state.redis)
         await startup_handler()
         TicketFeishuEventListenerService.start_from_config()
-        metrics_thread = PushMetrics()
+        metrics_thread = PushMetrics(role="api")
         metrics_thread.start()
         logger.info(f"{AppConfig.app_name}启动成功")
         yield
@@ -167,6 +168,7 @@ controller_list = [
     {"router": projectController, "tags": ["HRM-项目管理"]},
     {"router": debugtalkController, "tags": ["项目管理-DebugTalk"]},
     {"router": moduleController, "tags": ["HRM-模块管理"]},
+    {"router": moduleCommonPromptController, "tags": ["HRM-模块通用提示词"]},
     {"router": envController, "tags": ["HRM-环境管理"]},
     {"router": caseController, "tags": ["HRM-用例管理"]},
     {"router": runnerController, "tags": ["HRM-运行管理"]},

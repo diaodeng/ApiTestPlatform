@@ -48,6 +48,8 @@ export function useLogPullStorageConfig(proxy) {
       maxSearchSeconds: 30,
       maxSearchFileCount: 1000,
       maxPythonSearchBytes: 268435456,
+      maxConcurrentSearches: 2,
+      maxSearchLineBytes: 524288,
       postDownloadExtractEnabled: false,
       postDownloadVersionExtractEnabled: false,
       postDownloadIndexEnabled: false,
@@ -88,6 +90,8 @@ export function useLogPullStorageConfig(proxy) {
     storage.maxSearchSeconds = Number(config.maxSearchSeconds || 30);
     storage.maxSearchFileCount = Number(config.maxSearchFileCount || 1000);
     storage.maxPythonSearchBytes = Number(config.maxPythonSearchBytes || 268435456);
+    storage.maxConcurrentSearches = Number(config.maxConcurrentSearches || 2);
+    storage.maxSearchLineBytes = Number(config.maxSearchLineBytes || 524288);
     storage.postDownloadExtractEnabled = Boolean(config.postDownloadExtractEnabled);
     storage.postDownloadVersionExtractEnabled = Boolean(config.postDownloadVersionExtractEnabled);
     storage.postDownloadIndexEnabled = Boolean(config.postDownloadIndexEnabled);
@@ -122,6 +126,8 @@ export function useLogPullStorageConfig(proxy) {
       maxSearchSeconds: Number(storage.maxSearchSeconds || 30),
       maxSearchFileCount: Number(storage.maxSearchFileCount || 1000),
       maxPythonSearchBytes: Number(storage.maxPythonSearchBytes || 268435456),
+      maxConcurrentSearches: Number(storage.maxConcurrentSearches || 2),
+      maxSearchLineBytes: Number(storage.maxSearchLineBytes || 524288),
       postDownloadExtractEnabled: Boolean(storage.postDownloadExtractEnabled),
       postDownloadVersionExtractEnabled: Boolean(storage.postDownloadVersionExtractEnabled),
       postDownloadIndexEnabled: Boolean(storage.postDownloadIndexEnabled),

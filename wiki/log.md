@@ -1,12 +1,197 @@
+## [2026-08-27] FEAT | 工单 AI Token 用量记录与汇总展示
+
+- 触发：工单 AI 分析历史、工单概览和 AI 执行审计之前都无法直接看到每次分析消耗了多少 Token，排查成本和模型费用复盘成本较高。
+- 方案：`ticket_ai_analysis_task` 新增 `audit_execution_id`、`input_token_count`、`output_token_count`、`total_token_count` 四个字段；`sys_ai_task_execution` 继续保留原始 `token_usage` JSON，不新增重复列。
+- 展示：工单 AI 历史列表和详情弹窗显示输入/输出/总 Token，工单概览通过 `GET /ticket/{ticket_id}/summary` 返回 `aiTokenSummary` 显示整单聚合值，AI 执行审计列表新增“总 Token”列，详情页保留原始 `tokenUsage` JSON。
+- 性能取舍：只在单工单概览接口内按 `ticket_id` 做一次 SQL 聚合，不把 Token 汇总扩散到工单列表、分页摘要或批量接口，因此不会对列表性能造成明显影响。
+- 验证计划：补充服务层与 Token 归一化测试，并执行定向 `ruff` / `pytest` 校验。
+
+## [2026-08-26] FIX | 工单 AI Agent 队列陈旧请求自动恢复
+
+- 触发：Agent 实际没有执行任务时，工单手动/自动 AI 仍持续打印“等待 Agent 槽位”，`queue_head` 长时间停留在历史请求，`active_count=0`；排队协程同时会持有完整 AI 请求，积压后放大 API 进程内存。
+- 根因：旧实现主要在请求缓存缺失或总超时后才清理队列头；若请求在 FastAPI/Celery 断连、重启或 WebSocket 断开前已入队，但请求缓存仍保留 24 小时，就会被历史 `queue_head` 长时间卡住；排队阶段也会持续持有完整 prompt/context。
+- 修复：`AgentDispatchService` 新增排队心跳租约与队列头自愈逻辑，抢占槽位前会自动清理已终态、排队租约过期、请求缓存缺失或总超时且无运行租约的队列头；排队阶段仅保留轻量状态，真正发给 Agent 时再从 Redis 恢复完整请求，并对等待日志做固定间隔节流。
+- 验证：执行 `uv run pytest tests/test_agent_dispatch_service.py` 与 `uv run ruff check module_qtr/service/agent_dispatch_service.py module_qtr/util/agent_dispatch_config.py tests/test_agent_dispatch_service.py` 通过；补充回归测试覆盖陈旧队列头、排队租约过期和缓存消息恢复场景。
+- 排查：只读查询工单 `INC00001882932` 的 AI 任务发现 `queue_head=ticket-ai-analysis:2043457233009664` 对应任务已于 2026-08-26 15:26:13 失败，但 2026-08-26 18:06:22 的后续请求仍被它阻塞。
+
+## [2026-08-26] 工单自动日志去重、自动 AI 复用成功日志、任务日志补齐 TID
+
+- 触发原因：工单修改后会反复自动拉取同一份日志；已有成功日志时自动 AI 有时因为未新建日志记录或缺少版本回填入口而被跳过；任务日志缺少可查询的 TID/trace_id，链路排查困难。
+- 影响范围：`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/service/sync/ticket_sync_automation_service.py`、`server/modules/ticket/dao/ticket_log_pull_dao.py`、`server/module_task/*`、`web/src/views/*/job/log.vue`、`web/public/docs/*`。
+- 关键改动：
+  - 新增“相同拉取参数成功记录”匹配逻辑，自动化命中后直接跳过重复拉取；
+  - 自动 AI 统一改为可复用成功日志记录触发，并继续走版本回填、条件检查和通知链路；
+  - Celery 任务执行日志表新增 `trace_id` 持久化与查询展示，系统/QTR 任务日志页支持按 TID 检索。
+- 验证：新增自动日志去重、自动 AI 复用、任务日志 trace_id 的定向测试，并执行 `uv run pytest tests/test_ticket_sync_automation_reuse.py tests/test_ticket_log_pull_retry_guard.py tests/test_celery_job_trace_id.py` 通过。
+
+## [2026-08-26] INGEST-CODE | 自动 AI 历史与内部状态条件过滤
+
+- 触发：同步入库的工单可能已处理或已完成 AI 分析，继续自动分析会浪费 Token。
+- 方案：在日志拉取默认配置中增加 `autoAiAnalysisCondition`，支持历史成功条件和内部工单状态多选；自动触发按 AND 关系检查，手动分析不受影响。
+- 关键约束：状态使用工单内部 `status` 编码，不使用外部状态文案；状态未映射或不在允许列表时跳过自动 AI 并记录 `auto-ai` 原因。
+- 变更范围：同步配置服务、日志拉取请求模型、自动化运行时快照、自动 AI 触发护栏、同步自动化页面、用户说明。
+
 ---
 title: 操作日志
 type: log
 source_type: mixed
 created: 2026-05-20
-updated: 2026-08-11
+updated: 2026-08-25
 ---
 
 # 操作日志
+
+## [2026-08-25] FEAT | 工单 AI Agent 跨进程派发与并发队列
+
+- 触发：`start.sh` 以 Supervisor 分进程启动 FastAPI、Celery Worker 和 Celery Beat，自动 AI 需要在 Worker 侧安全投递到 FastAPI 内的 Agent WebSocket 连接。
+- 实现：新增系统参数 `ticket.ai.agent.maxConcurrentTasks`，默认值 1；Celery Worker 通过内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 提交请求，QTR 域用 Redis 共享队列、运行中租约和短锁控制单 Agent 并发，超过上限的请求只排队等待。
+- 语义：队列等待和 Agent 执行共用同一个总超时边界，发给 Agent 的等待预算按剩余时间计算，避免并发队列把任务总超时拉长。
+- 验证：补充并发队列与剩余超时回归测试；未修改生产数据库。
+
+## [2026-08-25] FIX | 自动 AI 内部网关错误拼接生产代理前缀导致 404
+
+- 触发：生产 `.env.prod` 使用 `APP_ROOT_PATH=/prod-api` 时，Celery Worker 通过 `127.0.0.1:8080` 访问内部 Agent 网关仍携带 `/prod-api`，自动 AI 连续收到 404。
+- 根因：本机直连不经过反向代理，内部路由实际为 `/qtr/agent/ai-analysis/send/{agent_code}`；外部代理前缀不应拼接到本机 URL。
+- 排查：只读查询 `ticket_ai_analysis_task`、`ticket`、`ticket_event`、`ticket_log_pull_record`；任务 `2043210025327616` 于数据库记录为失败，错误为内部网关 404；同一工单后续自动任务仍复现相同 URL。未修改数据库数据。
+- 修复：`TicketAiAnalysisService._build_agent_gateway_url` 仅拼接本机端口和业务路径，并新增 URL 回归测试；同时补充生产发布后统一重启 FastAPI/Celery 进程的运维说明。
+- 验证：定向 pytest 通过（3 passed）；当前工作区静态路由包含 `POST /qtr/agent/ai-analysis/send/{agent_code}`。
+
+## [2026-08-25] FIX | 自动 AI 提交失败原因写入通知与工单事件
+
+- 触发：日志拉取成功后自动 AI 提交被拒绝时，原通知只显示 `record_id/version_id`，无法判断是 Agent 未连接、版本映射还是其他前置校验失败。
+- 修复：读取 `result.message` 作为统一失败原因，同时写入通知详情（模板 `${reason}`）和 `auto-ai:failed` 工单事件；事件详情保留版本、Agent、Provider 及失败阶段，并单独提交数据库会话。
+- 架构诊断：`start.sh` 的 Supervisor 将 FastAPI、Celery Worker、Celery Beat 分进程启动；Agent WebSocket 连接表仅在 FastAPI 进程内，Celery 自动任务无法直接读取。跨进程派发尚未实现，后续需选择 Redis 消息网关或受保护的 FastAPI 内部中转接口。
+- 验证：新增自动 AI 提交失败原因写入事件和通知的定向测试；未修改生产数据库。
+
+## [2026-08-23] FEAT | 工单模块通用提示词按编码复用
+
+- 触发：多个项目存在相同 `module_code` 的模块，需要复用共同 AI 分析说明，同时保留项目模块的特殊说明。
+- 架构层：工单域 / HRM 模块管理 / AI 提示词编排 / Web 控制台。
+- 变更传播链：`hrm_module_common_prompt` 管理资源 -> `TicketPromptService.resolve_prompt_layers` 按模块编码解析 -> AI 任务 `prompt_text/analysis_context` 快照 -> 工单 summary 与详情层级展示。
+- 数据规则：跨项目相同编码保留；不合并 `module_id`，不改写历史工单、统计快照或历史 AI 任务；项目内重复编码先只读盘点，确认清理后再加联合唯一索引。
+- 更新页面：`web/public/docs/module_common_prompt.md`、`web/public/docs/updates/2026-08-23-module-common-prompt.md`、`server/docs/ticket_read_api.md`、`web/public/docs/ticket_detail.md`、`wiki/entities/services/ticket-domain.md`、`wiki/entities/data-models/ticket-core-models.md`。
+- 更新代码：HRM 模块通用提示词 ORM/VO/DAO/Service/Controller、菜单权限、工单 AI 提示词解析与任务快照、summary 契约、前端管理页和详情展示。
+
+## [2026-08-21] FIX | 问题实例详情 DAO 查询回归
+
+- 触发：进入问题详情、编辑页或绑定工单区域时，`TicketIssueDao` 缺少 `list_tickets_by_issue_id`，请求报属性不存在。
+- 根因：新增工单搜索 DAO 时误替换了原有按 Issue 查询绑定工单的方法。
+- 修复：恢复 `list_tickets_by_issue_id`，保留 `search_tickets_for_issue`；Issue 详情重新按 `ticket.issue_id` 查询有效工单。
+- 更新的页面：`server/modules/ticket/dao/ticket_issue_dao.py`、`web/public/docs/updates/2026-08-21-ticket-issue-dao-regression.md`、`web/public/docs/updates/history.md`。
+- 验证：补丁已完成静态结构核对；环境中的 Python/npm 命令执行受到运行器限流和解释器 PATH 差异影响。
+
+## [2026-08-21] FIX | 问题实例新增可选字段校验
+
+- 触发：问题实例新增表单未选择负责人时提交 `ownerId: ""`，Pydantic 整数校验失败并返回“参数或数据异常: ownerId”。
+- 修复：`TicketIssueBaseModel` 将可选整数空字符串归一化为 `None`；前端新增提交过滤空可选字段。
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_issue_vo.py`、`web/src/views/ticket/issue/index.vue`、`server/tests/test_ticket_issue_service.py`、`web/public/docs/ticket_issue.md`、`web/public/docs/updates/2026-08-21-ticket-issue-create-optional-fields.md`。
+- 验证：补充空负责人/项目/模块模型归一化测试；构建命令受当前执行器限流影响，待环境恢复后执行。
+
+## [2026-08-21] INGEST-CODE | 工单问题实例关联增强
+
+- 触发：问题管理页面绑定工单使用内部 ID，工单详情无法直接搜索已有 Issue，工单列表缺少批量归因入口。
+- 架构层：工单域 / 问题实例归因 / 工单列表 / 工单详情 / 版本展示。
+- 更新的页面：`server/modules/ticket/entity/vo/ticket_issue_vo.py`、`server/modules/ticket/dao/ticket_issue_dao.py`、`server/modules/ticket/service/issue/ticket_issue_service.py`、`server/modules/ticket/controller/ticket_issue_controller.py`、`server/modules/ticket/enums/ticket_enums.py`、`web/src/api/ticket/ticket.js`、`web/src/views/ticket/issue/index.vue`、`web/src/views/ticket/components/TicketDetailWithList.vue`、`web/src/views/ticket/index.vue`、`web/public/docs/2026-08-21-ticket-issue-association-plan.md`、`web/public/docs/ticket_detail.md`、`web/public/docs/updates/2026-08-21-ticket-issue-association.md`、`wiki/flows/ticket-issue-attribution-flow.md`。
+- 变更传播链：`ticketNo` 远程搜索 -> Issue 单张业务号绑定 -> `ticket.issue_id` 主归因 -> Issue 影响工单数刷新；工单列表当前页多选 -> 全量预校验 -> 批量事务绑定 -> 目标/旧 Issue 计数刷新 -> `ISSUE_ATTRIBUTED` 事件。
+- 关键结论：内部 `ticket_id/first_ticket_id` 保留为稳定关联，用户界面改用工单号；批量归因默认不覆盖其他 Issue；相似度和工单分类仍不自动强绑定；Issue 版本先从绑定工单四类版本实时聚合。
+- 验证：已补充问题实例服务定向测试、后端编译和前端构建待环境限流恢复后执行。
+
+## [2026-08-21] FIX | 修复工单日志上下文横向滚动
+
+- 触发：用户反馈工单日志上下文查看窗口在关闭换行时无法左右滑动，影响较长日志内容查看。
+- 根因：日志行默认样式使用 `overflow: hidden`，在子元素层截断了单行内容，父级滚动容器无法形成横向溢出范围；该规则来自此前日志大文件显示优化。
+- 变更传播链：`LogViewerDialog.vue` 日志上下文行样式 -> `.log-content-block` 横向滚动 -> 工单详情日志拉取和日志拉取记录查看入口；服务端上下文行长度保护及完整行按需读取逻辑保持不变。
+- 更新文件：`web/src/components/ticket/LogViewerDialog.vue`、`web/public/docs/ticket_log_viewer.md`、`web/public/docs/updates/2026-08-21-ticket-log-viewer-horizontal-scroll-fix.md`、`web/public/docs/updates/history.md`、`wiki/flows/ticket-log-record-isolated-view.md`。
+
+## [2026-08-21] INGEST-CODE | 修复工单日志拉取门店回填
+
+- 触发：工单详情日志拉取弹窗未回填门店，且工单门店值可能不完整或无法匹配门店配置时仍需要原样显示。
+- 根因：详情页切换到轻量 summary 后，`TicketSummaryModel` 未声明 `extraData`，导致 `log_pull_hints`、`external_sync.source` 和自动日志配置在响应模型校验时被过滤；同时历史同步字段可能只保存顶层 `external_field_mapping.ticketStore`。
+- 变更传播链：`Ticket.extra_data` -> `TicketSummaryModel.extra_data` -> `useLogViewer` 多来源回填 -> `LogPullConfigFields` 按 `org_no/storeCode/sap_org_no` 匹配；命中后提交 `org_no` 并显示门店名称、`org_no`、`sap_org_no`，未命中保留原始值。
+- 更新文件：`server/modules/ticket/entity/vo/ticket_read_vo.py`、`server/tests/test_ticket_summary_log_pull_hints.py`、`web/src/views/ticket/hooks/useLogViewer.js`、`web/src/components/ticket/LogPullConfigFields.vue`、`web/public/docs/ticket_log_pull.md`、`web/public/docs/updates/2026-08-21-ticket-log-pull-store-prefill.md`、`web/public/docs/updates/history.md`、`wiki/entities/services/ticket-domain.md`。
+
+
+- 结论：生产有效工单的 `submit_time` 已全部回填，工单列表、详情响应和实时统计不再从 `extra_data.external_sync` JSON 或 `create_time` 回退提交时间。
+- 列表语义：`/ticket/list` 的提交时间范围筛选、默认排序、`submitTime`/`submit_time` 排序和页面展示统一以 `ticket.submit_time` 为准，默认顺序为 `submit_time DESC, ticket_id DESC`；详情与实时统计沿用相同主表时间口径。
+- 性能：移除 JSON `COALESCE` 时间表达式后，默认列表可使用既有 `idx_ticket_del_submit_time (del_flag, submit_time, ticket_id)` 反向扫描，避免全表扫描与 Top-N 排序。
+- 索引：ORM 同步声明 `idx_ticket_del_module_code_submit_time`、`idx_ticket_log_pull_ticket_created_status`、`idx_ticket_ai_task_ticket_created_status`；物理 `CREATE INDEX` 由运维按同名、同列顺序手工执行，本次未执行 DDL。
+- 边界：`externalCreateTime` 继续保留为外部同步来源和审计元数据；同步、导入和手工创建链路仍负责将业务提交时间写入 `submit_time`。
+- 验证：新增列表 SQL 编译、列表响应装饰和 ORM 索引元数据回归测试；生产索引创建后需执行只读 `EXPLAIN` 确认模块筛选和最新日志/AI 状态查询命中新索引。
+
+
+## [2026-08-21] FEAT | 工单轻量概览与按需读取接口
+
+- 功能：新增工单轻量概览、独立相似工单和消息/快照按需读取接口；旧工单详情与消息接口保持兼容。
+- 后端新增：`GET /ticket/{ticket_id}/summary`、`GET /ticket/{ticket_id}/similar-tickets`、`GET /ticket/{ticket_id}/messages/page`、`GET /ticket/{ticket_id}/snapshots/page`。
+- 契约：相似工单 `data` 返回 `status/message/items`，消息和快照返回 `items/limit/hasMore`；数量参数默认分别为 5、20、10，最大 100。
+- 安全：相似工单使用摘要白名单投影，工单、Issue、消息和快照的 BIGINT 主键按字符串返回。
+- 关键日志：概览记录未加载消息、快照、相似度和提示词；相似度与按需读取记录 ticket_id、limit、返回数量和 has_more。
+- 用户说明：`server/docs/ticket_read_api.md`。
+- 验证：新增文件 compileall 与 Ruff 通过；本环境虚拟环境未安装 pytest，相关测试未能执行。
+
+
+## [2026-08-26] FIX | 工单AI分析 Agent 响应 JSON 校验误报失败
+
+- 现象：工单 AI 分析实际已由本机 Agent 执行并回传结果，但服务端任务记录被写成 `Cannot check isinstance when validating from json, use a JsonOrPython validator instead.`，页面无法看到真实的 Worker 失败摘要。
+- 根因：`HandleResponse.response` 联合类型包含依赖 Python `isinstance` 判定的对象，服务端在工单网关调用和 Redis 缓存回读时误用 `model_validate_json` 直接校验原始 JSON 字符串，Pydantic 在 JSON 校验阶段抛出框架异常。
+- 修复：为 `HandleResponse` 增加统一传输负载解析入口，先把 JSON 字符串/字节反序列化为 Python 字典，再执行 `model_validate`；工单 AI 网关与分发缓存统一复用该入口。
+- 验证：新增 3 个回归测试，覆盖 `HandleResponse` 传输负载恢复、工单 AI 网关结果解析、Agent 分发缓存读取。
+- 影响：修复后页面会优先展示 Agent/Worker 的真实失败原因，例如 PowerShell heredoc 语法不兼容、鉴权失败等，便于继续定位真正的执行问题。
+
+## [2026-08-26] FIX | 工单AI分析提示词约束 Worker 直接输出 JSON
+
+- 现象：Windows Agent 上的 Codex Worker 在部分任务中没有直接返回最终 JSON，而是尝试调用 PowerShell 用 heredoc 写入结果文件，触发 `PowerShell doesn't support heredoc with <<`。
+- 根因：当前提示词只要求“输出严格 JSON”，但没有明确禁止 Worker 自行用 shell/python/PowerShell 写结果文件；在 `workspace-write` 沙箱下，模型可能把“产出结构化结果”误解为“需要落盘 JSON 文件”。
+- 修复：服务端主提示词与 Agent 本地 fallback 提示词同步增加约束，明确禁止用 shell/heredoc 写结果文件，要求直接把最终 JSON 作为最后一条回复输出，由 CLI/服务自动保存。
+- 验证：新增提示词回归测试，校验禁止 shell 文件写入、禁止 heredoc、声明系统自动保存结果文件。
+- 影响：优先降低 Windows PowerShell 下 heredoc 误触发概率；若后续仍有个别模型不遵守提示词，再考虑进一步收紧工具权限。
+
+## [2026-08-20] FIX | Provider模型下拉预览字段和工单分析初始化加载
+
+- 现象：Provider弹窗点击“更新模型”后模型选项数量有返回但文案为空；工单AI分析/协同消息弹窗自动回填Provider后模型下拉为空，切换Provider后才出现。
+- 根因：模型发现协议服务返回 `model_id/display_name` 普通字典，预览接口未按 Web camelCase 契约转换；工单页面只在 Provider `change` 事件中请求模型，初始化回填未触发请求。
+- 修复：预览接口统一输出 `modelId/displayName`；新增工单模型选项加载 hook，初始化和切换均按当前 Provider 加载并忽略过期响应；分析和协同请求透传 `aiModelName`，服务端校验模型属于当前 Provider 启用目录后复用 `selectedWorkerModel` 执行链，空值回退 Provider 默认模型。
+- 关键日志：Provider预览成功记录模型数量；任务创建阶段保留 Provider、模型和执行器快照，非法模型直接返回明确错误，不创建任务。
+- 验证：后端变更文件 `compileall` 通过；前端 hook 语法检查通过；完整前端构建和真实 Provider/Agent 联调待环境可用后执行。
+
+
+- 原因：模型目录新增接口为异步 FastAPI 路由，但底层 Service、DAO 和远端模型发现仍是同步实现，直接调用会阻塞事件循环。
+- 修复：保留既有同步 Service/DAO 接口，模型目录查询、刷新、手动添加、启用/禁用、删除和模型选项接口统一通过 `await run_in_threadpool(...)` 执行。
+- 兼容性：不改造共享 Service/DAO 方法，不切换 `AsyncSessionProxy`，降低对其他调用方的影响。
+- 验证：模型目录相关控制器、DAO、Service 的 ruff 检查通过。
+
+
+- 功能：支持一个 Provider 配置多个可用模型，使用方可按场景选择不同模型，实现"同一 API Key 不同模型"的灵活配置。
+- 后端新增：6 个模型管理接口（全局模型列表、刷新并持久化、手动添加、启用/禁用、删除、按编码查询可用模型）。
+- 后端修改：`AiProviderProtocolService.generate_text()` 新增 `model_name` 可选参数；`TicketSyncAiConfigService` 各 AI 配置段增加 `modelName` 字段；`TicketLightAiService` 所有调用点透传模型名称。
+- 前端新增：Provider 管理页增加"可用模型"管理表格，支持添加/刷新/启用/禁用/删除模型；工单 AI 分析、同步自动化各配置段、协同消息均增加模型选择器。
+- 权限：查看模型列表 `system:aiprovider:query`，管理模型 `system:aiprovider:edit`。
+- 向后兼容：所有新增字段均为可选，空值时 fallback 到 Provider 的 `default_model`。
+
+## [2026-08-18] FIX | 工单日志搜索内存峰值保护与并发限制
+
+- 触发：生产 Supervisor 记录 FastAPI 在日志搜索开始后多次被 `SIGKILL`，随后由 `autorestart=true` 拉起；搜索实现通过 `communicate()` 和 `splitlines()` 暂存整批 rg 输出，且没有应用层搜索并发上限。
+- 根因判断：应用日志只能确认外部 `SIGKILL`，OOM 需由 Pod 状态或 cgroup `memory.events` 最终确认；本次改造针对搜索峰值、超长行和并发叠加增加保护。
+- 修复：新增 `maxConcurrentSearches`（默认 2，范围 1-8）和 `maxSearchLineBytes`（默认 524288，范围 1 KiB-4 MiB）配置；rg 最终输出层使用 `--max-columns --max-columns-preview`，Python 降级路径复用同一单行字节限制。
+- 修复：rg 管道改为有界队列逐行消费，达到用户动态 `limit`、超时或异常时关闭并 wait 回收子进程；搜索接口不再额外复制固定 500 字符预览。
+- 更新的页面：`server/modules/ticket/service/log_pull/ticket_log_service.py`、`server/modules/ticket/service/log_pull/ticket_log_pull_service.py`、`server/modules/ticket/entity/vo/ticket_log_pull_vo.py`、`server/modules/ticket/util/ticket_log_search_limiter.py`、`server/modules/ticket/controller/ticket_log_pull_controller.py`、`web/src/views/ticket/syncAutomation/hooks/useLogPullStorageConfig.js`、`web/src/views/ticket/syncAutomation/index.vue`、`wiki/flows/ticket-log-record-isolated-view.md`、`wiki/entities/data-models/ticket-core-models.md`。
+- 验证：新增并发限制、配置归一化、UTF-8 单行截断、动态 limit、native rg any/all 和进程流式清理测试；ruff 与日志相关 unittest 全部通过。
+
+## [2026-08-17] FIX | 工单 AI 历史任务恢复写入 NULL 导致生产启动失败
+
+- 触发：生产服务启动时清理 `created` / `running` 状态的工单 AI 历史任务，`ticket_ai_analysis_task.command_line` 被批量更新为 `NULL`，触发 MySQL 非空约束错误并导致 FastAPI 被 Supervisor 反复重启。
+- 根因：`TicketAiAnalysisService._mark_task_status` 的 `command_line` 参数允许缺省，但更新数据时直接写入 `None`；数据库实体字段 `command_line` 为非空字段。
+- 修复：状态更新时将 `command_line is None` 规范化为空字符串；已有命令内容保持不变。
+- 验证：新增任务状态更新单元测试，覆盖缺省命令和已提供命令两种场景。
+- 影响：仅影响工单 AI 任务状态更新；服务启动恢复流程不再因缺省执行命令触发数据库非空约束异常。
+
+## [2026-08-17] FIX | Codex Worker 旧 bearer token 导致工单 AI 分析 401
+
+- 触发：本地 Agent 使用 Provider `openai_com`（Provider ID 1）执行 Codex Worker 时，`auth.json.OPENAI_API_KEY` 指纹与 Provider 密钥一致且直接访问 `https://ai-router.dmall.com/v1/models` 返回 200，但 Worker `/responses` 返回 `401 Unauthorized: Invalid token`。
+- 根因：任务级 Codex Home 从本机配置复制了 `[model_providers.custom]` 下旧的 `experimental_bearer_token`（例如本地代理令牌 `PROXY_MANAGED`）。Codex CLI 对该字段的使用优先级高于 `auth.json`，因此实际请求没有使用 Provider 下发的 API Key。
+- 修复：`client_new/services/ticket_ai_analysis_service.py` 在准备任务级 Codex 配置时同步覆盖当前 `model_provider` 对应区段的 `experimental_bearer_token`；鉴权诊断也按该字段、`auth.json`、环境变量的实际回退顺序取值。
+- 验证：新增任务级 bearer token 诊断与配置覆盖测试；`client_new` 定向测试 9 项全部通过。
+- 影响：仅影响 `codex` Worker 的任务级配置准备和鉴权诊断，不修改本机全局 Codex 配置，不记录 API Key 明文。
 
 ## [2026-08-12] FIX | rg 日志搜索文件数过多导致 execve 参数过长应用重启
 
@@ -1849,3 +2034,38 @@ updated: 2026-08-11
 - 现象：凭证新增、更新、删除接口返回 500，日志装饰器在鉴权查询时收到 `query_db=None`。
 - 根因：凭证控制器使用 `db` 参数名，而系统日志装饰器按约定读取 `query_db`。
 - 修复：统一凭证控制器各接口数据库依赖参数为 `query_db`，保证鉴权和操作日志写入使用同一会话。
+## [2026-08-25] INGEST-CODE | 工单自动化结果通知
+
+- 触发：自动拉日志到自动 AI 分析需要按既有推送配置通知成功、失败和跳过结果，并支持业务字段模板变量。
+- 架构层：工单同步业务层、日志拉取服务、AI 分析服务、通用通知服务与 Web 同步自动化配置页。
+- 创建的页面：无。
+- 更新的页面：`entities/services/ticket-domain.md`、`flows/ticket-automation-flow.md`、`log.md`。
+- 创建的双向链接：0 对（沿用工单域与自动化流程既有双向关联）。
+- 变更传播链：`automationNotification` 配置 -> 自动化启动快照 -> 日志拉取记录/工单 extra_data -> `TicketNotifyService` 模板渲染 -> 既有推送配置投递。
+- 总共涉及页面：3。
+
+## [2026-08-25] 修复 | 工单 AI 分析结果回写事务
+
+- 触发：Agent 已在 2026-08-25 17:48:45 返回成功结果，但任务仍显示执行中，日志报 `Data too long for column 'owner'`。
+- 根因：AI 的 `owner_suggestion` 为长文本，写入 `ticket_snapshot.owner`（`String(100)`）时 flush 失败；异常分支未先回滚，导致后续失败状态更新继续命中已失效事务。
+- 修复：快照 owner 展示字段按 100 字符截断，完整结果保留在 `ticket.ai_analysis` 与快照结构化数据；异常处理先回滚数据库会话，再写入失败终态。
+- 更新页面：`flows/ticket-automation-flow.md`、`web/public/docs/ticket_detail.md`、`web/public/docs/updates/2026-08-25-ticket-ai-result-writeback.md`。
+
+## [2026-08-25] INGEST-CODE | 指定工单手动自动化补跑
+
+- 触发：需要在飞书多维表格主动拉取定时任务关闭时，按指定工单号模拟拉取并重放既有自动化。
+- 架构层：工单同步控制器、`TicketManualAutomationService`、Pydantic 请求模型与 Web 同步配置页。
+- 创建的页面：无。
+- 更新的页面：`flows/ticket-automation-flow.md`、`flows/ticket-external-sync-flow.md`、`log.md`、`web/public/docs/ticket-sync-automation.md`。
+- 创建的双向链接：0 对（沿用工单域、外部同步流程和自动化流程既有双向关联）。
+- 变更传播链：同步配置页 -> `POST /ticket/sync/automation/manual-run` -> 手动自动化服务 -> 飞书单工单同步入库或本地 `Ticket` ORM 快照 -> `bitable_pull` 后处理。
+- 关键约束：飞书模式忽略定时开关、常规筛选和时间窗口，但仍要求连接与字段映射完整且精确匹配唯一记录；数据库模式不重新入库、不覆盖工单字段；两种模式均服从自动化范围与现有场景开关。
+- 总共涉及页面：4。
+
+
+## [2026-08-25] 修复 | 工单 AI 分析 Provider 下发优先级
+
+- 触发：工单分析选择 Claude Code/Codex Provider 后，Agent 仍可能读取旧 `workerEnv` 或任务工作区配置。
+- 根因：服务端扩展环境变量覆盖了 Provider 核心变量；Codex `config.toml` 的缩进 `base_url` 未被替换；Claude 工作区 `.env` 只追加、不覆盖旧值。
+- 修复：Provider 核心连接配置优先于 `workerEnv`，Codex 支持缩进配置覆盖，Claude `.env` 对同名变量执行覆盖。
+- 并发配置：`ticket.ai.agent.maxConcurrentTasks`，默认值 `1`，入口为“系统管理 → AI 配置中心 → Agent 并发数”。

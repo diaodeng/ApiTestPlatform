@@ -162,7 +162,7 @@ async def get_ticket_workflow(request: Request, query_db: Session = Depends(get_
     :return: 状态列表和流转配置
     """
     try:
-        return ResponseUtil.success(data=TicketService.get_workflow_services(query_db))
+        return ResponseUtil.success(data=await run_in_threadpool(TicketService.get_workflow_services, query_db))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -182,7 +182,7 @@ async def save_workflow_status(
     :return: 保存结果
     """
     try:
-        result = TicketService.save_workflow_status(query_db, status_object)
+        result = await run_in_threadpool(TicketService.save_workflow_status, query_db, status_object)
         if result.is_success:
             return ResponseUtil.success(data=result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -203,7 +203,7 @@ async def delete_workflow_status(request: Request, status_id: int, query_db: Ses
     :return: 删除结果；已被工单、历史或流转规则引用时会拒绝删除
     """
     try:
-        result = TicketService.delete_workflow_status(query_db, status_id)
+        result = await run_in_threadpool(TicketService.delete_workflow_status, query_db, status_id)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -227,7 +227,7 @@ async def save_workflow_transition(
     :return: 保存结果
     """
     try:
-        result = TicketService.save_workflow_transition(query_db, transition_object)
+        result = await run_in_threadpool(TicketService.save_workflow_transition, query_db, transition_object)
         if result.is_success:
             return ResponseUtil.success(data=result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -248,7 +248,7 @@ async def delete_workflow_transition(request: Request, transition_id: int, query
     :return: 删除结果
     """
     try:
-        result = TicketService.delete_workflow_transition(query_db, transition_id)
+        result = await run_in_threadpool(TicketService.delete_workflow_transition, query_db, transition_id)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -267,7 +267,11 @@ async def get_ticket_stat_classification_options(request: Request, query_db: Ses
     :return: 工单类型、根因分类、解决方式和关闭结果选项
     """
     try:
-        return ResponseUtil.success(data=TicketSyncConfigService.get_ticket_stat_classification_options(query_db))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketSyncConfigService.get_ticket_stat_classification_options, query_db
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -394,7 +398,7 @@ async def get_knowledge_list(
     :return: 知识库文章分页列表
     """
     try:
-        query_result = TicketService.get_knowledge_list_services(query_db, query)
+        query_result = await run_in_threadpool(TicketService.get_knowledge_list_services, query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=query_result)
         return ResponseUtil.success(data=query_result)
@@ -419,7 +423,7 @@ async def add_knowledge(
     :return: 新增结果
     """
     try:
-        result = TicketService.create_knowledge(query_db, article_object, current_user)
+        result = await run_in_threadpool(TicketService.create_knowledge, query_db, article_object, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -442,7 +446,7 @@ async def edit_knowledge(
     :return: 编辑结果
     """
     try:
-        result = TicketService.update_knowledge(query_db, article_object, current_user)
+        result = await run_in_threadpool(TicketService.update_knowledge, query_db, article_object, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -464,7 +468,7 @@ async def get_knowledge_detail(request: Request, article_id: int, query_db: Sess
     :return: 文章详情
     """
     try:
-        result = TicketService.get_knowledge_detail_services(query_db, article_id)
+        result = await run_in_threadpool(TicketService.get_knowledge_detail_services, query_db, article_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="知识库文章不存在")
     except Exception as e:
         logger.exception(e)
@@ -489,7 +493,7 @@ async def delete_knowledge(
     :return: 删除结果
     """
     try:
-        result = TicketService.delete_knowledge(query_db, article_id, current_user)
+        result = await run_in_threadpool(TicketService.delete_knowledge, query_db, article_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)

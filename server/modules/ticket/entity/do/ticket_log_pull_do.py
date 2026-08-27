@@ -16,6 +16,15 @@ class TicketLogPullRecord(Base):
     """
 
     __tablename__ = "ticket_log_pull_record"
+    __table_args__ = (
+        Index(
+            "idx_ticket_log_pull_ticket_created_status",
+            "ticket_id",
+            "create_time",
+            "id",
+            "status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="记录ID"

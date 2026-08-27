@@ -5,18 +5,24 @@ from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_hrm.entity.vo.common_vo import CrudResponseModel
+from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_issue_dao import TicketIssueDao
-from modules.ticket.entity.do.ticket_do import Ticket, TicketIssue, TicketRelation
+from modules.ticket.entity.do.ticket_do import Ticket, TicketEvent, TicketIssue, TicketRelation
+from modules.ticket.enums.ticket_enums import TicketEventType
 from modules.ticket.entity.vo.ticket_issue_vo import (
+    TicketIssueBatchBindModel,
+    TicketIssueBindByTicketNoModel,
     TicketIssueBindModel,
     TicketIssueCreateAndBindModel,
     TicketIssueCreateModel,
     TicketIssueQueryModel,
     TicketIssueSimilarBindModel,
+    TicketIssueTicketOptionQueryModel,
     TicketIssueUpdateModel,
     dump_model,
 )
-from modules.ticket.util.ticket_common_util import user_name
+from modules.ticket.service.core.ticket_version_service import TicketVersionService
+from modules.ticket.util.ticket_common_util import user_id, user_name
 from utils.common_util import CamelCaseUtil
 from utils.snowflake import snowIdWorker
 
@@ -37,6 +43,51 @@ class TicketIssueService:
         return TicketIssueDao.get_issue_list(query_db, query)
 
     @classmethod
+    def search_tickets_for_issue(
+        cls,
+        query_db: Session,
+        query: TicketIssueTicketOptionQueryModel,
+    ) -> list[dict[str, Any]]:
+        """
+        查询问题实例绑定工单选择器候选。
+        :param query_db: 数据库会话
+        :param query: 工单号/标题搜索条件
+        :return: 轻量工单候选列表
+        """
+        tickets = TicketIssueDao.search_tickets_for_issue(
+            query_db,
+            query.keyword,
+            project_id=query.project_id,
+            module_id=query.module_id,
+            limit=query.limit,
+        )
+        rows = CamelCaseUtil.transform_result(tickets)
+        issue_ids = [row.get("issueId") for row in rows if isinstance(row, dict) and row.get("issueId")]
+        issue_map = TicketIssueDao.list_issue_summary_by_ids(query_db, issue_ids)
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            issue = issue_map.get(row.get("issueId"))
+            result.append(
+                {
+                    "ticketId": row.get("ticketId"),
+                    "ticketNo": row.get("ticketNo") or "",
+                    "title": row.get("title") or "",
+                    "status": row.get("status") or "",
+                    "projectId": row.get("projectId"),
+                    "projectName": row.get("projectName") or row.get("merchantName") or "",
+                    "moduleId": row.get("moduleId"),
+                    "moduleName": row.get("moduleName") or "",
+                    "currentAssigneeName": row.get("currentAssigneeName") or "",
+                    "issueId": row.get("issueId"),
+                    "issueNo": getattr(issue, "issue_no", "") if issue else "",
+                    "issueTitle": getattr(issue, "title", "") if issue else "",
+                }
+            )
+        return result
+
+    @classmethod
     def get_issue_detail_services(cls, query_db: Session, issue_id: int) -> dict[str, Any] | None:
         """
         查询问题实例详情，并附带已绑定工单列表。
@@ -48,8 +99,12 @@ class TicketIssueService:
         if not issue:
             return None
         result = CamelCaseUtil.transform_result(issue)
+        result["firstTicketId"] = str(issue.first_ticket_id) if issue.first_ticket_id else None
+        first_ticket = TicketIssueDao.get_ticket_by_id(query_db, issue.first_ticket_id)
+        result["firstTicketNo"] = first_ticket.ticket_no if first_ticket else ""
         tickets = TicketIssueDao.list_tickets_by_issue_id(query_db, issue_id)
         ticket_rows = CamelCaseUtil.transform_result(tickets)
+        TicketVersionService.attach_ticket_version_labels(query_db, ticket_rows)
         result["tickets"] = ticket_rows
 
         # 补充关系只展示当前 Issue 下工单之间的关系，避免把无关工单混入详情页。
@@ -115,6 +170,9 @@ class TicketIssueService:
             data = dump_model(issue_object)
             data.pop("issue_id", None)
             data.pop("issue_no", None)
+            data.pop("first_ticket_id", None)
+            data.pop("first_ticket_no", None)
+            data.pop("affected_ticket_count", None)
             data["update_by"] = user_name(current_user)
             data["update_time"] = datetime.now()
             TicketIssueDao.update_issue(query_db, issue.issue_id, data)
@@ -146,6 +204,8 @@ class TicketIssueService:
             return CrudResponseModel(is_success=False, message="工单不存在")
         if not issue:
             return CrudResponseModel(is_success=False, message="问题实例不存在")
+        if issue.project_id and ticket.project_id and issue.project_id != ticket.project_id:
+            return CrudResponseModel(is_success=False, message="工单与问题实例不属于同一项目")
         try:
             previous_issue_id = ticket.issue_id
             cls.apply_ticket_issue_binding(
@@ -155,6 +215,7 @@ class TicketIssueService:
                 relation_type=bind_object.relation_type or "manual",
                 confirmed=bind_object.confirmed,
                 current_user=current_user,
+                remark=bind_object.remark,
             )
             cls.refresh_affected_ticket_count(query_db, issue.issue_id, current_user)
             if previous_issue_id and previous_issue_id != issue.issue_id:
@@ -168,6 +229,157 @@ class TicketIssueService:
         except Exception:
             query_db.rollback()
             raise
+
+    @classmethod
+    def bind_ticket_by_no(
+        cls,
+        query_db: Session,
+        issue_id: int,
+        bind_object: TicketIssueBindByTicketNoModel,
+        current_user: CurrentUserModel | None,
+    ) -> CrudResponseModel:
+        """
+        按业务工单号绑定工单到已有问题实例。
+        :param query_db: 数据库会话
+        :param issue_id: 目标问题实例ID
+        :param bind_object: 工单号绑定参数
+        :param current_user: 当前用户
+        :return: 操作结果
+        """
+        issue = TicketIssueDao.get_issue_by_id(query_db, issue_id)
+        if not issue:
+            return CrudResponseModel(is_success=False, message="问题实例不存在")
+        ticket = TicketDao.get_ticket_by_no(query_db, bind_object.ticket_no)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在")
+        if issue.project_id and ticket.project_id and issue.project_id != ticket.project_id:
+            return CrudResponseModel(is_success=False, message="工单与问题实例不属于同一项目")
+        return cls.bind_ticket_to_issue(
+            query_db,
+            ticket.ticket_id,
+            TicketIssueBindModel(
+                issueId=issue.issue_id,
+                relationType=bind_object.relation_type,
+                confirmed=bind_object.confirmed,
+                remark=bind_object.remark,
+            ),
+            current_user,
+        )
+
+    @classmethod
+    def batch_bind_tickets_to_issue(
+        cls,
+        query_db: Session,
+        bind_object: TicketIssueBatchBindModel,
+        current_user: CurrentUserModel | None,
+    ) -> CrudResponseModel:
+        """
+        将多张工单一次性绑定到已有问题实例。
+        :param query_db: 数据库会话
+        :param bind_object: 批量绑定参数
+        :param current_user: 当前用户
+        :return: 批量处理结果
+        """
+        issue = TicketIssueDao.get_issue_by_id(query_db, bind_object.issue_id)
+        total = len(bind_object.ticket_nos)
+        if not issue:
+            return CrudResponseModel(
+                is_success=False,
+                message="问题实例不存在",
+                result={"total": total, "successCount": 0, "failedCount": total},
+            )
+
+        tickets = TicketDao.list_tickets_by_nos(query_db, bind_object.ticket_nos)
+        ticket_map = {str(ticket.ticket_no).strip(): ticket for ticket in tickets}
+        missing_ticket_nos = [ticket_no for ticket_no in bind_object.ticket_nos if ticket_no not in ticket_map]
+        conflicts: list[dict[str, Any]] = []
+        project_conflicts: list[dict[str, Any]] = []
+        for ticket_no in bind_object.ticket_nos:
+            ticket = ticket_map.get(ticket_no)
+            if not ticket:
+                continue
+            if issue.project_id and ticket.project_id and issue.project_id != ticket.project_id:
+                project_conflicts.append(
+                    {
+                        "ticketNo": ticket.ticket_no,
+                        "ticketId": ticket.ticket_id,
+                        "reason": "工单与问题实例不属于同一项目",
+                    }
+                )
+            if ticket.issue_id and ticket.issue_id != issue.issue_id and not bind_object.allow_reassign:
+                old_issue = TicketIssueDao.get_issue_by_id(query_db, ticket.issue_id)
+                conflicts.append(
+                    {
+                        "ticketNo": ticket.ticket_no,
+                        "ticketId": ticket.ticket_id,
+                        "issueId": ticket.issue_id,
+                        "issueNo": old_issue.issue_no if old_issue else "",
+                        "reason": "工单已归属其他问题实例",
+                    }
+                )
+
+        validation_errors: list[dict[str, Any]] = [
+            {"ticketNo": ticket_no, "reason": "工单不存在"} for ticket_no in missing_ticket_nos
+        ]
+        validation_errors.extend(project_conflicts)
+        validation_errors.extend(conflicts)
+        result = {
+            "total": total,
+            "successCount": 0,
+            "failedCount": total if validation_errors else 0,
+            "updatedTicketNos": [],
+            "missingTicketNos": missing_ticket_nos,
+            "conflicts": conflicts,
+            "projectConflicts": project_conflicts,
+            "details": validation_errors,
+            "issue": CamelCaseUtil.transform_result(issue),
+        }
+        if validation_errors:
+            return CrudResponseModel(
+                is_success=False,
+                message="批量关联校验失败，未更新任何工单",
+                result=result,
+            )
+
+        changed_issue_ids = {issue.issue_id}
+        updated_ticket_nos: list[str] = []
+        try:
+            for ticket_no in bind_object.ticket_nos:
+                ticket = ticket_map[ticket_no]
+                if ticket.issue_id:
+                    changed_issue_ids.add(ticket.issue_id)
+                cls.apply_ticket_issue_binding(
+                    query_db,
+                    ticket=ticket,
+                    issue=issue,
+                    relation_type=bind_object.relation_type or "manual",
+                    confirmed=bind_object.confirmed,
+                    current_user=current_user,
+                    remark=bind_object.remark,
+                )
+                updated_ticket_nos.append(ticket.ticket_no)
+            for changed_issue_id in changed_issue_ids:
+                cls.refresh_affected_ticket_count(query_db, changed_issue_id, current_user)
+            query_db.commit()
+        except Exception:
+            query_db.rollback()
+            raise
+
+        result.update(
+            {
+                "successCount": len(updated_ticket_nos),
+                "failedCount": 0,
+                "updatedTicketNos": updated_ticket_nos,
+                "issue": CamelCaseUtil.transform_result(
+                    TicketIssueDao.get_issue_by_id(query_db, issue.issue_id)
+                ),
+            }
+        )
+        return CrudResponseModel(
+            is_success=True,
+            message=f"批量关联成功，共 {len(updated_ticket_nos)} 张工单",
+            result=result,
+        )
 
     @classmethod
     def create_issue_and_bind(
@@ -239,6 +451,8 @@ class TicketIssueService:
             return CrudResponseModel(is_success=False, message="相似工单不存在")
         if ticket.ticket_id == similar_ticket.ticket_id:
             return CrudResponseModel(is_success=False, message="不能将工单归入自身")
+        if ticket.project_id and similar_ticket.project_id and ticket.project_id != similar_ticket.project_id:
+            return CrudResponseModel(is_success=False, message="当前工单与相似工单不属于同一项目")
 
         try:
             changed_issue_ids = {ticket.issue_id, similar_ticket.issue_id}
@@ -260,6 +474,7 @@ class TicketIssueService:
                 relation_type=bind_object.relation_type or "similar",
                 confirmed=True,
                 current_user=current_user,
+                remark=bind_object.remark,
             )
             cls.upsert_similarity_relation(query_db, ticket, similar_ticket, bind_object, current_user)
             changed_issue_ids.add(issue.issue_id)
@@ -298,6 +513,21 @@ class TicketIssueService:
             return CrudResponseModel(is_success=True, message="工单未绑定问题实例")
         try:
             TicketIssueDao.update_ticket_issue(query_db, ticket.ticket_id, None, "", False, user_name(current_user))
+            TicketDao.add_event(
+                query_db,
+                TicketEvent(
+                    ticket_id=ticket.ticket_id,
+                    event_type=TicketEventType.ISSUE_ATTRIBUTED.value,
+                    operator_id=user_id(current_user),
+                    operator_name=user_name(current_user),
+                    content="解除工单问题实例归因",
+                    event_data={
+                        "action": "unbind",
+                        "previous_issue_id": previous_issue_id,
+                    },
+                    create_time=datetime.now(),
+                ),
+            )
             cls.refresh_affected_ticket_count(query_db, previous_issue_id, current_user)
             query_db.commit()
             return CrudResponseModel(is_success=True, message="工单归因解除成功")
@@ -326,6 +556,7 @@ class TicketIssueService:
         """
         data = dump_model(issue_object)
         data.pop("issue_id", None)
+        data.pop("first_ticket_no", None)
         data.pop("affected_ticket_count", None)
         data.pop("relation_type", None)
         data.pop("confirmed", None)
@@ -371,6 +602,7 @@ class TicketIssueService:
         relation_type: str,
         confirmed: bool,
         current_user: CurrentUserModel | None,
+        remark: str | None = None,
     ) -> None:
         """
         写入工单主归因字段；同一工单重复绑定同一 Issue 保持幂等。
@@ -388,6 +620,7 @@ class TicketIssueService:
             and bool(ticket.issue_confirmed) == bool(confirmed)
         ):
             return
+        previous_issue_id = ticket.issue_id
         TicketIssueDao.update_ticket_issue(
             query_db,
             ticket.ticket_id,
@@ -399,6 +632,25 @@ class TicketIssueService:
         ticket.issue_id = issue.issue_id
         ticket.issue_relation_type = relation_type
         ticket.issue_confirmed = confirmed
+        TicketDao.add_event(
+            query_db,
+            TicketEvent(
+                ticket_id=ticket.ticket_id,
+                event_type=TicketEventType.ISSUE_ATTRIBUTED.value,
+                operator_id=user_id(current_user),
+                operator_name=user_name(current_user),
+                content=f"工单归因到问题实例 {issue.issue_no}",
+                event_data={
+                    "action": "bind",
+                    "issue_id": issue.issue_id,
+                    "previous_issue_id": previous_issue_id,
+                    "relation_type": relation_type,
+                    "confirmed": bool(confirmed),
+                    "remark": str(remark or "").strip() or None,
+                },
+                create_time=datetime.now(),
+            ),
+        )
 
     @classmethod
     def refresh_affected_ticket_count(

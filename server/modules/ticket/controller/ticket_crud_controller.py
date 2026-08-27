@@ -9,6 +9,11 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from modules.ticket.entity.vo.ticket_read_vo import (
+    TicketMessagesPageQueryModel,
+    TicketSimilarQueryModel,
+    TicketSnapshotsPageQueryModel,
+)
 from modules.ticket.entity.vo.ticket_vo import (
     TicketAssignModel,
     TicketCommentCreateModel,
@@ -24,6 +29,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.core.ticket_import_service import TicketImportService
+from modules.ticket.service.core.ticket_read_service import TicketReadService
 from modules.ticket.service.core.ticket_service import TicketService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
@@ -42,7 +48,7 @@ async def get_ticket_list(
     :return: 工单分页列表
     """
     try:
-        query_result = TicketService.get_ticket_list_services(query_db, query)
+        query_result = await run_in_threadpool(TicketService.get_ticket_list_services, query_db, query)
         if query.is_page:
             return ResponseUtil.success(model_content=query_result)
         return ResponseUtil.success(data=query_result)
@@ -122,7 +128,7 @@ async def search_ticket_natural_language(
     """
     try:
         # 先执行自然语言搜索，得到工单ID和分数的映射
-        search_results = TicketEmbeddingService.search_tickets(query_db, keyword, limit)
+        search_results = await run_in_threadpool(TicketEmbeddingService.search_tickets, query_db, keyword, limit)
         if not search_results:
             return ResponseUtil.success(data=[])
         
@@ -144,7 +150,7 @@ async def search_ticket_natural_language(
         query.sort_field = None
         query.sort_order = None
         query.is_page = False
-        query_result = TicketService.get_ticket_list_services(query_db, query)
+        query_result = await run_in_threadpool(TicketService.get_ticket_list_services, query_db, query)
         
         rows = (
             query_result
@@ -245,7 +251,9 @@ async def translate_ticket_description(
     :return: 翻译后的工单详情
     """
     try:
-        result = TicketService.translate_ticket_description_services(query_db, ticket_id, current_user)
+        result = await run_in_threadpool(
+            TicketService.translate_ticket_description_services, query_db, ticket_id, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result.result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -271,10 +279,77 @@ async def delete_ticket(
     :return: 删除结果
     """
     try:
-        result = TicketService.delete_ticket(query_db, ticket_id, current_user)
+        result = await run_in_threadpool(TicketService.delete_ticket, query_db, ticket_id, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/summary", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
+)
+async def get_ticket_summary(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
+    """获取轻量工单概览，不读取消息、快照、相似工单和提示词。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_summary, query_db, ticket_id)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/similar-tickets", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
+)
+async def get_ticket_similar_tickets(
+    request: Request,
+    ticket_id: int,
+    query: TicketSimilarQueryModel = Depends(TicketSimilarQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """获取相似工单摘要，limit 默认 5、最大 100。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_similar_tickets, query_db, ticket_id, query.limit)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/messages/page", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))]
+)
+async def get_ticket_messages_page(
+    request: Request,
+    ticket_id: int,
+    query: TicketMessagesPageQueryModel = Depends(TicketMessagesPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """按需获取最近工单消息，limit 默认 20、最大 100。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_messages_page, query_db, ticket_id, query.limit)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/snapshots/page", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))]
+)
+async def get_ticket_snapshots_page(
+    request: Request,
+    ticket_id: int,
+    query: TicketSnapshotsPageQueryModel = Depends(TicketSnapshotsPageQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """按需获取最近工单 ACR 快照，limit 默认 10、最大 100。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_snapshots_page, query_db, ticket_id, query.limit)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -290,7 +365,7 @@ async def get_ticket_detail(request: Request, ticket_id: int, query_db: Session 
     :return: 工单详情
     """
     try:
-        result = TicketService.get_ticket_detail_services(query_db, ticket_id)
+        result = await run_in_threadpool(TicketService.get_ticket_detail_services, query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
     except Exception as e:
         logger.exception(e)
@@ -316,7 +391,7 @@ async def assign_ticket(
     :return: 指派结果
     """
     try:
-        result = TicketService.assign_ticket(query_db, ticket_id, assign_object, current_user)
+        result = await run_in_threadpool(TicketService.assign_ticket, query_db, ticket_id, assign_object, current_user)
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -346,7 +421,9 @@ async def change_ticket_status(
     :return: 状态流转结果
     """
     try:
-        result = TicketService.change_ticket_status(query_db, ticket_id, status_object, current_user)
+        result = await run_in_threadpool(
+            TicketService.change_ticket_status, query_db, ticket_id, status_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -375,7 +452,7 @@ async def add_ticket_comment(
     :return: 评论结果
     """
     try:
-        result = TicketService.add_comment(query_db, ticket_id, comment_object, current_user)
+        result = await run_in_threadpool(TicketService.add_comment, query_db, ticket_id, comment_object, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -422,7 +499,7 @@ async def add_ticket_event(
     :return: 事件记录结果
     """
     try:
-        result = TicketService.add_event(query_db, ticket_id, event_object, current_user)
+        result = await run_in_threadpool(TicketService.add_event, query_db, ticket_id, event_object, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -441,7 +518,7 @@ async def get_ticket_timeline(request: Request, ticket_id: int, query_db: Sessio
     :return: 状态历史、指派历史、事件和 RCA
     """
     try:
-        result = TicketService.get_timeline_services(query_db, ticket_id)
+        result = await run_in_threadpool(TicketService.get_timeline_services, query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
     except Exception as e:
         logger.exception(e)
@@ -469,7 +546,7 @@ async def upsert_ticket_rca(
     :return: RCA 保存结果
     """
     try:
-        result = TicketService.upsert_rca(query_db, ticket_id, rca_object, current_user)
+        result = await run_in_threadpool(TicketService.upsert_rca, query_db, ticket_id, rca_object, current_user)
         return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
     except Exception as e:
         logger.exception(e)
@@ -515,7 +592,7 @@ async def add_ticket_message(
     :return: 消息保存结果及可选 AI 任务结果
     """
     try:
-        result = TicketService.add_message(query_db, ticket_id, message_object, current_user)
+        result = await run_in_threadpool(TicketService.add_message, query_db, ticket_id, message_object, current_user)
         if result.is_success:
             return ResponseUtil.success(data=result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -544,7 +621,9 @@ async def add_ticket_snapshot(
     :return: 快照保存结果
     """
     try:
-        result = TicketService.create_snapshot(query_db, ticket_id, snapshot_object, current_user)
+        result = await run_in_threadpool(
+            TicketService.create_snapshot, query_db, ticket_id, snapshot_object, current_user
+        )
         if result.is_success:
             return ResponseUtil.success(data=result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
@@ -572,13 +651,13 @@ async def extract_ticket_knowledge(
     :return: 知识库案例生成结果
     """
     try:
-        result = TicketService.create_knowledge_from_ticket(query_db, ticket_id, current_user)
+        result = await run_in_threadpool(TicketService.create_knowledge_from_ticket, query_db, ticket_id, current_user)
         if result.is_success:
-            query_db.commit()
+            await run_in_threadpool(query_db.commit)
             return ResponseUtil.success(data=result, msg=result.message)
         return ResponseUtil.failure(msg=result.message)
     except Exception as e:
-        query_db.rollback()
+        await run_in_threadpool(query_db.rollback)
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
 @ticketCrudController.get(
@@ -598,7 +677,11 @@ async def get_ticket_user_options(
     :return: 可指派用户选项
     """
     try:
-        return ResponseUtil.success(data=TicketService.get_user_options_services(query_db, query.keyword, query.limit))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketService.get_user_options_services, query_db, query.keyword, query.limit
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -613,7 +696,7 @@ async def get_ticket_project_options(request: Request, query_db: Session = Depen
     :return: 项目选项列表
     """
     try:
-        return ResponseUtil.success(data=TicketService.get_project_options_services(query_db))
+        return ResponseUtil.success(data=await run_in_threadpool(TicketService.get_project_options_services, query_db))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
@@ -633,7 +716,11 @@ async def get_ticket_module_options(
     :return: 模块选项列表，包含模块ID、名称和模块业务码
     """
     try:
-        return ResponseUtil.success(data=TicketService.get_module_options_services(query_db, projectId))
+        return ResponseUtil.success(
+            data=await run_in_threadpool(
+                TicketService.get_module_options_services, query_db, projectId
+            )
+        )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

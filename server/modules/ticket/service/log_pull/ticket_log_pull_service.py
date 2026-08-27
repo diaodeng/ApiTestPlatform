@@ -57,7 +57,12 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullVendorOptionModel,
     TicketLogPullVendorStoreOptionsModel,
 )
-from modules.ticket.enums.ticket_enums import TicketEventType, TicketLogDataType, TicketLogPullStatus
+from modules.ticket.enums.ticket_enums import (
+    TicketEventType,
+    TicketLogDataType,
+    TicketLogPullStatus,
+)
+from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
@@ -65,6 +70,7 @@ from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
+from utils.metrics.task_memory import get_task_memory_observer
 
 
 class TicketLogContentTooLargeError(Exception):
@@ -366,6 +372,8 @@ class TicketLogPullService:
             "maxSearchSeconds": 30,
             "maxSearchFileCount": 1000,
             "maxPythonSearchBytes": 268435456,
+            "maxConcurrentSearches": 2,
+            "maxSearchLineBytes": 524288,
             "postDownloadExtractEnabled": False,
             "postDownloadVersionExtractEnabled": False,
             "postDownloadIndexEnabled": False,
@@ -450,6 +458,12 @@ class TicketLogPullService:
         normalized["maxSearchFileCount"] = max(cls._parse_positive_int(normalized.get("maxSearchFileCount"), 1000), 10)
         normalized["maxPythonSearchBytes"] = max(
             cls._parse_positive_int(normalized.get("maxPythonSearchBytes"), 268435456), 10485760
+        )
+        normalized["maxConcurrentSearches"] = min(
+            max(cls._parse_positive_int(normalized.get("maxConcurrentSearches"), 2), 1), 8
+        )
+        normalized["maxSearchLineBytes"] = min(
+            max(cls._parse_positive_int(normalized.get("maxSearchLineBytes"), 524288), 1024), 4194304
         )
         normalized["postDownloadExtractEnabled"] = bool(normalized.get("postDownloadExtractEnabled"))
         normalized["postDownloadVersionExtractEnabled"] = bool(normalized.get("postDownloadVersionExtractEnabled"))
@@ -811,14 +825,9 @@ class TicketLogPullService:
             existing_store_map: dict[tuple[str, str, str], TicketLogPullStoreConfig] = {}
             if normalized_mode == "overwrite":
                 deleted_count = TicketLogPullDao.delete_all_store_configs(query_db)
-                cls._log_chain_step(
-                    query_db,
-                    ticket_id=None,
-                    record_id=None,
-                    step="store-import",
-                    status="overwrite",
-                    reason=f"覆盖导入前清空旧数据 {deleted_count} 条",
-                    detail={"deletedCount": deleted_count},
+                query_db.commit()
+                logger.info(
+                    f"门店配置导入-覆盖模式：清空旧数据 {deleted_count} 条"
                 )
             else:
                 # 先把已有配置放入内存，避免逐行查库和重复 flush。
@@ -835,71 +844,59 @@ class TicketLogPullService:
                 "importMode": normalized_mode,
             }
             now = datetime.now()
-            for row_index, row in rows:
-                try:
-                    store = cls._build_store_config_entity(row, now)
-                    match_key = cls._build_store_config_match_key(store)
-                    if not any(match_key):
-                        raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
+            # 每 BATCH_SIZE 条提交一次，避免单次事务过大导致超时
+            BATCH_SIZE = 100
+            for batch_start in range(0, len(rows), BATCH_SIZE):
+                batch = rows[batch_start:batch_start + BATCH_SIZE]
+                for row_index, row in batch:
+                    try:
+                        store = cls._build_store_config_entity(row, now)
+                        match_key = cls._build_store_config_match_key(store)
+                        if not any(match_key):
+                            raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
 
-                    existing = existing_store_map.get(match_key)
-                    if existing:
-                        for field in (
-                            "group_no",
-                            "vender_no",
-                            "region_no",
-                            "org_no",
-                            "org_name",
-                            "sap_org_no",
-                            "platform_no",
-                            "parent_org_no",
-                            "perm_node_id",
-                            "org_type",
-                            "company_no",
-                            "city_no",
-                            "biz_type_no",
-                            "status",
-                            "created",
-                            "modifid",
-                            "open_date",
-                            "language_desc",
-                        ):
-                            setattr(existing, field, getattr(store, field))
-                        saved = existing
-                        summary["updatedCount"] += 1
-                    else:
-                        query_db.add(store)
-                        existing_store_map[match_key] = store
-                        saved = store
-                        summary["insertedCount"] += 1
+                        existing = existing_store_map.get(match_key)
+                        if existing:
+                            for field in (
+                                "group_no",
+                                "vender_no",
+                                "region_no",
+                                "org_no",
+                                "org_name",
+                                "sap_org_no",
+                                "platform_no",
+                                "parent_org_no",
+                                "perm_node_id",
+                                "org_type",
+                                "company_no",
+                                "city_no",
+                                "biz_type_no",
+                                "status",
+                                "created",
+                                "modifid",
+                                "open_date",
+                                "language_desc",
+                            ):
+                                setattr(existing, field, getattr(store, field))
+                            summary["updatedCount"] += 1
+                        else:
+                            query_db.add(store)
+                            existing_store_map[match_key] = store
+                            summary["insertedCount"] += 1
 
-                    cls._log_chain_step(
-                        query_db,
-                        ticket_id=None,
-                        record_id=int(saved.id) if getattr(saved, "id", None) else None,
-                        step="store-import",
-                        status="success",
-                        reason="覆盖保存完成" if existing else "新增保存完成",
-                        detail={
-                            "row": row_index,
-                            "venderNo": saved.vender_no,
-                            "orgNo": saved.org_no,
-                            "sapOrgNo": saved.sap_org_no,
-                            "importMode": normalized_mode,
-                        },
-                    )
-                except Exception as exc:
-                    summary["failedRows"].append({"row": row_index, "reason": str(exc)})
-                    cls._log_chain_step(
-                        query_db,
-                        ticket_id=None,
-                        record_id=None,
-                        step="store-import",
-                        status="failed",
-                        reason=str(exc),
-                        detail={"row": row_index},
-                    )
-            query_db.commit()
+                    except Exception as exc:
+                        summary["failedRows"].append({"row": row_index, "reason": str(exc)})
+                        logger.warning(
+                            f"门店配置导入-第 {row_index} 行失败：{exc}"
+                        )
+                # 每批结束后提交一次，避免 session 膨胀和单次 commit 超时
+                query_db.commit()
+                logger.info(
+                    f"门店配置导入-已提交批次 batch_start={batch_start}，"
+                    f"当前累计 新增={summary['insertedCount']} "
+                    f"更新={summary['updatedCount']} "
+                    f"失败={len(summary['failedRows'])}"
+                )
             return CrudResponseModel(is_success=True, message="门店配置导入完成", result=summary)
         except Exception:
             query_db.rollback()
@@ -1332,7 +1329,7 @@ class TicketLogPullService:
         return normalize_ticket_version_key(match.group(1))
 
     @staticmethod
-    def _update_ticket_version_id(cls, query_db: Session, ticket_id: int, version_key: str) -> int | None:
+    def _update_ticket_version_id(query_db: Session, ticket_id: int, version_key: str) -> int | None:
         """
         将日志中的版本文本解析为工单发生版本ID。
 
@@ -1452,6 +1449,7 @@ class TicketLogPullService:
             message=message,
             detail=detail,
             notify_config=notify_config,
+            stage="auto_ai_analysis",
         )
 
     @staticmethod
@@ -1507,6 +1505,7 @@ class TicketLogPullService:
             message=message,
             detail=detail,
             notify_config=notify_config,
+            stage="log_pull",
         )
 
     @classmethod
@@ -1815,6 +1814,124 @@ class TicketLogPullService:
                     logger.warning(f"删除重新截取产生的临时文件失败: {archive_path}")
 
     @classmethod
+    def _normalize_pull_identity(cls, raw_identity: dict[str, Any]) -> str:
+        """
+        归一化影响日志内容的拉取参数签名，忽略通知和自动 AI 等自动化元数据。
+        :param raw_identity: 原始拉取参数字典
+        :return: 稳定可比较的签名字符串
+        """
+        normalized: dict[str, Any] = {}
+        for key in sorted(raw_identity):
+            value = raw_identity.get(key)
+            if isinstance(value, datetime):
+                normalized[key] = value.replace(microsecond=0).isoformat(sep=" ")
+            elif isinstance(value, date):
+                normalized[key] = value.isoformat()
+            elif value in (None, ""):
+                normalized[key] = None
+            elif isinstance(value, str):
+                normalized[key] = value.strip()
+            else:
+                normalized[key] = value
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def _build_pull_identity_from_payload(cls, payload: TicketLogPullCreateModel) -> str:
+        """
+        基于创建参数生成拉取签名，用于自动化去重。
+        :param payload: 拉取创建模型
+        :return: 当前请求的参数签名
+        """
+        log_begin_time, log_end_time = cls._resolve_log_time_range(payload)
+        raw_identity = {
+            "environment": str(payload.environment or "").strip() or None,
+            "vendorId": int(payload.vendor_id),
+            "storeId": str(payload.store_id or "").strip(),
+            "posNo": int(payload.pos_no),
+            "commandDataType": int(payload.command_data_type or 1),
+            "modifyTime": payload.modify_time,
+            "path": payload.path,
+            "fileMaxSize": cls._parse_positive_int(payload.file_max_size, 500),
+            "zipMaxSize": cls._parse_positive_int(payload.zip_max_size, 500),
+            "logBeginTime": log_begin_time,
+            "logEndTime": log_end_time,
+        }
+        return cls._normalize_pull_identity(raw_identity)
+
+    @classmethod
+    def _build_pull_identity_from_record(cls, record: TicketLogPullRecord) -> str:
+        """
+        基于历史成功记录生成拉取签名，供自动化复用时比对。
+        :param record: 成功的日志拉取记录
+        :return: 历史记录的参数签名
+        """
+        command_content = (
+            dict(record.command_content)
+            if isinstance(record.command_content, dict)
+            else cls._json_loads(record.command_content, {})
+        )
+        if not isinstance(command_content, dict):
+            command_content = {}
+        raw_identity = {
+            "environment": str(record.environment or "").strip() or None,
+            "vendorId": int(record.vendor_id),
+            "storeId": str(record.store_id or "").strip(),
+            "posNo": int(record.pos_no),
+            "commandDataType": int(record.command_data_type or 1),
+            "modifyTime": cls._first_present_value(command_content, "modifyTime", "modify_time"),
+            "path": cls._first_present_value(command_content, "path"),
+            "fileMaxSize": cls._parse_positive_int(
+                cls._first_present_value(command_content, "fileMaxSize", "file_max_size"), 500
+            ),
+            "zipMaxSize": cls._parse_positive_int(
+                cls._first_present_value(command_content, "zipMaxSize", "zip_max_size"), 500
+            ),
+            "logBeginTime": (
+                cls._first_present_value(command_content, "logBeginTime", "log_begin_time") or record.log_begin_time
+            ),
+            "logEndTime": (
+                cls._first_present_value(command_content, "logEndTime", "log_end_time") or record.log_end_time
+            ),
+        }
+        return cls._normalize_pull_identity(raw_identity)
+
+    @classmethod
+    def find_matching_success_record(
+        cls, query_db: Session, ticket_id: int, payload: TicketLogPullCreateModel
+    ) -> TicketLogPullRecord | None:
+        """
+        查询相同拉取参数下最近一条成功记录，供自动化跳过重复拉取。
+        :param query_db: 数据库会话
+        :param ticket_id: 工单ID
+        :param payload: 当前拉取参数
+        :return: 命中的成功记录，未命中返回 None
+        """
+        target_signature = cls._build_pull_identity_from_payload(payload)
+        candidates = TicketLogPullDao.list_success_records_by_pull_identity(
+            query_db,
+            ticket_id=ticket_id,
+            environment=payload.environment,
+            vendor_id=int(payload.vendor_id),
+            store_id=str(payload.store_id or "").strip(),
+            pos_no=int(payload.pos_no),
+            command_data_type=int(payload.command_data_type or 1),
+        )
+        for record in candidates:
+            if cls._build_pull_identity_from_record(record) == target_signature:
+                return record
+        return None
+
+    @classmethod
+    def trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> dict[str, Any]:
+        """
+        触发指定日志记录的自动 AI 分析，并返回结构化结果。
+        :param db: 数据库会话
+        :param record_id: 日志拉取记录ID
+        :return: 自动 AI 处理结果摘要
+        """
+        return cls._trigger_auto_ai_analysis(db, record_id)
+
+    @classmethod
     def create_log_pull_services(
         cls, query_db: Session, ticket_id: int | None, payload: TicketLogPullCreateModel, current_user: CurrentUserModel
     ) -> CrudResponseModel:
@@ -1867,6 +1984,19 @@ class TicketLogPullService:
                 reason="日志开始时间不能晚于结束时间",
             )
             return CrudResponseModel(is_success=False, message="日志开始时间不能晚于结束时间")
+
+        # 校验门店：store_id 不能为空，否则传给外部接口必然失败
+        resolved_store_id = str(payload.store_id or "").strip()
+        if not resolved_store_id:
+            cls._log_chain_step(
+                query_db,
+                ticket_id=resolved_ticket_id,
+                record_id=None,
+                step="create-log-pull",
+                status="skipped",
+                reason="门店（storeId）不能为空，请输入正确的 org_no",
+            )
+            return CrudResponseModel(is_success=False, message="门店（storeId）不能为空，请输入正确的 org_no")
 
         try:
             record = TicketLogPullDao.add_record(
@@ -2302,6 +2432,17 @@ class TicketLogPullService:
         :param record_id: 记录ID
         :return: 无
         """
+        observation = get_task_memory_observer("api").start(
+            {
+                "task_id": record_id,
+                "task_key": "ticket_log_pull",
+                "task_family": "ticket_log_pull",
+                "queue_name": "ticket-log-pull",
+                "owner_type": "ticket",
+                "trigger_type": "background",
+            }
+        )
+        status = "success"
         try:
             with SessionLocal() as db:
                 record = TicketLogPullDao.get_record_by_id(db, record_id)
@@ -2318,10 +2459,23 @@ class TicketLogPullService:
                 }:
                     cls._process_download(db, record_id)
         except Exception as exc:
-            logger.exception(exc)
+            status = "failed"
+            logger.exception(f"日志拉取记录执行失败: record_id={record_id}, error={exc}")
         finally:
             with cls._executor_lock:
                 cls._active_record_ids.discard(record_id)
+            get_task_memory_observer("api").finish(
+                {
+                    "task_id": record_id,
+                    "task_key": "ticket_log_pull",
+                    "task_family": "ticket_log_pull",
+                    "queue_name": "ticket-log-pull",
+                    "owner_type": "ticket",
+                    "trigger_type": "background",
+                },
+                observation,
+                status,
+            )
             gc.collect()
 
     @classmethod
@@ -2848,36 +3002,39 @@ class TicketLogPullService:
 
 
     @classmethod
-    def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> None:
+    def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> dict[str, Any]:
         """
-        根据日志拉取记录中的自动化配置触发 AI 分析。
+        根据日志拉取记录中的自动化配置触发 AI 分析，并返回结构化结果。
         :param db: 数据库会话
         :param record_id: 日志拉取记录ID
-        :return: 无
+        :return: 自动 AI 处理结果摘要
         """
         record = TicketLogPullDao.get_record_by_id(db, record_id)
         if not record or not isinstance(record.command_content, dict):
+            reason = "缺少可用的命令内容"
             cls._log_chain_step(
                 db,
                 ticket_id=getattr(record, "ticket_id", None),
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="缺少可用的命令内容",
+                reason=reason,
             )
-            return
+            return {"status": "skipped", "reason": reason, "recordId": str(record_id)}
         if not record.ticket_id:
+            reason = "未关联工单"
             cls._log_chain_step(
                 db,
                 ticket_id=None,
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="未关联工单",
+                reason=reason,
             )
-            return
+            return {"status": "skipped", "reason": reason, "recordId": str(record.id)}
         ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
         if not ticket:
+            reason = "工单不存在"
             logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单不存在")
             cls._log_chain_step(
                 db,
@@ -2885,9 +3042,14 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="工单不存在",
+                reason=reason,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         version_id = ticket.affected_version_id
         record_notify_config = cls._extract_record_notify_config(record)
         automation = record.command_content.get("_automation")
@@ -2900,16 +3062,47 @@ class TicketLogPullService:
             agent_code = str(record.command_content.get("aiAgentCode") or "").strip()
             provider_code = str(record.command_content.get("aiProviderCode") or "").strip()
         if not auto_ai_enabled:
+            reason = "未启用自动AI"
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="未启用自动AI",
+                reason=reason,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
+        auto_ai_condition = TicketAutoAiAnalysisConditionService.resolve_condition(record.command_content)
+        condition_skip = TicketAutoAiAnalysisConditionService.check_conditions(db, ticket, auto_ai_condition)
+        if condition_skip:
+            skip_reason, skip_detail = condition_skip
+            logger.info(
+                f"日志拉取记录[{record_id}] 自动AI分析跳过 | ticket_id={record.ticket_id}, "
+                f"reason={skip_reason}, detail={skip_detail}"
+            )
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="skipped",
+                reason=skip_reason,
+                detail=skip_detail,
+            )
+            return {
+                "status": "skipped",
+                "reason": skip_reason,
+                "detail": skip_detail,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         if not agent_code and not provider_code:
+            reason = "未填写Provider或Agent"
             logger.warning(f"日志拉取记录[{record_id}] 已配置自动AI但未填写Provider或Agent")
             cls._log_chain_step(
                 db,
@@ -2917,7 +3110,7 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="未填写Provider或Agent",
+                reason=reason,
             )
             cls._notify_automation(
                 db,
@@ -2927,8 +3120,22 @@ class TicketLogPullService:
                 detail=f"record_id={record_id}",
                 notify_config=record_notify_config,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         if not version_id:
+            version_id = cls.ensure_ticket_version_id_from_log(db, record.ticket_id, record.id)
+            if version_id:
+                ticket = TicketDao.get_ticket_by_id(db, record.ticket_id) or ticket
+                logger.info(
+                    f"日志拉取记录[{record_id}] 自动AI触发前已从日志回填发生版本 | "
+                    f"ticket_id={record.ticket_id}, version_id={version_id}"
+                )
+        if not version_id:
+            reason = "工单缺少发生版本"
             logger.warning(f"日志拉取记录[{record_id}] 自动AI触发失败，工单缺少发生版本")
             cls._log_chain_step(
                 db,
@@ -2936,7 +3143,7 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="skipped",
-                reason="工单缺少发生版本",
+                reason=reason,
             )
             cls._notify_automation(
                 db,
@@ -2946,7 +3153,12 @@ class TicketLogPullService:
                 detail=f"record_id={record_id}",
                 notify_config=record_notify_config,
             )
-            return
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
         try:
             from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel
             from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
@@ -2963,36 +3175,71 @@ class TicketLogPullService:
             )
             result = TicketAiAnalysisService.create_analysis_task_services(db, record.ticket_id, request, None)
             if not result.is_success:
+                failure_reason = str(result.message or "自动AI分析任务提交未成功").strip()
                 logger.warning(
-                    "日志拉取记录[%s] 自动AI分析未成功提交 | ticket_id=%s, message=%s",
-                    record_id,
-                    record.ticket_id,
-                    result.message,
+                    f"日志拉取记录[{record_id}] 自动AI分析未成功提交 | "
+                    f"ticket_id={record.ticket_id}, reason={failure_reason}"
                 )
-                cls._notify_automation(
-                    db,
-                    record.ticket_id,
-                    status="failed",
-                    message=f"日志拉取后自动AI提交失败：{result.message}",
-                    detail=f"record_id={record_id}, version_id={version_id}",
-                    notify_config=record_notify_config,
-                )
-            else:
                 cls._log_chain_step(
                     db,
                     ticket_id=record.ticket_id,
                     record_id=record_id,
                     step="auto-ai",
-                    status="submitted",
-                    reason="自动AI分析已提交",
+                    status="failed",
+                    reason=failure_reason,
                     detail={
                         "versionId": version_id,
                         "agentCode": agent_code,
                         "providerCode": provider_code,
-                        "taskId": getattr(result.result, "task_id", None),
+                        "failureStage": "submit",
                     },
                 )
+                cls._notify_automation(
+                    db,
+                    record.ticket_id,
+                    status="failed",
+                    message="日志拉取后自动AI提交失败",
+                    detail=failure_reason,
+                    notify_config=record_notify_config,
+                )
+                db.commit()
+                return {
+                    "status": "failed",
+                    "reason": failure_reason,
+                    "failureStage": "submit",
+                    "recordId": str(record.id),
+                    "ticketId": str(record.ticket_id),
+                    "versionId": str(version_id),
+                    "agentCode": agent_code or None,
+                    "providerCode": provider_code or None,
+                }
+
+            task_id = getattr(result.result, "task_id", None)
+            cls._log_chain_step(
+                db,
+                ticket_id=record.ticket_id,
+                record_id=record_id,
+                step="auto-ai",
+                status="submitted",
+                reason="自动AI分析已提交",
+                detail={
+                    "versionId": version_id,
+                    "agentCode": agent_code,
+                    "providerCode": provider_code,
+                    "taskId": task_id,
+                },
+            )
+            return {
+                "status": "submitted",
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+                "versionId": str(version_id),
+                "agentCode": agent_code or None,
+                "providerCode": provider_code or None,
+                "taskId": str(task_id) if task_id is not None else None,
+            }
         except Exception as exc:
+            failure_reason = str(exc)
             logger.exception(f"日志拉取记录[{record_id}] 触发自动AI分析失败: {exc}")
             cls._log_chain_step(
                 db,
@@ -3000,7 +3247,7 @@ class TicketLogPullService:
                 record_id=record_id,
                 step="auto-ai",
                 status="failed",
-                reason=str(exc),
+                reason=failure_reason,
             )
             cls._notify_automation(
                 db,
@@ -3010,6 +3257,12 @@ class TicketLogPullService:
                 detail=f"record_id={record_id}, error={exc}",
                 notify_config=record_notify_config,
             )
+            return {
+                "status": "failed",
+                "reason": failure_reason,
+                "recordId": str(record.id),
+                "ticketId": str(record.ticket_id),
+            }
 
     @classmethod
     def _submit_external_request(cls, db: Session, record: TicketLogPullRecord) -> None:

@@ -5,27 +5,35 @@ from modules.ticket.util.ticket_log_preview_util import build_ticket_log_search_
 
 
 class TicketLogPreviewUtilTests(unittest.TestCase):
-    """验证日志搜索结果预览内容的截断边界。"""
+    """验证兼容预览函数不再执行固定字符截断。"""
 
-    def test_build_search_hit_previews_keeps_first_500_characters(self):
-        """超长命中行应只返回行首 500 个字符，并保留完整长度和定位信息。"""
+    def test_build_search_hit_previews_passes_through_long_content(self):
+        """已按搜索配置处理的超长命中行应保持原内容和截断标记。"""
         content = "a" * 600
-        hit = TicketLogSearchHitModel(file="pos.log", line=18, content=content)
+        hit = TicketLogSearchHitModel(
+            file="pos.log", line=18, content=content, content_length=120, content_truncated=True
+        )
+        hits = [hit]
 
-        preview = build_ticket_log_search_hit_previews([hit])[0]
+        result = build_ticket_log_search_hit_previews(hits)
 
-        self.assertEqual(preview.content, content[:500])
-        self.assertEqual(preview.content_length, 600)
-        self.assertTrue(preview.content_truncated)
-        self.assertEqual((preview.file, preview.line), ("pos.log", 18))
-        self.assertEqual(hit.content, content)
+        self.assertIs(result, hits)
+        self.assertIs(result[0], hit)
+        self.assertEqual(result[0].content, content)
+        self.assertEqual(result[0].content_length, 120)
+        self.assertTrue(result[0].content_truncated)
 
-    def test_build_search_hit_previews_keeps_short_content(self):
-        """未超过预览上限的命中行应原样返回且标记为未截断。"""
+    def test_build_search_hit_previews_passes_through_short_content(self):
+        """短内容也应直接透传，不生成额外对象。"""
         hit = TicketLogSearchHitModel(file="pos.log", line=19, content="正常日志")
+        hits = [hit]
 
-        preview = build_ticket_log_search_hit_previews([hit])[0]
+        result = build_ticket_log_search_hit_previews(hits)
 
-        self.assertEqual(preview.content, "正常日志")
-        self.assertEqual(preview.content_length, 4)
-        self.assertFalse(preview.content_truncated)
+        self.assertIs(result, hits)
+        self.assertIs(result[0], hit)
+        self.assertEqual(result[0].content, "正常日志")
+
+
+if __name__ == "__main__":
+    unittest.main()

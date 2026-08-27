@@ -27,6 +27,7 @@ from module_task.celery_job_models import CeleryPeriodicTask, CeleryTaskExecutio
 from module_task.celery_job_service import CeleryJobService
 from module_task.task_register import JOB_REGISTRY
 from utils.log_util import logger
+from utils.metrics.task_memory import get_task_memory_observer
 
 TASK_LOCK_PREFIX = "celery:task:lock"
 TASK_STATE_PREFIX = "celery:task:state"
@@ -417,6 +418,7 @@ def _build_execution_log_fields(
         "queue_name": str(payload.get("queue_name") or "celery"),
         "trigger_type": str(payload.get("trigger_type") or "scheduler"),
         "celery_task_id": celery_task_id,
+        "trace_id": str(payload.get("trace_id") or "").strip() or None,
         "schedule_desc": str(payload.get("schedule_desc") or ""),
         "status": status,
         "message": message,
@@ -555,11 +557,24 @@ def execute_registered_job(self, payload: dict):
     lock_acquired = False
     started_at = datetime.now()
     runtime_client = None
+    memory_observer = get_task_memory_observer()
+    memory_observation = None
+    memory_context = {
+        "task_id": task_id,
+        "celery_task_id": self.request.id,
+        "trace_id": trace_id,
+        "task_key": payload.get("task_key"),
+        "task_family": str(payload.get("task_key") or "registered_job").split(".")[-1],
+        "queue_name": payload.get("queue_name"),
+        "owner_type": payload.get("owner_type"),
+        "trigger_type": payload.get("trigger_type"),
+    }
 
     try:
         payload = dict(payload)
         payload["trace_id"] = trace_id
         payload["celery_task_id"] = self.request.id
+        memory_observation = memory_observer.start(memory_context)
 
         if not allow_concurrent:
             lock_client = _build_lock_client()
@@ -627,6 +642,9 @@ def execute_registered_job(self, payload: dict):
         final_status = str(result.get("status") or "failed")
         final_message = str(result.get("message") or "")
         final_exception = str(result.get("exception_info") or "")
+        if memory_observation:
+            memory_observer.finish(memory_context, memory_observation, final_status)
+            memory_observation = None
         if final_status != "success":
             logger.error(
                 f"任务执行结束[{task_id}]，状态={final_status}，消息={final_message}，异常={final_exception}"
@@ -659,6 +677,9 @@ def execute_registered_job(self, payload: dict):
         finished_at = datetime.now()
         duration_ms = int((finished_at - started_at).total_seconds() * 1000)
         logger.exception(f"任务执行失败[{task_id}]：{exc}")
+        if memory_observation:
+            memory_observer.finish(memory_context, memory_observation, "failed")
+            memory_observation = None
         _update_task_status(
             task_id,
             status="failed",
@@ -685,6 +706,8 @@ def execute_registered_job(self, payload: dict):
         except Exception as exc:
             logger.warning(f"释放任务锁失败[{task_id}]：{exc}")
         finally:
+            if memory_observation:
+                memory_observer.finish(memory_context, memory_observation, "failed")
             request_id_var.reset(token)
 
 

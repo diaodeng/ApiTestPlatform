@@ -65,12 +65,14 @@ async def init_create_table():
     _ensure_large_sys_config_value_column()
     _ensure_ticket_log_pull_ticket_id_nullable()
     _ensure_ticket_log_pull_record_poll_deadline_column()
+    _ensure_celery_task_execution_log_trace_id_column()
     _ensure_celery_periodic_task_execution_mode_column()
     _ensure_hrm_project_business_code_column()
     _ensure_hrm_module_business_code_column()
     _ensure_ticket_role_columns()
     _ensure_ticket_classification_columns()
     _ensure_ai_provider_preferred_executor_column()
+    _ensure_ticket_ai_analysis_token_columns()
     _ensure_user_config_unique_index()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
@@ -192,6 +194,54 @@ def _ensure_ticket_log_pull_record_poll_deadline_column():
             )
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_log_pull_record.poll_deadline_at 字段失败: {exc}")
+
+
+def _ensure_celery_task_execution_log_trace_id_column():
+    """
+    为 celery_task_execution_log 补齐 trace_id 字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                result = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'celery_task_execution_log'
+                              AND COLUMN_NAME = 'trace_id'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if result:
+                    return
+                logger.info("检测到 celery_task_execution_log 缺少 trace_id 列，自动补齐")
+                connection.execute(
+                    text(
+                        """
+                        ALTER TABLE celery_task_execution_log
+                        ADD COLUMN trace_id VARCHAR(64) NULL COMMENT '任务链路追踪ID' AFTER celery_task_id
+                        """
+                    )
+                )
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(celery_task_execution_log)")).mappings().all()
+            existing_columns = {str(row.get("name") or "") for row in rows}
+            if "trace_id" in existing_columns:
+                return
+            logger.info("检测到 sqlite celery_task_execution_log.trace_id 缺少，自动补齐")
+            connection.execute(text("ALTER TABLE celery_task_execution_log ADD COLUMN trace_id VARCHAR(64)"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 celery_task_execution_log.trace_id 字段失败: {exc}")
 
 
 def _ensure_celery_periodic_task_execution_mode_column():
@@ -501,6 +551,64 @@ def _ensure_ai_provider_preferred_executor_column():
             )
     except Exception as exc:
         logger.warning(f"检查或升级 sys_ai_provider.preferred_executor 字段失败: {exc}")
+
+
+def _ensure_ticket_ai_analysis_token_columns():
+    """
+    为 ticket_ai_analysis_task 补齐 Token 统计与审计关联字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    column_specs = [
+        ("audit_execution_id", "BIGINT", "AI审计执行ID", "AFTER analysis_context"),
+        ("input_token_count", "INT", "输入Token数", "AFTER audit_execution_id"),
+        ("output_token_count", "INT", "输出Token数", "AFTER input_token_count"),
+        ("total_token_count", "INT", "总Token数", "AFTER output_token_count"),
+    ]
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                rows = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'ticket_ai_analysis_task'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                existing_columns = {str(row.get("COLUMN_NAME") or "") for row in rows}
+                for column_name, column_type, column_comment, column_position in column_specs:
+                    if column_name in existing_columns:
+                        continue
+                    logger.info(f"检测到 ticket_ai_analysis_task 缺少 {column_name} 列，自动补齐")
+                    connection.execute(
+                        text(
+                            f"""
+                            ALTER TABLE ticket_ai_analysis_task
+                            ADD COLUMN {column_name} {column_type} NULL COMMENT '{column_comment}' {column_position}
+                            """
+                        )
+                    )
+                    existing_columns.add(column_name)
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(ticket_ai_analysis_task)")).mappings().all()
+            existing_columns = {str(row.get("name") or "") for row in rows}
+            for column_name, column_type, _column_comment, _column_position in column_specs:
+                if column_name in existing_columns:
+                    continue
+                logger.info(f"检测到 sqlite ticket_ai_analysis_task.{column_name} 缺少，自动补齐")
+                connection.execute(text(f"ALTER TABLE ticket_ai_analysis_task ADD COLUMN {column_name} {column_type}"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket_ai_analysis_task token 统计字段失败: {exc}")
 
 
 def _ensure_user_config_unique_index():

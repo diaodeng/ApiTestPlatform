@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import codecs
+import inspect
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +32,28 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
 )
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
+from modules.ticket.util.ticket_log_search_limiter import TicketLogSearchLimiter
 from utils.log_util import logger
+
+_SEARCH_LIMITER = TicketLogSearchLimiter()
+
+
+def _limit_search_concurrency(method):
+    """
+    为同步日志搜索入口增加进程内并发限制。
+    :param method: 原始搜索方法
+    :return: 受并发限制包装的方法
+    """
+    @wraps(method)
+    def wrapper(cls, *args, **kwargs):
+        bound = inspect.signature(method).bind_partial(cls, *args, **kwargs)
+        db = bound.arguments.get("db")
+        runtime_config = cls._get_runtime_config(db)
+        max_concurrent = runtime_config.get("maxConcurrentSearches", 2)
+        with _SEARCH_LIMITER.slot(max_concurrent):
+            return method(cls, *args, **kwargs)
+
+    return wrapper
 
 
 class LogService:
@@ -45,6 +70,9 @@ class LogService:
     LINE_INDEX_ENCODING_VERSION = 2
     SEARCH_MODE_ENV = "TICKET_LOG_SEARCH_MODE"
     CONTEXT_MODE_ENV = "TICKET_LOG_CONTEXT_MODE"
+    CONTEXT_LINE_TRUNCATE_ENV = "TICKET_LOG_CONTEXT_LINE_TRUNCATE"
+    # 上下文单行内容最大字符数，超过则截断，避免超大行导致 JSON 序列化与前端渲染卡顿
+    MAX_CONTEXT_LINE_LENGTH = 102400
     # rg 单次命令行文件数上限，超过后自动分批执行，避免 execve 参数过长导致进程启动失败
     RG_MAX_FILE_ARGS = 50
 
@@ -222,6 +250,7 @@ class LogService:
         return sorted(result, key=lambda item: item.file)
 
     @classmethod
+    @_limit_search_concurrency
     def search(
         cls,
         ticket_id: int,
@@ -377,6 +406,8 @@ class LogService:
                     "<target_file...>",
                 ],
                 "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
             },
         )
         return cls._search_by_rg_keywords(
@@ -399,6 +430,7 @@ class LogService:
         )
 
     @classmethod
+    @_limit_search_concurrency
     def search_keywords(
         cls,
         ticket_id: int,
@@ -479,6 +511,8 @@ class LogService:
                 args={
                     "reason": "env_python",
                     "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                    "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
                     "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
                     "ignoreCase": ignore_case,
                     "wordRegexp": word_regexp,
@@ -574,6 +608,8 @@ class LogService:
                     "<target_file...>",
                 ],
                 "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
             },
         )
         hits = cls._search_by_rg_keywords(
@@ -735,6 +771,7 @@ class LogService:
             ticket_id, record_id, file_path, resolved_config
         )
         max_scan_bytes = cls._config_int(resolved_config, "maxPythonSearchBytes", 268435456)
+        max_line_bytes = cls._config_int(resolved_config, "maxSearchLineBytes", 524288)
         scanned_bytes = 0
         for target_file in resolved_target_files:
             if len(hits) >= limit:
@@ -751,10 +788,15 @@ class LogService:
                     )
                     if not matched_keywords:
                         continue
+                    display_content, content_length, content_truncated = cls._truncate_search_content(
+                        content, max_line_bytes
+                    )
                     hit = TicketLogSearchHitModel(
                         file=target_file,
                         line=line_no,
-                        content=content.rstrip("\r\n"),
+                        content=display_content,
+                        content_length=content_length,
+                        content_truncated=content_truncated,
                         matched_keywords=matched_keywords,
                     )
                     if with_context:
@@ -890,8 +932,6 @@ class LogService:
         :param max_seconds: 管道最大执行秒数
         :return: 搜索命中列表
         """
-        hits: list[TicketLogSearchHitModel] = []
-        seen_keys: set[tuple[str, int]] = set()
         first_keyword = keywords[0]
         # 构建 rg 第一段命令：从指定文件中搜索关键字
         first_command = [
@@ -920,14 +960,40 @@ class LogService:
             for index, keyword in enumerate(keywords[1:], start=1):
                 command = [executable, "--color", "never"]
                 if index == len(keywords) - 1:
+                    command.extend(cls._rg_max_columns_args(runtime_config))
                     command.extend(["-m", str(limit)])
                 command.append(cls._build_rg_output_content_pattern(keyword, ignore_case, word_regexp))
                 commands.append(command)
         else:
-            commands.append([executable, "--color", "never", "-m", str(limit), "."])
+            commands.append(
+                [
+                    executable,
+                    "--color",
+                    "never",
+                    *cls._rg_max_columns_args(runtime_config),
+                    "-m",
+                    str(limit),
+                    ".",
+                ]
+            )
 
         try:
-            stdout_text = cls._run_rg_pipeline(commands, extract_dir, max_seconds)
+            hits = cls._collect_rg_hits(
+                commands=commands,
+                extract_dir=extract_dir,
+                timeout_seconds=max_seconds,
+                ticket_id=ticket_id,
+                keywords=keywords,
+                search_mode=search_mode,
+                context_before=context_before,
+                context_after=context_after,
+                limit=limit,
+                with_context=with_context,
+                record_id=record_id,
+                ignore_case=ignore_case,
+                word_regexp=word_regexp,
+                max_line_bytes=cls._config_int(runtime_config, "maxSearchLineBytes", 524288),
+            )
         except subprocess.TimeoutExpired:
             logger.warning(
                 f"rg 日志搜索达到保护超时，日志搜索降级为 Python，ticket_id={ticket_id}，record_id={record_id}"
@@ -948,6 +1014,8 @@ class LogService:
                 args={
                     "reason": "rg_timeout",
                     "maxSearchSeconds": runtime_config.get("maxSearchSeconds"),
+                    "maxSearchLineBytes": runtime_config.get("maxSearchLineBytes"),
+                    "maxConcurrentSearches": runtime_config.get("maxConcurrentSearches"),
                     "maxPythonSearchBytes": runtime_config.get("maxPythonSearchBytes"),
                     "ignoreCase": ignore_case,
                     "wordRegexp": word_regexp,
@@ -1090,28 +1158,10 @@ class LogService:
                 cls._log_search_completed("python", ticket_id, record_id, len(fallback_hits), search_started_at)
             return fallback_hits
 
-        # 解析 rg 输出，去重并收集命中
-        for raw_line in stdout_text.splitlines():
-            if len(hits) >= limit:
-                break
-            hit = cls._parse_rg_line(raw_line)
-            if not hit:
-                continue
-            unique_key = (hit.file, hit.line)
-            if unique_key in seen_keys:
-                continue
-            matched_keywords = cls._match_keywords(
-                hit.content, keywords, search_mode, ignore_case=ignore_case, word_regexp=word_regexp
-            )
-            if not matched_keywords:
-                continue
-            hit.matched_keywords = matched_keywords
-            if with_context:
-                hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
-            hits.append(hit)
-            seen_keys.add(unique_key)
         if search_started_at is not None:
             cls._log_search_completed("rg", ticket_id, record_id, len(hits), search_started_at)
+        # 建议 OS 释放本次搜索读取文件的页缓存，避免多次搜索不同工单日志后内存持续增长
+        cls._release_page_cache(target_files, ticket_id, record_id)
         return hits
 
     @classmethod
@@ -1223,19 +1273,117 @@ class LogService:
             f"rg 分批搜索完成，共 {batch_count} 批，命中 {len(hits)} 条，"
             f"ticket_id={ticket_id}，record_id={record_id}"
         )
+        cls._release_page_cache(target_files, ticket_id, record_id)
         return hits
 
     @classmethod
-    def _run_rg_pipeline(cls, commands: list[list[str]], extract_dir: Path, timeout_seconds: int) -> str:
+    def _collect_rg_hits(
+        cls,
+        *,
+        commands: list[list[str]],
+        extract_dir: Path,
+        timeout_seconds: int,
+        ticket_id: int,
+        keywords: list[str],
+        search_mode: str,
+        context_before: int,
+        context_after: int,
+        limit: int,
+        with_context: bool,
+        record_id: int | None,
+        ignore_case: bool,
+        word_regexp: bool,
+        max_line_bytes: int,
+    ) -> list[TicketLogSearchHitModel]:
         """
-        使用管道串联多个 rg 进程，避免把中间匹配结果收集到 Python 内存。
+        流式消费 rg 最终输出并构造命中结果，避免整批 stdout 和拆分列表同时驻留内存。
+        :param commands: rg 命令链
+        :param extract_dir: 日志解压目录
+        :param timeout_seconds: 管道最大执行秒数
+        :param ticket_id: 工单ID
+        :param keywords: 已归一化的关键字列表
+        :param search_mode: 匹配模式
+        :param context_before: 前置上下文行数
+        :param context_after: 后置上下文行数
+        :param limit: 最大返回命中数
+        :param with_context: 是否直接返回上下文
+        :param record_id: 日志拉取记录ID
+        :param ignore_case: 是否忽略关键字大小写
+        :param word_regexp: 是否仅匹配完整单词
+        :param max_line_bytes: 单行最大输出字节数
+        :return: 搜索命中列表
+        """
+        hits: list[TicketLogSearchHitModel] = []
+        seen_keys: set[tuple[str, int]] = set()
+        output_stream = cls._run_rg_pipeline(commands, extract_dir, timeout_seconds)
+        try:
+            for raw_line in output_stream:
+                if len(hits) >= limit:
+                    break
+                hit = cls._parse_rg_line(raw_line, max_line_bytes=max_line_bytes)
+                if not hit:
+                    continue
+                unique_key = (hit.file, hit.line)
+                if unique_key in seen_keys:
+                    continue
+                # rg 管道链已确保最终输出的每一行都满足关键字匹配条件，
+                # 不需要 Python 侧再做 _match_keywords 二次校验。
+                # 前端不使用 matched_keywords 按命中粒度高亮，统一传入所有关键字。
+                hit.matched_keywords = keywords
+                if with_context:
+                    hit.context = cls.context(ticket_id, hit.file, hit.line, context_before, context_after, record_id)
+                hits.append(hit)
+                seen_keys.add(unique_key)
+        finally:
+            output_stream.close()
+        return hits
+
+    @classmethod
+    def _run_rg_pipeline(cls, commands: list[list[str]], extract_dir: Path, timeout_seconds: int) -> Iterator[str]:
+        """
+        使用管道串联多个 rg 进程，并逐行产出最后一段输出。
         :param commands: rg 命令链，第一段读取日志文件，后续段从 stdin 过滤
         :param extract_dir: 日志解压目录
         :param timeout_seconds: 管道最大执行秒数
-        :return: 最后一段 rg 的标准输出
+        :return: 最后一段 rg 的标准输出迭代器
         """
         processes: list[subprocess.Popen] = []
         previous_stdout = None
+        output_queue: queue.Queue[object] = queue.Queue(maxsize=64)
+        stream_end = object()
+        stop_event = threading.Event()
+        stderr_chunks: list[str] = []
+        output_reader: threading.Thread | None = None
+        stderr_reader: threading.Thread | None = None
+
+        def enqueue(item: object) -> None:
+            """向有界队列写入输出，停止清理时放弃未消费内容。"""
+            while not stop_event.is_set():
+                try:
+                    output_queue.put(item, timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
+
+        def read_output(stream) -> None:
+            """在线程中读取最终 rg 输出，避免主线程阻塞在无超时 readline。"""
+            try:
+                for line in iter(stream.readline, ""):
+                    enqueue(line)
+            except BaseException as exc:
+                enqueue(exc)
+            finally:
+                enqueue(stream_end)
+
+        def read_stderr(stream) -> None:
+            """后台读取最后一个 rg 的错误输出，避免 stderr 管道反压。"""
+            try:
+                text = stream.read()
+                if text:
+                    stderr_chunks.append(text)
+            except Exception:
+                return
+
         try:
             for index, command in enumerate(commands):
                 process = subprocess.Popen(
@@ -1252,17 +1400,78 @@ class LogService:
                     previous_stdout.close()
                 previous_stdout = process.stdout
                 processes.append(process)
-            stdout_text, stderr_text = processes[-1].communicate(timeout=timeout_seconds)
+
+            final_process = processes[-1]
+            output_reader = threading.Thread(
+                target=read_output,
+                args=(final_process.stdout,),
+                name="ticket-log-rg-stdout",
+                daemon=True,
+            )
+            output_reader.start()
+            if final_process.stderr is not None:
+                stderr_reader = threading.Thread(
+                    target=read_stderr,
+                    args=(final_process.stderr,),
+                    name="ticket-log-rg-stderr",
+                    daemon=True,
+                )
+                stderr_reader.start()
+
+            deadline = time.monotonic() + max(int(timeout_seconds), 1)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(commands[-1], timeout_seconds)
+                try:
+                    item = output_queue.get(timeout=remaining)
+                except queue.Empty as exc:
+                    raise subprocess.TimeoutExpired(commands[-1], timeout_seconds) from exc
+                if item is stream_end:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield str(item)
+
+            final_process.wait(timeout=max(deadline - time.monotonic(), 0.1))
             for process in processes[:-1]:
                 process.wait(timeout=1)
-            final_returncode = processes[-1].returncode
-            if final_returncode not in (0, 1):
-                raise RuntimeError(str(stderr_text or stdout_text or "rg 搜索失败").strip())
-            return stdout_text
+            if stderr_reader is not None:
+                stderr_reader.join(timeout=1)
+            stderr_text = "".join(stderr_chunks)
+            if final_process.returncode not in (0, 1):
+                raise RuntimeError(stderr_text.strip() or "rg 搜索失败")
         finally:
+            stop_event.set()
             for process in processes:
                 if process.poll() is None:
                     process.kill()
+            # 显式关闭最后一个进程的 stdout，确保 readline() 线程立即收到 EOF 退出
+            if processes and processes[-1].stdout is not None:
+                try:
+                    processes[-1].stdout.close()
+                except OSError:
+                    pass
+            for process in processes:
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+            if output_reader is not None:
+                output_reader.join(timeout=3)
+            if stderr_reader is not None:
+                stderr_reader.join(timeout=3)
+            for process in processes:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
 
     @staticmethod
     def _build_rg_output_content_pattern(keyword: str, ignore_case: bool, word_regexp: bool) -> str:
@@ -1315,6 +1524,7 @@ class LogService:
         """
         hits: list[TicketLogSearchHitModel] = []
         max_scan_bytes = cls._config_int(runtime_config, "maxPythonSearchBytes", 268435456)
+        max_line_bytes = cls._config_int(runtime_config, "maxSearchLineBytes", 524288)
         deadline = time.monotonic() + cls._config_int(runtime_config, "maxSearchSeconds", 30)
         scanned_bytes = 0
         for target_file in target_files:
@@ -1340,10 +1550,15 @@ class LogService:
                     )
                     if not matched_keywords:
                         continue
+                    display_content, content_length, content_truncated = cls._truncate_search_content(
+                        content, max_line_bytes
+                    )
                     hit = TicketLogSearchHitModel(
                         file=target_file,
                         line=line_no,
-                        content=content.rstrip("\r\n"),
+                        content=display_content,
+                        content_length=content_length,
+                        content_truncated=content_truncated,
                         matched_keywords=matched_keywords,
                     )
                     if with_context:
@@ -1450,6 +1665,8 @@ class LogService:
                 "maxSearchSeconds": 30,
                 "maxSearchFileCount": 1000,
                 "maxPythonSearchBytes": 268435456,
+                "maxConcurrentSearches": 2,
+                "maxSearchLineBytes": 524288,
             }
         return TicketLogPullService.get_storage_config_dict(db)
 
@@ -1522,6 +1739,31 @@ class LogService:
     def _config_int(config: dict[str, Any], key: str, default: int) -> int:
         """委托到 TicketLogArchiveUtil。"""
         return TicketLogArchiveUtil.config_int(config, key, default)
+
+    @staticmethod
+    def _truncate_search_content(content: str, max_bytes: int) -> tuple[str, int, bool]:
+        """
+        按 UTF-8 字节上限截断搜索结果内容，并返回实际返回内容长度。
+        :param content: 原始日志行内容
+        :param max_bytes: 单行最大输出字节数
+        :return: 截断后的内容、返回内容字符长度、是否截断
+        """
+        text = str(content or "").rstrip("\r\n")
+        encoded = text.encode("utf-8", errors="replace")
+        if len(encoded) <= max_bytes:
+            return text, len(text), False
+        truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
+        return truncated, len(truncated), True
+
+    @staticmethod
+    def _rg_max_columns_args(runtime_config: dict[str, Any]) -> list[str]:
+        """
+        构造最终 rg 输出阶段的单行字节限制参数。
+        :param runtime_config: 日志搜索运行保护配置
+        :return: rg 命令参数
+        """
+        max_line_bytes = LogService._config_int(runtime_config, "maxSearchLineBytes", 524288)
+        return ["--max-columns", str(max_line_bytes), "--max-columns-preview"]
 
     @staticmethod
     def _normalize_keywords(keywords: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -1779,7 +2021,7 @@ class LogService:
         total: int,
         before_count: int,
         after_count: int,
-        current_lines: list[tuple[int, str]],
+        current_lines: list[tuple[int, str, bool, int]],
         record_id: int | None = None,
     ) -> TicketLogContextModel:
         """
@@ -1792,10 +2034,10 @@ class LogService:
         :param total: 当前文件总行数
         :param before_count: 需要的前置上下文行数
         :param after_count: 需要的后置上下文行数
-        :param current_lines: 当前文件已读取行
+        :param current_lines: 当前文件已读取行，四元组 (行号, 内容, 是否截断, 原始长度)
         :return: 上下文响应
         """
-        context_parts: list[tuple[str, int, str]] = []
+        context_parts: list[tuple[str, int, str, bool, int]] = []
         missing_before = max(before_count - (center - start), 0)
         missing_after = max(after_count - (end - center), 0)
         if missing_before > 0:
@@ -1806,24 +2048,35 @@ class LogService:
                 previous_total = int(previous_index.get("line_count") or 0)
                 previous_start = max(previous_total - missing_before + 1, 1)
                 context_parts.extend(
-                    (previous_file, line, content)
-                    for line, content in cls._read_lines_by_index(previous_path, previous_start, previous_total)
+                    (previous_file, line, content, truncated, original_length)
+                    for line, content, truncated, original_length in
+                    cls._read_lines_by_index(previous_path, previous_start, previous_total)
                 )
 
-        context_parts.extend((file_path, line, content) for line, content in current_lines)
+        context_parts.extend(
+            (file_path, line, content, truncated, original_length)
+            for line, content, truncated, original_length in current_lines
+        )
 
         if missing_after > 0:
             next_file = cls._adjacent_log_file(ticket_id, file_path, direction="next", record_id=record_id)
             if next_file:
                 next_path = cls._resolve_log_file(ticket_id, next_file, record_id)
                 context_parts.extend(
-                    (next_file, line, content)
-                    for line, content in cls._read_lines_by_index(next_path, 1, missing_after)
+                    (next_file, line, content, truncated, original_length)
+                    for line, content, truncated, original_length in
+                    cls._read_lines_by_index(next_path, 1, missing_after)
                 )
 
         context_lines = [
-            TicketLogContextLineModel(file=line_file, line=index, content=content.rstrip("\r\n"))
-            for line_file, index, content in context_parts
+            TicketLogContextLineModel(
+                file=line_file,
+                line=index,
+                content=content.rstrip("\r\n"),
+                content_length=original_length,
+                content_truncated=truncated,
+            )
+            for line_file, index, content, truncated, original_length in context_parts
         ]
         has_prev = (
             start > 1
@@ -1865,16 +2118,19 @@ class LogService:
         )
 
     @classmethod
-    def _read_current_file_lines_by_native(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+    def _read_current_file_lines_by_native(cls, path: Path, start: int, end: int) -> list[tuple[int, str, bool, int]]:
         """
-        使用系统工具读取当前文件指定行段。
+        使用系统工具读取当前文件指定行段，同样应用单行截断逻辑。
         :param path: 日志文件路径
         :param start: 起始行号
         :param end: 结束行号
-        :return: 行号与内容列表
+        :return: 行号、内容、是否截断、原始长度 四元组列表
         """
         if end < start:
             return []
+        truncate_value = os.environ.get(cls.CONTEXT_LINE_TRUNCATE_ENV, "1").strip().lower()
+        truncate_enabled = truncate_value not in ("0", "false", "no", "off")
+        max_line_length = cls.MAX_CONTEXT_LINE_LENGTH
         if os.name == "nt":
             executable = shutil.which("powershell") or shutil.which("powershell.exe")
             if not executable:
@@ -1914,19 +2170,32 @@ class LogService:
         )
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or process.stdout.strip() or "原生命令读取上下文失败")
-        return [(line_no, content) for line_no, content in enumerate(process.stdout.splitlines(), start=start)]
+        result: list[tuple[int, str, bool, int]] = []
+        for line_no, content in enumerate(process.stdout.splitlines(), start=start):
+            original_length = len(content)
+            if truncate_enabled and original_length > max_line_length:
+                content = content[:max_line_length]
+                result.append((line_no, content, True, original_length))
+            else:
+                result.append((line_no, content, False, 0))
+        return result
 
     @classmethod
-    def _read_lines_by_index(cls, path: Path, start: int, end: int) -> list[tuple[int, str]]:
+    def _read_lines_by_index(cls, path: Path, start: int, end: int) -> list[tuple[int, str, bool, int]]:
         """
         基于行索引读取指定行范围，不扫描整份日志。
+        超过 CONTEXT_LINE_TRUNCATE_ENV 控制阈值的行会被截断，避免超大行导致 JSON 序列化与前端渲染卡顿。
         :param path: 日志文件路径
         :param start: 起始行号
         :param end: 结束行号
-        :return: 行号与文本内容列表
+        :return: 行号、文本内容、是否截断、原始长度 四元组列表
         """
         if end < start:
             return []
+        # 检查是否启用单行截断，默认启用
+        truncate_value = os.environ.get(cls.CONTEXT_LINE_TRUNCATE_ENV, "1").strip().lower()
+        truncate_enabled = truncate_value not in ("0", "false", "no", "off")
+        max_line_length = cls.MAX_CONTEXT_LINE_LENGTH
         meta = cls._ensure_line_index(path)
         total = int(meta.get("line_count") or 0)
         if total <= 0:
@@ -1935,12 +2204,20 @@ class LogService:
         normalized_end = min(int(end or total), total)
         offsets = cls._read_line_offsets(path, normalized_start, normalized_end)
         encoding = str(meta.get("encoding") or "utf-8")
-        result: list[tuple[int, str]] = []
+        result: list[tuple[int, str, bool, int]] = []
         with path.open("rb") as source:
             for line_no, offset in offsets:
                 source.seek(offset)
                 content = source.readline().decode(encoding, errors="replace")
-                result.append((line_no, content))
+                original_length = len(content)
+                if truncate_enabled and original_length > max_line_length:
+                    content = content[:max_line_length]
+                    last_newline = content.rfind("\n")
+                    if last_newline > 0:
+                        content = content[:last_newline]
+                    result.append((line_no, content, True, original_length))
+                else:
+                    result.append((line_no, content, False, 0))
         return result
 
     @classmethod
@@ -1979,10 +2256,14 @@ class LogService:
     @classmethod
     def _detect_file_encoding(cls, path: Path) -> str:
         """
-        读取文件头部样本并探测编码，优先兼容 UTF-8 和常见中文日志编码。
+        读取文件头部样本并探测编码，优先使用行索引中缓存的编码，避免重复 charset_normalizer 调用。
         :param path: 文件路径
         :return: 编码名称
         """
+        # 优先从已有的行索引中读取缓存的编码
+        cached_encoding = cls._read_encoding_from_line_index(path)
+        if cached_encoding:
+            return cached_encoding
         with path.open("rb") as file_obj:
             sample = file_obj.read(65536)
         if not sample:
@@ -2012,13 +2293,45 @@ class LogService:
         return "utf-8"
 
     @classmethod
-    def _parse_rg_line(cls, raw_line: str) -> TicketLogSearchHitModel | None:
+    def _read_encoding_from_line_index(cls, path: Path) -> str | None:
         """
-        解析 rg 的 no-heading 输出行。搜索命令在 extract 目录内执行，因此这里拿到的是相对路径。
+        从已有的行索引文件中读取缓存的编码，避免重复探测。
+        :param path: 日志文件路径
+        :return: 缓存的编码名称，索引不存在或无效时返回 None
+        """
+        index_path = cls._line_index_path(path)
+        try:
+            if not index_path.exists():
+                return None
+            with index_path.open("r", encoding="utf-8") as file_obj:
+                meta = json.loads(file_obj.readline() or "{}")
+            encoding = str(meta.get("encoding") or "").strip()
+            return encoding if encoding else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _clean_rg_preview_content(content: str) -> str:
+        """
+        移除 rg --max-columns-preview 为超长行附加的说明文本。
+        :param content: rg 输出的行内容
+        :return: 可直接返回给接口的日志内容
+        """
+        return re.sub(r"\s+\[\.\.\. omitted end of long line\]$", "", str(content or ""))
+
+    @classmethod
+    def _parse_rg_line(
+        cls, raw_line: str, *, max_line_bytes: int | None = None
+    ) -> TicketLogSearchHitModel | None:
+        """
+        解析 rg 的 no-heading 输出行。
+        rg 已通过 --max-columns 限制单行输出字节数，不再做 Python 侧二次截断。
+        content_truncated 通过 rg 的 --max-columns-preview 后缀判断。
         :param raw_line: rg 输出原始行
+        :param max_line_bytes: 保留参数兼容调用方，不再使用
         :return: 搜索命中
         """
-        remain = raw_line.lstrip(".\\/")
+        remain = raw_line.lstrip(".\\/").rstrip("\r\n")
         parts = remain.split(":", 2)
         if len(parts) < 3:
             return None
@@ -2026,10 +2339,17 @@ class LogService:
             line_no = int(parts[1])
         except ValueError:
             return None
+        raw_content = parts[2]
+        cleaned_content = cls._clean_rg_preview_content(raw_content)
+        # rg 的 --max-columns-preview 会在超长行末尾追加 "[... omitted end of long line]"
+        # _clean_rg_preview_content 移除该后缀后，若 raw_content 与原内容不一致即表示 rg 已截断
+        content_truncated = cleaned_content != raw_content
         return TicketLogSearchHitModel(
             file=cls._normalize_relative_path(parts[0]),
             line=line_no,
-            content=parts[2],
+            content=cleaned_content,
+            content_length=len(cleaned_content),
+            content_truncated=content_truncated,
         )
 
     @classmethod
@@ -2199,6 +2519,51 @@ class LogService:
         return value
 
     @classmethod
+    def _release_page_cache(
+        cls,
+        target_files: list[str],
+        ticket_id: int,
+        record_id: int | None = None,
+    ) -> None:
+        """
+        rg 搜索完成后建议 OS 释放本次搜索读取文件的页缓存，避免多次搜索不同工单日志后内存持续增长。
+        在 Linux 上使用 posix_fadvise(POSIX_FADV_DONTNEED)，Windows 上跳过。
+        :param target_files: 本次搜索的日志文件相对路径列表
+        :param ticket_id: 工单ID
+        :param record_id: 日志拉取记录ID
+        :return: 无
+        """
+        if os.name != "posix":
+            return
+        try:
+            import ctypes
+
+            POSIX_FADV_DONTNEED = 4  # Linux 标准值
+            released_count = 0
+            for target_file in target_files:
+                try:
+                    target_path = cls._resolve_log_file(ticket_id, target_file, record_id)
+                    fd = os.open(str(target_path), os.O_RDONLY)
+                    try:
+                        ctypes.CDLL("libc.so.6", use_errno=True).posix_fadvise(
+                            fd, 0, 0, POSIX_FADV_DONTNEED
+                        )
+                        released_count += 1
+                    except Exception:
+                        pass
+                    finally:
+                        os.close(fd)
+                except Exception:
+                    pass
+            if released_count > 0:
+                logger.debug(
+                    f"日志搜索后释放页缓存完成，ticket_id={ticket_id}，"
+                    f"record_id={record_id}，released_files={released_count}/{len(target_files)}"
+                )
+        except Exception:
+            pass
+
+    @classmethod
     def _write_meta(cls, path: Path, payload: dict[str, Any]) -> None:
         """
         写入日志准备元数据。
@@ -2227,3 +2592,29 @@ class LogService:
         :return: 解压目录
         """
         return cls._ticket_dir(ticket_id, record_id) / "extract"
+
+    @classmethod
+    def read_line_content(
+        cls, ticket_id: int, file_path: str, line_no: int, record_id: int | None = None
+    ) -> str:
+        """
+        获取指定日志文件的单行完整原始内容，不做截断，用于前端展开超大行的完整内容。
+        :param ticket_id: 工单ID
+        :param file_path: 相对日志文件路径
+        :param line_no: 行号
+        :param record_id: 日志拉取记录ID
+        :return: 完整原始行内容
+        """
+        normalized_file = cls._normalize_relative_path(file_path)
+        target_path = cls._resolve_log_file(ticket_id, normalized_file, record_id)
+        center = max(int(line_no or 1), 1)
+        rows = cls._read_line_offsets(target_path, center, center)
+        if not rows:
+            raise ValueError(f"行号 {center} 在日志文件 {normalized_file} 中不存在")
+        _, offset = rows[0]
+        meta = cls._ensure_line_index(target_path)
+        encoding = str(meta.get("encoding") or "utf-8")
+        with target_path.open("rb") as source:
+            source.seek(offset)
+            content = source.readline().decode(encoding, errors="replace")
+        return content.rstrip("\r\n")

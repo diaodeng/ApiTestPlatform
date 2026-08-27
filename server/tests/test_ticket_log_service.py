@@ -1,15 +1,29 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.log_pull.ticket_log_service import LogService
 
 
 class TicketLogServiceTests(unittest.TestCase):
     """验证工单日志搜索的文件范围边界。"""
+
+    def test_storage_config_normalizes_search_limits(self):
+        """日志搜索并发数和单行字节数应使用默认值并限制配置范围。"""
+        defaults = TicketLogPullService._normalize_storage_config({})
+        normalized = TicketLogPullService._normalize_storage_config(
+            {"maxConcurrentSearches": 1, "maxSearchLineBytes": 99_999_999}
+        )
+
+        self.assertEqual(defaults["maxConcurrentSearches"], 2)
+        self.assertEqual(defaults["maxSearchLineBytes"], 524_288)
+        self.assertEqual(normalized["maxConcurrentSearches"], 1)
+        self.assertEqual(normalized["maxSearchLineBytes"], 4_194_304)
 
     def test_search_with_file_scope_only_returns_target_file_hits(self):
         """指定日志文件搜索时，不应返回其他文件里的同关键字命中。"""
@@ -52,6 +66,87 @@ class TicketLogServiceTests(unittest.TestCase):
 
         self.assertEqual([(item.file, item.line) for item in hits], [("worker.log", 1), ("app.log", 2)])
 
+    def test_search_line_content_is_truncated_by_utf8_bytes(self):
+        """搜索结果单行内容应按 UTF-8 字节上限截断且不切断半个字符。"""
+        content, content_length, truncated = LogService._truncate_search_content("中文" * 20, 10)
+
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(content.encode("utf-8")), 10)
+        self.assertEqual(content_length, len(content))
+        content.encode("utf-8").decode("utf-8")
+
+    def test_rg_output_limit_uses_configured_columns_and_preview(self):
+        """最终 rg 输出阶段应使用配置化单行字节上限和预览参数。"""
+        self.assertEqual(
+            LogService._rg_max_columns_args({"maxSearchLineBytes": 4096}),
+            ["--max-columns", "4096", "--max-columns-preview"],
+        )
+
+    def test_parse_rg_line_marks_configured_line_limit(self):
+        """解析达到单行字节上限的 rg 输出时应标记内容截断。"""
+        hit = LogService._parse_rg_line("app.log:3:abcdefghijk", max_line_bytes=10)
+
+        self.assertIsNotNone(hit)
+        self.assertTrue(hit.content_truncated)
+        self.assertEqual((hit.file, hit.line, hit.content), ("app.log", 3, "abcdefghij"))
+
+    def test_native_rg_keeps_truncated_match_and_dynamic_limit(self):
+        """最终 rg 输出截断时仍应保留命中行，并遵守动态返回条数。"""
+        executable = shutil.which("rg")
+        if not executable:
+            self.skipTest("rg is not installed")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extract_dir = Path(temp_dir)
+            (extract_dir / "app.log").write_text("x" * 100 + " needle\nshort needle\n", encoding="utf-8")
+            hits = LogService._search_by_rg_keywords_single(
+                ticket_id=1,
+                keywords=["needle"],
+                search_mode="any",
+                executable=executable,
+                extract_dir=extract_dir,
+                context_before=0,
+                context_after=0,
+                limit=1,
+                with_context=False,
+                record_id=None,
+                runtime_config={"maxSearchSeconds": 5, "maxSearchLineBytes": 32},
+                target_files=["app.log"],
+                max_seconds=5,
+            )
+
+        self.assertEqual(len(hits), 1)
+        self.assertTrue(hits[0].content_truncated)
+        self.assertEqual(hits[0].matched_keywords, ["needle"])
+        self.assertLessEqual(len(hits[0].content.encode("utf-8")), 32)
+
+    def test_native_rg_all_mode_keeps_truncated_line_as_all_match(self):
+        """all 模式中间阶段应完整匹配，最终输出截断不能丢失命中。"""
+        executable = shutil.which("rg")
+        if not executable:
+            self.skipTest("rg is not installed")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extract_dir = Path(temp_dir)
+            (extract_dir / "app.log").write_text("x" * 100 + " first second\n", encoding="utf-8")
+            hits = LogService._search_by_rg_keywords_single(
+                ticket_id=1,
+                keywords=["first", "second"],
+                search_mode="all",
+                executable=executable,
+                extract_dir=extract_dir,
+                context_before=0,
+                context_after=0,
+                limit=10,
+                with_context=False,
+                record_id=None,
+                runtime_config={"maxSearchSeconds": 5, "maxSearchLineBytes": 32},
+                target_files=["app.log"],
+                max_seconds=5,
+            )
+
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].matched_keywords, ["first", "second"])
+        self.assertLessEqual(len(hits[0].content.encode("utf-8")), 32)
+
     def test_context_pages_between_numbered_and_current_rotation_file(self):
         """数字后缀轮转文件应可向后翻到无后缀最新文件，也可反向返回。"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,7 +182,7 @@ class TicketLogServiceTests(unittest.TestCase):
             lines = LogService._read_lines_by_index(log_path, 2, 2)
             rebuilt_meta = json.loads(index_path.read_text(encoding="utf-8").splitlines()[0])
 
-        self.assertEqual([(line_no, content.rstrip("\r\n")) for line_no, content in lines], [(2, "處理成功")])
+        self.assertEqual([(item[0], item[1].rstrip("\r\n")) for item in lines], [(2, "處理成功")])
         self.assertEqual(rebuilt_meta["encoding"], "utf-8")
 
     def test_detect_file_encoding_accepts_utf8_sample_with_trailing_partial_character(self):

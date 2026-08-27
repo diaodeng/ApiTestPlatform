@@ -328,8 +328,23 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('summaryReport', $event)"
                     >
                       <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="AI模型">
+                    <el-select
+                      v-model="form.summaryReport.aiModelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.summaryReport.aiProviderCode"
+                    >
+                      <el-option v-for="item in (lightModelOptionsMap[form.summaryReport.aiProviderCode] || [])" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -660,12 +675,32 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('aiSyncExtract', $event)"
                     >
                       <el-option
                         v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select
+                      v-model="form.aiSyncExtract.modelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.aiSyncExtract.providerCode"
+                    >
+                      <el-option
+                        v-for="item in (lightModelOptionsMap[form.aiSyncExtract.providerCode] || [])"
+                        :key="item.modelId"
+                        :label="item.displayName || item.modelId"
+                        :value="item.modelId"
                       />
                     </el-select>
                   </el-form-item>
@@ -742,12 +777,32 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('translateConfig', $event)"
                     >
                       <el-option
                         v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select
+                      v-model="form.translateConfig.modelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.translateConfig.providerCode"
+                    >
+                      <el-option
+                        v-for="item in (lightModelOptionsMap[form.translateConfig.providerCode] || [])"
+                        :key="item.modelId"
+                        :label="item.displayName || item.modelId"
+                        :value="item.modelId"
                       />
                     </el-select>
                   </el-form-item>
@@ -831,8 +886,15 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
-                    <el-select v-model="form.titleSummaryConfig.providerCode" placeholder="请选择标题总结 Provider" filterable clearable style="width: 100%">
+                    <el-select v-model="form.titleSummaryConfig.providerCode" placeholder="请选择标题总结 Provider" filterable clearable style="width: 100%" @change="handleProviderModelChange('titleSummaryConfig', $event)">
                       <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="form.titleSummaryConfig.modelName" placeholder="留空使用Provider默认模型" filterable clearable style="width: 100%" :disabled="!form.titleSummaryConfig.providerCode">
+                      <el-option v-for="item in (lightModelOptionsMap[form.titleSummaryConfig.providerCode] || [])" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -864,8 +926,15 @@
                 </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="Provider 编码">
-                    <el-select v-model="form.knowledgeConfig.providerCode" placeholder="请选择知识提炼 Provider" filterable clearable style="width: 100%">
+                    <el-select v-model="form.knowledgeConfig.providerCode" placeholder="请选择知识提炼 Provider" filterable clearable style="width: 100%" @change="handleProviderModelChange('knowledgeConfig', $event)">
                       <el-option v-for="item in lightProviderOptions" :key="item.providerCode" :label="formatProviderOptionLabel(item)" :value="item.providerCode" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select v-model="form.knowledgeConfig.modelName" placeholder="留空使用Provider默认模型" filterable clearable style="width: 100%" :disabled="!form.knowledgeConfig.providerCode">
+                      <el-option v-for="item in (lightModelOptionsMap[form.knowledgeConfig.providerCode] || [])" :key="item.modelId" :label="item.displayName || item.modelId" :value="item.modelId" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -988,12 +1057,32 @@
                       filterable
                       clearable
                       style="width: 100%"
+                      @change="handleProviderModelChange('aiClassification', $event)"
                     >
                       <el-option
                         v-for="item in lightProviderOptions"
                         :key="item.providerCode"
                         :label="formatProviderOptionLabel(item)"
                         :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="模型">
+                    <el-select
+                      v-model="form.aiClassification.modelName"
+                      placeholder="留空使用Provider默认模型"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      :disabled="!form.aiClassification.providerCode"
+                    >
+                      <el-option
+                        v-for="item in (lightModelOptionsMap[form.aiClassification.providerCode] || [])"
+                        :key="item.modelId"
+                        :label="item.displayName || item.modelId"
+                        :value="item.modelId"
                       />
                     </el-select>
                   </el-form-item>
@@ -1175,6 +1264,48 @@
                   </el-form-item>
                 </el-col>
               </el-row>
+
+              <el-divider content-position="left">自动化结果通知</el-divider>
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="6">
+                  <el-form-item label="启用结果通知" label-width="150px">
+                    <el-switch v-model="form.automationNotification.enabled" inline-prompt active-text="开" inactive-text="关" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :xs="24" :md="9">
+                  <el-form-item label="推送配置" label-width="150px">
+                    <el-select v-model="form.automationNotification.pushIds" multiple filterable collapse-tags :loading="pushOptionsLoading" placeholder="请选择推送配置" style="width: 100%">
+                      <el-option v-for="item in pushOptions" :key="item.pushId || item.value" :label="item.pushName || item.label || item.name" :value="item.pushId || item.value" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :xs="12" :md="4">
+                  <el-form-item label="成功时推送" label-width="110px">
+                    <el-switch v-model="form.automationNotification.success.push" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :xs="12" :md="4">
+                  <el-form-item label="失败时推送" label-width="110px">
+                    <el-switch v-model="form.automationNotification.failed.push" />
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.automationNotification.enabled" :span="24">
+                  <el-form-item label="消息模板" label-width="150px">
+                    <el-input v-model="form.automationNotification.messageTemplate" type="textarea" :rows="6" placeholder="留空使用系统默认模板；使用 ${变量名} 引用变量" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-descriptions v-if="form.automationNotification.enabled" :column="3" border size="small" class="automation-notify-variables">
+                <el-descriptions-item label="${ticket_no}">工单号</el-descriptions-item>
+                <el-descriptions-item label="${ticket_title}">工单标题</el-descriptions-item>
+                <el-descriptions-item label="${merchant_name}">商家名称</el-descriptions-item>
+                <el-descriptions-item label="${store_name}">门店名称或日志门店编号</el-descriptions-item>
+                <el-descriptions-item label="${stage_label}">当前阶段，如日志拉取、AI 分析</el-descriptions-item>
+                <el-descriptions-item label="${status_label}">成功或失败</el-descriptions-item>
+                <el-descriptions-item label="${reason}">失败原因或结果说明</el-descriptions-item>
+                <el-descriptions-item label="${detail}">任务、日志或异常详情</el-descriptions-item>
+                <el-descriptions-item label="${ticket_url}">工单详情链接</el-descriptions-item>
+              </el-descriptions>
 
               <el-alert class="mt8" type="info" show-icon :closable="false" title="定时任务优先" description="定时任务参数中指定的 automation 配置优先级最高，此处配置仅在没有任务级参数时作为默认值。" />
             </el-form>
@@ -1439,6 +1570,49 @@
               </div>
             </template>
 
+            <el-alert
+              title="指定工单手动自动化"
+              type="info"
+              :closable="false"
+              show-icon
+              description="可在关闭定时主动拉取时补跑指定工单。查询多维表格模式仅按工单号查询，忽略主动拉取开关、常规过滤条件和时间窗口；数据库快照模式不覆盖工单字段，只重新执行后处理自动化。"
+            />
+            <el-form :model="manualAutomationForm" label-width="150px" style="margin-top: 16px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="10">
+                  <el-form-item label="工单号" required>
+                    <el-input
+                      v-model="manualAutomationForm.ticketNo"
+                      clearable
+                      placeholder="输入要补跑的精确工单号"
+                      @keyup.enter="handleRunManualAutomation"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="10">
+                  <el-form-item label="数据来源">
+                    <el-radio-group v-model="manualAutomationForm.source">
+                      <el-radio value="bitable">查询多维表格</el-radio>
+                      <el-radio value="database">使用数据库快照</el-radio>
+                    </el-radio-group>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="4">
+                  <el-form-item label-width="0">
+                    <el-button
+                      type="primary"
+                      :loading="manualAutomationLoading"
+                      v-hasPermi="['ticket:sync:config:edit']"
+                      @click="handleRunManualAutomation"
+                    >
+                      执行自动化
+                    </el-button>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+
+            <el-divider content-position="left">主动拉取定时任务配置</el-divider>
             <el-form :model="form.bitablePull" label-width="150px">
               <el-row :gutter="16">
                 <el-col :xs="24" :md="12">
@@ -2665,6 +2839,25 @@
             <el-form :model="form.logPullDefaults" label-width="150px">
               <el-row :gutter="16">
                 <el-col :xs="24" :md="12">
+                  <el-form-item label="默认日志环境">
+                    <el-select
+                      v-model="form.logPullDefaults.environment"
+                      filterable
+                      clearable
+                      placeholder="选择环境分组和子环境"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in logPullExternalEnvironmentOptions"
+                        :key="item.value"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-tip">自动拉日志未单独指定环境时使用；格式为“分组:子环境”。</div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
                   <el-form-item label="命令类型">
                     <el-input-number
                       v-model="form.logPullDefaults.commandDataType"
@@ -2771,6 +2964,49 @@
                         :value="item.providerCode"
                       />
                     </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
+                  <el-form-item label="历史分析条件">
+                    <el-radio-group v-model="form.logPullDefaults.autoAiAnalysisCondition.analysisMode">
+                      <el-radio-button label="always">允许重复分析</el-radio-button>
+                      <el-radio-button label="not_successful">仅无成功记录</el-radio-button>
+                    </el-radio-group>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
+                  <el-form-item label="状态过滤">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">仅自动分析受影响；手动分析不受影响</div>
+                  </el-form-item>
+                </el-col>
+                <el-col
+                  v-if="form.logPullDefaults.autoAiEnabled && form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
+                  :span="24"
+                >
+                  <el-form-item label="允许的工单状态" required>
+                    <el-select
+                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusCodes"
+                      multiple
+                      filterable
+                      collapse-tags
+                      collapse-tags-tooltip
+                      placeholder="请选择内部工作流状态（多选）"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in workflowStatusOptions"
+                        :key="`auto-ai-status-${item.value}`"
+                        :label="`${item.label} [${item.value}]`"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-help-text">工单状态需先映射为内部状态；未满足条件时不会消耗 Token</div>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -2885,6 +3121,27 @@
                       v-model="logPullStorage.maxPythonSearchBytes"
                       :min="10485760"
                       :step="10485760"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索最大并发数">
+                    <el-input-number
+                      v-model="logPullStorage.maxConcurrentSearches"
+                      :min="1"
+                      :max="8"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索单行最大字节数">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchLineBytes"
+                      :min="256"
+                      :max="4194304"
+                      :step="65536"
                       style="width: 100%"
                     />
                   </el-form-item>
@@ -3138,12 +3395,13 @@
     listTicketSyncNotifyPushOptions,
     previewTicketSyncBitablePullFields,
     previewTicketSyncPersonReminder,
+    runTicketManualAutomation,
     runTicketSyncPersonReminder,
     runTicketSyncSummaryReport,
     runTicketCustomStatistics,
     sendTicketSyncGroupPushByTicket,
   } from '@/api/ticket/ticket';
-  import { listAiProviderOptions } from '@/api/system/aiprovider';
+  import { listAiProviderOptions, listAiProviderModelOptions } from '@/api/system/aiprovider';
   import { listAiPromptTemplateOptions } from '@/api/system/aiprompt';
   import { all as listAllAgents } from '@/api/hrm/agent';
   import { useSyncConfig } from './hooks/useSyncConfig';
@@ -3200,6 +3458,7 @@
     saving: logPullExternalSaving,
     groups: logPullExternalGroups,
     groupKeys: logPullExternalGroupKeys,
+    environmentOptions: logPullExternalEnvironmentOptions,
     vendorFilterOptions: logPullExternalVendorFilterOptions,
     credentialBindingOptions: logPullExternalCredentialBindingOptions,
     loadConfig: logPullExternalLoadConfig,
@@ -3264,6 +3523,7 @@
   const pushOptions = ref([]);
   const analysisProviderOptions = ref([]);
   const lightProviderOptions = ref([]);
+const lightModelOptionsMap = ref({});
   const promptOptions = ref([]);
   const agentOptions = ref([]);
   const groupSendLoading = ref(false);
@@ -3274,6 +3534,7 @@
   const autoCategoryStatsLoading = ref(false);
   const autoCategoryRunLoading = ref(false);
   const bitablePullFieldsLoading = ref(false);
+  const manualAutomationLoading = ref(false);
   const bitablePullFieldsLoaded = ref(false);
   const personPreviewResult = ref(null);
   const autoCategoryStats = ref(null);
@@ -3282,6 +3543,10 @@
   const groupSendForm = reactive({
     ticketNo: '',
     forcePush: false,
+  });
+  const manualAutomationForm = reactive({
+    ticketNo: '',
+    source: 'bitable',
   });
   const personQueryForm = reactive({
     userId: '',
@@ -3373,6 +3638,37 @@
     const code = item.promptCode || item.templateCode || item.value || '';
     const name = item.promptName || item.templateName || item.label || code || '-';
     return `${name}${code && name !== code ? ` [${code}]` : ''}`;
+  }
+
+  /**
+   * Provider 变更时加载该 Provider 的可用模型列表。
+   * @param {string} sectionName 配置段名称
+   * @param {string} providerCode Provider 编码
+   */
+  function handleProviderModelChange(sectionName, providerCode) {
+    if (!providerCode) {
+      lightModelOptionsMap.value[providerCode] = [];
+      return;
+    }
+    if (lightModelOptionsMap.value[providerCode]) return;
+    listAiProviderModelOptions(providerCode).then((response) => {
+      lightModelOptionsMap.value[providerCode] = Array.isArray(response.data) ? response.data : [];
+    }).catch(() => {
+      lightModelOptionsMap.value[providerCode] = [];
+    });
+  }
+
+  /**
+   * 预加载所有已配置 Provider 的模型列表。
+   */
+  function preloadModelOptions() {
+    const sections = ['aiSyncExtract', 'translateConfig', 'titleSummaryConfig', 'knowledgeConfig', 'aiClassification', 'summaryReport'];
+    sections.forEach((section) => {
+      const providerCode = form[section]?.providerCode || form[section]?.aiProviderCode;
+      if (providerCode) {
+        handleProviderModelChange(section, providerCode);
+      }
+    });
   }
 
   function loadAiOptions() {
@@ -3549,6 +3845,32 @@
         appSecret: String(form.feishuAuth.appSecret || '').trim(),
       },
     };
+  }
+
+  /**
+   * 按输入工单号手动执行多维表格拉取后的自动化流程。
+   */
+  function handleRunManualAutomation() {
+    const ticketNo = String(manualAutomationForm.ticketNo || '').trim();
+    if (!ticketNo) {
+      proxy.$modal.msgWarning('请先输入工单号');
+      return;
+    }
+    manualAutomationLoading.value = true;
+    runTicketManualAutomation({
+      ticketNo,
+      source: manualAutomationForm.source,
+    })
+      .then((response) => {
+        const sourceLabel = manualAutomationForm.source === 'database' ? '数据库快照' : '多维表格';
+        proxy.$modal.msgSuccess(`${sourceLabel}工单自动化已执行完成：${response.data?.ticketNo || ticketNo}`);
+      })
+      .catch((error) => {
+        proxy.$modal.msgError(error?.message || '工单自动化执行失败');
+      })
+      .finally(() => {
+        manualAutomationLoading.value = false;
+      });
   }
 
   function handlePreviewBitablePullFields() {
@@ -3741,7 +4063,7 @@
   }
 
   onMounted(() => {
-    loadConfig();
+    loadConfig().then(() => { preloadModelOptions(); });
     loadRemoteCredentialOptions();
     loadPushOptions();
     loadAiOptions();

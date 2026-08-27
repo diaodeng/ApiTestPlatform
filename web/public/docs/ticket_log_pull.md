@@ -24,7 +24,39 @@
 9. 配置存储方式（本地/FTP）和通知设置
 10. 提交后记录状态为「待执行」，后台自动提交申请并进入轮询
 
-## 记录状态说明
+## 工单门店信息回填
+
+从工单详情的「日志拉取」Tab 打开提交弹窗时，系统会按以下来源回填商家、门店、POS 和拉取日期：
+
+1. 最近一次日志拉取记录；
+2. 工单同步保存的 `extraData.externalSync.source` 或 `extraData.logPullHints`；
+3. 工单自动化配置 `extraData.ticketAutomation.logPullConfig`；
+4. 历史同步字段 `extraData.external_field_mapping.ticketStore`（作为门店原始值兜底）。
+
+门店配置由 `/ticket/log-pull/vendor-store-options` 按当前商家懒加载，选项显示格式为：
+
+```text
+门店名称 [org_no] (sap_org_no)
+```
+
+- 如果回填值命中 `org_no`、`storeCode` 或 `sap_org_no`，弹窗会显示对应的完整门店选项；提交给外部日志接口的 `storeId` 统一使用 `org_no`。
+- 如果工单中的门店信息不完整，或没有匹配到门店配置，系统会保留原始值显示，并提示用户确认；用户可以直接编辑为正确的 `org_no` 后提交。
+- 用户手动切换商家时，旧门店值会清空，避免把其他商家的门店提交到当前商家。
+
+工单同步自动拉日志时，系统会统一合并任务级日志参数、当前有效 AI 提取结果、同步对象字段、历史 `extraData.log_pull_hints`、规则识别结果和系统默认值。自动化审计中的 `identify`、日志提交请求和自动 AI 使用同一份最终参数；缺少 `vendorId`、`storeId`、`posNo/SCO` 或 `modifyTime` 时只记录跳过原因，不创建无效拉取记录。
+
+对于自动拉日志，系统现在会先检查“同一工单 + 同一环境/商家/门店/POS/数据类型 + 同一日志时间范围/路径/日期”等实际拉取参数下，是否已经存在**成功**记录。若命中成功记录，则不会再次向外部平台重复提交，而是直接复用已有成功记录继续后续自动 AI 判断，避免工单被编辑后反复拉取相同日志。
+
+`log_pull_hints` 中建议使用以下字段：
+
+- `vendorId`：商家编号；
+- `sourceStoreCode`：外部来源中的门店编码，只用于保留来源和与 AI 结果做一致性判断，不一定是日志接口可用的 `org_no`，AI 永远不会反写它；
+- `storeId`：日志接口使用的门店 `org_no`，由门店选择规则确定并在提交前按当前商家校验；如果外部 `sourceStoreCode` 是 `sap_org_no` 等业务编码，系统会先按商家映射转换为对应的 `org_no`，不能直接把 SAP 编码提交给日志接口；
+- `posNo` / `scoNo`：机台编号；
+- `modifyTime`：日志日期，格式为 `YYYY-MM-DD`。
+
+AI 提取门店时，如果 AI 值与 `sourceStoreCode` 相等或 AI 值包含在 `sourceStoreCode` 中，则使用 AI 值更新 `storeId`；如果 AI 值为空或不匹配，则使用 `sourceStoreCode`。没有 `sourceStoreCode` 时，有效 AI 新值可以替换旧 `storeId`，无有效 AI 值时保留旧值。`sourceStoreCode` 始终保持外部原始值，不会被 AI 反写。最终 `storeId` 只有通过当前商家 `org_no` 校验后才会提交日志。若同一商家和同一 `sourceStoreCode` 命中多个不同的 `org_no`，系统会在自动化日志中记录商家、来源编码和全部候选门店（包括 `orgNo`、门店名称和 `sapOrgNo`），并中断自动日志提交，避免把日志发到错误门店；用户确认唯一门店后再手动或重新触发拉取。
+
 
 | 状态 | 说明 |
 |------|------|
@@ -76,6 +108,10 @@
 | rangeAfterMinutes | 时间点后延伸分钟数 | 10 |
 | autoAiEnabled | 拉取成功后是否自动发起 AI 分析 | 关 |
 | aiAgentCode / aiProviderCode | 自动 AI 分析使用的 Agent/Provider | 空 |
+
+自动 AI 分析触发前，如果关联工单没有填写 `affectedVersionId`，系统会在日志拉取成功后从已入库的日志正文中提取版本号，并自动创建或复用版本中心记录后回填工单。通常不需要人工维护发生版本；只有日志正文没有可识别版本号，或版本中心关联失败时，才会记录跳过自动 AI 的原因。
+
+如果自动日志步骤因为“已存在相同参数的成功记录”而被跳过，或当前场景只开启了“自动 AI”但未重新拉日志，系统也会直接复用最近的成功日志记录继续执行同一套版本回填与自动 AI 规则，不再要求必须重新拉到一份新日志。
 
 ### 存储与资源限制（运行态护栏）
 

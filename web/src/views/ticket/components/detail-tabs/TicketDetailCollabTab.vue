@@ -7,12 +7,15 @@
     addTicketSnapshot,
     bindTicketIssueFromSimilar,
     extractTicketKnowledge,
-    getTicket,
+    getTicketMessagesPage,
+    getTicketSnapshotsPage,
+    getTicketSummary,
   } from '@/api/ticket/ticket';
   import {
     buildTicketAiPreferenceDefaults,
     saveTicketAiPreferencePatch,
   } from '../../hooks/useTicketAiPreference';
+  import { useAiProviderModelOptions } from '../../hooks/useAiProviderModelOptions';
   import { useOptions } from '../../hooks/useOptions';
 
   const props = defineProps({
@@ -27,6 +30,10 @@
     detail: {
       type: Object,
       default: null,
+    },
+    similarTickets: {
+      type: Array,
+      default: () => [],
     },
   });
 
@@ -50,6 +57,10 @@
   const messageDataText = ref('');
   const issueActionLoading = ref(false);
   const messageForm = ref(createDefaultMessageForm());
+  const {
+    modelOptions: messageModelOptions,
+    loadModelOptions: loadMessageModelOptions,
+  } = useAiProviderModelOptions();
   const hasExternalDetail = computed(() =>
     Boolean(props.detail?.ticketId || props.detail?.ticket_id)
   );
@@ -58,9 +69,9 @@
     return Number.isFinite(ticketId) && ticketId > 0 ? ticketId : undefined;
   });
 
-  const ticketMessages = computed(() => detail.value.messages || []);
-  const ticketSnapshots = computed(() => detail.value.snapshots || []);
-  const similarTickets = computed(() => detail.value.similarTickets || []);
+  const ticketMessages = ref([]);
+  const ticketSnapshots = ref([]);
+  const similarTickets = computed(() => props.similarTickets || []);
   const latestSnapshot = computed(
     () => ticketSnapshots.value[0] || detail.value.latestSnapshot || null
   );
@@ -88,6 +99,7 @@
       versionId: undefined,
       agentCode: '',
       aiProviderCode: '',
+      aiModelName: '',
     };
   }
 
@@ -105,7 +117,9 @@
       versionId: resolveDefaultMessageId(),
       agentCode: aiDefaults.agentCode,
       aiProviderCode: aiDefaults.aiProviderCode,
+      aiModelName: aiDefaults.aiModelName || '',
     };
+    loadMessageModelOptions(messageForm.value.aiProviderCode);
     if (!aiDefaults.hasManualAgentCode) {
       applyMessageProviderAgent(messageForm.value.aiProviderCode);
     }
@@ -165,22 +179,37 @@
     applyMessageProviderAgent(providerCode);
     saveTicketAiPreferencePatch({
       aiProviderCode: providerCode,
+      aiModelName: '',
       agentCode: messageForm.value.agentCode,
     });
+    // Provider切换后清理旧模型，再加载新Provider的启用模型。
+    messageForm.value.aiModelName = '';
+    loadMessageModelOptions(providerCode);
+  }
+
+  function handleMessageModelChange(aiModelName) {
+    saveTicketAiPreferencePatch({ aiModelName });
   }
 
   /**
    * 刷新协同 tab 需要的详情数据。
-   * @returns {Promise<void>} 刷新完成 Promise。
+   * @returns {Promise<void>} 加载完成 Promise。
    */
   function refreshDetail() {
     if (hasExternalDetail.value) {
       detail.value = props.detail || {};
-      return reloadDetailVersionsAndResetMessageForm();
+      return Promise.all([
+        getTicketMessagesPage(resolvedTicketId.value, { limit: 20 }),
+        getTicketSnapshotsPage(resolvedTicketId.value, { limit: 10 }),
+      ]).then(([messagesResponse, snapshotsResponse]) => {
+        ticketMessages.value = messagesResponse?.data?.items || [];
+        ticketSnapshots.value = snapshotsResponse?.data?.items || [];
+        return reloadDetailVersionsAndResetMessageForm();
+      });
     }
     if (!resolvedTicketId.value) return Promise.resolve();
     loading.value = true;
-    return getTicket(resolvedTicketId.value)
+    return getTicketSummary(resolvedTicketId.value)
       .then((response) => {
         detail.value = response.data || {};
         return reloadDetailVersionsAndResetMessageForm();
@@ -244,6 +273,7 @@
     messageForm.value.versionId = detail.value.affectedVersionId || messageForm.value.versionId;
     const attachments = parseMessageAttachments();
     if (attachments === null) return;
+    saveTicketAiPreferencePatch({ aiModelName: messageForm.value.aiModelName || '' });
     addTicketMessage(resolvedTicketId.value, {
       ...messageForm.value,
       content,
@@ -532,6 +562,26 @@
                     :key="item.providerCode"
                     :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
                     :value="item.providerCode"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="模型">
+                <el-select
+                  v-model="messageForm.aiModelName"
+                  placeholder="留空使用默认模型"
+                  filterable
+                  clearable
+                  style="width: 100%"
+                  :disabled="!messageForm.aiProviderCode"
+                  @change="handleMessageModelChange"
+                >
+                  <el-option
+                    v-for="item in (messageModelOptions || [])"
+                    :key="item.modelId"
+                    :label="item.displayName || item.modelId"
+                    :value="item.modelId"
                   />
                 </el-select>
               </el-form-item>

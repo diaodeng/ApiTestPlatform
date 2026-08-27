@@ -208,3 +208,33 @@ class AiProviderSecretModel(BaseModel):
 
     provider_id: int = Field(description="Provider主键")
     api_key: str = Field(description="Provider密钥明文")
+
+
+class AddProviderModelCatalogItemRequest(BaseModel):
+    """手动添加模型目录项请求。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    model_id: str = Field(min_length=1, description="模型标识")
+    display_name: str = Field(default="", description="模型展示名称")
+
+
+class ToggleProviderModelCatalogItemRequest(BaseModel):
+    """启用/禁用模型目录项请求。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    enabled: bool = Field(description="是否启用")
+
+
+class ProviderModelOptionModel(BaseModel):
+    """使用方页面的模型下拉选项模型。"""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+    model_id: str = Field(description="模型标识")
+    display_name: str = Field(default="", description="模型展示名称")

@@ -114,6 +114,56 @@ class TicketIssueDao:
         return db.query(Ticket).filter(Ticket.ticket_id == ticket_id, Ticket.del_flag == "0").first()
 
     @classmethod
+    def search_tickets_for_issue(
+        cls,
+        db: Session,
+        keyword: str | None,
+        project_id: int | None = None,
+        module_id: int | None = None,
+        limit: int = 20,
+    ) -> list[Ticket]:
+        """
+        按工单号或标题搜索问题实例可绑定的工单。
+        :param db: 数据库会话
+        :param keyword: 工单号或标题关键字
+        :param project_id: 可选项目ID
+        :param module_id: 可选模块ID
+        :param limit: 返回数量上限
+        :return: 工单实体列表
+        """
+        normalized_keyword = str(keyword or "").strip()
+        if not normalized_keyword:
+            return []
+        safe_limit = min(max(int(limit or 20), 1), 20)
+        query = db.query(Ticket).filter(
+            Ticket.del_flag == "0",
+            or_(
+                Ticket.ticket_no.like(f"%{normalized_keyword}%"),
+                Ticket.title.like(f"%{normalized_keyword}%"),
+            ),
+        )
+        if project_id:
+            query = query.filter(Ticket.project_id == project_id)
+        if module_id:
+            query = query.filter(Ticket.module_id == module_id)
+        return query.order_by(Ticket.update_time.desc(), Ticket.ticket_id.desc()).limit(safe_limit).all()
+
+        """
+        查询归属到指定问题实例的有效工单。
+        :param db: 数据库会话
+        :param issue_id: 问题实例ID
+        :return: 工单列表
+        """
+        if not issue_id:
+            return []
+        return (
+            db.query(Ticket)
+            .filter(Ticket.issue_id == issue_id, Ticket.del_flag == "0")
+            .order_by(Ticket.create_time.asc(), Ticket.ticket_id.asc())
+            .all()
+        )
+
+    @classmethod
     def list_tickets_by_issue_id(cls, db: Session, issue_id: int | None) -> list[Ticket]:
         """
         查询归属到指定问题实例的有效工单。

@@ -1086,6 +1086,8 @@ class CeleryJobService:
             query = query.filter(CeleryTaskExecutionLog.status == query_object.status)
         if query_object.trigger_type:
             query = query.filter(CeleryTaskExecutionLog.trigger_type == query_object.trigger_type)
+        if query_object.trace_id:
+            query = query.filter(CeleryTaskExecutionLog.trace_id == query_object.trace_id)
         date_range = cls._parse_range(query_object.begin_time, query_object.end_time)
         if date_range:
             query = query.filter(CeleryTaskExecutionLog.create_time.between(date_range[0], date_range[1]))
@@ -1206,6 +1208,7 @@ class CeleryJobService:
             "taskKey": "任务注册键",
             "queueName": "队列",
             "triggerType": "触发方式",
+            "traceId": "TID",
             "status": "执行状态",
             "message": "执行消息",
             "exceptionInfo": "异常信息",

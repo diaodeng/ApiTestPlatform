@@ -221,21 +221,6 @@ def _extract_ticket_sync_summary(extra_data: Any) -> dict[str, Any] | None:
     }
 
 
-def _resolve_ticket_submit_time(extra_data: Any, create_time: Any) -> Any:
-    """
-    解析工单提交时间：优先外部 createTime，缺失时回退本地创建时间。
-
-    :param extra_data: 工单扩展字段。
-    :param create_time: 本地创建时间。
-    :return: 提交时间值。
-    """
-    sync_summary = _extract_ticket_sync_summary(extra_data) or {}
-    external_create_time = str(sync_summary.get("externalCreateTime") or "").strip()
-    if external_create_time:
-        return external_create_time
-    return create_time
-
-
 def _extract_ticket_automation_config(data: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
     """
     提取工单创建或编辑时携带的日志自动化配置。
@@ -519,9 +504,6 @@ class TicketService:
             item["ticketUrl"] = sync_summary.get("ticketUrl") or sync_summary.get("sourceRecordUrl")
         if isinstance(sync_summary, dict) and sync_summary.get("externalCreateTime"):
             item["externalCreateTime"] = sync_summary.get("externalCreateTime")
-        item["submitTime"] = item.get("submitTime") or _resolve_ticket_submit_time(
-            extra_data, item.get("createTime") or item.get("create_time")
-        )
         item["processingConclusionStatus"] = "processed" if item.get("processedAt") else "unprocessed"
         origin_description = str(
             (extra_data or {}).get("origin_description") or (extra_data or {}).get("original_description") or ""
@@ -1016,7 +998,7 @@ class TicketService:
                 elif str(translation_meta.get("translated_text") or "").strip():
                     data["description"] = translated_description
                     extra_data["origin_description"] = original_description
-                    extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                    extra_data["ai_translation"] = str(translation_meta.get("translated_text") or "").strip()
                     if translation_meta.get("provider_code"):
                         extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
                     if translation_meta.get("prompt_code"):
@@ -1268,7 +1250,7 @@ class TicketService:
                 elif str(translation_meta.get("translated_text") or "").strip():
                     data["description"] = translated_description
                     extra_data["origin_description"] = original_description
-                    extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                    extra_data["ai_translation"] = str(translation_meta.get("translated_text") or "").strip()
                     if translation_meta.get("provider_code"):
                         extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
                     if translation_meta.get("prompt_code"):
@@ -2071,6 +2053,7 @@ class TicketService:
                             versionId=version_id,
                             agentCode=message_object.agent_code,
                             aiProviderCode=message_object.ai_provider_code,
+                            aiModelName=message_object.ai_model_name,
                             forceRefresh=True,
                             extraInstruction=content,
                         )

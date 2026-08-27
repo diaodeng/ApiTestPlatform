@@ -19,12 +19,14 @@ from modules.ticket.service.ai.ticket_auto_classification_service import TicketA
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
+from modules.ticket.service.sync.ticket_sync_ai_field_service import TicketSyncAiFieldService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import user_name as _user_name
+from modules.ticket.util.ticket_store_resolution_util import TicketStoreResolutionUtil
 from utils.log_util import logger
 
 
@@ -209,6 +211,11 @@ class TicketSyncPostProcessService:
         existing_title = str(ticket.title or "").strip()
         incoming_title = str(sync_object.title or "").strip()
         meta = TicketSyncPayloadService.build_meta(extra_data)
+        cached_extract_state = (
+            extra_data.get("ai_sync_extract")
+            if isinstance(extra_data.get("ai_sync_extract"), dict)
+            else {}
+        )
         scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
         scope_allowed = scope_decision.eligible
         extra_data = TicketAutomationScopeService.attach_audit_data(extra_data, scope_decision)
@@ -224,11 +231,6 @@ class TicketSyncPostProcessService:
             f"module_name={scope_decision.module_name!r}, matched_by={scope_decision.matched_by}, "
             f"matched_value={scope_decision.matched_value!r}, reason={scope_decision.reason}"
         )
-        skip_ai_analysis_due_to_update_title = cls.should_skip_ai_analysis_for_update_with_title(
-            ticket=ticket,
-            incoming_title=incoming_title,
-            meta=meta,
-        )
         ai_extract_result: dict[str, Any] = {}
         ai_extract_meta: dict[str, Any] = {"skipped": True}
         ai_extract_apply_meta: dict[str, Any] = {"updated": False}
@@ -237,11 +239,6 @@ class TicketSyncPostProcessService:
             logger.info(
                 f"外部工单同步延后处理跳过统一提取与标题AI: ticket_no={sync_object.ticket_no}, "
                 f"reason={scope_decision.reason}"
-            )
-        elif skip_ai_analysis_due_to_update_title:
-            logger.info(
-                f"外部工单同步延后处理跳过统一提取与分类AI：更新场景且已携带标题, "
-                f"ticket_no={sync_object.ticket_no}"
             )
         else:
             try:
@@ -255,10 +252,27 @@ class TicketSyncPostProcessService:
                     source_ref=sync_object.ticket_no,
                     current_user_name=_user_name(current_user),
                     sync_scene=sync_scene,
+                    cached_extract_state=cached_extract_state,
+                    source_fields={
+                        "projectName": sync_object.project_name or sync_object.merchant_name,
+                        "moduleName": sync_object.module_name,
+                        "sourceStoreCode": TicketStoreResolutionUtil.resolve_source_store_code(
+                            raw_payload=sync_object.raw_payload,
+                            extra_data=sync_object.extra_data,
+                            log_pull_config=sync_object.log_pull_config,
+                        ),
+                    },
                 )
-                sync_object, ai_extract_apply_meta = cls.apply_ai_extract_to_sync_object(
+                sync_object, ai_extract_apply_meta = TicketSyncAiFieldService.apply_extract_to_sync_object(
                     sync_object,
                     ai_extract_result,
+                )
+                # AI 回填后重新识别，避免延后自动化继续使用旧快照。
+                detected = TicketSyncAutomationService.detect_fields(
+                    db,
+                    sync_object,
+                    config,
+                    apply_external_mappings=sync_scene != "remote_pull",
                 )
                 ai_extract_title = str((ai_extract_result or {}).get("title") or "").strip()
                 if not incoming_title and not existing_title and ai_extract_title:
@@ -269,6 +283,7 @@ class TicketSyncPostProcessService:
                 ai_extract_result = {}
                 ai_extract_meta = {"skipped": True, "error": str(exc)}
                 ai_extract_apply_meta = {"updated": False}
+
 
         try:
             if not scope_allowed and not incoming_title and not existing_title and "title" not in update_data:
@@ -327,7 +342,7 @@ class TicketSyncPostProcessService:
                 update_data["description"] = translated_description
             if should_translate and origin_description and str(translation_meta.get("translated_text") or "").strip():
                 extra_data["origin_description"] = origin_description
-                extra_data["ai_translation"] = translation_meta.get("translated_text") or translated_description
+                extra_data["ai_translation"] = str(translation_meta.get("translated_text") or "").strip()
                 extra_data["ai_translation_source_hash"] = SyncUtil.text_sha256(origin_description)
                 if translation_meta.get("provider_code"):
                     extra_data["ai_translation_provider_code"] = translation_meta.get("provider_code")
@@ -373,11 +388,6 @@ class TicketSyncPostProcessService:
                 logger.info(
                     f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
                     f"reason={scope_decision.reason}"
-                )
-            elif skip_ai_analysis_due_to_update_title and not classify_reason.startswith("status_changed:"):
-                logger.info(
-                    f"外部工单同步延后自动分类跳过: ticket_no={sync_object.ticket_no}, "
-                    f"reason=更新场景且已携带标题，未命中状态变更分类"
                 )
             else:
                 logger.info(
@@ -523,58 +533,8 @@ class TicketSyncPostProcessService:
         return revision > 1
 
     @classmethod
-    def apply_ai_extract_to_sync_object(
-        cls,
-        sync_object: TicketExternalSyncUpsertModel,
-        extract_result: dict[str, Any] | None,
-    ) -> tuple[TicketExternalSyncUpsertModel, dict[str, Any]]:
-        """
-        将统一提取结果回填到同步对象。
-        :param sync_object: 外部同步对象。
-        :param extract_result: 统一提取结果。
-        :return: (回填后的同步对象, 回填摘要)。
-        """
-        result = extract_result if isinstance(extract_result, dict) else {}
-        pos_no = SyncUtil.safe_int(result.get("posNo"))
-        sco_no = SyncUtil.safe_int(result.get("scoNo"))
-        log_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(result.get("logDate"))
-        log_pull_payload = (
-            dict(sync_object.log_pull_config or {})
-            if isinstance(sync_object.log_pull_config, dict)
-            else {}
-        )
-        changed = False
-        if pos_no:
-            if SyncUtil.safe_int(log_pull_payload.get("posNo")) != pos_no:
-                log_pull_payload["posNo"] = pos_no
-                changed = True
-        elif sco_no:
-            if SyncUtil.safe_int(log_pull_payload.get("scoNo")) != sco_no:
-                log_pull_payload["scoNo"] = sco_no
-                changed = True
-        if log_date:
-            previous_date = TicketSyncPayloadService.normalize_auto_log_pull_date_text(
-                log_pull_payload.get("modifyTime") or log_pull_payload.get("logDate")
-            )
-            if previous_date != log_date:
-                log_pull_payload["modifyTime"] = log_date
-                changed = True
-        if not changed:
-            return sync_object, {"updated": False}
-        updated_sync_object = sync_object.model_copy(update={"log_pull_config": log_pull_payload})
-        return updated_sync_object, {
-            "updated": True,
-            "logPullConfig": {
-                "posNo": SyncUtil.safe_int(log_pull_payload.get("posNo")),
-                "scoNo": SyncUtil.safe_int(log_pull_payload.get("scoNo")),
-                "modifyTime": TicketSyncPayloadService.normalize_auto_log_pull_date_text(
-                    log_pull_payload.get("modifyTime")
-                ),
-            },
-        }
-
-    @classmethod
     def attach_sync_ai_extract_meta(
+
         cls,
         extra_data: dict[str, Any],
         *,

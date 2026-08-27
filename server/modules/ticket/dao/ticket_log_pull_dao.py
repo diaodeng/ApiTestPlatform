@@ -77,6 +77,48 @@ class TicketLogPullDao:
         )
 
     @classmethod
+    def list_success_records_by_pull_identity(
+        cls,
+        db: Session,
+        ticket_id: int,
+        environment: str | None,
+        vendor_id: int,
+        store_id: str,
+        pos_no: int,
+        command_data_type: int,
+    ) -> list[TicketLogPullRecord]:
+        """
+        按工单与基础拉取维度查询成功记录，供自动化去重复用。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param environment: 环境标识
+        :param vendor_id: 商家 vendorId
+        :param store_id: 门店 org_no
+        :param pos_no: POS 编号
+        :param command_data_type: 数据类型
+        :return: 倒序排列的成功记录列表
+        """
+        query = db.query(TicketLogPullRecord).filter(
+            TicketLogPullRecord.ticket_id == ticket_id,
+            TicketLogPullRecord.status == "success",
+            TicketLogPullRecord.vendor_id == vendor_id,
+            TicketLogPullRecord.store_id == store_id,
+            TicketLogPullRecord.pos_no == pos_no,
+            TicketLogPullRecord.command_data_type == command_data_type,
+        )
+        normalized_environment = str(environment or "").strip()
+        if normalized_environment:
+            query = query.filter(TicketLogPullRecord.environment == normalized_environment)
+        else:
+            query = query.filter(
+                or_(
+                    TicketLogPullRecord.environment.is_(None),
+                    TicketLogPullRecord.environment == "",
+                )
+            )
+        return query.order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc()).all()
+
+    @classmethod
     def update_record(cls, db: Session, record_id: int, data: dict) -> None:
         """
         更新日志拉取记录字段。

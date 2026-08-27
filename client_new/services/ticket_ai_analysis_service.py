@@ -152,14 +152,32 @@ class TicketAiAnalysisService:
     ) -> tuple[str, str]:
         """
         解析 Worker 实际用于鉴权的 API Key，但不记录明文。
-        Codex 配置了 requires_openai_auth 时优先读取任务级 auth.json，避免仅依据
-        环境变量误判实际认证来源；其他 Provider 使用其约定的环境变量。
+        Codex 的 model_providers 配置可能通过 experimental_bearer_token 覆盖
+        auth.json，必须按 CLI 的实际优先级读取；其他 Provider 使用其约定的环境变量。
         :param provider_type: 当前 Provider 类型
         :param ai_home: 任务级配置目录
         :param env_values: 已合并的 Worker 环境变量
         :return: (API Key, 脱敏诊断中的来源标识)
         """
         if provider_type == "codex" and ai_home:
+            config_file = ai_home / "config.toml"
+            if config_file.exists():
+                try:
+                    config_text = config_file.read_text(encoding="utf-8")
+                    bearer_match = re.search(
+                        r'^\s*experimental_bearer_token\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s#]+))',
+                        config_text,
+                        flags=re.MULTILINE,
+                    )
+                    if bearer_match:
+                        bearer_token = next(
+                            (group for group in bearer_match.groups() if group is not None),
+                            "",
+                        ).strip()
+                        if bearer_token:
+                            return bearer_token, "config.toml.experimental_bearer_token"
+                except OSError as exc:
+                    logger.warning(f"读取任务级 Codex config.toml 鉴权配置失败，将回退 auth.json: {exc}")
             auth_file = ai_home / "auth.json"
             if auth_file.exists():
                 try:
@@ -197,9 +215,9 @@ class TicketAiAnalysisService:
             if config_file.exists():
                 try:
                     config_text = config_file.read_text(encoding="utf-8")
-                    match = re.search(r'^\s*base_url\s*=\s*"([^"]+)"', config_text, flags=re.MULTILINE)
+                    match = re.search(r'^[ \t]*base_url\s*=\s*(["\'])(.*?)\1', config_text, flags=re.MULTILINE)
                     if match:
-                        return match.group(1).strip().rstrip("/")
+                        return match.group(2).strip().rstrip("/")
                 except OSError as exc:
                     logger.warning(f"读取任务级 Codex config.toml 失败，将回退环境变量: {exc}")
         env_key = "ANTHROPIC_BASE_URL" if provider_type == "claude" else "OPENAI_BASE_URL"
@@ -343,8 +361,8 @@ class TicketAiAnalysisService:
     def _patch_codex_config_for_provider(codex_home: Path, overrides: dict[str, str]) -> None:
         """
         修改副本 config.toml 和 .env，使 Provider 下发的 base_url 和 api_key 生效。
-        Codex CLI 读 config.toml 中 model_providers 的 base_url 优先级高于 OPENAI_BASE_URL 环境变量，
-        读 auth.json 中的 OPENAI_API_KEY 优先级也高于环境变量，因此需要直接修改副本文件。
+        Codex CLI 读 config.toml 中 model_providers 的 base_url 和
+        experimental_bearer_token 优先级高于环境变量/auth.json，因此需要直接修改副本文件。
         :param codex_home: Codex home 目录
         :param overrides: Provider 环境变量覆盖项
         :return: 无
@@ -357,9 +375,11 @@ class TicketAiAnalysisService:
             if config_file.exists():
                 try:
                     config_text = config_file.read_text(encoding="utf-8")
+                    # base_url 通常位于 [model_providers.<name>] 节中，前面带缩进，
+                    # 旧正则只匹配行首无缩进配置，导致下发 Provider 地址没有覆盖实际模型 Provider。
                     new_config = re.sub(
-                        r'^(base_url\s*=\s*)"[^"]*"',
-                        rf'\1"{base_url}"',
+                        r'^([ \t]*base_url\s*=\s*)(["\'])(.*?)(\2)',
+                        lambda match: f'{match.group(1)}{match.group(2)}{base_url}{match.group(4)}',
                         config_text,
                         flags=re.MULTILINE,
                     )
@@ -368,6 +388,51 @@ class TicketAiAnalysisService:
                         logger.info(f"已修改 Codex config.toml base_url: {base_url}")
                 except Exception as exc:
                     logger.warning(f"修改 Codex config.toml 失败: {exc}")
+        # 修改当前 model provider 的 experimental_bearer_token，避免复制用户本地配置中的旧代理令牌。
+        if api_key:
+            config_file = codex_home / "config.toml"
+            try:
+                if config_file.exists():
+                    config_text = config_file.read_text(encoding="utf-8")
+                    provider_match = re.search(
+                        r'^\s*model_provider\s*=\s*["\']([^"\']+)["\']',
+                        config_text,
+                        flags=re.MULTILINE,
+                    )
+                    provider_name = provider_match.group(1) if provider_match else ""
+                    section_pattern = (
+                        rf'(?ms)(^\[model_providers\.{re.escape(provider_name)}\]\s*$.*?)(?=^\[|\Z)'
+                        if provider_name
+                        else ""
+                    )
+                    section_match = re.search(section_pattern, config_text) if section_pattern else None
+                    if section_match:
+                        provider_section = section_match.group(1)
+                        token_pattern = (
+                            r'(?m)^(\s*experimental_bearer_token\s*=\s*)'
+                            r'("[^"]*"|\'[^\']*\'|[^\s#]+)'
+                        )
+                        token_value = json.dumps(api_key, ensure_ascii=False)
+                        patched_section, replaced_count = re.subn(
+                            token_pattern,
+                            lambda match: f"{match.group(1)}{token_value}",
+                            provider_section,
+                            count=1,
+                        )
+                        if replaced_count == 0:
+                            patched_section = provider_section.rstrip() + (
+                                f"\nexperimental_bearer_token = {token_value}\n"
+                            )
+                        if patched_section != provider_section:
+                            config_file.write_text(
+                                config_text[: section_match.start(1)]
+                                + patched_section
+                                + config_text[section_match.end(1) :],
+                                encoding="utf-8",
+                            )
+                            logger.info("已修改 Codex config.toml experimental_bearer_token")
+            except Exception as exc:
+                logger.warning(f"修改 Codex config.toml experimental_bearer_token 失败: {exc}")
         # 修改 .env 中的 OPENAI_API_KEY 和 OPENAI_BASE_URL
         if base_url or api_key:
             env_file = codex_home / ".env"
@@ -395,7 +460,7 @@ class TicketAiAnalysisService:
                 logger.info(f"已修改 Codex .env: api_key={'***' if api_key else ''}, base_url={base_url}")
             except Exception as exc:
                 logger.warning(f"修改 Codex .env 失败: {exc}")
-        # 修改 auth.json 中的 OPENAI_API_KEY，Codex CLI 的 requires_openai_auth 从 auth.json 读取认证
+        # 同步修改 auth.json 中的 OPENAI_API_KEY，兼容 Codex 的认证回退路径。
         if api_key:
             auth_file = codex_home / "auth.json"
             try:
@@ -628,12 +693,26 @@ class TicketAiAnalysisService:
                 existing_lines: list[str] = []
                 if env_file.exists():
                     existing_lines = env_file.read_text(encoding="utf-8").splitlines()
-                existing_keys = {line.split("=", 1)[0] for line in existing_lines if "=" in line}
-                for line in env_lines:
-                    key = line.split("=", 1)[0]
-                    if key not in existing_keys:
-                        existing_lines.append(line)
-                env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+                # 同一工作区重试或切换 Provider 时必须覆盖旧值，不能只追加缺失键。
+                # 否则 Claude Code 会继续读取上一次任务的 API 地址和密钥。
+                override_map = {
+                    line.split("=", 1)[0]: line
+                    for line in env_lines
+                    if "=" in line
+                }
+                updated_lines: list[str] = []
+                written_keys: set[str] = set()
+                for existing_line in existing_lines:
+                    key = existing_line.split("=", 1)[0] if "=" in existing_line else ""
+                    if key in override_map:
+                        updated_lines.append(override_map[key])
+                        written_keys.add(key)
+                    else:
+                        updated_lines.append(existing_line)
+                updated_lines.extend(
+                    line for key, line in override_map.items() if key not in written_keys
+                )
+                env_file.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
                 logger.info(f"已为 Claude Code 写入 .env: api_key={'***' if api_key else ''}")
             except Exception as exc:
                 logger.warning(f"写入 Claude Code .env 失败: {exc}")
@@ -807,6 +886,55 @@ class TicketAiAnalysisService:
             return json.loads(raw_stdout.strip().splitlines()[-1])
         except Exception:
             return None
+
+    @classmethod
+    def _find_token_usage_payload(cls, candidate: Any) -> dict[str, Any] | None:
+        """
+        递归查找结果结构中的 Token 用量对象。
+        :param candidate: 待查找对象
+        :return: Token 用量字典
+        """
+        if isinstance(candidate, dict):
+            direct_keys = {
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "input_tokens",
+                "output_tokens",
+                "inputTokens",
+                "outputTokens",
+                "totalTokens",
+            }
+            if any(key in candidate for key in direct_keys):
+                return candidate
+            for key in ("usage", "token_usage", "tokenUsage"):
+                payload = candidate.get(key)
+                if isinstance(payload, dict):
+                    return payload
+            for value in candidate.values():
+                payload = cls._find_token_usage_payload(value)
+                if payload is not None:
+                    return payload
+            return None
+        if isinstance(candidate, (list, tuple)):
+            for item in candidate:
+                payload = cls._find_token_usage_payload(item)
+                if payload is not None:
+                    return payload
+        return None
+
+    @classmethod
+    def _extract_token_usage_payload(cls, *candidates: Any) -> dict[str, Any] | None:
+        """
+        从多个候选对象中提取 Token 用量。
+        :param candidates: 候选对象列表
+        :return: Token 用量字典
+        """
+        for candidate in candidates:
+            payload = cls._find_token_usage_payload(candidate)
+            if payload is not None:
+                return payload
+        return None
 
     @classmethod
     def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
@@ -2013,7 +2141,9 @@ class TicketAiAnalysisService:
    - snapshots 是历史 ACR 版本，新的结论需要说明相对上一版的变化。
    - similarTickets 是历史相似工单，若可复用经验，请写入 similar_cases、sop_suggestion、
      owner_suggestion、monitoring_suggestion。
-5. 输出严格 JSON，不要输出多余说明文本。
+5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
+   去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
+   写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
 6. 结果必须包含以下字段；如果某些扩展字段暂时无法确定，请用空字符串、空数组或 false 占位，不要省略：
    - ticket_id
    - project_id
@@ -2218,6 +2348,7 @@ class TicketAiAnalysisService:
                         "command_line": "cached:result.json",
                         "stdout_path": str(workspace_dir / "worker.stdout.txt"),
                         "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                        "token_usage": token_usage_payload,
                     },
                 }
             lock_payload = cls._read_json_file(task_lock_file)
@@ -2588,6 +2719,12 @@ class TicketAiAnalysisService:
                     }
 
                 normalized_result = parsed_result
+                token_usage_payload = cls._extract_token_usage_payload(
+                    normalized_result,
+                    parsed_result,
+                    cls._extract_json_from_text(raw_stdout) if raw_stdout.strip() else None,
+                    cls._extract_json_from_text(raw_stderr) if raw_stderr.strip() else None,
+                )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_finished",
@@ -2601,6 +2738,7 @@ class TicketAiAnalysisService:
                     "success": True,
                     "status": "success",
                     "message": "AI 分析完成",
+                    "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": normalized_result,
                         "raw_output": raw_stdout or raw_stderr,

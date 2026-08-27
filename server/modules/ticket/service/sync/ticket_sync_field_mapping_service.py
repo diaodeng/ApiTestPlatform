@@ -44,6 +44,19 @@ class ModuleMappingResult:
     matched_by: str = ""
     """匹配方式：mapping_moduleId/mapping_moduleCode/mapping_moduleName/direct_code/direct_name。"""
 
+    def to_payload(self) -> dict[str, Any]:
+        """转换为可写入 JSON 字段的稳定审计结构。"""
+        return {
+            "mappingMatched": self.mapping_matched,
+            "mappedModuleId": self.mapped_module_id,
+            "mappedModuleCode": self.mapped_module_code,
+            "mappedModuleName": self.mapped_module_name,
+            "resolvedModuleId": self.resolved_module_id,
+            "resolvedModuleCode": self.resolved_module_code,
+            "resolvedModuleName": self.resolved_module_name,
+            "matchedBy": self.matched_by,
+        }
+
 
 class TicketSyncFieldMappingService:
     """工单外部字段映射与人员解析。"""
@@ -677,6 +690,49 @@ class TicketSyncFieldMappingService:
         return SyncUtil.safe_int(getattr(row, "vender_no", None))
 
     @classmethod
+    def list_store_candidates_by_external_value(
+        cls,
+        db: Session,
+        *,
+        vendor_id: int | None,
+        ticket_store: str,
+    ) -> list[dict[str, str]]:
+        """
+        查询商家下与外部门店编码匹配的全部有效候选。
+        :param db: 数据库会话
+        :param vendor_id: 已匹配商家ID
+        :param ticket_store: 外部门店字段，通常对应 sap_org_no
+        :return: 去重后的候选门店列表
+        """
+        store_text = str(ticket_store or "").strip()
+        if not store_text or not vendor_id:
+            return []
+        rows = (
+            db.query(TicketLogPullStoreConfig)
+            .filter(
+                TicketLogPullStoreConfig.sap_org_no == store_text,
+                TicketLogPullStoreConfig.vender_no == str(vendor_id),
+            )
+            .order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc())
+            .all()
+        )
+        candidates: list[dict[str, str]] = []
+        seen_org_nos: set[str] = set()
+        for row in rows:
+            org_no = str(row.org_no or row.sap_org_no or "").strip()
+            if not org_no or org_no in seen_org_nos:
+                continue
+            seen_org_nos.add(org_no)
+            candidates.append(
+                {
+                    "orgNo": org_no,
+                    "orgName": str(row.org_name or "").strip(),
+                    "sapOrgNo": str(row.sap_org_no or store_text).strip(),
+                }
+            )
+        return candidates
+
+    @classmethod
     def resolve_store_by_external_value(
         cls,
         db: Session,
@@ -697,13 +753,15 @@ class TicketSyncFieldMappingService:
         if not vendor_id:
             return store_text, ""
 
-        query = db.query(TicketLogPullStoreConfig).filter(TicketLogPullStoreConfig.sap_org_no == store_text)
-        query = query.filter(TicketLogPullStoreConfig.vender_no == str(vendor_id))
-        row = query.order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc()).first()
-        if not row:
+        candidates = cls.list_store_candidates_by_external_value(
+            db,
+            vendor_id=vendor_id,
+            ticket_store=store_text,
+        )
+        if len(candidates) != 1:
             return store_text, ""
-        resolved_store_id = str(row.org_no or row.sap_org_no or "").strip() or store_text
-        return resolved_store_id, str(row.org_name or "").strip()
+        candidate = candidates[0]
+        return candidate["orgNo"], candidate["orgName"]
 
     @classmethod
     def match_assignee_mapping_exact(cls, assignee_text: str, assignee_mappings: Any) -> dict[str, Any] | None:

@@ -10,6 +10,9 @@ from module_task.celery_contract import CELERY_EXECUTE_JOB_TASK, build_task_payl
 from module_task.celery_job_models import CeleryPeriodicTask
 from module_task.celery_schedule_parser import build_interval_schedule, parse_cron_to_schedule
 from utils.log_util import logger
+from utils.metrics import PushMetrics
+
+_metrics_thread = None
 
 
 class DatabaseScheduler(Scheduler):
@@ -36,8 +39,13 @@ class DatabaseScheduler(Scheduler):
 
         :return: 无返回值。
         """
+        global _metrics_thread
         super().setup_schedule()
         self._sync_database_jobs(force=True)
+        if _metrics_thread is None or not _metrics_thread.is_alive():
+            _metrics_thread = PushMetrics(role="celery_beat")
+            _metrics_thread.start()
+            logger.info("Celery Beat 指标采集已启动: role=celery_beat")
 
     def sync(self):
         """

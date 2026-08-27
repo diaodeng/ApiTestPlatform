@@ -374,6 +374,20 @@ class HandleResponse(BaseModel):
     response: AgentResponse | AgentResponseWebSocket | AgentResponseWebUI | dict | None = None
     message: str = None
 
+    @classmethod
+    def validate_transport_payload(cls, payload: str | bytes | bytearray | dict[str, Any]) -> "HandleResponse":
+        """
+        校验通过 HTTP/Redis 传输后的 Agent 响应负载。
+        :param payload: 原始 JSON 字符串、字节数组或已解析字典
+        :return: 反序列化后的响应模型
+        """
+        normalized_payload: dict[str, Any] | Any = payload
+        if isinstance(normalized_payload, (bytes, bytearray)):
+            normalized_payload = normalized_payload.decode("utf-8")
+        if isinstance(normalized_payload, str):
+            normalized_payload = json.loads(normalized_payload)
+        return cls.model_validate(normalized_payload)
+
 
 def handle_response(args: tuple) -> HandleResponse:
     res_data = {

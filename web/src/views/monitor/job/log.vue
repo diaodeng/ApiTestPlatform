@@ -10,6 +10,15 @@
           @keyup.enter="handleQuery"
         />
       </el-form-item>
+      <el-form-item label="TID" prop="traceId">
+        <el-input
+          v-model="queryParams.traceId"
+          placeholder="请输入TID"
+          clearable
+          style="width: 220px"
+          @keyup.enter="handleQuery"
+        />
+      </el-form-item>
       <el-form-item label="执行状态" prop="status">
         <el-select v-model="queryParams.status" clearable placeholder="请选择" style="width: 160px">
           <el-option label="成功" value="success" />
@@ -70,6 +79,7 @@
       <el-table-column type="selection" width="55" align="center" />
       <el-table-column label="日志ID" width="90" align="center" prop="logId" />
       <el-table-column label="任务ID" width="90" align="center" prop="taskId" />
+      <el-table-column label="TID" align="center" prop="traceId" width="220" :show-overflow-tooltip="true" />
       <el-table-column label="任务名称" align="center" prop="taskName" :show-overflow-tooltip="true" />
       <el-table-column label="任务注册键" align="center" prop="taskKey" :show-overflow-tooltip="true" />
       <el-table-column label="触发方式" align="center" prop="triggerType" width="110" />
@@ -108,6 +118,7 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="日志ID">{{ form.logId }}</el-descriptions-item>
           <el-descriptions-item label="任务ID">{{ form.taskId }}</el-descriptions-item>
+          <el-descriptions-item label="TID" :span="2">{{ form.traceId || "-" }}</el-descriptions-item>
           <el-descriptions-item label="任务名称">{{ form.taskName }}</el-descriptions-item>
           <el-descriptions-item label="任务注册键">{{ form.taskKey }}</el-descriptions-item>
           <el-descriptions-item label="触发方式">{{ form.triggerType }}</el-descriptions-item>

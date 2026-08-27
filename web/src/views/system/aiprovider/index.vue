@@ -128,6 +128,39 @@
               <el-button class="ml8" type="primary" :loading="testLoading" @click="testProviderConnection">测试</el-button>
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="可用模型">
+              <div style="width: 100%">
+                <div style="margin-bottom: 6px">
+                  <el-button type="primary" size="small" icon="Plus" @click="handleAddModelItem" v-hasPermi="['system:aiprovider:edit']">添加模型</el-button>
+                  <el-button size="small" icon="Refresh" :loading="modelRefreshLoading" @click="handleRefreshModelCatalog" v-hasPermi="['system:aiprovider:edit']">从API刷新</el-button>
+                </div>
+                <el-table :data="allModelOptions" size="small" max-height="260" border>
+                  <el-table-column label="模型标识" prop="modelId" min-width="160" :show-overflow-tooltip="true" />
+                  <el-table-column label="展示名称" prop="displayName" min-width="140" :show-overflow-tooltip="true" />
+                  <el-table-column label="来源" align="center" width="80">
+                    <template #default="scope">
+                      <el-tag size="small" :type="scope.row.source === 'remote' ? '' : 'info'">{{ scope.row.source === 'remote' ? '远端' : '手动' }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="最近发现" align="center" width="100">
+                    <template #default="scope">{{ scope.row.discoveredAt ? parseTime(scope.row.discoveredAt) : '-' }}</template>
+                  </el-table-column>
+                  <el-table-column label="状态" align="center" width="80">
+                    <template #default="scope">
+                      <el-tag size="small" :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '启用' : '禁用' }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" align="center" width="140" v-hasPermi="['system:aiprovider:edit']">
+                    <template #default="scope">
+                      <el-button link size="small" :type="scope.row.enabled ? 'warning' : 'success'" @click="handleToggleModelItem(scope.row)">{{ scope.row.enabled ? '禁用' : '启用' }}</el-button>
+                      <el-button link size="small" type="danger" v-if="scope.row.source === 'manual'" @click="handleDeleteModelItem(scope.row)">删除</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </el-form-item>
+          </el-col>
           <el-col :span="12">
             <el-form-item label="首选Agent" prop="preferredAgentCode">
               <el-input v-model="form.preferredAgentCode" placeholder="分析任务可选，留空使用系统默认Agent" />
@@ -249,13 +282,19 @@
 <script setup name="AiProvider">
 import {
   addAiProvider,
+  addAiProviderModelCatalogItem,
   delAiProvider,
+  delAiProviderModelCatalogItem,
   getAiProvider,
   getAiProviderMetadataOptions,
   listAiProvider,
+  listAiProviderAllModelCatalog,
   listAiProviderModelCatalog,
+  listAiProviderModelOptions,
   previewAiProviderModelCatalog,
+  refreshAiProviderModelCatalog,
   testAiProviderConnection,
+  toggleAiProviderModelCatalogItem,
   updateAiProvider,
   viewAiProviderSecret
 } from '@/api/system/aiprovider'
@@ -275,7 +314,9 @@ const protocolOptions = ref([])
 const usageOptions = ref([])
 const executorOptions = ref([])
 const modelOptions = ref([])
+const allModelOptions = ref([])
 const modelLoading = ref(false)
+const modelRefreshLoading = ref(false)
 const testLoading = ref(false)
 const connectionConfigText = ref('')
 const workerEnvText = ref('')
@@ -380,6 +421,7 @@ function resetForm() {
     remark: ''
   }
   modelOptions.value = []
+  allModelOptions.value = []
   connectionConfigText.value = ''
   workerEnvText.value = ''
   proxy.resetForm('providerRef')
@@ -420,6 +462,7 @@ function handleUpdate(row) {
     connectionConfigText.value = form.value.connectionConfig ? JSON.stringify(form.value.connectionConfig, null, 2) : ''
     workerEnvText.value = form.value.workerEnv ? JSON.stringify(form.value.workerEnv, null, 2) : ''
     listAiProviderModelCatalog(row.providerId).then(catalogResponse => applyModelOptions(catalogResponse.data))
+    listAiProviderAllModelCatalog(row.providerId).then(catalogResponse => { allModelOptions.value = catalogResponse.data || [] })
     dialogTitle.value = '编辑 AI Provider'
     formOpen.value = true
   })
@@ -526,6 +569,74 @@ function handleDelete(row) {
     proxy.$modal.msgSuccess('删除成功')
     getList()
   }).catch(() => {})
+}
+
+function handleRefreshModelCatalog() {
+  if (!form.value.providerId) {
+    proxy.$modal.msgWarning('请先保存Provider后再刷新模型目录')
+    return
+  }
+  modelRefreshLoading.value = true
+  refreshAiProviderModelCatalog(form.value.providerId).then(response => {
+    const models = response.data || []
+    allModelOptions.value = models
+    applyModelOptions(models.filter(item => item.enabled))
+    proxy.$modal.msgSuccess(`已从API刷新 ${models.length} 个模型`)
+  }).finally(() => {
+    modelRefreshLoading.value = false
+  })
+}
+
+function handleAddModelItem() {
+  if (!form.value.providerId) {
+    proxy.$modal.msgWarning('请先保存Provider后再添加模型')
+    return
+  }
+  proxy.$prompt('请输入模型标识（model_id）', '手动添加模型', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputPattern: /\S+/,
+    inputErrorMessage: '模型标识不能为空'
+  }).then(({ value: modelId }) => {
+    const displayName = modelId.trim()
+    addAiProviderModelCatalogItem(form.value.providerId, { modelId: modelId.trim(), displayName }).then(response => {
+      loadAllModelCatalog()
+      loadEnabledModelCatalog()
+      proxy.$modal.msgSuccess('模型添加成功')
+    })
+  }).catch(() => {})
+}
+
+function handleToggleModelItem(row) {
+  toggleAiProviderModelCatalogItem(form.value.providerId, row.modelId, { enabled: !row.enabled }).then(() => {
+    loadAllModelCatalog()
+    loadEnabledModelCatalog()
+    proxy.$modal.msgSuccess(row.enabled ? '已禁用' : '已启用')
+  })
+}
+
+function handleDeleteModelItem(row) {
+  proxy.$modal.confirm(`是否确认删除模型 "${row.modelId}"？`).then(() => {
+    delAiProviderModelCatalogItem(form.value.providerId, row.modelId).then(() => {
+      loadAllModelCatalog()
+      loadEnabledModelCatalog()
+      proxy.$modal.msgSuccess('模型已删除')
+    })
+  }).catch(() => {})
+}
+
+function loadAllModelCatalog() {
+  if (!form.value.providerId) return
+  listAiProviderAllModelCatalog(form.value.providerId).then(response => {
+    allModelOptions.value = response.data || []
+  })
+}
+
+function loadEnabledModelCatalog() {
+  if (!form.value.providerId) return
+  listAiProviderModelCatalog(form.value.providerId).then(response => {
+    applyModelOptions(response.data)
+  })
 }
 
 loadMetadataOptions().then(getList)

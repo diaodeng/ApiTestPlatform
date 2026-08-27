@@ -7,10 +7,13 @@
   import TicketDetailHistoryTab from './detail-tabs/TicketDetailHistoryTab.vue';
   import {
     addTicketAiAnalysis,
+    bindTicketIssue,
     createAndBindTicketIssue,
-    getTicket,
+    getTicketSimilarTickets,
+    getTicketSummary,
     getTicketLogPullProjectVendorMap,
     listTicketAiAnalysisTasks,
+    listTicketIssues,
     retryTicketAiAnalysis,
     saveTicketLogPullProjectVendorMap,
     translateTicketDescription,
@@ -31,6 +34,7 @@
     buildTicketAiPreferenceDefaults,
     saveTicketAiPreferencePatch,
   } from '../hooks/useTicketAiPreference';
+  import { useAiProviderModelOptions } from '../hooks/useAiProviderModelOptions';
 
   const props = defineProps({
     open: {
@@ -96,9 +100,20 @@
   const detailMoreInfoExpanded = ref(false);
   const descriptionTranslateLoading = ref(false);
   const issueCreateBindOpen = ref(false);
+  const issueBindExistingOpen = ref(false);
+  const issueBindExistingLoading = ref(false);
+  const issueOptions = ref([]);
   const issueActionLoading = ref(false);
   const issueCreateBindForm = ref({});
+  const issueBindExistingForm = ref({});
   const detail = ref({});
+  const detailLoading = ref(false);
+  const similarTickets = ref([]);
+  const similarLoading = ref(false);
+  const similarError = ref('');
+  const similarStatus = ref('idle');
+  let detailRequestGeneration = 0;
+  let aiPollingGeneration = 0;
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
@@ -124,6 +139,10 @@
   const projectVendorMapLoading = ref(false);
   const projectVendorMapSubmitting = ref(false);
   const aiTaskLoading = ref(false);
+  const {
+    modelOptions: aiAnalysisModelOptions,
+    loadModelOptions: loadAiAnalysisModelOptions,
+  } = useAiProviderModelOptions();
   const aiTaskList = ref([]);
   const aiTaskTotal = ref(0);
   // detailVersionOptions 已通过 useOptions() 提供
@@ -132,6 +151,7 @@
     logPullRecordId: undefined,
     agentCode: '',
     aiProviderCode: '',
+    aiModelName: '',
     executor: '',
     forceRefresh: false,
     logAnalysisMode: 'hybrid',
@@ -187,9 +207,17 @@
     applyAiAnalysisProviderExecutor(providerCode);
     saveTicketAiPreferencePatch({
       aiProviderCode: providerCode,
+      aiModelName: '',
       agentCode: aiAnalysisTaskForm.value.agentCode,
       executor: aiAnalysisTaskForm.value.executor,
     });
+    // Provider切换后清理旧模型，再加载新Provider的启用模型。
+    aiAnalysisTaskForm.value.aiModelName = '';
+    loadAiAnalysisModelOptions(providerCode);
+  }
+
+  function handleAiAnalysisModelChange(aiModelName) {
+    saveTicketAiPreferencePatch({ aiModelName });
   }
 
   /**
@@ -245,14 +273,24 @@
       ? description.split('【AI翻译】')[0].trim()
       : description;
   });
-  const detailAiTranslation = computed(() =>
-    String(
+  const detailAiTranslation = computed(() => {
+    const raw = String(
       detail.value.aiTranslation ||
         detail.value.extraData?.aiTranslation ||
         detail.value.extraData?.ai_translation ||
         ''
-    ).trim()
-  );
+    ).trim();
+    if (!raw) return '';
+    // 移除可能混入的【AI翻译】标记，确保只展示纯译文
+    if (raw.startsWith('【AI翻译】')) {
+      return raw.slice('【AI翻译】'.length).trim();
+    }
+    const markerIndex = raw.indexOf('【AI翻译】');
+    if (markerIndex >= 0) {
+      return raw.slice(markerIndex + '【AI翻译】'.length).trim();
+    }
+    return raw;
+  });
 
   /**
    * 解析详情页默认版本号。
@@ -300,17 +338,21 @@
   }
   const aiTaskDetailPayload = computed(() => selectedAiTask.value || {});
   const aiPromptLayers = computed(() => detail.value.aiPromptLayers || {});
+  const aiPromptLayerItems = computed(() => [
+    { key: 'project', label: '项目默认提示词', layer: aiPromptLayers.value.project },
+    { key: 'moduleCommon', label: '模块通用说明', layer: aiPromptLayers.value.moduleCommon },
+    { key: 'moduleProject', label: '项目模块说明', layer: aiPromptLayers.value.moduleProject }
+  ]);
   const aiPromptHintTitle = computed(() => {
     const projectName =
       aiPromptLayers.value?.project?.projectName || detail.value.projectName || '';
-    const moduleName = aiPromptLayers.value?.module?.moduleName || detail.value.moduleName || '';
+    const moduleName =
+      aiPromptLayers.value?.moduleProject?.moduleName || detail.value.moduleName || '';
+    const moduleCode = aiPromptLayers.value?.moduleCommon?.moduleCode || detail.value.moduleCode || '';
     const parts = ['AI 分析会自动叠加默认提示词'];
-    if (projectName) {
-      parts.push(`项目：${projectName}`);
-    }
-    if (moduleName) {
-      parts.push(`模块：${moduleName}`);
-    }
+    if (projectName) parts.push(`项目：${projectName}`);
+    if (moduleName) parts.push(`模块：${moduleName}`);
+    if (moduleCode) parts.push(`编码：${moduleCode}`);
     return parts.join('，');
   });
   const aiPromptHintDesc = computed(() => {
@@ -331,6 +373,57 @@
 
   function syncDetailBundle(payload) {
     detail.value = payload || {};
+  }
+
+  function isCurrentDetailRequest(ticketId, generation) {
+    return (
+      props.open &&
+      currentTicketId.value === ticketId &&
+      detailRequestGeneration === generation
+    );
+  }
+
+  function stopAiTaskPolling() {
+    aiPollingGeneration += 1;
+  }
+
+  function resetDetailLoadingState() {
+    detail.value = {};
+    detailLoading.value = false;
+    similarTickets.value = [];
+    similarLoading.value = false;
+    similarError.value = '';
+    similarStatus.value = 'idle';
+  }
+
+  function loadSimilarTickets(ticketId, generation) {
+    similarLoading.value = true;
+    similarError.value = '';
+    similarStatus.value = 'loading';
+    return getTicketSimilarTickets(ticketId, { limit: 5 })
+      .then((response) => {
+        if (!isCurrentDetailRequest(ticketId, generation)) return;
+        const payload = response?.data || {};
+        similarTickets.value = payload.items || [];
+        similarStatus.value = payload.status || 'ready';
+        similarError.value = payload.message || '';
+      })
+      .catch((error) => {
+        if (!isCurrentDetailRequest(ticketId, generation)) return;
+        similarTickets.value = [];
+        similarStatus.value = 'failed';
+        similarError.value = error?.message || '相似工单加载失败';
+      })
+      .finally(() => {
+        if (isCurrentDetailRequest(ticketId, generation)) {
+          similarLoading.value = false;
+        }
+      });
+  }
+
+  function reloadSimilarTickets() {
+    if (!currentTicketId.value || !props.open) return Promise.resolve();
+    return loadSimilarTickets(currentTicketId.value, detailRequestGeneration);
   }
 
   /**
@@ -362,13 +455,23 @@
   }
 
   function refreshDetail() {
-    if (!currentTicketId.value) {
+    if (!currentTicketId.value || !props.open) {
       return Promise.resolve();
     }
-    return getTicket(currentTicketId.value).then((response) => {
-      syncDetailBundle(response.data || {});
-      loadDetailVersionOptions(detail.value.projectId);
-    });
+    const ticketId = currentTicketId.value;
+    const generation = detailRequestGeneration;
+    detailLoading.value = true;
+    return getTicketSummary(ticketId)
+      .then((response) => {
+        if (!isCurrentDetailRequest(ticketId, generation)) return;
+        syncDetailBundle(response.data || {});
+        return loadDetailVersionOptions(detail.value.projectId);
+      })
+      .finally(() => {
+        if (isCurrentDetailRequest(ticketId, generation)) {
+          detailLoading.value = false;
+        }
+      });
   }
 
   /**
@@ -377,6 +480,93 @@
    */
   function refreshDetailAndNotify() {
     return Promise.all([refreshDetail(), emitChanged()]).then(() => undefined);
+  }
+
+  function buildIssueBindExistingForm() {
+    return {
+      issueId: detail.value.issueId || undefined,
+      relationType: detail.value.issueRelationType || 'manual',
+      confirmed: detail.value.issueConfirmed !== false,
+      remark: '',
+    };
+  }
+
+  function formatIssueOption(item) {
+    return [item.issueNo || item.issueId, item.title, item.status ? `【${item.status}】` : '']
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function openIssueBindExistingDialog() {
+    if (!detail.value.ticketId) {
+      proxy.$modal.msgWarning('请先打开工单详情');
+      return;
+    }
+    issueBindExistingForm.value = buildIssueBindExistingForm();
+    issueOptions.value = detail.value.issueId
+      ? [{
+          issueId: detail.value.issueId,
+          issueNo: detail.value.issueNo,
+          title: detail.value.issueTitle,
+          status: detail.value.issueStatus,
+        }]
+      : [];
+    issueBindExistingOpen.value = true;
+  }
+
+  function searchIssuesForBind(keyword) {
+    const text = String(keyword || '').trim();
+    if (!text) {
+      return Promise.resolve(issueOptions.value);
+    }
+    issueBindExistingLoading.value = true;
+    return listTicketIssues({
+      keyword: text,
+      projectId: detail.value.projectId || undefined,
+      moduleId: detail.value.moduleId || undefined,
+      pageNum: 1,
+      pageSize: 20,
+    }).then((response) => {
+      const rows = response.rows || response.data || [];
+      const current = issueOptions.value.find(
+        (item) => String(item.issueId) === String(detail.value.issueId)
+      );
+      issueOptions.value = current && !rows.some((item) => String(item.issueId) === String(current.issueId))
+        ? [current, ...rows]
+        : rows;
+      return issueOptions.value;
+    }).finally(() => {
+      issueBindExistingLoading.value = false;
+    });
+  }
+
+  function submitIssueBindExisting() {
+    const targetIssueId = issueBindExistingForm.value.issueId;
+    if (!targetIssueId) {
+      proxy.$modal.msgWarning('请选择问题实例');
+      return;
+    }
+    const currentIssueId = detail.value.issueId;
+    const execute = () => {
+      issueActionLoading.value = true;
+      return bindTicketIssue(detail.value.ticketId, {
+        issueId: targetIssueId,
+        relationType: issueBindExistingForm.value.relationType || 'manual',
+        confirmed: issueBindExistingForm.value.confirmed !== false,
+        remark: issueBindExistingForm.value.remark || '',
+      }).then(() => {
+        proxy.$modal.msgSuccess(currentIssueId ? '问题实例已更换' : '问题实例关联成功');
+        issueBindExistingOpen.value = false;
+        return Promise.all([refreshDetail(), emitChanged()]);
+      }).finally(() => {
+        issueActionLoading.value = false;
+      });
+    };
+    if (currentIssueId && String(currentIssueId) !== String(targetIssueId)) {
+      proxy.$modal.confirm('当前工单已有问题归属，是否确认更换为所选问题？').then(execute);
+      return;
+    }
+    execute();
   }
 
   function buildIssueCreateBindForm() {
@@ -642,11 +832,34 @@
   async function waitForAiTaskTerminal(taskId, options = {}) {
     const maxAttempts = Number(options.maxAttempts || 6);
     const intervalMs = Number(options.intervalMs || 1500);
+    const pollingGeneration = aiPollingGeneration;
+    const pollingTicketId = currentTicketId.value;
     for (let index = 0; index < maxAttempts; index += 1) {
+      if (
+        pollingGeneration !== aiPollingGeneration ||
+        !props.open ||
+        currentTicketId.value !== pollingTicketId
+      ) {
+        return null;
+      }
       if (index > 0) {
         await sleep(intervalMs);
       }
+      if (
+        pollingGeneration !== aiPollingGeneration ||
+        !props.open ||
+        currentTicketId.value !== pollingTicketId
+      ) {
+        return null;
+      }
       const tasks = await loadAiAnalysisTasks(true);
+      if (
+        pollingGeneration !== aiPollingGeneration ||
+        !props.open ||
+        currentTicketId.value !== pollingTicketId
+      ) {
+        return null;
+      }
       const currentTask = (tasks || []).find((item) => String(item.taskId) === String(taskId));
       const status = String(currentTask?.status || '').toLowerCase();
       if (currentTask && aiTerminalStatuses.includes(status)) {
@@ -720,6 +933,8 @@
     aiAnalysisTaskForm.value.logPullRecordId = detail.value.latestLogPull?.id || undefined;
     aiAnalysisTaskForm.value.agentCode = aiDefaults.agentCode;
     aiAnalysisTaskForm.value.aiProviderCode = aiDefaults.aiProviderCode;
+    aiAnalysisTaskForm.value.aiModelName = aiDefaults.aiModelName || '';
+    loadAiAnalysisModelOptions(aiAnalysisTaskForm.value.aiProviderCode);
     if (!aiDefaults.hasManualAgentCode) {
       applyAiAnalysisProviderAgent(aiAnalysisTaskForm.value.aiProviderCode);
     }
@@ -835,6 +1050,7 @@
         logPullRecordId: aiAnalysisTaskForm.value.logPullRecordId || undefined,
         agentCode: aiAnalysisTaskForm.value.agentCode || undefined,
         aiProviderCode: aiAnalysisTaskForm.value.aiProviderCode || undefined,
+        aiModelName: aiAnalysisTaskForm.value.aiModelName || undefined,
         executor: aiAnalysisTaskForm.value.executor || undefined,
         forceRefresh: aiAnalysisTaskForm.value.forceRefresh,
         logAnalysisMode: aiAnalysisTaskForm.value.logAnalysisMode || 'hybrid',
@@ -903,7 +1119,11 @@
       proxy.$modal.msgWarning('工单ID无效，无法打开详情');
       return Promise.resolve();
     }
+    stopAiTaskPolling();
+    detailRequestGeneration += 1;
+    const generation = detailRequestGeneration;
     currentTicketId.value = ticketId;
+    resetDetailLoadingState();
     detailOpen.value = true;
     detailMainTab.value = 'overview';
     descriptionExpanded.value = true;
@@ -916,17 +1136,9 @@
     selectedAiTask.value = null;
     aiRepoMappingList.value = [];
     aiRepoMappingTotal.value = 0;
-    return getTicket(ticketId).then((response) => {
-      syncDetailBundle(response.data || {});
-      return loadDetailVersionOptions(detail.value.projectId)
-        .catch(() => {
-          detailVersionOptions.value = [];
-        })
-        .then(() => {
-          aiAnalysisTaskForm.value.mappingId =
-            detail.value.latestAiAnalysis?.mappingId || aiAnalysisTaskForm.value.mappingId;
-        });
-    });
+    const detailRequest = refreshDetail();
+    const similarRequest = loadSimilarTickets(ticketId, generation);
+    return Promise.all([detailRequest, similarRequest]);
   }
 
   function handleTranslateDescription() {
@@ -950,15 +1162,28 @@
   }
 
   function resetDetailDialog() {
+    detailRequestGeneration += 1;
+    currentTicketId.value = undefined;
     detailMainTab.value = 'overview';
     descriptionExpanded.value = true;
     translationExpanded.value = false;
     detailMoreInfoExpanded.value = false;
     detail.value = {};
+    detailLoading.value = false;
+    similarTickets.value = [];
+    similarLoading.value = false;
+    similarError.value = '';
+    similarStatus.value = 'idle';
     detailVersionOptions.value = [];
     aiTaskHistoryOpen.value = false;
     aiTaskDetailOpen.value = false;
+    aiTaskList.value = [];
+    aiTaskTotal.value = 0;
+    aiTaskQuery.value = { pageNum: 1, pageSize: 10, status: undefined };
+    aiAnalysisLogPullOptions.value = [];
     selectedAiTask.value = null;
+    issueCreateBindOpen.value = false;
+    issueCreateBindForm.value = {};
     aiAnalysisOpen.value = false;
     aiRepoMappingOpen.value = false;
     projectVendorMapOpen.value = false;
@@ -966,6 +1191,15 @@
 
   function formatJson(value) {
     return JSON.stringify(value, null, 2);
+  }
+
+  /**
+   * 格式化 Token 数量，空值时返回占位符。
+   * @param {number|string|null|undefined} value Token 数值。
+   * @returns {string} 展示文本。
+   */
+  function formatTokenCount(value) {
+    return Number.isFinite(Number(value)) ? String(Number(value)) : '-';
   }
 
   function getAiStatusTagType(value) {
@@ -999,6 +1233,8 @@
    * @returns {void}
    */
   function handleDetailClosed() {
+    stopAiTaskPolling();
+    detailRequestGeneration += 1;
     resetDetailDialog();
     emit('closed');
   }
@@ -1007,13 +1243,13 @@
     () => [props.open, props.ticketId],
     ([openValue, ticketId]) => {
       const resolvedTicketId = Number(ticketId);
-      if (!openValue || !Number.isFinite(resolvedTicketId) || resolvedTicketId <= 0) {
-        return;
-      }
-      if (resolvedTicketId === currentTicketId.value && detail.value.ticketId) {
-        return;
-      }
-      openDetail({ ticketId: resolvedTicketId });
+    if (!openValue || !Number.isFinite(resolvedTicketId) || resolvedTicketId <= 0) {
+      return;
+    }
+    if (resolvedTicketId === currentTicketId.value && detail.value.ticketId) {
+      return;
+    }
+    openDetail({ ticketId: resolvedTicketId });
     },
     { immediate: true }
   );
@@ -1167,6 +1403,24 @@
                 新建问题实例并绑定
               </el-button>
               <el-button
+                v-if="!detail.issueId"
+                link
+                type="primary"
+                @click="openIssueBindExistingDialog"
+                v-hasPermi="['ticket:issue:bind']"
+              >
+                关联已有问题
+              </el-button>
+              <el-button
+                v-if="detail.issueId"
+                link
+                type="warning"
+                @click="openIssueBindExistingDialog"
+                v-hasPermi="['ticket:issue:bind']"
+              >
+                更换问题
+              </el-button>
+              <el-button
                 v-if="detail.issueId"
                 link
                 type="danger"
@@ -1228,6 +1482,10 @@
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'overview'"
               :detail="detail"
+              :similar-tickets="similarTickets"
+              :similar-loading="similarLoading"
+              :similar-error="similarError"
+              :similar-status="similarStatus"
               @run-ai="openAiAnalysisDialog"
               @refresh-ai="refreshAiAnalysisData"
               @open-ai-history="openAiTaskHistory"
@@ -1241,6 +1499,7 @@
             <TicketDetailLogPullTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'logPull'"
+              :detail-open="props.open"
               :detail="detail"
               @changed="refreshDetailAndNotify"
             />
@@ -1251,6 +1510,7 @@
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'collab'"
               :detail="detail"
+              :similar-tickets="similarTickets"
               @changed="refreshDetailAndNotify"
               @run-ai="openAiAnalysisDialog"
               @open-ai-history="openAiTaskHistory"
@@ -1269,12 +1529,16 @@
             <TicketDetailHistoryTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'history'"
+              :detail-open="props.open"
               @changed="refreshDetailAndNotify"
             />
           </el-tab-pane>
         </el-tabs>
       </div>
     </template>
+    <div v-else v-loading="detailLoading" class="ticket-detail-loading">
+      <el-empty description="正在加载工单详情" />
+    </div>
   </el-dialog>
 
   <el-dialog
@@ -1339,6 +1603,24 @@
             :key="item.providerCode"
             :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
             :value="item.providerCode"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="模型">
+        <el-select
+          v-model="aiAnalysisTaskForm.aiModelName"
+          placeholder="留空使用Provider默认模型"
+          filterable
+          clearable
+          style="width: 100%"
+          :disabled="!aiAnalysisTaskForm.aiProviderCode"
+          @change="handleAiAnalysisModelChange"
+        >
+          <el-option
+            v-for="item in aiAnalysisModelOptions"
+            :key="item.modelId"
+            :label="item.displayName || item.modelId"
+            :value="item.modelId"
           />
         </el-select>
       </el-form-item>
@@ -1477,6 +1759,20 @@
         </el-select>
       </el-form-item>
       <el-alert :title="aiPromptHintTitle" :description="aiPromptHintDesc" type="info" show-icon />
+      <el-collapse class="ai-prompt-layer-preview" accordion>
+        <el-collapse-item title="查看本次自动加载的提示词层" name="prompt-layers">
+          <div v-for="item in aiPromptLayerItems" :key="item.key" class="ai-prompt-layer-item">
+            <div class="ai-prompt-layer-title">
+              <span>{{ item.label }}</span>
+              <el-tag v-if="item.layer?.matched" type="success" size="small">已加载</el-tag>
+              <el-tag v-else type="info" size="small">未配置</el-tag>
+            </div>
+            <div v-if="item.layer?.moduleCode" class="form-item-tip">模块编码：{{ item.layer.moduleCode }}</div>
+            <pre v-if="item.layer?.promptText" class="ai-prompt-layer-content">{{ item.layer.promptText }}</pre>
+            <div v-else class="form-item-tip">{{ item.layer?.reason || '当前没有可用说明' }}</div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
     </el-form>
     <template #footer>
       <el-button @click="aiAnalysisOpen = false">取消</el-button>
@@ -1494,7 +1790,7 @@
   <el-dialog
     v-model="aiTaskHistoryOpen"
     title="AI任务历史"
-    width="1100px"
+    width="1380px"
     append-to-body
     destroy-on-close
     :close-on-click-modal="false"
@@ -1523,6 +1819,15 @@
       <el-table-column label="提交人" prop="submittedByName" width="120" show-overflow-tooltip />
       <el-table-column label="完成时间" prop="finishedAt" width="170">
         <template #default="scope">{{ parseTime(scope.row.finishedAt) }}</template>
+      </el-table-column>
+      <el-table-column label="输入 Token" width="120" align="center">
+        <template #default="scope">{{ formatTokenCount(scope.row.inputTokenCount) }}</template>
+      </el-table-column>
+      <el-table-column label="输出 Token" width="120" align="center">
+        <template #default="scope">{{ formatTokenCount(scope.row.outputTokenCount) }}</template>
+      </el-table-column>
+      <el-table-column label="总 Token" width="120" align="center">
+        <template #default="scope">{{ formatTokenCount(scope.row.totalTokenCount) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="180" align="center" fixed="right">
         <template #default="scope">
@@ -1574,6 +1879,9 @@
         </el-tag>
         <span v-else>-</span>
       </el-descriptions-item>
+      <el-descriptions-item label="审计ID">{{
+        aiTaskDetailPayload.auditExecutionId || '-'
+      }}</el-descriptions-item>
       <el-descriptions-item label="版本">{{
         aiTaskDetailPayload.versionKey || '-'
       }}</el-descriptions-item>
@@ -1585,6 +1893,15 @@
       }}</el-descriptions-item>
       <el-descriptions-item label="完成时间">{{
         parseTime(aiTaskDetailPayload.finishedAt || aiTaskDetailPayload.updateTime) || '-'
+      }}</el-descriptions-item>
+      <el-descriptions-item label="输入 Token">{{
+        formatTokenCount(aiTaskDetailPayload.inputTokenCount)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="输出 Token">{{
+        formatTokenCount(aiTaskDetailPayload.outputTokenCount)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="总 Token">{{
+        formatTokenCount(aiTaskDetailPayload.totalTokenCount)
       }}</el-descriptions-item>
       <el-descriptions-item label="仓库地址" :span="2">{{
         aiTaskDetailPayload.repoUrl || '-'
@@ -1851,6 +2168,58 @@
       <el-button @click="issueCreateBindOpen = false">取消</el-button>
       <el-button type="primary" :loading="issueActionLoading" @click="submitIssueCreateBind">
         确认创建并绑定
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    v-model="issueBindExistingOpen"
+    :title="detail.issueId ? '更换问题实例' : '关联已有问题实例'"
+    width="720px"
+    append-to-body
+    destroy-on-close
+  >
+    <el-form :model="issueBindExistingForm" label-width="110px">
+      <el-form-item label="问题实例" required>
+        <el-select
+          v-model="issueBindExistingForm.issueId"
+          filterable
+          remote
+          reserve-keyword
+          clearable
+          placeholder="输入问题编号或标题搜索"
+          :remote-method="searchIssuesForBind"
+          :loading="issueBindExistingLoading"
+          style="width: 100%"
+          @focus="searchIssuesForBind('')"
+        >
+          <el-option
+            v-for="item in issueOptions"
+            :key="item.issueId"
+            :label="formatIssueOption(item)"
+            :value="item.issueId"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="归因类型">
+        <el-select v-model="issueBindExistingForm.relationType" style="width: 100%">
+          <el-option label="手工归因" value="manual" />
+          <el-option label="主问题" value="primary" />
+          <el-option label="重复工单" value="duplicate" />
+          <el-option label="相关工单" value="related" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="已确认">
+        <el-switch v-model="issueBindExistingForm.confirmed" />
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="issueBindExistingForm.remark" type="textarea" :rows="3" maxlength="500" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="issueBindExistingOpen = false">取消</el-button>
+      <el-button type="primary" :loading="issueActionLoading" @click="submitIssueBindExisting">
+        确认关联
       </el-button>
     </template>
   </el-dialog>

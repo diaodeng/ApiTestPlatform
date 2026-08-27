@@ -118,14 +118,19 @@ export function useLogPrepareProgress() {
     return `${ticketId || 0}:${recordId || 0}`;
   }
 
-  onBeforeUnmount(() => {
+  function stopAllPolling() {
     timerByRecord.forEach((timer) => window.clearTimeout(timer));
     timerByRecord.clear();
     requestByRecord.clear();
+    downloadProgressByRecord.value = {};
+  }
+  onBeforeUnmount(() => {
+    stopAllPolling();
   });
 
   return {
     prepareWithDownloadProgress,
     getDownloadProgress,
+    stopAllPolling,
   };
 }

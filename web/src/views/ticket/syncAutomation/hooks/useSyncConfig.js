@@ -282,7 +282,7 @@ export function useSyncConfig(proxy) {
         timeField: 'create_time', appToken: '', tableId: '', viewId: '', filterFormula: '',
         statusField: '状态', categoryField: '分类', priorityField: '优先级',
         bitableTimeField: '', pageSize: 500,
-        aiEnabled: false, aiProviderCode: '', aiPromptCode: '',
+        aiEnabled: false, aiProviderCode: '', aiModelName: '', aiPromptCode: '',
         windowMinutes: 60, endDelayMinutes: 0,
         startTime: '', endTime: '', includeClosed: true, messageTemplate: '',
       },
@@ -296,9 +296,11 @@ export function useSyncConfig(proxy) {
       scoPatterns: [],
       versionPatterns: [],
       logPullDefaults: {
+        environment: '',
         commandDataType: 1, fileMaxSize: 500, zipMaxSize: 500,
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
+        autoAiAnalysisCondition: { analysisMode: 'always', statusFilterEnabled: false, statusCodes: [] },
       },
       promptTemplates: { classificationHint: '' },
       aiClassification: {
@@ -311,6 +313,7 @@ export function useSyncConfig(proxy) {
         statusChangeTriggerStatuses: [],
         statusChangeForceReclassify: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_stat_classify_default',
       },
       aiSyncExtract: {
@@ -319,12 +322,14 @@ export function useSyncConfig(proxy) {
         bitablePullEnabled: false,
         manualCreateEnabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_sync_extract_default',
         extractFields: ['storeName', 'posNo', 'scoNo', 'logDate', 'versionKey'],
       },
       translateConfig: {
         enabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_translate_default',
         translateOnExternalSync: true,
         translateOnRemotePull: true,
@@ -334,11 +339,13 @@ export function useSyncConfig(proxy) {
       titleSummaryConfig: {
         enabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_title_summary_default',
       },
       knowledgeConfig: {
         enabled: false,
         providerCode: '',
+        modelName: '',
         promptCode: 'ticket_knowledge_extract_default',
       },
       automationConfig: {
@@ -354,6 +361,13 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnRemotePull: false,
         autoAiAnalysisOnBitablePull: false,
         autoAiAnalysisOnManualCreate: false,
+      },
+      automationNotification: {
+        enabled: false,
+        pushIds: [],
+        success: { push: true },
+        failed: { push: true },
+        messageTemplate: '',
       },
       automationScope: {
         enabled: false,
@@ -407,6 +421,7 @@ export function useSyncConfig(proxy) {
   function applyLogPullDefaultsConfig(payload = {}) {
     const logPullDefaults = payload || {}
     form.logPullDefaults = {
+      environment: String(logPullDefaults.environment || '').trim(),
       commandDataType: Number(logPullDefaults.commandDataType || 1),
       fileMaxSize: Number(logPullDefaults.fileMaxSize || 500),
       zipMaxSize: Number(logPullDefaults.zipMaxSize || 500),
@@ -416,6 +431,23 @@ export function useSyncConfig(proxy) {
       autoAiEnabled: Boolean(logPullDefaults.autoAiEnabled),
       aiAgentCode: logPullDefaults.aiAgentCode || '',
       aiProviderCode: logPullDefaults.aiProviderCode || '',
+      autoAiAnalysisCondition: {
+        analysisMode: ['always', 'not_successful'].includes(
+          String(logPullDefaults.autoAiAnalysisCondition?.analysisMode || '').trim()
+        )
+          ? String(logPullDefaults.autoAiAnalysisCondition.analysisMode).trim()
+          : 'always',
+        statusFilterEnabled: Boolean(logPullDefaults.autoAiAnalysisCondition?.statusFilterEnabled),
+        statusCodes: Array.isArray(logPullDefaults.autoAiAnalysisCondition?.statusCodes)
+          ? Array.from(
+              new Set(
+                logPullDefaults.autoAiAnalysisCondition.statusCodes
+                  .map((item) => String(item || '').trim())
+                  .filter(Boolean)
+              )
+            )
+          : [],
+      },
     }
   }
 
@@ -727,6 +759,7 @@ export function useSyncConfig(proxy) {
       pageSize: Number(summaryReport.pageSize || 500),
       aiEnabled: Boolean(summaryReport.aiEnabled),
       aiProviderCode: summaryReport.aiProviderCode || '',
+      aiModelName: summaryReport.aiModelName || '',
       aiPromptCode: summaryReport.aiPromptCode || '',
       windowMinutes: Number(summaryReport.windowMinutes || 60),
       endDelayMinutes: Number(summaryReport.endDelayMinutes || 0),
@@ -749,6 +782,7 @@ export function useSyncConfig(proxy) {
         : [],
       statusChangeForceReclassify: Boolean(aiClassification.statusChangeForceReclassify),
       providerCode: aiClassification.providerCode || '',
+      modelName: aiClassification.modelName || '',
       promptCode: aiClassification.promptCode || 'ticket_stat_classify_default',
     }
 
@@ -759,6 +793,7 @@ export function useSyncConfig(proxy) {
       bitablePullEnabled: Boolean(aiSyncExtract.bitablePullEnabled),
       manualCreateEnabled: Boolean(aiSyncExtract.manualCreateEnabled),
       providerCode: aiSyncExtract.providerCode || '',
+      modelName: aiSyncExtract.modelName || '',
       promptCode: aiSyncExtract.promptCode || 'ticket_sync_extract_default',
       extractFields: Array.isArray(aiSyncExtract.extractFields)
         ? aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)
@@ -769,6 +804,7 @@ export function useSyncConfig(proxy) {
     form.translateConfig = {
       enabled: Boolean(translateConfig.enabled),
       providerCode: translateConfig.providerCode || '',
+      modelName: translateConfig.modelName || '',
       promptCode: translateConfig.promptCode || 'ticket_translate_default',
       translateOnExternalSync: translateConfig.translateOnExternalSync !== false,
       translateOnRemotePull: translateConfig.translateOnRemotePull !== false,
@@ -780,6 +816,7 @@ export function useSyncConfig(proxy) {
     form.titleSummaryConfig = {
       enabled: Boolean(titleSummaryConfig.enabled),
       providerCode: titleSummaryConfig.providerCode || '',
+      modelName: titleSummaryConfig.modelName || '',
       promptCode: titleSummaryConfig.promptCode || 'ticket_title_summary_default',
     }
 
@@ -787,6 +824,7 @@ export function useSyncConfig(proxy) {
     form.knowledgeConfig = {
       enabled: Boolean(knowledgeConfig.enabled),
       providerCode: knowledgeConfig.providerCode || '',
+      modelName: knowledgeConfig.modelName || '',
       promptCode: knowledgeConfig.promptCode || 'ticket_knowledge_extract_default',
     }
 
@@ -804,6 +842,17 @@ export function useSyncConfig(proxy) {
       autoAiAnalysisOnRemotePull: Boolean(automationConfig.autoAiAnalysisOnRemotePull),
       autoAiAnalysisOnBitablePull: Boolean(automationConfig.autoAiAnalysisOnBitablePull),
       autoAiAnalysisOnManualCreate: Boolean(automationConfig.autoAiAnalysisOnManualCreate),
+    }
+
+    const automationNotification = payload.automationNotification || {}
+    form.automationNotification = {
+      enabled: Boolean(automationNotification.enabled),
+      pushIds: Array.isArray(automationNotification.pushIds)
+        ? automationNotification.pushIds.map(Number).filter((item) => Number.isFinite(item) && item > 0)
+        : [],
+      success: { push: automationNotification.success?.push !== false },
+      failed: { push: automationNotification.failed?.push !== false },
+      messageTemplate: String(automationNotification.messageTemplate || ''),
     }
 
     const automationScope = payload.automationScope || {}
@@ -890,6 +939,16 @@ export function useSyncConfig(proxy) {
       validateElForm('remoteFormRef'),
     ])
     if (!basicValid || !remoteValid) return
+
+    const condition = form.logPullDefaults?.autoAiAnalysisCondition || {}
+    if (
+      form.logPullDefaults?.autoAiEnabled &&
+      condition.statusFilterEnabled &&
+      (!Array.isArray(condition.statusCodes) || condition.statusCodes.length === 0)
+    ) {
+      proxy.$modal.msgWarning('启用工单状态过滤时，至少选择一个内部工单状态')
+      return
+    }
 
     saving.value = true
     try {
@@ -1001,6 +1060,29 @@ export function useSyncConfig(proxy) {
               .filter((item) => item.sourceField && item.targetField)
           : [],
       }
+      payload.logPullDefaults = {
+        ...payload.logPullDefaults,
+        autoAiEnabled: Boolean(payload.logPullDefaults?.autoAiEnabled),
+        aiAgentCode: String(payload.logPullDefaults?.aiAgentCode || '').trim(),
+        aiProviderCode: String(payload.logPullDefaults?.aiProviderCode || '').trim(),
+        autoAiAnalysisCondition: {
+          analysisMode: ['always', 'not_successful'].includes(
+            String(payload.logPullDefaults?.autoAiAnalysisCondition?.analysisMode || '').trim()
+          )
+            ? String(payload.logPullDefaults.autoAiAnalysisCondition.analysisMode).trim()
+            : 'always',
+          statusFilterEnabled: Boolean(payload.logPullDefaults?.autoAiAnalysisCondition?.statusFilterEnabled),
+          statusCodes: Array.isArray(payload.logPullDefaults?.autoAiAnalysisCondition?.statusCodes)
+            ? Array.from(
+                new Set(
+                  payload.logPullDefaults.autoAiAnalysisCondition.statusCodes
+                    .map((item) => String(item || '').trim())
+                    .filter(Boolean)
+                )
+              )
+            : [],
+        },
+      }
       payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()
       payload.personReminder.appSecret = String(payload.personReminder?.appSecret || '').trim()
       payload.personReminder.rowsMarkdownTemplate = String(payload.personReminder?.rowsMarkdownTemplate || '').trim()
@@ -1032,6 +1114,7 @@ export function useSyncConfig(proxy) {
       payload.summaryReport.pageSize = Math.min(Math.max(Number(payload.summaryReport?.pageSize || 500), 1), 500)
       payload.summaryReport.aiEnabled = Boolean(payload.summaryReport?.aiEnabled)
       payload.summaryReport.aiProviderCode = String(payload.summaryReport?.aiProviderCode || '').trim()
+      payload.summaryReport.aiModelName = String(payload.summaryReport?.aiModelName || '').trim()
       payload.summaryReport.aiPromptCode = String(payload.summaryReport?.aiPromptCode || '').trim()
       payload.aiClassification = {
         enabled: Boolean(payload.aiClassification?.enabled),
@@ -1045,6 +1128,7 @@ export function useSyncConfig(proxy) {
           : [],
         statusChangeForceReclassify: Boolean(payload.aiClassification?.statusChangeForceReclassify),
         providerCode: String(payload.aiClassification?.providerCode || '').trim(),
+        modelName: String(payload.aiClassification?.modelName || '').trim(),
         promptCode: String(payload.aiClassification?.promptCode || '').trim() || 'ticket_stat_classify_default',
       }
       payload.aiSyncExtract = {
@@ -1053,6 +1137,7 @@ export function useSyncConfig(proxy) {
         bitablePullEnabled: Boolean(payload.aiSyncExtract?.bitablePullEnabled),
         manualCreateEnabled: Boolean(payload.aiSyncExtract?.manualCreateEnabled),
         providerCode: String(payload.aiSyncExtract?.providerCode || '').trim(),
+        modelName: String(payload.aiSyncExtract?.modelName || '').trim(),
         promptCode: String(payload.aiSyncExtract?.promptCode || '').trim() || 'ticket_sync_extract_default',
         extractFields: Array.isArray(payload.aiSyncExtract?.extractFields)
           ? Array.from(new Set(payload.aiSyncExtract.extractFields.map((item) => String(item || '').trim()).filter(Boolean)))
@@ -1061,6 +1146,7 @@ export function useSyncConfig(proxy) {
       payload.translateConfig = {
         enabled: Boolean(payload.translateConfig?.enabled),
         providerCode: String(payload.translateConfig?.providerCode || '').trim(),
+        modelName: String(payload.translateConfig?.modelName || '').trim(),
         promptCode: String(payload.translateConfig?.promptCode || '').trim() || 'ticket_translate_default',
         translateOnExternalSync: payload.translateConfig?.translateOnExternalSync !== false,
         translateOnRemotePull: payload.translateConfig?.translateOnRemotePull !== false,
@@ -1070,11 +1156,13 @@ export function useSyncConfig(proxy) {
       payload.titleSummaryConfig = {
         enabled: Boolean(payload.titleSummaryConfig?.enabled),
         providerCode: String(payload.titleSummaryConfig?.providerCode || '').trim(),
+        modelName: String(payload.titleSummaryConfig?.modelName || '').trim(),
         promptCode: String(payload.titleSummaryConfig?.promptCode || '').trim() || 'ticket_title_summary_default',
       }
       payload.knowledgeConfig = {
         enabled: Boolean(payload.knowledgeConfig?.enabled),
         providerCode: String(payload.knowledgeConfig?.providerCode || '').trim(),
+        modelName: String(payload.knowledgeConfig?.modelName || '').trim(),
         promptCode: String(payload.knowledgeConfig?.promptCode || '').trim() || 'ticket_knowledge_extract_default',
       }
       payload.automationConfig = {
@@ -1090,6 +1178,21 @@ export function useSyncConfig(proxy) {
         autoAiAnalysisOnRemotePull: Boolean(payload.automationConfig?.autoAiAnalysisOnRemotePull),
         autoAiAnalysisOnBitablePull: Boolean(payload.automationConfig?.autoAiAnalysisOnBitablePull),
         autoAiAnalysisOnManualCreate: Boolean(payload.automationConfig?.autoAiAnalysisOnManualCreate),
+      }
+      payload.automationNotification = {
+        enabled: Boolean(payload.automationNotification?.enabled),
+        pushIds: Array.from(
+          new Set(
+            (Array.isArray(payload.automationNotification?.pushIds)
+              ? payload.automationNotification.pushIds
+              : [])
+              .map(Number)
+              .filter((item) => Number.isFinite(item) && item > 0)
+          )
+        ),
+        success: { push: payload.automationNotification?.success?.push !== false },
+        failed: { push: payload.automationNotification?.failed?.push !== false },
+        messageTemplate: String(payload.automationNotification?.messageTemplate || '').trim(),
       }
       payload.automationScope = {
         enabled: Boolean(payload.automationScope?.enabled),
