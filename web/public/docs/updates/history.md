@@ -6,6 +6,7 @@ title: 更新历史
 
 ## 2026-08-27
 
+- 工单链路内存泄漏治理：修复 Agent 分片注册表泄漏，日志拉取与 AI 分析大字段改为延迟加载和超长裁剪，部署层注入 `MALLOC_ARENA_MAX=2` 缓解堆碎片；接口契约不变。详见：[工单链路内存泄漏治理](2026-08-27-ticket-memory-leak-fixes.md)。
 - 工单 AI 历史、工单概览和 AI 执行审计新增 Token 用量展示，支持查看输入 Token、输出 Token、总 Token，以及单工单维度的累计汇总。详见：[工单 AI Token 用量记录与展示](2026-08-27-ticket-ai-token-usage.md)。
 
 ## 2026-08-26

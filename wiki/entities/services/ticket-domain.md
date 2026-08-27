@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-08-25
+freshness: 2026-08-27
 created: 2026-05-20
-updated: 2026-08-25
+updated: 2026-08-27
 related_files:
   - server/modules/ticket/controller/ticket_controller.py
   - server/modules/ticket/service/core/ticket_read_service.py
@@ -339,6 +339,11 @@ graph TD
 - 同日起，`GET /ticket/{ticket_id}/summary` 增加 `aiTokenSummary`，只在单工单维度按 `ticket_id` 进行一次 SQL 聚合，用于展示整单 AI Token 合计；该聚合不会扩散到工单列表或批量摘要接口，因此不引入列表查询性能回退。
 - AI 执行审计服务保留 `tokenUsage` 原始 JSON 作为详情追溯依据；审计列表仅派生 `totalTokenCount` 展示摘要，避免在审计表和任务表双写重复统计字段。
 - 同一详情弹窗切换工单前会清空概览、相似工单、AI 任务和问题操作状态，并通过工单 ID、请求 generation 和弹窗打开状态校验异步响应；关闭详情时停止日志列表自动刷新、日志准备进度查询和 AI 短轮询，清理日志查看器和历史临时表单状态。前端用户说明见 `web/public/docs/ticket_detail.md`，接口契约见 `server/docs/ticket_read_api.md`。
+- 2026-08-27 起工单链路执行内存治理（背景：1.4G 内存预算下 RSS 持续爬升）：
+  - `TicketLogPullDao.get_record_meta_by_id` 提供轻量记录查询，defer `compressed_content` 和 `exception_detail` 两个长文本列；状态轮询、重拉、停止、删除、下载文件名、自动 AI 触发等只关心元数据的后台与控制器路径统一改用该查询，日志查看正文两条路径保留全量读取。`get_latest_success_record_by_ticket_id` 与 `list_success_records_by_pull_identity` 同样增加 defer，避免 AI 分析触发时整包加载压缩正文。
+  - `TicketAiDao.list_recoverable_tasks` 增加 prompt/raw_output/analysis_context 的 defer；`_serialize_task_summary` 显式剔除 `promptText/rawOutput/analysisContext`，防止摘要序列化时延迟列逐行回表。
+  - `_update_execution_record` 对审计写入集中裁剪：响应文本按 `EXECUTION_TEXT_MAX_CHARS`（20000 字符）截断；`request_payload/response_payload/token_usage` 经 `_compact_execution_payload` 把超过 20000 字符的字符串字段替换为占位文本、超 200 项的列表截断。AI 分析请求载荷中的 80 万字节日志正文不再整包写入内存和审计长文本列。
+  - 成功任务的 `raw_output` 写库前截断到 5000 字符，完整内容以工作区 result 文件与分析结果结构化字段为准。
 
 ## 参见
 

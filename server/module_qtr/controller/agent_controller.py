@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -36,9 +37,73 @@ agentController = APIRouter(prefix="/qtr/agent")
 
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
+# 分片注册表过期时间（秒）：超过该时间的未完成分片条目视为丢失（Agent 掉线、断流或分组异常），
+# 由心跳任务定期清理，避免分片内容长期驻留内存造成缓慢泄漏。
+CHUNK_REGISTRY_EXPIRE_SECONDS = 10 * 60
+# 单个事件分片组允许的最大分片数：正常事件消息远小于该值，超限说明分片序列已异常，
+# 直接丢弃整组，防止 Agent 异常高频上报导致单个 chunk_id 无限占用内存。
+EVENT_CHUNK_MAX_PIECES = 2048
+# 分片注册表单次清理的日志间隔（秒），避免心跳日志被清理动作刷屏。
+CHUNK_REGISTRY_SWEEP_LOG_INTERVAL_SECONDS = 300
+
 # agent状态
 agent_status = defaultdict(dict)
-event_chunks = defaultdict(lambda: {"chunks": {}, "total": 0})
+# event_chunk 分片注册表：value 额外维护 first_seen_at 时间戳，供过期清理使用
+event_chunks = defaultdict(lambda: {"chunks": {}, "total": 0, "first_seen_at": 0.0})
+_event_chunks_last_sweep_log_at = {"ts": 0.0}
+
+
+def _sweep_stale_event_chunks(now_ts: float) -> int:
+    """
+    清理过期的 event_chunk 分片组。
+
+    触发条件：距首次收到分片超过 CHUNK_REGISTRY_EXPIRE_SECONDS 仍未凑齐，说明剩余分片
+    已经丢失（断连、重传失败等），继续保留只会占用内存且永远无法组装成功。
+
+    :param now_ts: 当前单调时间戳（time.monotonic）
+    :return: 本次清理的分片组数量
+    """
+    expired_keys = [
+        key
+        for key, value in event_chunks.items()
+        if now_ts - value.get("first_seen_at", 0.0) > CHUNK_REGISTRY_EXPIRE_SECONDS
+    ]
+    for key in expired_keys:
+        event_chunks.pop(key, None)
+    if expired_keys and now_ts - _event_chunks_last_sweep_log_at["ts"] > CHUNK_REGISTRY_SWEEP_LOG_INTERVAL_SECONDS:
+        logger.warning(f"已清理过期的事件分片组 {len(expired_keys)} 个（未在限时内凑齐，判定为丢包）")
+        _event_chunks_last_sweep_log_at["ts"] = now_ts
+    return len(expired_keys)
+
+
+def _prune_response_future_chunks(now_ts: float) -> int:
+    """
+    清理长时间只攒了分片却未等到完整响应帧的请求状态。
+
+    场景：Agent 开始回送 response_chunk 后连接中断，发送方 Future 超时只取消等待，
+    已接收的分片内容仍挂在 response_futures 条目里；连接正常关闭时才会在 finally 中移除。
+    这里按首见时间兜底清理：
+    - Future 已结束（超时/取消/完成）：弹出整个条目；
+    - Future 仍在等待（异常长请求）：只回收分片内容，保留 Future 本身。
+
+    :param now_ts: 当前单调时间戳（time.monotonic）
+    :return: 清理的条目数量
+    """
+    removed = 0
+    for request_id, request_state in list(response_futures.items()):
+        if not request_state.get("chunks"):
+            continue
+        if now_ts - request_state.get("chunks_first_seen_at", 0.0) <= CHUNK_REGISTRY_EXPIRE_SECONDS:
+            continue
+        future_obj = request_state.get("future")
+        future_pending = bool(future_obj is not None and not future_obj.done())
+        request_state.pop("chunks", None)
+        request_state.pop("chunks_first_seen_at", None)
+        removed += 1
+        if not future_pending:
+            # 等待方已不存在，完整移除该请求条目。
+            response_futures.pop(request_id, None)
+    return removed
 
 
 def _sanitize_log_value(value, *, key: str | None = None):
@@ -222,6 +287,10 @@ class ConnectionManager:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)  # 每30秒发送一次心跳
                 # logger.info(f'开始向客户端发送心跳信息：{self.agents}')
                 invalid_agent_key = []
+                # 顺带清理分片注册表：未凑齐且超时的 event_chunk 组、长时间无完整响应帧的响应分片。
+                now_mono = time.monotonic()
+                _sweep_stale_event_chunks(now_mono)
+                _prune_response_future_chunks(now_mono)
                 for k, v in agent_status.items():
                     if len(v) > 0:
                         # logger.info(agent_status)
@@ -378,12 +447,15 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                 data_chunk = message_data["data"]
                 request_state = response_futures.get(request_id)
                 if not request_state:
-                    logger.warning(f"收到未知响应分片，request_id={request_id}")
+                    # 等待方已不存在（超时/取消/断连清理），直接丢弃分片，
+                    # 避免为孤儿分片重建条目造成内存累积。
+                    logger.warning(f"收到未知响应分片，已丢弃，request_id={request_id}")
                     continue
 
                 # 将分片存储在字典中
                 if "chunks" not in request_state:
                     request_state["chunks"] = []
+                    request_state["chunks_first_seen_at"] = time.monotonic()
 
                 # 存储分片数据
                 request_state["chunks"].append(data_chunk)
@@ -395,7 +467,9 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                     if not current_finished_request:
                         continue
                     try:
-                        complete_message = "".join(current_finished_request["chunks"])
+                        chunks = current_finished_request.pop("chunks", [])
+                        current_finished_request.pop("chunks_first_seen_at", None)
+                        complete_message = "".join(chunks)
                         response_data = decompress_str_to_dict(complete_message)
                         response_keys = (
                             list(response_data.keys()) if isinstance(response_data, dict) else type(response_data)
@@ -414,12 +488,26 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                         del complete_message
                         del response_data
                     finally:
-                        del current_finished_request["chunks"]
+                        current_finished_request.pop("chunks", None)
+                        current_finished_request.pop("chunks_first_seen_at", None)
             elif message_data.get("type") == "event_chunk":
                 chunk_id = f"{agent_code}:{message_data.get('chunk_id')}"
+                now_mono = time.monotonic()
+                if chunk_id not in event_chunks:
+                    event_chunks[chunk_id] = {"chunks": {}, "total": 0, "first_seen_at": now_mono}
                 current_event = event_chunks[chunk_id]
                 total = int(message_data.get("total") or 0)
                 index = int(message_data.get("index") or 0)
+                # 分片数超限视为异常上报（正常事件消息不会超过 EVENT_CHUNK_MAX_PIECES 片），
+                # 整组丢弃，防止单个 chunk_id 无限占用内存。
+                if total > EVENT_CHUNK_MAX_PIECES or len(current_event["chunks"]) >= EVENT_CHUNK_MAX_PIECES:
+                    logger.warning(
+                        f"事件分片数超过保护上限，整组丢弃 | agent={agent_code}, chunk_id={chunk_id}, "
+                        f"declared_total={total}, received={len(current_event['chunks'])}, "
+                        f"max={EVENT_CHUNK_MAX_PIECES}"
+                    )
+                    event_chunks.pop(chunk_id, None)
+                    continue
                 current_event["chunks"][index] = message_data.get("data") or ""
                 current_event["total"] = max(total, int(current_event.get("total") or 0))
                 if (

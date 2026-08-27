@@ -16,7 +16,28 @@ from module_admin.service.log_service import LoginLogService, OperationLogServic
 from module_admin.service.login_service import LoginService
 
 IP_LOCATION_CACHE_TTL_SECONDS = 60 * 60
+# 缓存条目数上限：超过后触发一次全表过期清理，仍超限时按写入时间淘汰最旧条目。
+IP_LOCATION_CACHE_MAX_ENTRIES = 2048
 _ip_location_cache: dict[str, tuple[float, str]] = {}
+
+
+def _prune_ip_location_cache(current_timestamp: float) -> None:
+    """
+    清理 IP 归属地缓存：先删除已过期的条目，数量仍超上限时按过期时间淘汰最旧条目。
+
+    原实现只做读取时 TTL 校验，过期条目从不删除，公网访问源 IP 持续变化时缓存无界增长。
+
+    :param current_timestamp: 当前时间戳（秒）
+    :return: 无
+    """
+    if not _ip_location_cache:
+        return
+    expired_keys = [key for key, item in _ip_location_cache.items() if item[0] <= current_timestamp]
+    for key in expired_keys:
+        _ip_location_cache.pop(key, None)
+    while len(_ip_location_cache) > IP_LOCATION_CACHE_MAX_ENTRIES:
+        oldest_key = min(_ip_location_cache.items(), key=lambda item: item[1][0])[0]
+        _ip_location_cache.pop(oldest_key, None)
 
 
 def log_decorator(title: str, business_type: int, log_type: str | None = "operation"):
@@ -220,4 +241,6 @@ async def get_ip_location(oper_ip: str | None):
         current_timestamp + IP_LOCATION_CACHE_TTL_SECONDS,
         oper_location,
     )
+    # 写入后清理过期/超限条目，保证缓存长期有界。
+    _prune_ip_location_cache(current_timestamp)
     return oper_location
