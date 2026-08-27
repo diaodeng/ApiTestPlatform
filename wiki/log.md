@@ -2075,3 +2075,11 @@ updated: 2026-08-25
 - 根因：服务端扩展环境变量覆盖了 Provider 核心变量；Codex `config.toml` 的缩进 `base_url` 未被替换；Claude 工作区 `.env` 只追加、不覆盖旧值。
 - 修复：Provider 核心连接配置优先于 `workerEnv`，Codex 支持缩进配置覆盖，Claude `.env` 对同名变量执行覆盖。
 - 并发配置：`ticket.ai.agent.maxConcurrentTasks`，默认值 `1`，入口为“系统管理 → AI 配置中心 → Agent 并发数”。
+
+
+## [2026-08-27] 修复 | 工单与问题实例导出范围
+
+- 触发：工单列表勾选一条记录导出却返回默认 10 条；问题实例管理勾选后点击“导出工单”没有可见响应。
+- 根因：`TicketQueryModel` 只按 camelCase 别名接收输入，服务内部使用 snake_case 构造导致 `ticketIds`、`pageSize` 和 `isPage` 被静默忽略；问题实例页面维护了导出状态和请求逻辑，但遗漏了绑定状态的列选择对话框模板。
+- 修复：选中工单导出使用 `TicketQueryModel.model_validate` 按 `ticketIds/pageNum/pageSize/isPage` 构造查询；问题实例页面补齐导出列选择对话框；两处导出 ID 均保持字符串传输，交由 Pydantic 在接口边界校验并解析，避免 BIGINT 精度丢失。
+- 验证范围：新增服务回归测试，确认选中 ID、分页大小和分页标记会完整传入 DAO 查询；前端构建验证导出对话框模板与脚本可编译。

@@ -182,11 +182,14 @@ class TicketExportService:
             raise ValueError(
                 f"选中的工单超过单次导出上限 {MAX_EXPORT_ROWS} 条，请减少勾选数量后重试。"
             )
-        query = TicketQueryModel(
-            ticket_ids=",".join(str(tid) for tid in ticket_ids),
-            page_num=1,
-            page_size=MAX_EXPORT_ROWS + 1,
-            is_page=True,
+        # TicketQueryModel 仅接收 camelCase 别名；使用模型校验入口避免选中 ID 和分页参数被静默忽略。
+        query = TicketQueryModel.model_validate(
+            {
+                "ticketIds": ",".join(str(ticket_id) for ticket_id in ticket_ids),
+                "pageNum": 1,
+                "pageSize": MAX_EXPORT_ROWS + 1,
+                "isPage": True,
+            }
         )
         query = TicketService._build_ticket_list_filter_query(query_db, query)
         result = TicketDao.get_ticket_list(query_db, query)

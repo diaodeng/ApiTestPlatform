@@ -466,6 +466,36 @@
       </el-skeleton>
     </el-drawer>
 
+    <el-dialog
+      v-model="issueTicketExportDialogOpen"
+      title="导出问题实例关联工单"
+      width="580px"
+      append-to-body
+    >
+      <el-alert
+        :title="`已选择 ${selectedIssueRows.length} 个问题实例，将导出其关联工单。`"
+        type="info"
+        :closable="false"
+        show-icon
+        class="mb12"
+      />
+      <el-checkbox-group v-model="issueTicketExportColumnKeys" class="issue-ticket-export-column-config">
+        <el-checkbox
+          v-for="item in issueTicketExportColumnOptions"
+          :key="item.key"
+          :label="item.key"
+          :disabled="item.required"
+        >
+          {{ item.label }}
+        </el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="resetIssueTicketExportColumns">恢复默认（全选）</el-button>
+        <el-button @click="issueTicketExportDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="issueTicketExporting" @click="doExportIssueTickets">导出</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="columnConfigOpen" title="列设置" width="520px" append-to-body>
       <el-checkbox-group v-model="visibleIssueColumnKeys">
         <el-row :gutter="12">
@@ -845,7 +875,10 @@ function openIssueTicketExportDialog() {
 async function doExportIssueTickets() {
   issueTicketExporting.value = true;
   try {
-    const selectedIds = selectedIssueRows.value.map((row) => Number(row.issueId || row.issue_id));
+    const selectedIds = selectedIssueRows.value
+      .map((row) => row.issueId || row.issue_id)
+      .filter((issueId) => issueId !== undefined && issueId !== null && issueId !== '')
+      .map((issueId) => String(issueId));
     const payload = {
       selectedIssueIds: selectedIds,
       columns: issueTicketExportColumnKeys.value || [],
@@ -1204,5 +1237,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.issue-ticket-export-column-config {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
 }
 </style>

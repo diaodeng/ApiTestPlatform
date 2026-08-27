@@ -1939,11 +1939,17 @@
   async function doExportTickets() {
     ticketExporting.value = true;
     try {
-      const selectedIds = selectedTicketRows.value.map((row) => Number(row.ticketId || row.ticket_id));
-      // 自然语言搜索场景：没有选中时，优先按当前页面可见的工单ID导出
+      const selectedIds = selectedTicketRows.value
+        .map((row) => row.ticketId || row.ticket_id)
+        .filter((ticketId) => ticketId !== undefined && ticketId !== null && ticketId !== '')
+        .map((ticketId) => String(ticketId));
+      // 自然语言搜索场景：没有选中时，优先按当前页面可见的工单 ID 导出。
       let exportIds = selectedIds;
       if (!exportIds.length && naturalKeyword.value) {
-        exportIds = ticketList.value.map((row) => Number(row.ticketId || row.ticket_id));
+        exportIds = ticketList.value
+          .map((row) => row.ticketId || row.ticket_id)
+          .filter((ticketId) => ticketId !== undefined && ticketId !== null && ticketId !== '')
+          .map((ticketId) => String(ticketId));
       }
       const payload = {
         selectedTicketIds: exportIds,
