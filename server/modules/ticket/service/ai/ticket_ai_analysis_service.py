@@ -1275,6 +1275,63 @@ class TicketAiAnalysisService:
         task.audit_execution_id = execution.execution_id
         return int(execution.execution_id)
 
+    # 审计记录响应文本与 JSON 载荷的最大保留长度。
+    # 完整内容已随任务/工作区文件留档（result_path、raw_output），审计只保留定位所需的头部信息，
+    # 避免每次分析把几十万字节的上下文和响应整包写入内存再落到数据库长文本列。
+    EXECUTION_TEXT_MAX_CHARS = 20000
+    EXECUTION_PAYLOAD_MAX_CHARS = 20000
+
+    @classmethod
+    def _truncate_execution_text(cls, value: Any) -> str | None:
+        """
+        将审计文本按上限截断。
+        :param value: 原始文本
+        :return: 截断后的文本，空值返回 None
+        """
+        text = str(value).strip() if value not in (None, "") else ""
+        if not text:
+            return None
+        if len(text) <= cls.EXECUTION_TEXT_MAX_CHARS:
+            return text
+        return (
+            f"{text[:cls.EXECUTION_TEXT_MAX_CHARS]}\n...（审计文本超长已截断，原始 {len(text)} 字符，"
+            f"完整内容见任务工作区）..."
+        )
+
+    @classmethod
+    def _compact_execution_payload(cls, value: Any) -> Any:
+        """
+        将审计 JSON 载荷归一化并裁剪超大字符串字段。
+
+        AI 分析请求载荷中包含 80 万字符级的日志正文（context.sourceLogPull.text）、
+        工单描述和时间线等大文本；直接整包序列化会在执行线程内翻倍占用内存，
+        且审计查询页并不需要完整正文。这里递归遍历载荷，把超过阈值的字符串字段
+        替换为"前缀 + 长度说明"的占位文本，小字段原样保留。
+
+        :param value: 原始载荷（dict/list/str 等任意 JSON 安全结构）
+        :return: 裁剪后的载荷
+        """
+
+        def _walk(node: Any, depth: int = 0):
+            if depth > 8:  # 防御异常深嵌套，超深的整体截断为占位文本
+                return "<deep payload truncated>"
+            if isinstance(node, str):
+                if len(node) <= cls.EXECUTION_PAYLOAD_MAX_CHARS:
+                    return node
+                return (
+                    f"{node[:512]}...（审计载荷长文本已截断，原始 {len(node)} 字符）"
+                )
+            if isinstance(node, dict):
+                return {key: _walk(item, depth + 1) for key, item in node.items()}
+            if isinstance(node, list):
+                walk_result = [_walk(item, depth + 1) for item in node]
+                if len(walk_result) > 200:  # 列表项过多时仅保留前 200 项，避免大列表膨胀
+                    return walk_result[:200]
+                return walk_result
+            return node
+
+        return _walk(cls._json_safe_value(value))
+
     @classmethod
     def _update_execution_record(
         cls,
@@ -1283,7 +1340,7 @@ class TicketAiAnalysisService:
         **kwargs: Any,
     ) -> None:
         """
-        更新工单 AI 审计记录。
+        更新工单 AI 审计记录。响应文本和 JSON 载荷会先做超长裁剪，控制审计写入的内存峰值。
         :param db: 数据库会话
         :param execution_id: 审计ID
         :param kwargs: 更新字段
@@ -1302,11 +1359,11 @@ class TicketAiAnalysisService:
         ):
             if key in kwargs:
                 value = kwargs.get(key)
-                update_data[key] = str(value).strip() if value not in (None, "") else None
+                update_data[key] = cls._truncate_execution_text(value)
         for key in ("request_payload", "response_payload", "token_usage"):
             if key in kwargs:
                 value = kwargs.get(key)
-                update_data[key] = cls._json_safe_value(value) if value is not None else None
+                update_data[key] = cls._compact_execution_payload(value) if value is not None else None
         if not update_data:
             return
         update_data["update_time"] = datetime.now()
@@ -2816,10 +2873,18 @@ class TicketAiAnalysisService:
     def _serialize_task_summary(cls, task: TicketAiAnalysisTask) -> dict[str, Any]:
         """
         将分析任务转换为摘要字典。
-        :param task: 任务对象
-        :return: 摘要字典
+
+        大字段（promptText/rawOutput/analysisContext）由 DAO 层 defer 延迟加载，
+        摘要场景不需要这些内容，这里显式置空，避免 transform_result 逐行访问
+        属性时触发 SQLAlchemy 按需回表，把大文本重新拉进内存。
+
+        :param task: 任务对象（大列为延迟加载）
+        :return: 不包含大字段的摘要字典
         """
         item = CamelCaseUtil.transform_result(task)
+        # 摘要只保留轻量元数据，防止访问延迟列触发回表加载。
+        for heavy_key in ("promptText", "rawOutput", "analysisContext"):
+            item.pop(heavy_key, None)
         result_payload = item.get("analysisResult") if isinstance(item, dict) else None
         item["analysisSummary"] = (
             (result_payload or {}).get("analysisSummary") if isinstance(result_payload, dict) else None
@@ -2962,7 +3027,10 @@ class TicketAiAnalysisService:
         source_log_pull_record = None
         notify_config: dict[str, Any] | None = None
         if getattr(task, "source_log_pull_record_id", None):
-            source_log_pull_record = TicketLogPullDao.get_record_by_id(db, int(task.source_log_pull_record_id))
+            # 仅读取 command_content 中的通知配置，使用轻量查询避免加载压缩正文。
+            source_log_pull_record = TicketLogPullDao.get_record_meta_by_id(
+                db, int(task.source_log_pull_record_id)
+            )
         if source_log_pull_record and isinstance(source_log_pull_record.command_content, dict):
             notify_config = source_log_pull_record.command_content.get(
                 "notifyConfig"
@@ -3242,6 +3310,8 @@ class TicketAiAnalysisService:
                 version_key=version_key,
             )
             cls._log_task_step(task_id, "PERSIST", "写回工单与 RCA 结果")
+            # raw_output 仅保留摘要级输出；原始 Agent 响应中可能包含大体积日志上下文，
+            # 完整内容以工作区 result.json / 分析结果结构化字段为准。
             cls._persist_success_result(db, task, ticket, normalized, result_text or raw_stdout, None)
             finished_at = datetime.now()
             cls._mark_task_status(
@@ -3251,7 +3321,7 @@ class TicketAiAnalysisService:
                 status_desc="分析成功",
                 finished_at=finished_at,
                 analysis_result=normalized,
-                raw_output=result_text or raw_stdout,
+                raw_output=(result_text or raw_stdout or "")[:5000],
                 command_line=f"agent:{agent_code}",
                 input_token_count=(normalized_token_usage or {}).get("input_token_count"),
                 output_token_count=(normalized_token_usage or {}).get("output_token_count"),

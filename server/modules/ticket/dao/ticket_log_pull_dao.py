@@ -59,6 +59,31 @@ class TicketLogPullDao:
         return db.query(TicketLogPullRecord).filter(TicketLogPullRecord.id == record_id).first()
 
     @classmethod
+    def get_record_meta_by_id(cls, db: Session, record_id: int) -> TicketLogPullRecord | None:
+        """
+        根据记录ID查询日志拉取记录（轻量版）。
+
+        与 get_record_by_id 的差异：defer 压缩正文和异常堆栈两个长文本列，
+        供状态轮询、参数重建、审计事件等只关心元数据的后台链路使用，
+        避免每次调用都把最多兆级的 compressed_content 拉进内存。
+
+        注意：返回的 ORM 对象被访问到被 defer 列时仍会按需回表加载，行为与延迟列一致。
+
+        :param db: 数据库会话
+        :param record_id: 记录ID
+        :return: 记录对象（大列为延迟加载）
+        """
+        return (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(TicketLogPullRecord.id == record_id)
+            .first()
+        )
+
+    @classmethod
     def get_latest_success_record_by_ticket_id(cls, db: Session, ticket_id: int) -> TicketLogPullRecord | None:
         """
         查询指定工单最近一条成功的日志拉取记录。
@@ -68,6 +93,10 @@ class TicketLogPullDao:
         """
         return (
             db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
             .filter(
                 TicketLogPullRecord.ticket_id == ticket_id,
                 TicketLogPullRecord.status == "success",
@@ -98,13 +127,20 @@ class TicketLogPullDao:
         :param command_data_type: 数据类型
         :return: 倒序排列的成功记录列表
         """
-        query = db.query(TicketLogPullRecord).filter(
-            TicketLogPullRecord.ticket_id == ticket_id,
-            TicketLogPullRecord.status == "success",
-            TicketLogPullRecord.vendor_id == vendor_id,
-            TicketLogPullRecord.store_id == store_id,
-            TicketLogPullRecord.pos_no == pos_no,
-            TicketLogPullRecord.command_data_type == command_data_type,
+        query = (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(
+                TicketLogPullRecord.ticket_id == ticket_id,
+                TicketLogPullRecord.status == "success",
+                TicketLogPullRecord.vendor_id == vendor_id,
+                TicketLogPullRecord.store_id == store_id,
+                TicketLogPullRecord.pos_no == pos_no,
+                TicketLogPullRecord.command_data_type == command_data_type,
+            )
         )
         normalized_environment = str(environment or "").strip()
         if normalized_environment:

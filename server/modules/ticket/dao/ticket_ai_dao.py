@@ -264,13 +264,18 @@ class TicketAiDao:
         查询需要恢复执行的 AI 分析任务。
         :param db: 数据库会话
         :param statuses: 可恢复状态列表
-        :return: 任务列表
+        :return: 任务列表（大列为延迟加载）
         """
         status_list = [status for status in statuses if status]
         if not status_list:
             return []
         return (
             db.query(TicketAiAnalysisTask)
+            .options(
+                defer(TicketAiAnalysisTask.prompt_text),
+                defer(TicketAiAnalysisTask.raw_output),
+                defer(TicketAiAnalysisTask.analysis_context),
+            )
             .filter(TicketAiAnalysisTask.status.in_(status_list))
             .order_by(TicketAiAnalysisTask.create_time.asc(), TicketAiAnalysisTask.task_id.asc())
             .all()
