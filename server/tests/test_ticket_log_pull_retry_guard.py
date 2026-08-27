@@ -7,12 +7,13 @@ from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 
 
 class DummyUser:
-    """仅用于通过类型参数传递，不会在失败分支中被实际读取。"""
+    """仅用于通过类型参数传递的简化用户对象。"""
 
-    user = SimpleNamespace(user_name="tester")
+    user = SimpleNamespace(user_name="tester", user_id=7)
 
 
 def test_get_external_config_services_returns_grouped_environments(monkeypatch):
@@ -279,3 +280,164 @@ def test_find_matching_success_record_ignores_automation_snapshot(monkeypatch):
     result = TicketLogPullService.find_matching_success_record(object(), 1001, payload)
 
     assert result is matching_record
+
+
+def test_sync_config_normalizes_auto_log_pull_stop_condition():
+    """自动拉日志停止条件应完成去重、裁剪和布尔归一化。"""
+    normalized = TicketSyncConfigService.normalize_sync_config(
+        {
+            "logPullDefaults": {
+                "autoLogPullStopCondition": {
+                    "enabled": 1,
+                    "statusCodes": [" wait_dev ", "", None, "wait_dev", "resolved"],
+                    "cancelActiveRecords": 0,
+                }
+            }
+        }
+    )
+
+    condition = normalized["logPullDefaults"]["autoLogPullStopCondition"]
+    assert condition == {
+        "enabled": True,
+        "statusCodes": ["wait_dev", "resolved"],
+        "cancelActiveRecords": False,
+    }
+    match = TicketSyncConfigService.match_auto_log_pull_stop_condition("resolved", normalized)
+    assert match["matched"] is True
+    assert match["ticketStatus"] == "resolved"
+
+
+
+def test_create_log_pull_services_persists_automation_snapshot(monkeypatch):
+    """创建日志拉取记录时应把自动化快照写入 command_content。"""
+
+    class DummyDb:
+        def __init__(self):
+            self.commit_count = 0
+
+        def commit(self):
+            self.commit_count += 1
+
+    db = DummyDb()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(TicketLogPullService, "_get_storage_config_dict", lambda query_db: {"mode": "local"})
+    monkeypatch.setattr(TicketLogPullService, "_add_ticket_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(TicketLogPullService, "_log_chain_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(TicketLogPullService, "queue_record", lambda record_id: None)
+    monkeypatch.setattr(
+        "modules.ticket.service.log_pull.ticket_log_pull_service.TicketDao.get_ticket_by_id",
+        lambda query_db, ticket_id: SimpleNamespace(ticket_id=ticket_id),
+    )
+
+    def fake_add_record(query_db, record):
+        record.id = 2043149749595137
+        captured["record"] = record
+        return record
+
+    monkeypatch.setattr(TicketLogPullDao, "add_record", fake_add_record)
+
+    payload = TicketLogPullCreateModel.model_validate(
+        {
+            "ticketId": 1001,
+            "environment": "prod",
+            "vendorId": 11,
+            "storeId": "552283",
+            "posNo": 2,
+            "commandDataType": 1,
+            "modifyTime": "2026-08-20",
+            "logBeginTime": "2026-08-20 10:00:00",
+            "logEndTime": "2026-08-20 10:30:00",
+            "autoAiEnabled": True,
+            "aiProviderCode": "provider-a",
+            "notifyConfig": {"channel": "a"},
+            "automationSnapshot": {
+                "autoCreated": True,
+                "notifyConfig": {"channel": "a"},
+            },
+        }
+    )
+
+    result = TicketLogPullService.create_log_pull_services(db, 1001, payload, DummyUser())
+
+    assert result.is_success is True
+    record = captured["record"]
+    assert record.command_content["notifyConfig"] == {"channel": "a"}
+    assert record.command_content["_automation"]["autoCreated"] is True
+    assert record.command_content["_automation"]["autoAiEnabled"] is True
+    assert db.commit_count == 1
+
+
+
+def test_cancel_auto_created_active_records_by_ticket_status_only_cancels_auto_records(monkeypatch):
+    """命中停止条件后，只应停止自动创建的活动日志记录。"""
+
+    class DummyDb:
+        def __init__(self):
+            self.commit_count = 0
+
+        def commit(self):
+            self.commit_count += 1
+
+    db = DummyDb()
+    auto_record = SimpleNamespace(
+        id=2043149749595138,
+        ticket_id=1001,
+        status="created",
+        command_content={"_automation": {"autoCreated": True}},
+    )
+    manual_record = SimpleNamespace(
+        id=2043149749595139,
+        ticket_id=1001,
+        status="created",
+        command_content={},
+    )
+    updated_records: list[tuple[int, dict]] = []
+    event_calls: list[dict] = []
+    log_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        TicketLogPullDao,
+        "list_active_records_by_ticket_id",
+        lambda query_db, ticket_id, statuses: [auto_record, manual_record],
+    )
+    monkeypatch.setattr(
+        TicketLogPullDao,
+        "update_record",
+        lambda query_db, record_id, data: updated_records.append((record_id, data)),
+    )
+    monkeypatch.setattr(
+        TicketLogPullService,
+        "_add_ticket_event",
+        lambda *args, **kwargs: event_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        TicketLogPullService,
+        "_log_chain_step",
+        lambda *args, **kwargs: log_calls.append(kwargs),
+    )
+
+    result = TicketLogPullService.cancel_auto_created_active_records_by_ticket_status(
+        db,
+        ticket_id=1001,
+        ticket_status="wait_dev",
+        operator_name="tester",
+        operator_id=7,
+        config={
+            "logPullDefaults": {
+                "autoLogPullStopCondition": {
+                    "enabled": True,
+                    "statusCodes": ["wait_dev", "resolved"],
+                    "cancelActiveRecords": True,
+                }
+            }
+        },
+        trigger_source="ticket_status_change",
+    )
+
+    assert result["cancelledRecordIds"] == [2043149749595138]
+    assert updated_records[0][0] == 2043149749595138
+    assert updated_records[0][1]["status"] == "cancelled"
+    assert event_calls[0]["event_data"]["trigger_source"] == "ticket_status_change"
+    assert log_calls[0]["status"] == "cancelled"
+    assert db.commit_count == 1

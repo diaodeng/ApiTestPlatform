@@ -186,6 +186,7 @@ class TicketSyncConfigService:
                     "statusFilterEnabled": False,
                     "statusCodes": [],
                 },
+                "autoLogPullStopCondition": cls.default_auto_log_pull_stop_condition(),
             },
             "promptTemplates": {
                 "classificationHint": "预留给后续 AI 识别场景，当前版本由可配置规则和正则完成识别。",
@@ -204,6 +205,18 @@ class TicketSyncConfigService:
         return TicketSyncAiConfigService.default_section("aiSyncExtract")
 
     # --- 翻译默认配置 ---
+
+    @classmethod
+    def default_auto_log_pull_stop_condition(cls) -> dict[str, Any]:
+        """
+        默认自动拉日志停止条件配置。
+        :return: 停止条件默认值
+        """
+        return {
+            "enabled": False,
+            "statusCodes": [],
+            "cancelActiveRecords": True,
+        }
 
     @classmethod
     def default_translate_config(cls) -> dict[str, Any]:
@@ -1346,6 +1359,9 @@ class TicketSyncConfigService:
             "statusFilterEnabled": bool(raw_ai_condition.get("statusFilterEnabled")),
             "statusCodes": status_codes,
         }
+        merged["logPullDefaults"]["autoLogPullStopCondition"] = cls.normalize_auto_log_pull_stop_condition(
+            merged["logPullDefaults"].get("autoLogPullStopCondition")
+        )
         # 最大并发数已迁移到日志拉取存储配置（maxWorkers），这里剔除历史遗留字段，避免两处配置不一致。
         merged["logPullDefaults"].pop("logPullConcurrency", None)
         if not isinstance(merged.get("promptTemplates"), dict):
@@ -1663,6 +1679,67 @@ class TicketSyncConfigService:
             merged["versionPatterns"] = cls.default_sync_config()["versionPatterns"]
         merged["defaultPullLimit"] = min(max(int(merged.get("defaultPullLimit") or 50), 1), 200)
         return merged
+
+    @classmethod
+    def normalize_auto_log_pull_stop_condition(cls, condition: dict[str, Any] | None) -> dict[str, Any]:
+        """
+        归一化自动拉日志停止条件。
+        :param condition: 原始停止条件
+        :return: 归一化后的停止条件
+        """
+        raw_condition = condition if isinstance(condition, dict) else {}
+        normalized_status_codes: list[str] = []
+        raw_status_codes = raw_condition.get("statusCodes")
+        if isinstance(raw_status_codes, list):
+            for item in raw_status_codes:
+                status_code = str(item or "").strip()
+                if status_code and status_code not in normalized_status_codes:
+                    normalized_status_codes.append(status_code)
+        return {
+            "enabled": bool(raw_condition.get("enabled")),
+            "statusCodes": normalized_status_codes,
+            "cancelActiveRecords": bool(raw_condition.get("cancelActiveRecords", True)),
+        }
+
+    @classmethod
+    def get_auto_log_pull_stop_condition(cls, config: dict[str, Any] | None) -> dict[str, Any]:
+        """
+        从同步配置中提取自动拉日志停止条件。
+        :param config: 同步配置
+        :return: 归一化后的停止条件
+        """
+        log_pull_defaults = config.get("logPullDefaults") if isinstance(config, dict) else {}
+        if not isinstance(log_pull_defaults, dict):
+            log_pull_defaults = {}
+        return cls.normalize_auto_log_pull_stop_condition(log_pull_defaults.get("autoLogPullStopCondition"))
+
+    @classmethod
+    def match_auto_log_pull_stop_condition(
+        cls,
+        ticket_status: str | None,
+        config: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """
+        判断工单状态是否命中自动拉日志停止条件。
+        :param ticket_status: 当前工单内部状态编码
+        :param config: 同步配置
+        :return: 命中结果与上下文
+        """
+        condition = cls.get_auto_log_pull_stop_condition(config)
+        normalized_status = str(ticket_status or "").strip()
+        matched = bool(
+            condition.get("enabled")
+            and normalized_status
+            and normalized_status in condition.get("statusCodes", [])
+        )
+        reason = f"工单状态[{normalized_status}]命中自动拉日志停止条件" if matched else ""
+        return {
+            "matched": matched,
+            "ticketStatus": normalized_status,
+            "reason": reason,
+            "condition": condition,
+        }
+
 
     # --- migrated from TicketSyncService.ensure_param_config_rows ---
 

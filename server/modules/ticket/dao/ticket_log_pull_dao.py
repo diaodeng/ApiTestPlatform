@@ -130,6 +130,37 @@ class TicketLogPullDao:
         db.query(TicketLogPullRecord).filter(TicketLogPullRecord.id == record_id).update(data)
 
     @classmethod
+    def list_active_records_by_ticket_id(
+        cls,
+        db: Session,
+        ticket_id: int,
+        statuses: Iterable[str],
+    ) -> list[TicketLogPullRecord]:
+        """
+        查询指定工单下仍处于活动状态的日志拉取记录。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param statuses: 活动状态列表
+        :return: 活动日志拉取记录列表
+        """
+        status_list = [status for status in statuses if status]
+        if not ticket_id or not status_list:
+            return []
+        return (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(
+                TicketLogPullRecord.ticket_id == ticket_id,
+                TicketLogPullRecord.status.in_(status_list),
+            )
+            .order_by(TicketLogPullRecord.create_time.asc(), TicketLogPullRecord.id.asc())
+            .all()
+        )
+
+    @classmethod
     def list_ticket_records(cls, db: Session, query: TicketLogPullQueryModel):
         """
         分页查询指定工单的日志拉取记录。

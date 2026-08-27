@@ -1644,6 +1644,19 @@ class TicketService:
                 except Exception as exc:
                     logger.warning(f"工单[{ticket_id}]关闭后自动提炼知识库失败: {exc}")
             query_db.commit()
+            try:
+                sync_config = TicketSyncConfigService.load_sync_config(query_db)
+                TicketLogPullService.cancel_auto_created_active_records_by_ticket_status(
+                    query_db,
+                    ticket_id=ticket_id,
+                    ticket_status=status_object.to_status,
+                    operator_name=_user_name(current_user),
+                    operator_id=_user_id(current_user),
+                    config=sync_config,
+                    trigger_source="ticket_status_change",
+                )
+            except Exception as exc:
+                logger.warning(f"工单[{ticket_id}]状态变更后自动停止日志任务失败: {exc}")
             cls._run_status_change_ai_classification(
                 query_db,
                 ticket_id=ticket_id,

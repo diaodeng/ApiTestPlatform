@@ -2920,6 +2920,12 @@
                     />
                   </el-form-item>
                 </el-col>
+                <el-col :span="24">
+                  <el-divider content-position="left">日志拉取后自动 AI 分析</el-divider>
+                  <div class="form-help-text form-help-text--section">
+                    这里控制自动日志拉取成功后的 AI 分析行为，手工 AI 分析不受这里影响。
+                  </div>
+                </el-col>
                 <el-col :xs="24" :md="12">
                   <el-form-item label="自动 AI 分析">
                     <el-switch
@@ -3007,6 +3013,59 @@
                       />
                     </el-select>
                     <div class="form-help-text">工单状态需先映射为内部状态；未满足条件时不会消耗 Token</div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-divider content-position="left">自动拉日志停止条件</el-divider>
+                  <div class="form-help-text form-help-text--section">
+                    这里控制哪些内部状态命中后不再自动拉日志，只影响自动任务，不影响手工拉日志。
+                  </div>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="自动拉日志停止条件">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoLogPullStopCondition.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">仅影响自动拉日志；手工拉日志不受影响</div>
+                  </el-form-item>
+                </el-col>
+                <el-col
+                  v-if="form.logPullDefaults.autoLogPullStopCondition.enabled"
+                  :xs="24"
+                  :md="12"
+                >
+                  <el-form-item label="停止运行中自动任务">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoLogPullStopCondition.cancelActiveRecords"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">命中状态后可自动停止仍在执行中的自动日志任务</div>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoLogPullStopCondition.enabled" :span="24">
+                  <el-form-item label="停止状态（多选）" required>
+                    <el-select
+                      v-model="form.logPullDefaults.autoLogPullStopCondition.statusCodes"
+                      multiple
+                      filterable
+                      collapse-tags
+                      collapse-tags-tooltip
+                      placeholder="请选择命中后停止自动拉日志的内部工作流状态"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in workflowStatusOptions"
+                        :key="`auto-log-stop-status-${item.value}`"
+                        :label="`${item.label} [${item.value}]`"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-help-text">命中任一状态即停止自动拉日志，并不再发送无意义的拉取失败通知</div>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -4224,6 +4283,11 @@ const lightModelOptionsMap = ref({});
     font-size: 12px;
     line-height: 1.5;
     color: var(--el-text-color-secondary);
+  }
+
+  .form-help-text--section {
+    margin-top: -6px;
+    margin-bottom: 8px;
   }
 
   .action-bar {

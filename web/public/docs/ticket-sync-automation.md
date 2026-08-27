@@ -91,10 +91,15 @@
 | `logPullDefaults.autoAiAnalysisCondition.analysisMode` | 历史分析条件：`always` 每次允许，`not_successful` 仅工单没有成功分析记录时允许 | `always` |
 | `logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled` | 是否启用内部工单状态过滤 | `false` |
 | `logPullDefaults.autoAiAnalysisCondition.statusCodes` | 允许自动分析的内部状态编码列表，由页面下拉多选生成 | `[]` |
+| `logPullDefaults.autoLogPullStopCondition.enabled` | 是否启用“自动拉日志停止条件” | `false` |
+| `logPullDefaults.autoLogPullStopCondition.statusCodes` | 命中后停止自动拉日志的内部状态编码列表，支持多选；命中任一状态即停止 | `[]` |
+| `logPullDefaults.autoLogPullStopCondition.cancelActiveRecords` | 命中停止状态后，是否自动停止当前工单下仍在运行中的自动日志任务 | `true` |
 
 自动 AI 条件只有在“自动 AI 分析”开启时生效，并按 AND 关系检查：自动 AI 已开启、工单状态命中允许列表（启用状态过滤时）、历史分析条件满足、没有正在执行的 AI 任务。状态配置使用系统内部状态编码，不直接填写外部状态文案；外部状态必须先通过“状态映射”转换为内部状态。状态为空、未映射或不在允许列表时，只跳过自动 AI，不影响日志拉取，也不会消耗 Token。
 
-页面入口为“工单同步自动化 → 日志拉取配置 → 拉日志默认值”。启用状态过滤后，在“允许的工单状态”中多选内部工作流状态；保存时至少选择一个状态。手动发起 AI 分析和手动重试不受这些自动分析条件限制。
+自动拉日志停止条件只影响“同步后自动拉日志”，不影响工单详情页手工拉日志、手工重试和手工 AI 分析。启用后，系统会在自动创建日志任务前检查当前工单内部状态；只要命中任一停止状态，就直接跳过自动日志步骤，并且不再发送无意义的“拉不动日志”失败通知。如果同时打开“停止运行中自动任务”，那么当工单后续流转到这些状态时，系统还会自动取消当前工单下仍在执行中的自动日志任务；这里只处理自动化创建的记录，不会停止手工拉取的任务。
+
+页面入口为“工单同步自动化 → 日志拉取配置 → 拉日志默认值”。启用状态过滤后，在“允许的工单状态”中多选内部工作流状态；保存时至少选择一个状态。启用自动拉日志停止条件后，在“停止状态（多选）”中选择命中后需要停止自动拉日志的内部状态即可。手动发起 AI 分析和手动重试不受这些自动分析条件限制。
 
 示例：
 

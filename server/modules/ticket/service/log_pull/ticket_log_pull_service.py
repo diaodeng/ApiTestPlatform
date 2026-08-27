@@ -66,6 +66,7 @@ from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import 
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_post_process_service import TicketLogPostProcessService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
+from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
 from utils.common_util import CamelCaseUtil
@@ -1961,7 +1962,7 @@ class TicketLogPullService:
         if storage_mode not in {"local", "ftp"}:
             storage_mode = "local"
         now = datetime.now()
-        command_content = payload.model_dump(by_alias=True)
+        command_content = cls._build_command_content(payload)
         log_begin_time, log_end_time = cls._resolve_log_time_range(payload)
         has_explicit_range = cls._has_explicit_log_time_range(payload)
         if has_explicit_range and (not log_begin_time or not log_end_time):
@@ -2479,12 +2480,198 @@ class TicketLogPullService:
             gc.collect()
 
     @classmethod
+    def _extract_record_automation_snapshot(cls, record: TicketLogPullRecord | dict[str, Any] | Any) -> dict[str, Any]:
+        """
+        提取日志记录中的内部自动化快照。
+        :param record: 日志记录或命令内容
+        :return: 自动化快照字典
+        """
+        command_content = record.command_content if hasattr(record, "command_content") else record
+        if not isinstance(command_content, dict):
+            command_content = cls._json_loads(command_content, {})
+        if not isinstance(command_content, dict):
+            return {}
+        automation_snapshot = command_content.get("_automation")
+        return dict(automation_snapshot) if isinstance(automation_snapshot, dict) else {}
+
+    @classmethod
+    def is_auto_created_record(cls, record: TicketLogPullRecord | dict[str, Any] | Any) -> bool:
+        """
+        判断日志记录是否由自动化链路自动创建。
+        :param record: 日志记录或命令内容
+        :return: 是否自动创建
+        """
+        automation_snapshot = cls._extract_record_automation_snapshot(record)
+        return bool(automation_snapshot.get("autoCreated"))
+
+    @classmethod
+    def _cancel_record_by_stop_condition(
+        cls,
+        db: Session,
+        record: TicketLogPullRecord,
+        *,
+        ticket_status: str,
+        reason: str,
+        operator_name: str,
+        operator_id: int | None,
+        trigger_source: str,
+    ) -> bool:
+        """
+        将命中停止条件的自动日志记录标记为已取消。
+        :param db: 数据库会话
+        :param record: 日志拉取记录
+        :param ticket_status: 当前工单状态
+        :param reason: 取消原因
+        :param operator_name: 操作人名称
+        :param operator_id: 操作人ID
+        :param trigger_source: 触发来源
+        :return: 是否完成取消
+        """
+        if record.status not in cls.ACTIVE_STATUSES:
+            return False
+        now = datetime.now()
+        status_desc = "工单状态命中自动拉日志停止条件，已自动停止"
+        TicketLogPullDao.update_record(
+            db,
+            record.id,
+            {
+                "status": TicketLogPullStatus.CANCELLED.value,
+                "status_desc": status_desc,
+                "is_error": False,
+                "update_by": operator_name,
+                "update_time": now,
+                "finished_at": now,
+            },
+        )
+        if record.ticket_id:
+            cls._add_ticket_event(
+                db,
+                ticket_id=record.ticket_id,
+                operator_id=operator_id,
+                operator_name=operator_name,
+                content="工单状态命中自动拉日志停止条件，已停止自动日志拉取",
+                event_data={
+                    "record_id": record.id,
+                    "status": record.status,
+                    "ticket_status": ticket_status,
+                    "stopped_at": now.isoformat(),
+                    "reason": reason,
+                    "trigger_source": trigger_source,
+                },
+            )
+        cls._log_chain_step(
+            db,
+            ticket_id=record.ticket_id,
+            record_id=record.id,
+            step="stop-log-pull",
+            status="cancelled",
+            reason=reason,
+            detail={
+                "ticketStatus": ticket_status,
+                "triggerSource": trigger_source,
+                "autoCreated": True,
+            },
+        )
+        return True
+
+    @classmethod
+    def cancel_auto_created_active_records_by_ticket_status(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        ticket_status: str | None,
+        operator_name: str,
+        operator_id: int | None = None,
+        config: dict[str, Any] | None = None,
+        trigger_source: str = "ticket_status",
+    ) -> dict[str, Any]:
+        """
+        当工单状态命中停止条件时，批量停止仍在运行中的自动日志任务。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param ticket_status: 当前工单状态
+        :param operator_name: 操作人名称
+        :param operator_id: 操作人ID
+        :param config: 已加载的同步配置
+        :param trigger_source: 触发来源
+        :return: 取消结果摘要
+        """
+        stop_context = TicketSyncConfigService.match_auto_log_pull_stop_condition(ticket_status, config)
+        condition = stop_context.get("condition", {}) if isinstance(stop_context, dict) else {}
+        if not stop_context.get("matched") or not bool(condition.get("cancelActiveRecords")):
+            return {"matched": bool(stop_context.get("matched")), "cancelledRecordIds": []}
+        active_records = TicketLogPullDao.list_active_records_by_ticket_id(db, ticket_id, cls.ACTIVE_STATUSES)
+        cancelled_record_ids: list[int] = []
+        for record in active_records:
+            if not cls.is_auto_created_record(record):
+                continue
+            cancelled = cls._cancel_record_by_stop_condition(
+                db,
+                record,
+                ticket_status=str(stop_context.get("ticketStatus") or ticket_status or "").strip(),
+                reason=str(stop_context.get("reason") or "工单状态命中自动拉日志停止条件"),
+                operator_name=operator_name,
+                operator_id=operator_id,
+                trigger_source=trigger_source,
+            )
+            if cancelled:
+                cancelled_record_ids.append(record.id)
+        if cancelled_record_ids:
+            db.commit()
+        return {
+            "matched": bool(stop_context.get("matched")),
+            "cancelledRecordIds": cancelled_record_ids,
+        }
+
+    @classmethod
+    def cancel_record_if_stop_condition_hit(
+        cls,
+        db: Session,
+        record: TicketLogPullRecord,
+        *,
+        config: dict[str, Any] | None = None,
+        operator_name: str = "system",
+        operator_id: int | None = None,
+        trigger_source: str = "scan_pending_records",
+    ) -> bool:
+        """
+        检查单条活动日志记录是否应因工单状态命中停止条件而被取消。
+        :param db: 数据库会话
+        :param record: 日志拉取记录
+        :param config: 已加载的同步配置
+        :param operator_name: 操作人名称
+        :param operator_id: 操作人ID
+        :param trigger_source: 触发来源
+        :return: 是否已取消
+        """
+        if not record.ticket_id or record.status not in cls.ACTIVE_STATUSES or not cls.is_auto_created_record(record):
+            return False
+        ticket = TicketDao.get_ticket_by_id(db, record.ticket_id)
+        if not ticket:
+            return False
+        stop_context = TicketSyncConfigService.match_auto_log_pull_stop_condition(ticket.status, config)
+        condition = stop_context.get("condition", {}) if isinstance(stop_context, dict) else {}
+        if not stop_context.get("matched") or not bool(condition.get("cancelActiveRecords")):
+            return False
+        return cls._cancel_record_by_stop_condition(
+            db,
+            record,
+            ticket_status=str(ticket.status or "").strip(),
+            reason=str(stop_context.get("reason") or "工单状态命中自动拉日志停止条件"),
+            operator_name=operator_name,
+            operator_id=operator_id,
+            trigger_source=trigger_source,
+        )
+
+    @classmethod
     def scan_pending_records(cls, db: Session) -> dict[str, int]:
         """
         后台周期任务入口：扫描待处理的日志拉取记录。
         1. created 兜底：投递到线程池提交外部申请；
         2. submitting/polling 超时：标记为轮询超时失败；
         3. submitting/polling 未超时：单次探测外部平台，命中可下载结果则投递下载解析。
+        4. 命中自动拉日志停止条件的自动记录：直接取消，不再继续拉取。
         :param db: 数据库会话
         :return: 扫描摘要
         """
@@ -2495,11 +2682,16 @@ class TicketLogPullService:
             "failed": 0,
             "downloading": 0,
             "pending": 0,
+            "cancelled": 0,
         }
         try:
             now = datetime.now()
+            sync_config = TicketSyncConfigService.load_sync_config(db)
             created_records = TicketLogPullDao.list_created_records(db, 100)
             for record in created_records:
+                if cls.cancel_record_if_stop_condition_hit(db, record, config=sync_config):
+                    summary["cancelled"] += 1
+                    continue
                 cls.queue_record(record.id)
                 current = TicketLogPullDao.get_record_by_id(db, record.id)
                 if current is not None and current.status != TicketLogPullStatus.CREATED.value:
@@ -2511,6 +2703,9 @@ class TicketLogPullService:
                 [TicketLogPullStatus.SUBMITTING.value, TicketLogPullStatus.POLLING.value],
             )
             for record in expired_records:
+                if cls.cancel_record_if_stop_condition_hit(db, record, config=sync_config):
+                    summary["cancelled"] += 1
+                    continue
                 cls._fail_record(
                     db,
                     record.id,
@@ -2542,6 +2737,9 @@ class TicketLogPullService:
                 200,
             )
             for record in pending_records:
+                if cls.cancel_record_if_stop_condition_hit(db, record, config=sync_config):
+                    summary["cancelled"] += 1
+                    continue
                 summary["scanned"] += 1
                 probe = cls._probe_external_status(db, record)
                 if probe == "matched":
@@ -3296,7 +3494,7 @@ class TicketLogPullService:
             if isinstance(record.command_content, dict)
             else cls._json_loads(record.command_content, {})
         )
-        command_content = cls._build_command_content(command_content)
+        command_content = cls._build_command_content(command_content, include_internal=False)
         response = httpx.post(
             request_url,
             data={
@@ -4409,13 +4607,18 @@ class TicketLogPullService:
         return gzip.decompress(base64.b64decode(encoded_text.encode("ascii"))).decode("utf-8")
 
     @classmethod
-    def _build_command_content(cls, payload: TicketLogPullCreateModel | dict[str, Any]) -> dict[str, Any]:
+    def _build_command_content(
+        cls,
+        payload: TicketLogPullCreateModel | dict[str, Any],
+        *,
+        include_internal: bool = True,
+    ) -> dict[str, Any]:
         """
-        根据页面输入构造外部接口 commandContent。
+        根据页面输入构造外部接口 commandContent，并附带内部自动化快照。
         :param payload: 页面请求参数
         :return: commandContent 字典
         """
-        source = payload if isinstance(payload, dict) else payload.model_dump(by_alias=True)
+        source = payload if isinstance(payload, dict) else payload.model_dump(by_alias=True, exclude_none=True)
         command_content: dict[str, Any] = {
             "fileMaxSize": str(source.get("fileMaxSize") or source.get("file_max_size") or 500),
             "zipMaxSize": str(source.get("zipMaxSize") or source.get("zip_max_size") or 500),
@@ -4447,6 +4650,31 @@ class TicketLogPullService:
                 command_content["logBeginTime"] = begin_time.isoformat(sep=" ")
             if end_time:
                 command_content["logEndTime"] = end_time.isoformat(sep=" ")
+
+        if include_internal:
+            notify_config = source.get("notifyConfig") or source.get("notify_config")
+            if isinstance(notify_config, dict):
+                command_content["notifyConfig"] = dict(notify_config)
+
+            raw_automation_snapshot = source.get("automationSnapshot") or source.get("automation_snapshot")
+            automation_snapshot = dict(raw_automation_snapshot) if isinstance(raw_automation_snapshot, dict) else {}
+            if source.get("autoAiEnabled") is not None or source.get("auto_ai_enabled") is not None:
+                automation_snapshot["autoAiEnabled"] = bool(
+                    source.get("autoAiEnabled") or source.get("auto_ai_enabled")
+                )
+            ai_agent_code = str(source.get("aiAgentCode") or source.get("ai_agent_code") or "").strip()
+            if ai_agent_code:
+                automation_snapshot["aiAgentCode"] = ai_agent_code
+            ai_provider_code = str(source.get("aiProviderCode") or source.get("ai_provider_code") or "").strip()
+            if ai_provider_code:
+                automation_snapshot["aiProviderCode"] = ai_provider_code
+            auto_ai_condition = source.get("autoAiAnalysisCondition") or source.get("auto_ai_analysis_condition")
+            if isinstance(auto_ai_condition, dict):
+                automation_snapshot["autoAiAnalysisCondition"] = auto_ai_condition
+            if isinstance(notify_config, dict) and "notifyConfig" not in automation_snapshot:
+                automation_snapshot["notifyConfig"] = dict(notify_config)
+            if automation_snapshot:
+                command_content["_automation"] = automation_snapshot
         return command_content
 
     @staticmethod
@@ -4554,6 +4782,8 @@ class TicketLogPullService:
             payload_data["autoAiEnabled"] = automation.get("autoAiEnabled")
             payload_data["aiAgentCode"] = automation.get("aiAgentCode")
             payload_data["aiProviderCode"] = automation.get("aiProviderCode")
+            if isinstance(automation.get("autoAiAnalysisCondition"), dict):
+                payload_data["autoAiAnalysisCondition"] = automation.get("autoAiAnalysisCondition")
         try:
             return TicketLogPullCreateModel.model_validate(payload_data)
         except Exception as exc:
