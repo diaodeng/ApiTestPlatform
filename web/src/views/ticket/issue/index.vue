@@ -76,12 +76,25 @@
         </el-button>
       </el-col>
       <el-col :span="1.5">
+        <el-button
+          type="warning"
+          plain
+          icon="Download"
+          :disabled="selectedIssueRows.length === 0"
+          @click="openIssueTicketExportDialog"
+          v-hasPermi="['ticket:issue:export']"
+        >
+          导出工单
+        </el-button>
+      </el-col>
+      <el-col :span="1.5">
         <el-button plain icon="Setting" @click="columnConfigOpen = true">列设置</el-button>
       </el-col>
       <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
     </el-row>
 
-    <el-table v-loading="loading" :data="issueList" row-key="issueId" @row-dblclick="handleDetail">
+    <el-table v-loading="loading" :data="issueList" row-key="issueId" @selection-change="handleIssueSelectionChange" @row-dblclick="handleDetail">
+      <el-table-column type="selection" width="48" align="center" fixed="left" />
       <el-table-column v-if="isIssueColumnVisible('issueNo')" label="问题编号" prop="issueNo" width="180" show-overflow-tooltip />
       <el-table-column v-if="isIssueColumnVisible('title')" label="问题标题" prop="title" min-width="220" show-overflow-tooltip />
       <el-table-column v-if="isIssueColumnVisible('status')" label="状态" prop="status" width="100" align="center">
@@ -477,6 +490,7 @@ import {
   bindTicketIssueByNo,
   confirmTicketRelation,
   delTicketRelation,
+  exportIssueTickets,
   getTicketIssue,
   getTicketStatClassificationOptions,
   listTicketIssues,
@@ -488,6 +502,7 @@ import {
   updateTicketIssue,
 } from '@/api/ticket/ticket'
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
+import { saveAs } from 'file-saver'
 import { severityOptions } from '../constants'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -514,6 +529,10 @@ const allModuleOptions = ref([])
 const ownerOptions = ref([])
 const problemPatternOptions = ref([])
 const columnConfigOpen = ref(false)
+const selectedIssueRows = ref([])
+const issueTicketExportDialogOpen = ref(false)
+const issueTicketExporting = ref(false)
+const issueTicketExportColumnKeys = ref([])
 const savingColumnConfig = ref(false)
 const visibleIssueColumnKeys = ref([
   'issueNo',
@@ -777,6 +796,80 @@ function saveIssueColumnConfig() {
     .finally(() => {
       savingColumnConfig.value = false
     })
+}
+
+// 问题实例导出工单列配置（必须包含问题编号、问题名）
+const issueTicketExportColumnOptions = [
+  { key: 'issueNo', label: '问题编号', required: true },
+  { key: 'issueTitle', label: '问题名', required: true },
+  { key: 'ticketNo', label: '工单编号' },
+  { key: 'title', label: '标题' },
+  { key: 'status', label: '状态' },
+  { key: 'project', label: '项目' },
+  { key: 'moduleName', label: '模块' },
+  { key: 'issueType', label: '工单类型' },
+  { key: 'isProblem', label: '问题性质' },
+  { key: 'rootCauseType', label: '根因分类' },
+  { key: 'solutionType', label: '解决方式' },
+  { key: 'resolution', label: '关闭结果' },
+  { key: 'problemPattern', label: '细分问题' },
+  { key: 'customerPriority', label: '对方优先级' },
+  { key: 'internalPriority', label: '内部优先级' },
+  { key: 'source', label: '来源' },
+  { key: 'firstLineAssigneeName', label: '1线人员' },
+  { key: 'internalOwnerName', label: '内部负责人' },
+  { key: 'currentAssigneeName', label: '当前处理人' },
+  { key: 'submitTime', label: '工单提交时间' },
+  { key: 'firstResponseAt', label: '首次响应时间' },
+  { key: 'processedAt', label: '处理完成时间' },
+  { key: 'createTime', label: '创建时间' },
+];
+
+function handleIssueSelectionChange(selection) {
+  selectedIssueRows.value = selection || [];
+}
+
+function resetIssueTicketExportColumns() {
+  issueTicketExportColumnKeys.value = issueTicketExportColumnOptions.map((item) => item.key);
+}
+
+function openIssueTicketExportDialog() {
+  if (!selectedIssueRows.value.length) {
+    proxy.$modal.msgWarning('请先选择问题实例');
+    return;
+  }
+  resetIssueTicketExportColumns();
+  issueTicketExportDialogOpen.value = true;
+}
+
+async function doExportIssueTickets() {
+  issueTicketExporting.value = true;
+  try {
+    const selectedIds = selectedIssueRows.value.map((row) => Number(row.issueId || row.issue_id));
+    const payload = {
+      selectedIssueIds: selectedIds,
+      columns: issueTicketExportColumnKeys.value || [],
+    };
+    const response = await exportIssueTickets(payload);
+    // request.js 对 Blob 响应会直接返回 Blob，不再是 Axios response。
+    const blob = response instanceof Blob
+      ? response
+      : new Blob([response], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    // 后端异常响应在 Blob 请求下也会被封装成 Blob，需要先解析 JSON 错误再下载。
+    if (blob.type === 'application/json' || blob.type.startsWith('text/')) {
+      const errorBody = JSON.parse(await blob.text());
+      throw new Error(errorBody.msg || '导出失败');
+    }
+    const filename = '问题实例关联工单导出.xlsx';
+    saveAs(blob, filename);
+    proxy.$modal.msgSuccess('导出成功');
+    issueTicketExportDialogOpen.value = false;
+  } catch (error) {
+    const msg = error?.response?.data?.msg || error?.message || '导出失败';
+    proxy.$modal.msgError(msg);
+  } finally {
+    issueTicketExporting.value = false;
+  }
 }
 
 function resetIssueColumnConfig() {

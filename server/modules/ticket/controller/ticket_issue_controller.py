@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from modules.ticket.entity.vo.ticket_export_vo import TicketIssueTicketExportRequestModel
 from modules.ticket.entity.vo.ticket_issue_vo import (
     TicketIssueBatchBindModel,
     TicketIssueBindByTicketNoModel,
@@ -19,6 +22,7 @@ from modules.ticket.entity.vo.ticket_issue_vo import (
     TicketIssueUpdateModel,
     TicketRelationCreateModel,
 )
+from modules.ticket.service.export.ticket_export_service import TicketExportService
 from modules.ticket.service.issue.ticket_issue_service import TicketIssueService
 from modules.ticket.service.issue.ticket_relation_service import TicketRelationService
 from utils.log_util import logger
@@ -424,6 +428,48 @@ async def delete_ticket_relation(
         if result.is_success:
             return ResponseUtil.success(msg=result.message)
         return ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+# === 问题实例导出工单 ===
+@ticketIssueController.post(
+    "/issues/export-tickets",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:issue:export"))],
+)
+async def export_issue_tickets(
+    request: Request,
+    export_request: TicketIssueTicketExportRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    导出问题实例关联工单接口。
+    导出选中问题实例中绑定的工单，导出信息列可用户设置，默认包含问题编号和问题名。
+    :param request: 请求对象
+    :param export_request: 导出请求模型（选中问题实例ID、列配置）
+    :param query_db: 数据库会话
+    :return: 问题实例关联工单 Excel 文件流
+    """
+    try:
+        content = await run_in_threadpool(
+            TicketExportService.export_issue_tickets,
+            query_db,
+            export_request,
+        )
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"问题实例关联工单导出_{timestamp}.xlsx"
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+                "download-filename": quote(filename),
+            },
+        )
+    except ValueError as e:
+        logger.warning(f"问题实例工单导出参数错误: {e}")
+        return ResponseUtil.error(msg=str(e))
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

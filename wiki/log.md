@@ -41,6 +41,12 @@ updated: 2026-08-25
 
 # 操作日志
 
+## [2026-08-27] FIX | 工单导出 tuple 与 Blob 响应异常
+
+- 根因：工单导出服务将分页 Pydantic 结果直接执行 `list(result)`，得到 `('rows', [...])` 字段元组；前端 request 封装对 Blob 直接返回数据，却仍读取 `response.headers`。
+- 修复：统一提取 DAO 分页/非分页结果中的 `rows`；导出请求模型支持 camelCase 和当前筛选条件；前端直接保存 Blob 并使用固定文件名。
+- 验证：定向 `ruff` 检查通过；Pydantic 导出请求别名解析和分页结果提取回归检查通过；前端生产构建待完成。
+
 ## [2026-08-25] FEAT | 工单 AI Agent 跨进程派发与并发队列
 
 - 触发：`start.sh` 以 Supervisor 分进程启动 FastAPI、Celery Worker 和 Celery Beat，自动 AI 需要在 Worker 侧安全投递到 FastAPI 内的 Agent WebSocket 连接。

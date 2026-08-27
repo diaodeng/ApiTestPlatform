@@ -1,4 +1,4 @@
-"""
+﻿"""
 工单同步工具方法：类型转换、JSON 序列化、Hash、日期解析等通用函数。
 """
 import hashlib
@@ -123,8 +123,8 @@ class SyncUtil:
         if value in (None, ""):
             return []
         if isinstance(value, list):
-            return [str(item).strip() for item in value if item not in (None, "")]
-        return [kw.strip() for kw in str(value).split(",") if kw.strip()]
+            return [str(item).strip().lower() for item in value if item not in (None, "")]
+        return [kw.strip().lower() for kw in str(value).split(",") if kw.strip()]
 
     @staticmethod
     def payload_field_value(payload: dict, *keys: str, default=None):
