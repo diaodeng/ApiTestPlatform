@@ -2083,3 +2083,10 @@ updated: 2026-08-25
 - 根因：`TicketQueryModel` 只按 camelCase 别名接收输入，服务内部使用 snake_case 构造导致 `ticketIds`、`pageSize` 和 `isPage` 被静默忽略；问题实例页面维护了导出状态和请求逻辑，但遗漏了绑定状态的列选择对话框模板。
 - 修复：选中工单导出使用 `TicketQueryModel.model_validate` 按 `ticketIds/pageNum/pageSize/isPage` 构造查询；问题实例页面补齐导出列选择对话框；两处导出 ID 均保持字符串传输，交由 Pydantic 在接口边界校验并解析，避免 BIGINT 精度丢失。
 - 验证范围：新增服务回归测试，确认选中 ID、分页大小和分页标记会完整传入 DAO 查询；前端构建验证导出对话框模板与脚本可编译。
+
+## [2026-08-28] FIX | 工单日志查看准备进度复用
+
+- 触发：日志查看弹窗关闭后再次打开会重复发起准备/下载请求；离开工单详情页后重新进入也无法恢复下载进度，日志拉取记录管理页存在相同体验。
+- 修复：前端按“工单 ID + 日志拉取记录 ID”在模块级复用准备请求和进度状态；已处于 `preparing/downloading` 时只等待原任务，列表显示环形进度；重新加载列表时通过 `/ticket/logs/prepare-progress` 恢复后端 Redis 中的进度。
+- 影响范围：`web/src/views/ticket/hooks/useLogPrepareProgress.js`、`web/src/views/ticket/hooks/useLogViewer.js`、工单详情日志拉取 Tab、日志拉取记录管理页、日志查看器用户说明。
+- 验证：待执行前端生产构建和静态检查。

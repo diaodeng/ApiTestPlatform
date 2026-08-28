@@ -58,6 +58,7 @@ updated: 2026-05-20
 - [工单自动化链路流程](flows/ticket-automation-flow.md)
 - [工单自定义统计通知流程](flows/ticket-custom-statistics-notification.md)
 - [统一凭证刷新流程](flows/credential-refresh.md)
+- [工单日志拉取记录独立查看流程](flows/ticket-log-record-isolated-view.md)
 
 ## 契约
 
