@@ -19,7 +19,10 @@ def test_handle_response_validate_transport_payload_supports_ai_analysis_json():
                 "command": "run_ticket_ai_analysis",
                 "status": "failed",
                 "success": False,
+                "errorCode": "AI_WORKER_EXECUTION_ERROR",
+                "errorMessage": "PowerShell doesn't support heredoc with <<",
                 "message": "PowerShell doesn't support heredoc with <<",
+                "workerExitCode": 1,
                 "result": {
                     "stderr_context": "ParserError",
                     "analysis_result": None,
@@ -35,6 +38,9 @@ def test_handle_response_validate_transport_payload_supports_ai_analysis_json():
     assert response.status_code == 200
     assert isinstance(response.response, AgentResponseWebUI)
     assert response.response.success is False
+    assert response.response.error_code == "AI_WORKER_EXECUTION_ERROR"
+    assert response.response.error_message == "PowerShell doesn't support heredoc with <<"
+    assert response.response.worker_exit_code == 1
     assert response.response.message == "PowerShell doesn't support heredoc with <<"
     assert response.response.result["stderr_context"] == "ParserError"
 
@@ -51,6 +57,8 @@ def test_ticket_ai_gateway_parses_transport_payload_without_json_validator_error
                 "command": "run_ticket_ai_analysis",
                 "status": "failed",
                 "success": False,
+                "errorCode": "AI_WORKER_EXECUTION_ERROR",
+                "errorMessage": "PowerShell doesn't support heredoc with <<",
                 "message": "PowerShell doesn't support heredoc with <<",
                 "result": {
                     "stderr_context": "ParserError",
@@ -104,6 +112,7 @@ def test_ticket_ai_gateway_parses_transport_payload_without_json_validator_error
     assert response.status_code == 200
     assert isinstance(response.response, AgentResponseWebUI)
     assert response.response.success is False
+    assert response.response.error_code == "AI_WORKER_EXECUTION_ERROR"
     assert response.response.result["stderr_context"] == "ParserError"
 
 
@@ -113,6 +122,8 @@ def test_ticket_ai_failure_message_prefers_nested_agent_error_over_gateway_succe
         request_type=6,
         status="failed",
         success=False,
+        error_code="AI_WORKER_EXECUTION_ERROR",
+        error_message="error: the argument '--sandbox' cannot be used with '--approve-for-me'",
         message="error: the argument '--sandbox' cannot be used with '--approve-for-me'",
         result=None,
     )
@@ -143,6 +154,8 @@ def test_agent_dispatch_service_load_cached_result_supports_transport_json_paylo
                         "requestType": 6,
                         "status": "failed",
                         "success": False,
+                        "errorCode": "AI_WORKER_EXECUTION_ERROR",
+                        "errorMessage": "PowerShell doesn't support heredoc with <<",
                         "message": "PowerShell doesn't support heredoc with <<",
                         "result": {"stderr_context": "ParserError"},
                     },

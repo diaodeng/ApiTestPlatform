@@ -73,6 +73,7 @@ async def init_create_table():
     _ensure_ticket_classification_columns()
     _ensure_ai_provider_preferred_executor_column()
     _ensure_ticket_ai_analysis_token_columns()
+    _ensure_ai_analysis_error_code_columns()
     _ensure_ticket_ai_analysis_fingerprint_columns()
     _ensure_user_config_unique_index()
     logger.info("数据库连接成功")
@@ -610,6 +611,54 @@ def _ensure_ticket_ai_analysis_token_columns():
                 connection.execute(text(f"ALTER TABLE ticket_ai_analysis_task ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_ai_analysis_task token 统计字段失败: {exc}")
+
+
+def _ensure_ai_analysis_error_code_columns():
+    """
+    为工单 AI 任务和 AI 审计表补齐结构化错误码字段，兼容旧库。
+    :return: 无
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    table_specs = {
+        "ticket_ai_analysis_task": "失败错误码",
+        "sys_ai_task_execution": "失败错误码",
+    }
+    try:
+        with engine.begin() as connection:
+            for table_name, column_comment in table_specs.items():
+                if DATABASE_BACKEND == "mysql":
+                    exists = connection.execute(
+                        text(
+                            """
+                            SELECT 1
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = :table_name
+                              AND COLUMN_NAME = 'error_code'
+                            LIMIT 1
+                            """
+                        ),
+                        {"table_name": table_name},
+                    ).first()
+                else:
+                    columns = connection.execute(text(f"PRAGMA table_info({table_name})")).mappings().all()
+                    exists = any(str(row.get("name") or "") == "error_code" for row in columns)
+                if exists:
+                    continue
+                logger.info(f"检测到 {table_name} 缺少 error_code 列，自动补齐")
+                if DATABASE_BACKEND == "mysql":
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {table_name} ADD COLUMN error_code VARCHAR(100) NULL "
+                            f"COMMENT '{column_comment}'"
+                        )
+                    )
+                else:
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN error_code VARCHAR(100)"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 AI 分析错误码字段失败: {exc}")
 
 
 def _ensure_ticket_ai_analysis_fingerprint_columns():

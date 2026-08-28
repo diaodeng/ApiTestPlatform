@@ -1415,6 +1415,7 @@ class TicketAiAnalysisService:
             "provider_code",
             "model_name",
             "base_url",
+            "error_code",
             "response_text",
             "error_message",
         ):
@@ -2585,6 +2586,7 @@ class TicketAiAnalysisService:
         *,
         status: str,
         status_desc: str,
+        error_code: str | None = None,
         error_message: str | None = None,
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
@@ -2601,6 +2603,7 @@ class TicketAiAnalysisService:
         :param task_id: 任务ID
         :param status: 任务状态
         :param status_desc: 状态描述
+        :param error_code: 稳定的业务错误码
         :param error_message: 错误信息
         :param started_at: 开始时间
         :param finished_at: 结束时间
@@ -2612,6 +2615,7 @@ class TicketAiAnalysisService:
         update_data = {
             "status": status,
             "status_desc": status_desc,
+            "error_code": error_code,
             "error_message": error_message,
             "started_at": started_at,
             "finished_at": finished_at,
@@ -3278,13 +3282,22 @@ class TicketAiAnalysisService:
             tasks = TicketAiDao.list_recoverable_tasks(db, list(cls.ACTIVE_STATUSES))
             now = datetime.now()
             for task in tasks:
+                interrupted_message = "服务重启前任务未完成，已清理为失败"
                 cls._mark_task_status(
                     db,
                     task.task_id,
                     status=TicketAiAnalysisStatus.FAILED.value,
                     status_desc="服务重启前任务未完成，已清理为失败",
-                    error_message="服务重启前任务未完成，已清理为失败",
+                    error_code="AI_TASK_INTERRUPTED",
+                    error_message=interrupted_message,
                     finished_at=now,
+                )
+                cls._update_execution_record(
+                    db,
+                    getattr(task, "audit_execution_id", None),
+                    status="failed",
+                    error_code="AI_TASK_INTERRUPTED",
+                    error_message=interrupted_message,
                 )
             if tasks:
                 db.commit()
@@ -3373,6 +3386,7 @@ class TicketAiAnalysisService:
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="工单不存在",
+                error_code="AI_TICKET_NOT_FOUND",
                 error_message="工单不存在或已删除",
                 finished_at=datetime.now(),
             )
@@ -3380,6 +3394,7 @@ class TicketAiAnalysisService:
                 db,
                 getattr(task, "audit_execution_id", None),
                 status="failed",
+                error_code="AI_TICKET_NOT_FOUND",
                 error_message="工单不存在或已删除",
             )
             db.commit()
@@ -3419,6 +3434,7 @@ class TicketAiAnalysisService:
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="未找到仓库映射",
+                error_code="AI_REPO_MAPPING_NOT_FOUND",
                 error_message="未找到可用的项目版本仓库映射",
                 finished_at=datetime.now(),
             )
@@ -3426,6 +3442,7 @@ class TicketAiAnalysisService:
                 db,
                 audit_execution_id,
                 status="failed",
+                error_code="AI_REPO_MAPPING_NOT_FOUND",
                 error_message="未找到可用的项目版本仓库映射",
             )
             db.commit()
@@ -3514,6 +3531,7 @@ class TicketAiAnalysisService:
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="未找到Agent",
+                error_code="AI_AGENT_NOT_AVAILABLE",
                 error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
                 finished_at=datetime.now(),
                 command_line="agent:<none>",
@@ -3525,6 +3543,7 @@ class TicketAiAnalysisService:
                 provider_code=requested_provider_code or None,
                 model_name=worker_model_override or None,
                 base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
+                error_code="AI_AGENT_NOT_AVAILABLE",
                 error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
             )
             db.commit()
@@ -3563,6 +3582,8 @@ class TicketAiAnalysisService:
         request_payload: dict[str, Any] | None = None
         response_payload: dict[str, Any] = {}
         token_usage_payload: dict[str, Any] | None = None
+        error_code: str | None = None
+        failure_message: str | None = None
         try:
             request_payload = cls._build_agent_request_payload(
                 task_id=task_id,
@@ -3626,26 +3647,44 @@ class TicketAiAnalysisService:
                 status_code=getattr(agent_response, "status_code", None),
                 response_type=type(response_object).__name__ if response_object is not None else "None",
                 response_message=getattr(agent_response, "message", None),
+                response_error_code=getattr(response_object, "error_code", None),
+                response_error_message=getattr(response_object, "error_message", None),
                 response_result_preview=response_result_preview,
             )
             if getattr(agent_response, "status_code", 500) != 200:
+                error_code = "AI_AGENT_TRANSPORT_ERROR"
                 failure_message = (
-                    getattr(response_object, "message", None)
+                    getattr(response_object, "error_message", None)
+                    or getattr(response_object, "message", None)
                     or getattr(agent_response, "message", None)
-                    or "Agent HTTP 请求失败"
+                    or "Agent 网关传输失败"
                 )
+                response_payload = response_dump
                 cls._log_task_step(task_id, "FAIL", "Agent HTTP 请求失败", error=failure_message)
                 raise ValueError(failure_message)
-            response_payload = cls._extract_agent_response_result(response_object)
+
+            # Agent 业务失败与网关传输成功是两个独立状态。失败时不再尝试从
+            # result、响应文本或工单正文推断异常，直接使用客户端返回的结构化错误。
             if not bool(getattr(response_object, "success", True)):
-                # Agent 的 success 只是执行器摘要，最终成功由可解析结果和服务端 schema 校验决定。
-                # 这样不会因 Codex 正常写入 stderr 或旧执行器摘要误判已经生成的结果。
+                error_code = str(getattr(response_object, "error_code", None) or "AI_AGENT_EXECUTION_ERROR")
+                failure_message = str(
+                    getattr(response_object, "error_message", None)
+                    or getattr(response_object, "message", None)
+                    or "Agent 执行失败，但未返回错误信息"
+                )
+                response_payload = response_dump
                 cls._log_task_step(
                     task_id,
-                    "EXEC",
-                    "Agent 摘要标记失败，继续按结构化结果校验",
-                    has_structured_result=bool(response_payload),
+                    "FAIL",
+                    "Agent 返回结构化失败",
+                    error_code=error_code,
+                    error=failure_message,
+                    worker_exit_code=getattr(response_object, "worker_exit_code", None),
+                    diagnostics=getattr(response_object, "diagnostics", None),
                 )
+                raise ValueError(failure_message)
+
+            response_payload = cls._extract_agent_response_result(response_object)
             result_text = ""
             if response_payload:
                 result_text = cls._dumps(response_payload)
@@ -3660,13 +3699,13 @@ class TicketAiAnalysisService:
                 except Exception:
                     parsed_result = None
             if not isinstance(parsed_result, dict):
-                cls._log_task_step(task_id, "FAIL", "Agent 未返回可解析的分析结果")
-                failure_message = cls._resolve_agent_failure_message(
-                    response_object=response_object,
-                    agent_response=agent_response,
-                    response_payload=response_payload,
-                    raw_stdout=raw_stdout,
-                    raw_stderr=raw_stderr,
+                error_code = "AI_WORKER_RESULT_INVALID"
+                failure_message = "Agent 未返回可解析的分析结果"
+                cls._log_task_step(
+                    task_id,
+                    "FAIL",
+                    failure_message,
+                    error_code=error_code,
                 )
                 raise ValueError(failure_message)
             token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump, response_object)
@@ -3678,8 +3717,15 @@ class TicketAiAnalysisService:
                 version_key=version_key,
             )
             if not cls._validate_analysis_result_schema(parsed_result, schema_payload):
-                cls._log_task_step(task_id, "FAIL", "Agent 分析结果未通过 JSON Schema 校验")
-                raise ValueError("AI Agent 返回的分析结果未通过 JSON Schema 校验")
+                error_code = "AI_WORKER_RESULT_INVALID"
+                failure_message = "AI Agent 返回的分析结果未通过 JSON Schema 校验"
+                cls._log_task_step(
+                    task_id,
+                    "FAIL",
+                    failure_message,
+                    error_code=error_code,
+                )
+                raise ValueError(failure_message)
 
             # 先用成功指纹占位，再执行消息、RCA、快照和事件写回，确保并发重复任务只有
             # 一个事务可以进入成功写回流程。唯一约束冲突时，当前任务直接取消。
@@ -3748,17 +3794,25 @@ class TicketAiAnalysisService:
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
             return
         except Exception as exc:
-            cls._log_task_step(task_id, "ERROR", "AI 分析任务执行失败", error=str(exc))
+            failure_code = error_code or "AI_ANALYSIS_EXECUTION_ERROR"
+            failure_message = failure_message or str(exc)
+            cls._log_task_step(
+                task_id,
+                "ERROR",
+                "AI 分析任务执行失败",
+                error_code=failure_code,
+                error=failure_message,
+            )
             logger.exception(f"AI分析任务[{task_id}] 执行失败")
             # 持久化阶段可能已经触发数据库 flush 失败，必须先回滚才能继续写入失败终态；
             # 否则 SQLAlchemy 会拒绝后续状态更新，任务会长期停留在“执行中”。
             db.rollback()
-            failure_message = cls._summarize_worker_error(raw_stderr, raw_stdout, str(exc))
             cls._mark_task_status(
                 db,
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="分析失败",
+                error_code=failure_code,
                 error_message=failure_message,
                 finished_at=datetime.now(),
                 command_line=f"agent:{agent_code}",
@@ -3767,6 +3821,7 @@ class TicketAiAnalysisService:
                 db,
                 audit_execution_id,
                 status="failed",
+                error_code=failure_code,
                 provider_code=locals().get("requested_provider_code") or None,
                 model_name=locals().get("worker_model_override") or None,
                 base_url=(

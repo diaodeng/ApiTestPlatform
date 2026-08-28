@@ -11,6 +11,7 @@
 - Codex：结果从任务工作区的 `result.json` 读取。只有 Worker 退出码为 `0`、结果 JSON 可解析且通过本次任务的 JSON Schema 时才算成功。
 - Claude Code：使用命令输出的 JSON，优先读取 `structured_output`，其次解析 `result` 最终文本；`is_error=true` 或进程执行失败时算失败。
 - Worker 的 `stderr` 可能包含正常进度、模型输出和诊断信息。`stderr` 非空本身不会使 Codex 分析失败。
+- Worker 失败时，任务会记录结构化的“错误码”和真实“错误信息”；失败响应不包含工单正文或分析结果。`workerExitCode` 仅用于辅助诊断，不能替代业务错误码。
 - Schema 兼容接口中按字符串传输的 BIGINT ID，并包含 `symptom`、`similar_cases`、`sop_suggestion`、`owner_suggestion`、`monitoring_suggestion` 等可选增强字段；字段缺省时由服务端补默认值。
 
 ## 请求幂等
@@ -52,3 +53,15 @@ Codex 使用 `workspace-write` 沙箱和自动审批参数运行，适用于后�
 ### 为什么强制刷新后任务ID变化
 
 强制刷新明确要求绕过历史成功结果，因此会创建新的任务和新的请求指纹；旧结果仍保留在任务历史中。
+
+### 如何判断 AI 分析失败
+
+服务端以任务响应中的 `success` 和 `status` 判断执行状态：`success=false` 或 `status=failed/timeout` 表示失败，不再通过工单正文、分析结果文本或日志中的普通 `Error:` 关键字推断失败。
+
+失败任务可查看以下字段：
+
+- `errorCode`：稳定的业务错误码，例如 `AI_PROVIDER_QUOTA_EXCEEDED`、`AI_PROVIDER_AUTH_FAILED`、`AI_WORKER_PERMISSION_DENIED`。
+- `errorMessage`：Provider 或 Worker 返回的真实异常信息。
+- `workerExitCode`：本地进程退出码，仅作为辅助信息。
+
+如果 Worker 同时出现本地诊断告警和 Provider 致命异常，Provider 致命异常作为主错误保存，本地告警只保留在 Agent 诊断日志中。

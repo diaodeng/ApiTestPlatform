@@ -2100,7 +2100,6 @@ class TicketAiAnalysisService:
     def _extract_stderr_context(
         stderr_text: str | None,
         keywords: tuple[str, ...] = (
-            "error:",
             "openai_error",
             "bad_response_status_code",
             "invalid_request_error",
@@ -2170,6 +2169,110 @@ class TicketAiAnalysisService:
             if tail_lines:
                 return " | ".join(tail_lines)[:4000]
         return default_message
+
+    @staticmethod
+    def _find_worker_error_line(text: str | None, markers: tuple[str, ...]) -> str:
+        """
+        从 Worker 输出中提取明确的系统错误行，不将工单正文中的普通 Error 文本当作异常。
+        :param text: Worker 标准输出或标准错误
+        :param markers: 允许识别的系统错误标记
+        :return: 错误行，未找到时返回空字符串
+        """
+        if not text:
+            return ""
+        lowered_markers = tuple(marker.lower() for marker in markers)
+        for line in reversed(str(text).splitlines()):
+            normalized_line = re.sub(r"\s+", " ", line.strip())
+            lowered_line = normalized_line.lower()
+            if normalized_line and any(marker in lowered_line for marker in lowered_markers):
+                return normalized_line[:4000]
+        return ""
+
+    @classmethod
+    def _classify_worker_failure(
+        cls,
+        stderr_text: str | None,
+        stdout_text: str | None,
+        return_code: int | None,
+    ) -> dict[str, Any]:
+        """
+        将 Worker 的明确系统错误转换为稳定错误码和错误信息。
+        :param stderr_text: Worker 标准错误
+        :param stdout_text: Worker 标准输出
+        :param return_code: Worker 进程退出码
+        :return: 错误码、错误信息、退出码和诊断信息
+        """
+        combined_text = "\n".join(item for item in (stderr_text, stdout_text) if item)
+        diagnostics: list[dict[str, Any]] = []
+        permission_line = cls._find_worker_error_line(
+            combined_text,
+            ("permissiondenied", "permission denied", "access is denied", "拒绝访问"),
+        )
+        if permission_line:
+            diagnostics.append(
+                {
+                    "code": "AI_WORKER_PERMISSION_DENIED",
+                    "severity": "warning",
+                    "message": permission_line,
+                }
+            )
+
+        # 配额错误优先级高于本地日志告警，避免 PermissionDenied 覆盖真正的终止原因。
+        quota_line = cls._find_worker_error_line(
+            combined_text,
+            ("allocated quota exceeded", "quota exceeded", "token limit"),
+        )
+        if quota_line:
+            return {
+                "error_code": "AI_PROVIDER_QUOTA_EXCEEDED",
+                "error_message": quota_line,
+                "worker_exit_code": return_code,
+                "diagnostics": diagnostics,
+            }
+
+        auth_line = cls._find_worker_error_line(
+            combined_text,
+            ("401 unauthorized", "unauthorized", "authentication failed", "invalid api key"),
+        )
+        if auth_line:
+            return {
+                "error_code": "AI_PROVIDER_AUTH_FAILED",
+                "error_message": auth_line,
+                "worker_exit_code": return_code,
+                "diagnostics": diagnostics,
+            }
+
+        if permission_line:
+            return {
+                "error_code": "AI_WORKER_PERMISSION_DENIED",
+                "error_message": permission_line,
+                "worker_exit_code": return_code,
+                "diagnostics": diagnostics,
+            }
+
+        provider_line = cls._find_worker_error_line(
+            combined_text,
+            (
+                "bad_response_status_code",
+                "invalid_request_error",
+                "error sending request",
+                "stream disconnected",
+            ),
+        )
+        if provider_line:
+            return {
+                "error_code": "AI_PROVIDER_REQUEST_FAILED",
+                "error_message": provider_line,
+                "worker_exit_code": return_code,
+                "diagnostics": diagnostics,
+            }
+
+        return {
+            "error_code": "AI_WORKER_EXIT_NONZERO",
+            "error_message": f"AI Worker 返回非零退出码: {return_code}",
+            "worker_exit_code": return_code,
+            "diagnostics": diagnostics,
+        }
 
     @staticmethod
     def _normalize_worker_failure_message(message: str) -> str:
@@ -2401,6 +2504,8 @@ class TicketAiAnalysisService:
                 "success": False,
                 "status": "failed",
                 "message": "taskId 或 ticketId 不能为空",
+                "error_code": "AI_REQUEST_INVALID",
+                "error_message": "taskId 或 ticketId 不能为空",
             }
         try:
             workspace_root, repo_path, current_branch = cls._resolve_ai_repo_runtime_settings(mapping)
@@ -2487,6 +2592,7 @@ class TicketAiAnalysisService:
                     "success": False,
                     "status": "running",
                     "message": failure_message,
+                    "error_code": "AI_TASK_ALREADY_RUNNING",
                     "error_message": failure_message,
                 }
             cls._release_task_lock(task_lock_file)
@@ -2509,6 +2615,7 @@ class TicketAiAnalysisService:
                     "success": False,
                     "status": "running",
                     "message": failure_message,
+                    "error_code": "AI_TASK_ALREADY_RUNNING",
                     "error_message": failure_message,
                 }
             try:
@@ -2773,6 +2880,11 @@ class TicketAiAnalysisService:
                     ai_home=ai_home,
                     env_values=env_values,
                 )
+                worker_failure_payload = (
+                    cls._classify_worker_failure(raw_stderr, raw_stdout, process.returncode)
+                    if process.returncode != 0
+                    else None
+                )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_step",
@@ -2782,7 +2894,7 @@ class TicketAiAnalysisService:
                     elapsed_sec=worker_elapsed,
                     stdout_len=len(raw_stdout),
                     stderr_len=len(raw_stderr),
-                    stderr_context=cls._extract_stderr_context(raw_stderr),
+                    stderr_context=(worker_failure_payload or {}).get("error_message", ""),
                 )
 
                 parsed_result = cls._parse_worker_output(
@@ -2795,17 +2907,18 @@ class TicketAiAnalysisService:
                 )
 
                 if process.returncode != 0:
-                    failure_message = cls._normalize_worker_failure_message(
-                        cls._extract_stderr_context(raw_stderr)
-                        or cls._extract_stderr_context(raw_stdout)
-                        or f"AI Worker 返回非零退出码: {process.returncode}"
+                    failure_payload = worker_failure_payload or cls._classify_worker_failure(
+                        raw_stderr, raw_stdout, process.returncode
                     )
+                    failure_message = str(failure_payload["error_message"])
                     await cls._emit_event(
                         event_sender,
                         "ai_analysis_error",
                         task_id,
                         failure_message,
-                        return_code=process.returncode,
+                        error_code=failure_payload["error_code"],
+                        worker_exit_code=failure_payload["worker_exit_code"],
+                        diagnostics=failure_payload["diagnostics"],
                     )
                     return {
                         "request_type": req_data.get("requestType"),
@@ -2813,29 +2926,19 @@ class TicketAiAnalysisService:
                         "success": False,
                         "status": "failed",
                         "message": failure_message,
+                        "error_code": failure_payload["error_code"],
                         "error_message": failure_message,
-                        "result": {
-                            "workspace_path": str(workspace_dir),
-                            "result_path": str(result_file),
-                            "command_line": " ".join(command),
-                            "stdout_path": str(workspace_dir / "worker.stdout.txt"),
-                            "stderr_path": str(workspace_dir / "worker.stderr.txt"),
-                            "return_code": process.returncode,
-                        },
+                        "worker_exit_code": failure_payload["worker_exit_code"],
+                        "diagnostics": failure_payload["diagnostics"],
                     }
 
                 if parsed_result is None:
-                    if process.returncode == 0 and schema_payload:
-                        failure_message = "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验"
-                    else:
-                        failure_message = (
-                            cls._extract_stderr_context(raw_stderr)
-                            or cls._extract_stderr_context(raw_stdout)
-                            or cls._summarize_worker_error(
-                                raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果"
-                            )
-                        )
-                    failure_message = cls._normalize_worker_failure_message(failure_message)
+                    failure_payload = {
+                        "error_code": "AI_WORKER_RESULT_INVALID",
+                        "error_message": "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验",
+                        "worker_exit_code": process.returncode,
+                        "diagnostics": [],
+                    }
                     if (
                         provider_type == "codex"
                         and process.returncode != 0
@@ -2864,7 +2967,10 @@ class TicketAiAnalysisService:
                         event_sender,
                         "ai_analysis_error",
                         task_id,
-                        failure_message,
+                        failure_payload["error_message"],
+                        error_code=failure_payload["error_code"],
+                        worker_exit_code=failure_payload["worker_exit_code"],
+                        diagnostics=failure_payload["diagnostics"],
                         auth_diagnostic=worker_auth_diagnostic,
                     )
                     return {
@@ -2872,17 +2978,11 @@ class TicketAiAnalysisService:
                         "command": req_data.get("command"),
                         "success": False,
                         "status": "failed",
-                        "message": failure_message,
-                        "error_message": failure_message,
-                        "result": {
-                            "workspace_path": str(workspace_dir),
-                            "result_path": str(result_file),
-                            "command_line": " ".join(command),
-                            "stdout_path": str(workspace_dir / "worker.stdout.txt"),
-                            "stderr_path": str(workspace_dir / "worker.stderr.txt"),
-                            "stderr_context": cls._extract_stderr_context(raw_stderr),
-                            "auth_diagnostic": worker_auth_diagnostic,
-                        },
+                        "message": failure_payload["error_message"],
+                        "error_code": failure_payload["error_code"],
+                        "error_message": failure_payload["error_message"],
+                        "worker_exit_code": failure_payload["worker_exit_code"],
+                        "diagnostics": failure_payload["diagnostics"],
                     }
 
                 normalized_result = parsed_result
@@ -2920,24 +3020,39 @@ class TicketAiAnalysisService:
                 cls._release_task_lock(task_lock_file)
         except subprocess.TimeoutExpired as exc:
             failure_message = f"AI Worker 执行超时：{exc}"
-            await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message)
+            await cls._emit_event(
+                event_sender,
+                "ai_analysis_error",
+                task_id,
+                failure_message,
+                error_code="AI_WORKER_TIMEOUT",
+            )
             return {
                 "request_type": req_data.get("requestType"),
                 "command": req_data.get("command"),
                 "success": False,
                 "status": "timeout",
                 "message": failure_message,
+                "error_code": "AI_WORKER_TIMEOUT",
                 "error_message": failure_message,
             }
         except Exception as exc:
             logger.exception(f"AI分析Agent任务[{task_id}] 执行失败: {exc}")
-            failure_message = cls._summarize_worker_error(None, None, str(exc))
-            await cls._emit_event(event_sender, "ai_analysis_error", task_id, failure_message, error=str(exc))
+            failure_message = str(exc)
+            await cls._emit_event(
+                event_sender,
+                "ai_analysis_error",
+                task_id,
+                failure_message,
+                error_code="AI_WORKER_EXECUTION_ERROR",
+                error=str(exc),
+            )
             return {
                 "request_type": req_data.get("requestType"),
                 "command": req_data.get("command"),
                 "success": False,
                 "status": "failed",
                 "message": failure_message,
+                "error_code": "AI_WORKER_EXECUTION_ERROR",
                 "error_message": failure_message,
             }

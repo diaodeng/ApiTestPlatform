@@ -2090,3 +2090,10 @@ updated: 2026-08-25
 - 修复：前端按“工单 ID + 日志拉取记录 ID”在模块级复用准备请求和进度状态；已处于 `preparing/downloading` 时只等待原任务，列表显示环形进度；重新加载列表时通过 `/ticket/logs/prepare-progress` 恢复后端 Redis 中的进度。
 - 影响范围：`web/src/views/ticket/hooks/useLogPrepareProgress.js`、`web/src/views/ticket/hooks/useLogViewer.js`、工单详情日志拉取 Tab、日志拉取记录管理页、日志查看器用户说明。
 - 验证：待执行前端生产构建和静态检查。
+## [2026-08-28] INGEST-CODE | 工单 AI Worker 失败错误码透传
+
+- 客户端对 Worker 输出进行结构化错误分类，避免工单正文中的 `Error:` 污染 Provider 异常。
+- Agent 网关保留内层 `success/errorCode/errorMessage`，服务端失败分支不再从响应文本或分析结果反向匹配异常。
+- 工单 AI 任务表和 AI 审计表增加 `error_code`，失败响应不再返回工单信息或工作区结果元数据。
+- `PermissionDenied` 作为本地诊断告警保留；与 Provider 致命错误同时出现时不覆盖主错误。
+- 本次未调整 hybrid 日志读取策略和模型上下文限制。

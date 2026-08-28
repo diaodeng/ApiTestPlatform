@@ -531,6 +531,7 @@ class TicketAiAnalysisTask(Base):
     command_line: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="执行命令")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="created", comment="任务状态")
     status_desc: Mapped[str] = mapped_column(String(200), nullable=False, default="待执行", comment="状态描述")
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="失败错误码")
     error_message: Mapped[str] = mapped_column(Text, nullable=True, comment="失败信息")
     prompt_text: Mapped[str] = mapped_column(long_text_type(), nullable=False, default="", comment="提示词内容")
     raw_output: Mapped[str] = mapped_column(long_text_type(), nullable=False, default="", comment="AI原始输出")

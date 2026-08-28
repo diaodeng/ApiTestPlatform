@@ -159,7 +159,16 @@ class RequestByInput:
                 res_data = await TicketAiAnalysisService.handle_request(message_data_dict, event_sender)
             except Exception as e:
                 logger.exception(e)
-                res_data = {"Error": "".join(traceback.format_exception(e))}
+                # AI 分析异常也必须遵循结构化失败契约，避免服务端只能看到顶层 Error
+                # 或返回码，进而无法记录真实异常和稳定错误码。
+                failure_message = str(e) or type(e).__name__
+                res_data = {
+                    "success": False,
+                    "status": "failed",
+                    "message": failure_message,
+                    "error_code": "AI_AGENT_EXECUTION_ERROR",
+                    "error_message": failure_message,
+                }
             res_data["request_id"] = request_id
             res_data["request_type"] = request_type
             return res_data, client_status
