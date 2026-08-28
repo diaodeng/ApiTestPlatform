@@ -125,7 +125,7 @@
       </el-table-column>
       <el-table-column label="关联工单" min-width="220" show-overflow-tooltip>
         <template #default="scope">
-          <div v-if="scope.row.ticketId">
+          <div v-if="scope.row.ticketId" class="ticket-link" @click="openTicketDetail(scope.row)">
             <div class="ticket-title">{{ scope.row.ticketNo || '-' }}</div>
             <div class="ticket-subtitle">{{ scope.row.ticketTitle || '-' }}</div>
           </div>
@@ -477,8 +477,10 @@ import {
 } from '../logPull.shared'
 import { useLogPrepareProgress } from '../hooks/useLogPrepareProgress'
 import { blobValidate } from '@/utils/ruoyi'
+import { useRouter } from 'vue-router'
 
 const { proxy } = getCurrentInstance()
+const router = useRouter()
 const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress()
 
 const loading = ref(false)
@@ -577,6 +579,19 @@ function createDefaultForm() {
 function openLogViewer(row) {
   viewerRecord.value = row
   viewerVisible.value = true
+}
+
+// 打开关联工单详情：优先通过命名路由生成站内地址，兼容打包后路径不一致的场景
+function openTicketDetail(row) {
+  const ticketId = row?.ticketId
+  if (!ticketId) {
+    return
+  }
+  const route = router.resolve({
+    name: 'TicketDetail',
+    params: { ticketId: String(ticketId) }
+  })
+  window.open(route.href, '_blank', 'noopener')
 }
 
 function getList() {
@@ -1295,6 +1310,14 @@ onMounted(() => {
 <style scoped>
 .mb16 {
   margin-bottom: 16px;
+}
+
+.ticket-link {
+  cursor: pointer;
+}
+
+.ticket-link:hover .ticket-title {
+  color: var(--el-color-primary);
 }
 
 .ticket-title {
