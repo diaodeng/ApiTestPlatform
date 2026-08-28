@@ -13,6 +13,8 @@
 - Worker 的 `stderr` 可能包含正常进度、模型输出和诊断信息。`stderr` 非空本身不会使 Codex 分析失败。
 - Worker 失败时，任务会记录结构化的“错误码”和真实“错误信息”；失败响应不包含工单正文或分析结果。`workerExitCode` 仅用于辅助诊断，不能替代业务错误码。
 - Schema 兼容接口中按字符串传输的 BIGINT ID，并包含 `symptom`、`similar_cases`、`sop_suggestion`、`owner_suggestion`、`monitoring_suggestion` 等可选增强字段；字段缺省时由服务端补默认值。
+- 增强字段（含 `similar_cases`）接受数组或叙述字符串两种输出：模型写成叙述文字时不会导致校验失败，服务端归一化会自动把字符串包装为单元素数组再写回结果。
+- 分析结果未通过 JSON Schema 校验时，任务失败信息会包含具体违规字段明细（如 `$.similar_cases: 期望 array，实际 string`），无需人工比对结果文件定位。
 
 ## 请求幂等
 

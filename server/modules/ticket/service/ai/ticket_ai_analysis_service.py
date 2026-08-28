@@ -1958,7 +1958,9 @@ class TicketAiAnalysisService:
                 "symptom": {"type": ["array", "string"], "default": []},
                 "investigation_steps": {"type": ["array", "string"], "default": []},
                 "prevention_actions": {"type": ["array", "string"], "default": []},
-                "similar_cases": {"type": "array", "default": []},
+                # 与其他增强字段一致允许 string：模型倾向把历史相似工单写成叙述文字，
+                # 仅允许 array 曾导致 AI_WORKER_RESULT_INVALID（如 INC00001894981 分析失败）。
+                "similar_cases": {"type": ["array", "string"], "default": []},
                 "sop_suggestion": {"type": ["array", "string"], "default": []},
                 "owner_suggestion": {"type": "string", "default": ""},
                 "monitoring_suggestion": {"type": ["array", "string"], "default": []},
@@ -2216,6 +2218,19 @@ class TicketAiAnalysisService:
         normalized.setdefault("owner_suggestion", "")
         normalized.setdefault("monitoring_suggestion", [])
         normalized.setdefault("needs_human_review", True)
+        # 模型可能把增强字段写成叙述字符串而非数组（schema 已放宽为双类型），
+        # 这里统一包装为单元素数组，保证下游 RCA 结构化数据和前端拿到稳定类型。
+        flexible_fields = (
+            "symptom",
+            "investigation_steps",
+            "prevention_actions",
+            "similar_cases",
+            "sop_suggestion",
+            "monitoring_suggestion",
+        )
+        for flexible_field in flexible_fields:
+            if isinstance(normalized.get(flexible_field), str):
+                normalized[flexible_field] = [normalized[flexible_field]] if normalized[flexible_field].strip() else []
         return cls._json_safe_value(normalized)
 
     @classmethod
@@ -2367,41 +2382,94 @@ class TicketAiAnalysisService:
         :param schema: 本次任务的输出 schema
         :return: 是否通过校验
         """
+        return not cls._collect_schema_violations(payload, schema)
+
+    @classmethod
+    def _collect_schema_violations(cls, payload: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+        """
+        收集结构化分析结果相对输出 Schema 的全部违规路径，用于失败诊断。
+        判定规则与 _validate_analysis_result_schema 完全一致，只是把违规点以
+        `字段路径: 期望类型/实际类型` 的形式返回，便于直接写入日志和 error_message。
+        :param payload: Agent 返回结果
+        :param schema: 本次任务的输出 schema
+        :param path: 当前校验的 JSON 路径
+        :return: 违规描述列表，空列表表示通过校验
+        """
         expected_type = schema.get("type")
+
+        def _type_name(value: Any) -> str:
+            if value is None:
+                return "null"
+            if isinstance(value, bool):
+                return "boolean"
+            if isinstance(value, (int, float)):
+                return "number"
+            if isinstance(value, str):
+                return "string"
+            if isinstance(value, list):
+                return "array"
+            if isinstance(value, dict):
+                return "object"
+            return type(value).__name__
+
         if isinstance(expected_type, list):
-            return any(
-                cls._validate_analysis_result_schema(payload, {**schema, "type": item})
+            # 联合类型：任一分支通过即通过，全部分支失败才报告违规。
+            branch_violations = [
+                cls._collect_schema_violations(payload, {**schema, "type": item}, path)
                 for item in expected_type
-            )
+            ]
+            if all(branch_violations):
+                expected_desc = "/".join(expected_type)
+                return [f"{path}: 期望 {expected_desc}，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "object":
             if not isinstance(payload, dict):
-                return False
+                return [f"{path}: 期望 object，实际 {_type_name(payload)}"]
+            violations: list[str] = []
             required = schema.get("required") or []
             properties = schema.get("properties") or {}
-            if any(field not in payload for field in required):
-                return False
-            if schema.get("additionalProperties") is False and any(key not in properties for key in payload):
-                return False
-            return all(
-                key not in payload or cls._validate_analysis_result_schema(value, child_schema)
-                for key, child_schema in properties.items()
-                for value in [payload.get(key)]
+            violations.extend(
+                f"{path}.{field}: required 字段缺失" for field in required if field not in payload
             )
+            if schema.get("additionalProperties") is False:
+                violations.extend(
+                    f"{path}.{key}: additionalProperties 不允许的额外字段"
+                    for key in payload
+                    if key not in properties
+                )
+            for key, child_schema in properties.items():
+                if key in payload:
+                    violations.extend(cls._collect_schema_violations(payload[key], child_schema, f"{path}.{key}"))
+            return violations
         if expected_type == "array":
-            return isinstance(payload, list) and all(
-                cls._validate_analysis_result_schema(item, schema.get("items") or {}) for item in payload
-            )
+            if not isinstance(payload, list):
+                return [f"{path}: 期望 array，实际 {_type_name(payload)}"]
+            violations = []
+            items_schema = schema.get("items") or {}
+            for index, item in enumerate(payload):
+                violations.extend(cls._collect_schema_violations(item, items_schema, f"{path}[{index}]"))
+            return violations
         if expected_type == "string":
-            return isinstance(payload, str)
+            if not isinstance(payload, str):
+                return [f"{path}: 期望 string，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "number":
-            return isinstance(payload, (int, float)) and not isinstance(payload, bool)
+            if not (isinstance(payload, (int, float)) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 number，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "integer":
-            return isinstance(payload, int) and not isinstance(payload, bool)
+            if not (isinstance(payload, int) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 integer，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "null":
-            return payload is None
+            if payload is not None:
+                return [f"{path}: 期望 null，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "boolean":
-            return isinstance(payload, bool)
-        return True
+            if not isinstance(payload, bool):
+                return [f"{path}: 期望 boolean，实际 {_type_name(payload)}"]
+            return []
+        return []
 
     @classmethod
     def _create_rca_from_result(
@@ -3718,12 +3786,18 @@ class TicketAiAnalysisService:
             )
             if not cls._validate_analysis_result_schema(parsed_result, schema_payload):
                 error_code = "AI_WORKER_RESULT_INVALID"
+                # 输出具体违规字段，避免只留笼统信息导致需要人工比对 result.json 定位。
+                schema_violations = cls._collect_schema_violations(parsed_result, schema_payload)
+                violation_summary = "; ".join(schema_violations[:10])
                 failure_message = "AI Agent 返回的分析结果未通过 JSON Schema 校验"
+                if violation_summary:
+                    failure_message = f"{failure_message}: {violation_summary}"
                 cls._log_task_step(
                     task_id,
                     "FAIL",
                     failure_message,
                     error_code=error_code,
+                    violations=schema_violations,
                 )
                 raise ValueError(failure_message)
 

@@ -874,6 +874,34 @@ class TicketAiAnalysisService:
         return command
 
     @classmethod
+    @classmethod
+    def _resolve_worker_result_text(
+        cls,
+        *,
+        provider_type: str,
+        worker_config: dict[str, Any],
+        result_file: Path | None,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> str:
+        """
+        按 Provider 输出模式解析出待解析的原始结果文本。
+        :param provider_type: Provider 类型
+        :param worker_config: Worker 运行时配置
+        :param result_file: Codex 结果文件
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :return: 原始结果文本，可能为空字符串
+        """
+        result_text = ""
+        if worker_config.get("output_mode") == "file" and result_file and result_file.exists():
+            result_text = result_file.read_text(encoding="utf-8")
+        elif raw_stdout.strip():
+            result_text = raw_stdout.strip()
+        elif raw_stderr.strip():
+            result_text = raw_stderr.strip()
+        return result_text
+
     def _parse_worker_output(
         cls,
         *,
@@ -894,13 +922,13 @@ class TicketAiAnalysisService:
         :param schema_payload: 本次任务要求的 JSON Schema
         :return: 解析后的结果字典，解析失败返回 None
         """
-        result_text = ""
-        if worker_config.get("output_mode") == "file" and result_file and result_file.exists():
-            result_text = result_file.read_text(encoding="utf-8")
-        elif raw_stdout.strip():
-            result_text = raw_stdout.strip()
-        elif raw_stderr.strip():
-            result_text = raw_stderr.strip()
+        result_text = cls._resolve_worker_result_text(
+            provider_type=provider_type,
+            worker_config=worker_config,
+            result_file=result_file,
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+        )
 
         if not result_text.strip():
             return None
@@ -963,41 +991,93 @@ class TicketAiAnalysisService:
         :param schema: JSON Schema
         :return: 是否通过校验
         """
+        return not cls._collect_json_schema_violations(payload, schema)
+
+    @classmethod
+    def _collect_json_schema_violations(cls, payload: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+        """
+        收集 Worker 结果相对任务下发 JSON Schema 的违规路径，用于失败诊断上报。
+        判定规则与 _validate_json_schema 完全一致，但以
+        `字段路径: 期望类型/实际类型` 形式返回，便于随 ai_analysis_error 事件
+        直接写入服务端日志、任务记录和前端失败提示。
+        :param payload: 待校验结果
+        :param schema: JSON Schema
+        :param path: 当前校验的 JSON 路径
+        :return: 违规描述列表，空列表表示通过校验
+        """
         expected_type = schema.get("type")
+
+        def _type_name(value: Any) -> str:
+            if value is None:
+                return "null"
+            if isinstance(value, bool):
+                return "boolean"
+            if isinstance(value, (int, float)):
+                return "number"
+            if isinstance(value, str):
+                return "string"
+            if isinstance(value, list):
+                return "array"
+            if isinstance(value, dict):
+                return "object"
+            return type(value).__name__
+
         if isinstance(expected_type, list):
-            if not any(cls._validate_json_schema(payload, {**schema, "type": item}) for item in expected_type):
-                return False
-        elif expected_type == "object":
+            # 联合类型：任一分支通过即通过，全部分支失败才报告违规。
+            branch_violations = [
+                cls._collect_json_schema_violations(payload, {**schema, "type": item}, path)
+                for item in expected_type
+            ]
+            if all(branch_violations):
+                expected_desc = "/".join(expected_type)
+                return [f"{path}: 期望 {expected_desc}，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "object":
             if not isinstance(payload, dict):
-                return False
+                return [f"{path}: 期望 object，实际 {_type_name(payload)}"]
+            violations: list[str] = []
             required = schema.get("required") or []
-            if any(field not in payload for field in required):
-                return False
             properties = schema.get("properties") or {}
-            if schema.get("additionalProperties") is False and any(key not in properties for key in payload):
-                return False
-            if any(
-                key in payload and not cls._validate_json_schema(payload[key], child_schema)
-                for key, child_schema in properties.items()
-            ):
-                return False
-        elif expected_type == "array":
+            for field in required:
+                if field not in payload:
+                    violations.append(f"{path}.{field}: required 字段缺失")
+            if schema.get("additionalProperties") is False:
+                for key in payload:
+                    if key not in properties:
+                        violations.append(f"{path}.{key}: additionalProperties 不允许的额外字段")
+            for key, child_schema in properties.items():
+                if key in payload:
+                    violations.extend(cls._collect_json_schema_violations(payload[key], child_schema, f"{path}.{key}"))
+            return violations
+        if expected_type == "array":
             if not isinstance(payload, list):
-                return False
-            item_schema = schema.get("items")
-            if item_schema and any(not cls._validate_json_schema(item, item_schema) for item in payload):
-                return False
-        elif expected_type == "string":
-            return isinstance(payload, str)
-        elif expected_type == "number":
-            return isinstance(payload, (int, float)) and not isinstance(payload, bool)
-        elif expected_type == "integer":
-            return isinstance(payload, int) and not isinstance(payload, bool)
-        elif expected_type == "null":
-            return payload is None
-        elif expected_type == "boolean":
-            return isinstance(payload, bool)
-        return True
+                return [f"{path}: 期望 array，实际 {_type_name(payload)}"]
+            violations = []
+            items_schema = schema.get("items") or {}
+            for index, item in enumerate(payload):
+                violations.extend(cls._collect_json_schema_violations(item, items_schema, f"{path}[{index}]"))
+            return violations
+        if expected_type == "string":
+            if not isinstance(payload, str):
+                return [f"{path}: 期望 string，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "number":
+            if not (isinstance(payload, (int, float)) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 number，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "integer":
+            if not (isinstance(payload, int) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 integer，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "null":
+            if payload is not None:
+                return [f"{path}: 期望 null，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "boolean":
+            if not isinstance(payload, bool):
+                return [f"{path}: 期望 boolean，实际 {_type_name(payload)}"]
+            return []
+        return []
 
     @classmethod
     def _find_token_usage_payload(cls, candidate: Any) -> dict[str, Any] | None:
@@ -2933,11 +3013,52 @@ class TicketAiAnalysisService:
                     }
 
                 if parsed_result is None:
+                    # Worker 正常退出但结果不可用时，尽量给出具体违规原因：
+                    # 优先按 schema 校验收集违规字段；连 JSON 都解析不出时报告原始文本特征。
+                    result_text = cls._resolve_worker_result_text(
+                        provider_type=provider_type,
+                        worker_config=worker_config,
+                        result_file=result_file,
+                        raw_stdout=raw_stdout,
+                        raw_stderr=raw_stderr,
+                    )
+                    failure_diagnostics: list[dict[str, Any]] = []
+                    invalid_result_message = "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验"
+                    if result_text.strip() and schema_payload:
+                        candidate_payload: Any = None
+                        try:
+                            candidate_payload = json.loads(result_text)
+                        except Exception:
+                            candidate_payload = cls._extract_json_from_text(result_text)
+                        if isinstance(candidate_payload, dict):
+                            schema_violations = cls._collect_json_schema_violations(candidate_payload, schema_payload)
+                            if schema_violations:
+                                violation_summary = "; ".join(schema_violations[:10])
+                                invalid_result_message = (
+                                    f"AI Worker 结果未通过 JSON Schema 校验: {violation_summary}"
+                                )
+                                failure_diagnostics.append(
+                                    {
+                                        "code": "AI_WORKER_SCHEMA_VIOLATION",
+                                        "severity": "error",
+                                        "message": violation_summary,
+                                    }
+                                )
+                    if not failure_diagnostics and result_text.strip():
+                        # JSON 解析失败或非对象结构：给出原始文本头部，便于判断是否为模型自由文本。
+                        text_preview = re.sub(r"\s+", " ", result_text.strip())[:200]
+                        failure_diagnostics.append(
+                            {
+                                "code": "AI_WORKER_RESULT_UNPARSEABLE",
+                                "severity": "error",
+                                "message": text_preview,
+                            }
+                        )
                     failure_payload = {
                         "error_code": "AI_WORKER_RESULT_INVALID",
-                        "error_message": "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验",
+                        "error_message": invalid_result_message,
                         "worker_exit_code": process.returncode,
-                        "diagnostics": [],
+                        "diagnostics": failure_diagnostics,
                     }
                     if (
                         provider_type == "codex"
