@@ -9,7 +9,7 @@
 | **轻量 AI** | 翻译、知识提炼、分类统计 | 调用 OpenAI-compatible 接口，快速返回 |
 | **重型 AI** | 工单深度分析、RCA、知识沉淀 | 由 Codex Agent 执行，耗时较长 |
 
-本文档说明轻量 AI 部分。重型 AI 分析请参考 AI 分析功能相关文档。
+本文档说明轻量 AI 部分。重型 AI 分析请参考[工单深度 AI 分析说明](ticket_ai_analysis.md)。
 
 ## 轻量 AI 能力一览
 

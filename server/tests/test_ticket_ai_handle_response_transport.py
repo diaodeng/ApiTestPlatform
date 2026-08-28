@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from config.cache_backend import MemoryRedis
@@ -104,6 +105,27 @@ def test_ticket_ai_gateway_parses_transport_payload_without_json_validator_error
     assert isinstance(response.response, AgentResponseWebUI)
     assert response.response.success is False
     assert response.response.result["stderr_context"] == "ParserError"
+
+
+def test_ticket_ai_failure_message_prefers_nested_agent_error_over_gateway_success_message():
+    """结果为空时应保留 Agent 内层错误，不应被网关的“操作成功”覆盖。"""
+    response_object = AgentResponseWebUI(
+        request_type=6,
+        status="failed",
+        success=False,
+        message="error: the argument '--sandbox' cannot be used with '--approve-for-me'",
+        result=None,
+    )
+    agent_response = SimpleNamespace(message="操作成功")
+
+    failure_message = TicketAiAnalysisService._resolve_agent_failure_message(
+        response_object=response_object,
+        agent_response=agent_response,
+        response_payload={},
+    )
+
+    assert "--sandbox" in failure_message
+    assert "--approve-for-me" in failure_message
 
 
 

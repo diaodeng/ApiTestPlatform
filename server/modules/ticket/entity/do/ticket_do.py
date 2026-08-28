@@ -73,7 +73,9 @@ class Ticket(Base):
     classification_rule_id: Mapped[str] = mapped_column(
         String(64), nullable=False, default="", comment="外部字段分类规则ID"
     )
-    classification_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="工单类型分类更新时间")
+    classification_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="工单类型分类更新时间"
+    )
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=TicketStatus.PENDING.value, comment="当前状态"
     )
@@ -509,6 +511,8 @@ class TicketAiAnalysisTask(Base):
             "task_id",
             "status",
         ),
+        Index("idx_ticket_ai_task_request_fingerprint", "request_fingerprint"),
+        UniqueConstraint("success_fingerprint", name="uk_ticket_ai_task_success_fingerprint"),
     )
 
     task_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="任务ID")
@@ -536,6 +540,12 @@ class TicketAiAnalysisTask(Base):
     input_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输入Token数")
     output_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输出Token数")
     total_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="总Token数")
+    request_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="分析请求指纹"
+    )
+    success_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="成功结果唯一指纹"
+    )
     source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
     source_log_view_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="stored", comment="日志来源模式"
@@ -788,7 +798,9 @@ class TicketStatisticsMetricSnapshot(Base):
     count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="命中数量")
     definition_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="指标定义版本")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
-    update_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
 
 
 class UserStatisticsDaily(Base):

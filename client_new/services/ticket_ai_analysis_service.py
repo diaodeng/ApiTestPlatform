@@ -353,9 +353,47 @@ class TicketAiAnalysisService:
         overrides = provider_env_overrides or {}
         has_provider_keys = bool(overrides.get("OPENAI_BASE_URL") or overrides.get("OPENAI_API_KEY"))
         TicketAiCodexConfigService.copy_task_home_files(source_home, codex_home)
+        cls._trust_codex_workspace(codex_home, workspace_dir)
         if has_provider_keys:
             cls._patch_codex_config_for_provider(codex_home, overrides)
         return codex_home
+
+    @staticmethod
+    def _trust_codex_workspace(codex_home: Path, workspace_dir: Path) -> None:
+        """
+        将当前任务工作区加入任务级 Codex 配置的可信项目列表。
+
+        只信任任务工作区，不信任用户目录、磁盘根目录或代码仓库父目录；代码仓库的
+        可写范围由命令行的 ``--add-dir`` 单独控制。任务级配置位于工作区内，重试时
+        会保留，因此同一任务不会反复触发项目授权提示。
+        :param codex_home: 任务级 Codex 配置目录
+        :param workspace_dir: 当前任务工作区
+        :return: 无
+        """
+        workspace_path = workspace_dir.resolve()
+        if not workspace_path.is_absolute() or workspace_path == Path(workspace_path.anchor):
+            raise ValueError(f"拒绝将不安全路径加入 Codex trusted: {workspace_path}")
+        if "'" in str(workspace_path):
+            raise ValueError(f"Codex 工作区路径包含不支持的单引号: {workspace_path}")
+
+        config_file = codex_home / "config.toml"
+        config_text = config_file.read_text(encoding="utf-8") if config_file.exists() else ""
+        project_header = f"[projects.'{workspace_path}']"
+        section_pattern = re.compile(
+            rf"(?ms)^{re.escape(project_header)}\s*$.*?(?=^\[|\Z)"
+        )
+        trusted_section = f"{project_header}\ntrust_level = \"trusted\"\n"
+        if section_pattern.search(config_text):
+            # Windows 路径包含反斜杠，不能直接作为 re.sub 的 replacement，
+            # 否则重试更新已有 trusted 段落时会把 ``\x`` 解析成非法转义。
+            new_config = section_pattern.sub(lambda _: trusted_section, config_text, count=1)
+        else:
+            separator = "\n" if config_text and not config_text.endswith("\n") else ""
+            new_config = f"{config_text}{separator}\n{trusted_section}"
+        if new_config != config_text:
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(new_config, encoding="utf-8")
+            logger.info(f"已将当前 AI 任务工作区加入 Codex trusted: {workspace_path}")
 
     @staticmethod
     def _patch_codex_config_for_provider(codex_home: Path, overrides: dict[str, str]) -> None:
@@ -745,6 +783,7 @@ class TicketAiAnalysisService:
         provider_type: str,
         worker_config: dict[str, Any],
         repo_path: Path,
+        workspace_dir: Path | None = None,
         schema_file: Path | None,
         result_file: Path | None,
         selected_worker_model: str | None,
@@ -754,6 +793,7 @@ class TicketAiAnalysisService:
         :param provider_type: Provider 类型
         :param worker_config: Worker 运行时配置
         :param repo_path: 代码仓库路径
+        :param workspace_dir: 当前任务工作区路径
         :param schema_file: JSON Schema 文件路径
         :param result_file: 结果输出文件路径
         :param selected_worker_model: 选择的模型名称
@@ -762,15 +802,24 @@ class TicketAiAnalysisService:
         command_parts = [str(p).strip() for p in str(worker_config["command"]).split() if str(p).strip()]
         command = cls._resolve_provider_executable(provider_type, command_parts)
 
-        # 沙箱参数（仅 codex）
-        sandbox = worker_config.get("sandbox")
-        if sandbox:
-            command.extend(["-s", str(sandbox)])
-
         # 代码目录参数
         code_flag = worker_config.get("code_arg_flag")
         if code_flag:
-            command.extend([str(code_flag), str(repo_path)])
+            if provider_type == "codex" and workspace_dir:
+                # Codex 的主项目是任务工作区；指定的 worktree 作为额外可写目录提供。
+                command.extend([str(code_flag), str(workspace_dir), "--add-dir", str(repo_path)])
+            else:
+                command.extend([str(code_flag), str(repo_path)])
+
+        # --approve-for-me 本身会使用 workspace-write，不能再同时传 --sandbox。
+        # 这样既避免 CLI 参数冲突，也不会使用 dangerously-bypass 全盘绕过沙箱。
+        if provider_type == "codex" and "--approve-for-me" not in command:
+            command.append("--approve-for-me")
+
+        # 未启用自动审批时才传显式沙箱参数；当前 Codex 后台执行默认启用自动审批。
+        sandbox = worker_config.get("sandbox")
+        if sandbox and "--approve-for-me" not in command:
+            command.extend(["-s", str(sandbox)])
 
         # git 检查跳过（仅 codex）
         skip_flag = worker_config.get("skip_git_check_flag")
@@ -833,6 +882,7 @@ class TicketAiAnalysisService:
         result_file: Path | None,
         raw_stdout: str,
         raw_stderr: str,
+        schema_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """
         按 Provider 类型解析 Worker 输出结果。
@@ -841,6 +891,7 @@ class TicketAiAnalysisService:
         :param result_file: Codex 结果文件
         :param raw_stdout: Worker 标准输出
         :param raw_stderr: Worker 标准错误
+        :param schema_payload: 本次任务要求的 JSON Schema
         :return: 解析后的结果字典，解析失败返回 None
         """
         result_text = ""
@@ -856,36 +907,97 @@ class TicketAiAnalysisService:
 
         # Claude Code 使用 --output-format json 时，stdout 是单行 JSON，
         # 其中 structured_output 是已解析好的 dict，result 是模型最终文本。
+        def accept_candidate(candidate: Any) -> dict[str, Any] | None:
+            if not isinstance(candidate, dict):
+                return None
+            if schema_payload and not cls._validate_json_schema(candidate, schema_payload):
+                return None
+            return candidate
+
         if provider_type == "claude":
             claude_payload = cls._extract_json_from_text(result_text)
             if isinstance(claude_payload, dict):
                 structured = claude_payload.get("structured_output")
                 if isinstance(structured, dict):
-                    return structured
+                    accepted = accept_candidate(structured)
+                    if accepted is not None:
+                        return accepted
                 raw_result = claude_payload.get("result")
                 if isinstance(raw_result, str):
                     parsed = cls._extract_json_from_text(raw_result)
-                    if parsed is not None:
-                        return parsed
+                    accepted = accept_candidate(parsed)
+                    if accepted is not None:
+                        return accepted
                 if claude_payload.get("is_error"):
                     return None
-                return claude_payload
+                accepted = accept_candidate(claude_payload)
+                if accepted is not None:
+                    return accepted
 
         # 尝试直接解析 JSON
         try:
-            return json.loads(result_text)
+            accepted = accept_candidate(json.loads(result_text))
+            if accepted is not None:
+                return accepted
         except Exception:
             pass
 
-        # Claude Code stdout 可能包含 markdown 包裹的 JSON，尝试提取
-        if provider_type == "claude":
-            return cls._extract_json_from_text(result_text)
+        # Codex 结果文件和 Claude 最终文本都可能带 markdown JSON 围栏，统一尝试提取。
+        extracted_result = accept_candidate(cls._extract_json_from_text(result_text))
+        if extracted_result is not None:
+            return extracted_result
 
         # 尝试取最后一行 JSON
         try:
-            return json.loads(raw_stdout.strip().splitlines()[-1])
+            return accept_candidate(json.loads(raw_stdout.strip().splitlines()[-1]))
         except Exception:
             return None
+
+    @classmethod
+    def _validate_json_schema(cls, payload: Any, schema: dict[str, Any]) -> bool:
+        """
+        校验 Worker 结果是否满足当前任务下发的 JSON Schema。
+        当前工单分析 schema 使用 object、array、string、number、integer、null 和 required，
+        这里仅实现这些无副作用的基础规则，避免 Agent 客户端增加额外运行时依赖。
+        :param payload: 待校验结果
+        :param schema: JSON Schema
+        :return: 是否通过校验
+        """
+        expected_type = schema.get("type")
+        if isinstance(expected_type, list):
+            if not any(cls._validate_json_schema(payload, {**schema, "type": item}) for item in expected_type):
+                return False
+        elif expected_type == "object":
+            if not isinstance(payload, dict):
+                return False
+            required = schema.get("required") or []
+            if any(field not in payload for field in required):
+                return False
+            properties = schema.get("properties") or {}
+            if schema.get("additionalProperties") is False and any(key not in properties for key in payload):
+                return False
+            if any(
+                key in payload and not cls._validate_json_schema(payload[key], child_schema)
+                for key, child_schema in properties.items()
+            ):
+                return False
+        elif expected_type == "array":
+            if not isinstance(payload, list):
+                return False
+            item_schema = schema.get("items")
+            if item_schema and any(not cls._validate_json_schema(item, item_schema) for item in payload):
+                return False
+        elif expected_type == "string":
+            return isinstance(payload, str)
+        elif expected_type == "number":
+            return isinstance(payload, (int, float)) and not isinstance(payload, bool)
+        elif expected_type == "integer":
+            return isinstance(payload, int) and not isinstance(payload, bool)
+        elif expected_type == "null":
+            return payload is None
+        elif expected_type == "boolean":
+            return isinstance(payload, bool)
+        return True
 
     @classmethod
     def _find_token_usage_payload(cls, candidate: Any) -> dict[str, Any] | None:
@@ -1392,7 +1504,12 @@ class TicketAiAnalysisService:
         try:
             if not path.exists():
                 return None
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            try:
+                payload = json.loads(text)
+            except Exception:
+                # Codex 的最后消息可能带 ```json 围栏，缓存读取与 Worker 输出解析保持一致。
+                payload = TicketAiAnalysisService._extract_json_from_text(text)
             return payload if isinstance(payload, dict) else None
         except Exception:
             return None
@@ -1419,14 +1536,21 @@ class TicketAiAnalysisService:
         )
 
     @classmethod
-    def _load_cached_result(cls, result_file: Path) -> dict[str, Any] | None:
+    def _load_cached_result(
+        cls,
+        result_file: Path,
+        schema_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """
         读取已完成的分析结果缓存。
         :param result_file: 结果文件路径
+        :param schema_payload: 本次任务要求的 JSON Schema
         :return: 缓存结果，失败返回 None
         """
         payload = cls._read_json_file(result_file)
         if not cls._is_valid_cached_result(payload):
+            return None
+        if schema_payload and not cls._validate_json_schema(payload, schema_payload):
             return None
         return payload
 
@@ -2268,6 +2392,8 @@ class TicketAiAnalysisService:
             timeout_sec = int(req_data.get("timeoutSec") or req_data.get("timeout_sec") or cls.DEFAULT_TIMEOUT_SEC)
         except Exception:
             timeout_sec = cls.DEFAULT_TIMEOUT_SEC
+        # 缓存命中时也要返回统一的 token_usage 字段，避免引用尚未进入 Worker 分支的局部变量。
+        token_usage_payload: dict[str, Any] | None = None
         if not task_id or not ticket_id:
             return {
                 "request_type": req_data.get("requestType"),
@@ -2324,7 +2450,7 @@ class TicketAiAnalysisService:
                 )
             except Exception as exc:
                 logger.warning(f"写入 AI 分析请求快照失败: {exc}")
-            cached_result = cls._load_cached_result(result_file)
+            cached_result = cls._load_cached_result(result_file, schema_payload)
             if cached_result:
                 await cls._emit_event(
                     event_sender,
@@ -2608,6 +2734,7 @@ class TicketAiAnalysisService:
                     provider_type=provider_type,
                     worker_config=worker_config,
                     repo_path=repo_path,
+                    workspace_dir=workspace_dir,
                     schema_file=schema_file,
                     result_file=result_file,
                     selected_worker_model=selected_worker_model,
@@ -2664,16 +2791,56 @@ class TicketAiAnalysisService:
                     result_file=result_file,
                     raw_stdout=raw_stdout,
                     raw_stderr=raw_stderr,
+                    schema_payload=schema_payload,
                 )
 
-                if not parsed_result:
-                    failure_message = (
+                if process.returncode != 0:
+                    failure_message = cls._normalize_worker_failure_message(
                         cls._extract_stderr_context(raw_stderr)
                         or cls._extract_stderr_context(raw_stdout)
-                        or cls._summarize_worker_error(raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果")
+                        or f"AI Worker 返回非零退出码: {process.returncode}"
                     )
+                    await cls._emit_event(
+                        event_sender,
+                        "ai_analysis_error",
+                        task_id,
+                        failure_message,
+                        return_code=process.returncode,
+                    )
+                    return {
+                        "request_type": req_data.get("requestType"),
+                        "command": req_data.get("command"),
+                        "success": False,
+                        "status": "failed",
+                        "message": failure_message,
+                        "error_message": failure_message,
+                        "result": {
+                            "workspace_path": str(workspace_dir),
+                            "result_path": str(result_file),
+                            "command_line": " ".join(command),
+                            "stdout_path": str(workspace_dir / "worker.stdout.txt"),
+                            "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                            "return_code": process.returncode,
+                        },
+                    }
+
+                if parsed_result is None:
+                    if process.returncode == 0 and schema_payload:
+                        failure_message = "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验"
+                    else:
+                        failure_message = (
+                            cls._extract_stderr_context(raw_stderr)
+                            or cls._extract_stderr_context(raw_stdout)
+                            or cls._summarize_worker_error(
+                                raw_stderr, raw_stdout, "AI Worker 未返回可解析的 JSON 结果"
+                            )
+                        )
                     failure_message = cls._normalize_worker_failure_message(failure_message)
-                    if provider_type == "codex" and cls._is_unauthorized_worker_failure(raw_stdout, raw_stderr):
+                    if (
+                        provider_type == "codex"
+                        and process.returncode != 0
+                        and cls._is_unauthorized_worker_failure(raw_stdout, raw_stderr)
+                    ):
                         auth_probe = await cls._probe_codex_authentication(
                             str(worker_auth_diagnostic.get("base_url") or ""),
                             worker_api_key,
