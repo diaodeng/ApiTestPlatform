@@ -590,7 +590,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="操作" width="450">
+    <el-table-column label="操作" width="270" align="center">
       <template #default="scope">
         <el-button-group>
           <el-tooltip
@@ -608,61 +608,67 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
           </el-tooltip>
           <el-button
             v-else
-            link
+            circle
             type="primary"
             @click="handleOpenLogViewer(scope.row)"
+            title="查看日志"
+            aria-label="查看日志"
+            icon="View"
             :disabled="logPullActionLoading"
           >
-            查看日志
           </el-button>
           <el-button
-            link
+            circle
             type="primary"
+            icon="CopyDocument"
+            title="复制"
+            aria-label="复制"
             @click="handleCopyLogPull(scope.row)"
             :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
             v-hasPermi="['ticket:logpull:add']"
-          >
-            复制
-          </el-button>
+          />
           <el-button
-            link
+            circle
             type="warning"
+            icon="Refresh"
+            title="重新拉取"
+            aria-label="重新拉取"
             @click="retryLogPull(scope.row)"
             :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
             v-hasPermi="['ticket:logpull:add']"
-          >
-            重新拉取
-          </el-button>
+          />
           <el-button
-            link
+            circle
             type="success"
+            icon="Download"
+            title="重新下载"
+            aria-label="重新下载"
             @click="redownloadLogPull(scope.row)"
             :disabled="
               logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)
             "
             v-hasPermi="['ticket:logpull:add']"
-          >
-            重新下载
-          </el-button>
+          />
           <el-button
-            link
+            circle
             type="danger"
             icon="VideoPause"
+            title="停止"
+            aria-label="停止"
             @click="stopLogPull(scope.row)"
             :disabled="logPullActionLoading || !activeLogPullStatuses.includes(scope.row.status)"
             v-hasPermi="['ticket:logpull:remove']"
-          >
-            停止
-          </el-button>
+          />
           <el-button
-            link
+            circle
             type="danger"
+            icon="Delete"
+            title="删除"
+            aria-label="删除"
             @click="deleteLogPull(scope.row)"
             :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
             v-hasPermi="['ticket:logpull:remove']"
-          >
-            删除
-          </el-button>
+          />
         </el-button-group>
       </template>
     </el-table-column>

@@ -378,7 +378,7 @@ class TicketSyncFieldMappingService:
         :param mappings: 映射配置列表
         :return: 命中的映射对象
         """
-        target = str(field_value or "").strip()
+        target = str(field_value or "").strip().lower()
         if not target or not isinstance(mappings, list):
             return None
         for mapping in mappings:

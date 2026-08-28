@@ -20,7 +20,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 在同步配置页按工单号手动补跑 bitable_pull 场景自动化
 created: 2026-05-22
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # 工单自动化链路流程
@@ -92,15 +92,16 @@ sequenceDiagram
 | 4 | `TicketService.create_ticket` 在保存工单后可同步创建日志拉取任务，并把自动化配置写入工单 `extra_data.ticket_automation` 便于追溯；日志拉取服务先查外部列表，已可下载时直接进入下载流程，否则提交申请后由后台周期任务批量探测（提交申请与轮询探测解耦，不再阻塞后台线程）。 |
 | 5 | 日志拉取下载解析阶段（`TicketLogPullService._process_download`）成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 6 | 自动拉日志正式创建记录前，会先按工单、环境、商家、门店、POS、数据类型和实际日志范围等关键参数检查是否已有成功记录；若命中则跳过重复拉取并复用该成功记录。 |
-| 7 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
-| 8 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。 |
-| 8 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；日志拉取后的自动 AI 先经过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}`，再按 Redis 队列和 `ticket.ai.agent.maxConcurrentTasks` 控制单 Agent 并发；Provider 下发时服务端先合并 `workerEnv` 扩展项，再写入当前 Provider 的密钥、地址和模型；Codex/Claude Worker 初始化任务级配置时覆盖旧工作区值。Agent 并发由 `ticket.ai.agent.maxConcurrentTasks` 控制，默认 `1`，超出上限进入 Redis 队列。任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
-| 9 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
-| 10 | `TicketNotifyService` 以 `${ticket_no}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}` 等变量渲染通知模板；日志拉取和 AI 分析的成功、失败与因前置条件跳过都会投递到选定的推送配置。 |
-| 9 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。Worker 失败时会回传脱敏的 Provider、模型、实际基础地址、认证来源和 API Key 指纹；仅当 Codex 输出命中 401/Unauthorized/Invalid token 时，才以同一认证信息异步调用 `GET /models`，不调用模型推理，用于区分 token 无效与 Responses 链路异常。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
-| 10 | 手工发起日志拉取、手工补录工单和工单详情页中的重新拉取入口仍保留；这些入口复用同一套日志拉取与 AI 分析服务，避免前后端出现两套流程。 |
-| 11 | 工单详情页的日志拉取、工单新增页的日志拉取、独立日志拉取管理页是三个前端页面，但共用同一套后端日志拉取模型、选项接口和重试逻辑。 |
-| 12 | 工单详情页中商家和门店已切换为联动下拉，不再要求手工输入纯文本或数字。 |
+| 7 | 自动拉日志创建前还会检查 `logPullDefaults.autoLogPullStopCondition`；该配置使用内部工作流状态编码多选，命中任一状态时，本次自动拉日志直接记为 `skipped`，不再创建新的自动日志任务，也不会继续发送无意义的“拉不动日志”失败通知。 |
+| 8 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
+| 9 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。若自动拉日志因为停止条件被跳过，则同链路自动 AI 也一并跳过。 |
+| 10 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；日志拉取后的自动 AI 先经过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}`，再按 Redis 队列和 `ticket.ai.agent.maxConcurrentTasks` 控制单 Agent 并发；Provider 下发时服务端先合并 `workerEnv` 扩展项，再写入当前 Provider 的密钥、地址和模型；Codex/Claude Worker 初始化任务级配置时覆盖旧工作区值。Agent 并发由 `ticket.ai.agent.maxConcurrentTasks` 控制，默认 `1`，超出上限进入 Redis 队列。任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
+| 11 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
+| 12 | `TicketNotifyService` 以 `${ticket_no}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}` 等变量渲染通知模板；日志拉取和 AI 分析的成功、失败与因前置条件跳过都会投递到选定的推送配置。 |
+| 13 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。Worker 失败时会回传脱敏的 Provider、模型、实际基础地址、认证来源和 API Key 指纹；仅当 Codex 输出命中 401/Unauthorized/Invalid token 时，才以同一认证信息异步调用 `GET /models`，不调用模型推理，用于区分 token 无效与 Responses 链路异常。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
+| 14 | 手工发起日志拉取、手工补录工单和工单详情页中的重新拉取入口仍保留；这些入口复用同一套日志拉取与 AI 分析服务，避免前后端出现两套流程。 |
+| 15 | 工单详情页的日志拉取、工单新增页的日志拉取、独立日志拉取管理页是三个前端页面，但共用同一套后端日志拉取模型、选项接口和重试逻辑。 |
+| 16 | 工单详情页中商家和门店已切换为联动下拉，不再要求手工输入纯文本或数字。 |
 | 13 | 日志拉取记录的重新拉取会从历史 `command_content` 反向恢复提交参数，补齐通知配置与自动化字段，降低“缺少对应参数”问题。 |
 | 14 | AI 结果通知在分析成功和失败两种情况下都会发送，方便业务侧闭环确认。 |
 | 15 | AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
@@ -128,6 +129,7 @@ sequenceDiagram
 | AI 分析成功或失败 | 分别发送成功/失败通知，通知渠道由页面保存的推送配置决定。 |
 | AI 分析结果字段超出快照列长度 | “建议负责人”展示字段按 `ticket_snapshot.owner` 的 100 字符上限截断，完整 AI 结果仍保存在工单分析结果和快照结构化数据中；持久化异常先回滚事务，再将任务标记为失败，避免任务长期停留在执行中。 |
 | 自动日志拉取参数不完整、任务创建失败或自动 AI 前置条件不满足 | 记录自动化步骤并按失败通知开关推送工单号、商家、门店和具体原因。 |
+| 工单状态命中自动拉日志停止条件 | 自动日志步骤记为 `skipped`，不再创建新的自动日志任务；若已开启“停止运行中自动任务”，系统会在状态变更后和后台扫描时自动取消仍在运行中的自动任务，手工日志任务不受影响。 |
 | Codex/OpenAI 返回 `bad_response_status_code` | Agent 返回更明确的上游异常摘要；服务端通过日志截断和放宽增强字段必填约束降低重试失败概率。 |
 | Codex 启动返回 `os error 2` | Agent 在启动 Worker 前校验并复制任务级 Codex Home 引用的模型目录文件；引用缺失时返回包含 `model_catalog_json` 路径的明确错误。 |
 | Codex 返回 401/Unauthorized/Invalid token | Agent 记录脱敏认证指纹并执行一次无推理的 `/models` 鉴权探测；任务级 `config.toml` 的 `experimental_bearer_token` 优先于 `auth.json`，启动 Worker 时会由 Provider key 覆盖；若探测 401 则优先检查 Provider key，若探测 200 则携带 Worker 与探测 request ID 排查 Provider Responses 链路。 |
@@ -155,3 +157,13 @@ sequenceDiagram
 ## 自动 AI 前置条件
 
 日志拉取记录会保存创建时的 `autoAiAnalysisCondition` 快照。后台自动触发 AI 前，先读取工单 ORM 的内部 `status`，再按配置检查状态允许列表、历史成功分析记录和 `created/running` 活动任务；这些条件全部满足后才创建 AI 任务。失败或取消的历史任务不视为成功，可继续自动重试。手动 AI 分析入口不经过该过滤。 条件归一化和检查由 `TicketAutoAiAnalysisConditionService` 统一提供，日志拉取成功后的自动触发与未拉日志的同步自动化直提路径共用该能力。
+
+## 自动拉日志停止条件
+
+同步自动化配置页的 `logPullDefaults.autoLogPullStopCondition` 用于声明“哪些内部工作流状态命中后，不再继续自动拉日志”。
+
+- `enabled`：总开关，关闭时不生效。
+- `statusCodes`：内部工作流状态编码，多选；命中任一状态即停止，不是“某状态之后全部停止”。
+- `cancelActiveRecords`：是否自动取消当前工单下仍在执行中的自动日志任务；只会处理 `_automation.autoCreated=true` 的记录，避免误伤手工日志任务。
+
+该配置只影响自动拉日志及其同链路自动 AI 跳过逻辑，不影响手工拉日志、手工 AI 分析和手工重试。

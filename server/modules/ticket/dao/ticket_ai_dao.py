@@ -224,6 +224,55 @@ class TicketAiDao:
         )
 
     @classmethod
+    def get_successful_task_by_request_fingerprint(
+        cls, db: Session, request_fingerprint: str
+    ) -> TicketAiAnalysisTask | None:
+        """
+        按分析请求指纹查询已经成功的任务。
+        :param db: 数据库会话
+        :param request_fingerprint: 分析请求指纹
+        :return: 唯一成功任务，无匹配时返回 None
+        """
+        fingerprint = str(request_fingerprint or "").strip()
+        if not fingerprint:
+            return None
+        return (
+            db.query(TicketAiAnalysisTask)
+            .filter(
+                TicketAiAnalysisTask.request_fingerprint == fingerprint,
+                TicketAiAnalysisTask.status == TicketAiAnalysisStatus.SUCCESS.value,
+                TicketAiAnalysisTask.success_fingerprint == fingerprint,
+            )
+            .order_by(TicketAiAnalysisTask.finished_at.desc(), TicketAiAnalysisTask.task_id.desc())
+            .first()
+        )
+
+    @classmethod
+    def get_active_task_by_request_fingerprint(
+        cls, db: Session, request_fingerprint: str
+    ) -> TicketAiAnalysisTask | None:
+        """
+        查询同一分析请求当前正在执行或等待执行的任务。
+        :param db: 数据库会话
+        :param request_fingerprint: 分析请求指纹
+        :return: 活跃任务，无匹配时返回 None
+        """
+        fingerprint = str(request_fingerprint or "").strip()
+        if not fingerprint:
+            return None
+        return (
+            db.query(TicketAiAnalysisTask)
+            .filter(
+                TicketAiAnalysisTask.request_fingerprint == fingerprint,
+                TicketAiAnalysisTask.status.in_(
+                    (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value)
+                ),
+            )
+            .order_by(TicketAiAnalysisTask.create_time.asc(), TicketAiAnalysisTask.task_id.asc())
+            .first()
+        )
+
+    @classmethod
     def get_ticket_token_summary(cls, db: Session, ticket_id: int) -> dict[str, int]:
         """
         按工单聚合 AI Token 使用量。

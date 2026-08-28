@@ -158,7 +158,12 @@ async def _send_message_on_agent_loop(
                                         response_data,
                                         f"响应数据类型【{response_data.get('request_type')}】不支持"))
 
-            response = handle_response((AgentResponseEnum.SUCCESS.value, response, "操作成功"))
+            # 200 仅表示 Agent 网关已完成传输；业务执行失败时透传内层错误，
+            # 避免统一的“操作成功”覆盖 Worker 的真实失败原因。
+            response_message = "操作成功"
+            if isinstance(response, AgentResponseWebUI) and not response.success:
+                response_message = response.error_message or response.message or "Agent 执行失败"
+            response = handle_response((AgentResponseEnum.SUCCESS.value, response, response_message))
             return response
         except TimeoutError as e:
             elapsed_sec = round(time.monotonic() - request_started_at, 3)
@@ -356,13 +361,22 @@ class AgentResponseWebSocket(WebSocketClientProtocol):
 
 
 class AgentResponseWebUI(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        from_attributes=True,
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+    )
 
     request_type: int | None = None
     command: str | None = None
     status: str | None = None
     success: bool = True
     message: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    worker_exit_code: int | None = None
+    diagnostics: list[dict[str, Any]] | None = None
     recording_id: int | str | None = None
     result: dict[str, Any] | None = None
     data: dict[str, Any] | None = None

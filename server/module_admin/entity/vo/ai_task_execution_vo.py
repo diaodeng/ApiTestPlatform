@@ -2,10 +2,10 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
 from module_hrm.entity.vo.common_vo import QueryModel
-from pydantic.alias_generators import to_camel
 
 
 class AiTaskExecutionBaseModel(BaseModel):
@@ -36,6 +36,7 @@ class AiTaskExecutionBaseModel(BaseModel):
     response_text: str | None = Field(default=None, description="原始响应文本")
     token_usage: dict[str, Any] | None = Field(default=None, description="Token用量")
     total_token_count: int | None = Field(default=None, description="总Token数")
+    error_code: str | None = Field(default=None, description="失败错误码")
     error_message: str | None = Field(default=None, description="错误信息")
     created_by_id: int | None = Field(default=None, description="创建人ID")
     created_by_name: str | None = Field(default=None, description="创建人名称")

@@ -9,6 +9,7 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from modules.ticket.entity.vo.ticket_export_vo import TicketExportRequestModel
 from modules.ticket.entity.vo.ticket_read_vo import (
     TicketMessagesPageQueryModel,
     TicketSimilarQueryModel,
@@ -31,6 +32,7 @@ from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingSe
 from modules.ticket.service.core.ticket_import_service import TicketImportService
 from modules.ticket.service.core.ticket_read_service import TicketReadService
 from modules.ticket.service.core.ticket_service import TicketService
+from modules.ticket.service.export.ticket_export_service import TicketExportService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
@@ -726,3 +728,46 @@ async def get_ticket_module_options(
         return ResponseUtil.error(msg=str(e))
 
 
+
+# === 工单导出 ===
+@ticketCrudController.post(
+    "/export",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:export"))],
+)
+async def export_ticket_list(
+    request: Request,
+    export_request: TicketExportRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    导出工单列表接口。
+    如果复选框有选择则导出选择的工单，没有选择则按照筛选条件导出。
+    导出的列可手动选择，默认全部列，列名与Web页面列名一致。
+    :param request: 请求对象
+    :param export_request: 工单导出范围、筛选条件和列配置
+    :param query_db: 数据库会话
+    :return: 工单 Excel 文件流
+    """
+    try:
+        content = await run_in_threadpool(
+            TicketExportService.export_tickets,
+            query_db,
+            export_request,
+        )
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"工单列表导出_{timestamp}.xlsx"
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+                "download-filename": quote(filename),
+            },
+        )
+    except ValueError as e:
+        logger.warning(f"工单导出参数错误: {e}")
+        return ResponseUtil.error(msg=str(e))
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))

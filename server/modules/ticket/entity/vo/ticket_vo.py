@@ -572,6 +572,7 @@ class TicketAiAnalysisTaskModel(BaseModel):
     command_line: str | None = None
     status: str | None = None
     status_desc: str | None = None
+    error_code: str | None = None
     error_message: str | None = None
     prompt_text: str | None = None
     raw_output: str | None = None

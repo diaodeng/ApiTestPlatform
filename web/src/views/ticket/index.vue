@@ -388,6 +388,17 @@
           </el-button>
         </el-col>
         <el-col :span="1.5">
+          <el-button
+            type="warning"
+            plain
+            icon="Download"
+            @click="openTicketExportDialog"
+            v-hasPermi="['ticket:ticket:export']"
+          >
+            导出
+          </el-button>
+        </el-col>
+        <el-col :span="1.5">
           <el-button plain icon="Setting" @click="columnConfigOpen = true">列设置</el-button>
         </el-col>
         <el-col :span="1.5">
@@ -881,6 +892,30 @@
         <template #footer>
           <el-button @click="resetTicketColumnConfig">恢复默认</el-button>
           <el-button type="primary" @click="saveTicketColumnConfig">保存</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="ticketExportDialogOpen" title="导出工单" width="580px" append-to-body>
+        <el-alert
+          :title="selectedTicketRows.length > 0 ? `已选择 ${selectedTicketRows.length} 个工单，将导出选中工单。` : '未选择工单，将按当前筛选条件导出全部匹配工单。'"
+          type="info"
+          :closable="false"
+          show-icon
+          class="mb12"
+        />
+        <el-checkbox-group v-model="ticketExportColumnKeys" class="ticket-column-config">
+          <el-checkbox
+            v-for="item in ticketColumnOptions"
+            :key="item.key"
+            :label="item.key"
+          >
+            {{ item.label }}
+          </el-checkbox>
+        </el-checkbox-group>
+        <template #footer>
+          <el-button @click="resetTicketExportColumns">恢复默认（全选）</el-button>
+          <el-button @click="ticketExportDialogOpen = false">取消</el-button>
+          <el-button type="primary" :loading="ticketExporting" @click="doExportTickets">导出</el-button>
         </template>
       </el-dialog>
 
@@ -1695,6 +1730,7 @@
     changeTicketStatus,
     delTicket,
     downloadTicketImportTemplate,
+    exportTickets,
     getTicket,
     getTicketVersionStatistics,
     importTicketExcel,
@@ -1826,6 +1862,9 @@
   const formModuleValue = ref('');
   const tagText = ref('');
   const selectedTicketRows = ref([]);
+  const ticketExportDialogOpen = ref(false);
+  const ticketExporting = ref(false);
+  const ticketExportColumnKeys = ref([]);
   const { openTicketLogViewer } = useLogViewer(proxy, currentTicketId);
   const releaseBatchOpen = ref(false);
   const releaseBatchSubmitting = ref(false);
@@ -1884,6 +1923,62 @@
    * 解析本次 AI 分析的默认追加提示词编码。
    * @returns {Array<string>} 追加提示词编码列表
    */
+
+  // 导出列配置（与 Web 页面列名一致，复用列表列配置）
+  const ticketExportColumnOptions = computed(() => ticketColumnOptions);
+
+  function resetTicketExportColumns() {
+    ticketExportColumnKeys.value = ticketColumnOptions.map((item) => item.key);
+  }
+
+  function openTicketExportDialog() {
+    resetTicketExportColumns();
+    ticketExportDialogOpen.value = true;
+  }
+
+  async function doExportTickets() {
+    ticketExporting.value = true;
+    try {
+      const selectedIds = selectedTicketRows.value
+        .map((row) => row.ticketId || row.ticket_id)
+        .filter((ticketId) => ticketId !== undefined && ticketId !== null && ticketId !== '')
+        .map((ticketId) => String(ticketId));
+      // 自然语言搜索场景：没有选中时，优先按当前页面可见的工单 ID 导出。
+      let exportIds = selectedIds;
+      if (!exportIds.length && naturalKeyword.value) {
+        exportIds = ticketList.value
+          .map((row) => row.ticketId || row.ticket_id)
+          .filter((ticketId) => ticketId !== undefined && ticketId !== null && ticketId !== '')
+          .map((ticketId) => String(ticketId));
+      }
+      const payload = {
+        selectedTicketIds: exportIds,
+        columns: ticketExportColumnKeys.value || [],
+      };
+      if (!exportIds.length) {
+        payload.query = buildTicketListQueryParams();
+      }
+      const response = await exportTickets(payload);
+      // request.js 对 Blob 响应会直接返回 Blob，不再是 Axios response。
+      const blob = response instanceof Blob
+        ? response
+        : new Blob([response], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      // 后端异常响应在 Blob 请求下也会被封装成 Blob，需要先解析 JSON 错误再下载。
+      if (blob.type === 'application/json' || blob.type.startsWith('text/')) {
+        const errorBody = JSON.parse(await blob.text());
+        throw new Error(errorBody.msg || '导出失败');
+      }
+      const filename = '工单列表导出.xlsx';
+      saveAs(blob, filename);
+      proxy.$modal.msgSuccess('导出成功');
+      ticketExportDialogOpen.value = false;
+    } catch (error) {
+      const msg = error?.response?.data?.msg || error?.message || '导出失败';
+      proxy.$modal.msgError(msg);
+    } finally {
+      ticketExporting.value = false;
+    }
+  }
 
   function createDefaultTicketForm() {
     return {

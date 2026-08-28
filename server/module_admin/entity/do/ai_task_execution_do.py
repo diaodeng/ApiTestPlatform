@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, JSON, String
+from sqlalchemy import JSON, BigInteger, Column, DateTime, String
 
 from config.database import Base
 from config.sqlalchemy_types import long_text_type
@@ -36,9 +36,12 @@ class SysAiTaskExecution(Base):
     response_payload = Column(JSON, nullable=True, comment="响应载荷")
     response_text = Column(long_text_type(), nullable=True, comment="原始响应文本")
     token_usage = Column(JSON, nullable=True, comment="Token用量")
+    error_code = Column(String(100, collation="utf8_general_ci"), nullable=True, comment="失败错误码")
     error_message = Column(long_text_type(), nullable=True, comment="错误信息")
     created_by_id = Column(BigInteger, nullable=True, comment="创建人ID")
     created_by_name = Column(String(100, collation="utf8_general_ci"), nullable=True, default="", comment="创建人名称")
     create_time = Column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
     update_time = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间")
-    del_flag = Column(String(1, collation="utf8_general_ci"), nullable=False, default="0", comment="删除标志（0存在 2删除）")
+    del_flag = Column(
+        String(1, collation="utf8_general_ci"), nullable=False, default="0", comment="删除标志（0存在 2删除）"
+    )

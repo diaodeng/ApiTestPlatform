@@ -121,6 +121,7 @@ graph TD
 - 统计枚举配置统一保存在系统参数 `ticket.sync.automation.statClassification`，由工单同步自动化页面可视化维护；默认枚举来自 `TicketSyncConfigService.DEFAULT_TICKET_STAT_CLASSIFICATIONS`。
 - 2026-07-01 起，细分问题类型也进入同一套统计枚举：`problemPatterns`，工单主表落点为 `problem_pattern_code/problem_pattern_name/problem_pattern_confidence/problem_pattern_source/problem_pattern_verified*`。该字段用于统计“内存泄露”“280开头券为纸质券规则说明”等可治理问题模式，`tags` 仅作为辅助检索，不作为领导看板主统计口径。
 - 工单分类 AI 的 Provider 与提示词正文统一由系统管理中的 AI Provider / AI 提示词维护；`ticket.sync.automation.aiClassification` 只保存场景开关、Provider 编码和提示词编码选择。
+- 2026-08-28 起，工单深度 AI 分析按结构化结果判定成功：Codex 必须退出码为 0，结果文件可解析且通过任务 JSON Schema，`stderr` 非空只作为诊断信息，不再单独判失败；Claude Code 继续按 `--output-format json` 的 `structured_output`、最终 `result` 文本及 `is_error` 处理。分析请求按稳定指纹幂等，已有成功结果直接返回；强制刷新会生成新指纹。每次 Agent 执行尝试使用独立网关请求 ID，避免重试复用旧失败缓存；任务工作区已有有效 `result.json` 时直接返回，不重新启动 Worker。Agent 执行时以当前任务工作区为 Codex 主项目，仅将指定 Git worktree 作为额外目录，任务级配置只信任当前工作区。
 - 2026-07-27 起，分类内联 `promptContent` 已彻底删除；`classify_ticket_statistics` 只按 `aiClassification.promptCode` 读取 `SysAiPromptTemplate`，模板不存在时使用服务内置默认提示词，不再读取同步配置中的历史正文。
 - 工单列表、状态流转、RCA、外部同步入库和统计页均读取同一套枚举配置；旧 `category_name` 与 `categoryCounts` 继续保留兼容，不再承担新统计主维度。
 - AI 分类统计只允许从启用的固定枚举候选中选择细分问题类型；人工确认的细分问题不会被后续 AI 分类覆盖。
@@ -287,6 +288,7 @@ graph TD
 - 按人催办使用多维表格数据源时，明细链接优先读取本地工单 `ticket_url`；本地未保存链接但记录包含飞书 `recordId` 时，会按人员催办配置的 `appToken/tableId/viewId` 生成飞书多维表格记录 URL，默认行模板的 `${detail_link}` 会自动带出可点击链接。
 - 2026-07-04 对照备份分支 `master_params_ticket_new` 完成拆分后逻辑审计：主动拉取 `autoAppendTimeFilter=true` 时仍忽略显式 `createdAfter/createdBefore` 并动态使用最近 1 小时窗口；多维表格时间 filter 保持备份分支的 `and` 连接和“只追加外层、不递归补值”语义；拆分 controller 路由集合为 86 个且无重复注册。
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
+- 2026-08-28：工单深度 AI 分析结果 Schema 同时兼容 BIGINT 字符串序列化和实际 Agent 的文本型 `confidence`，并声明所有可选增强字段；客户端与服务端使用一致的结构校验，已有结果文件可直接复用。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
 - 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash`、`embedding` 或 `qdrant`。2026-07-05 起采用严格 Provider：配置 hash 就只用 hash，配置 embedding 就只用外部 Embedding + 数据库向量，配置 qdrant 就只用外部 Embedding + Qdrant；失败直接报错或记录日志，不再自动兜底。

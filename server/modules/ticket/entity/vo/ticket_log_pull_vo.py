@@ -337,6 +337,7 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
     auto_ai_analysis_condition: TicketAutoAiAnalysisConditionModel = Field(
         default_factory=TicketAutoAiAnalysisConditionModel, description="自动AI分析条件快照"
     )
+    automation_snapshot: dict[str, Any] | None = Field(default=None, description="内部自动化快照，仅供系统内部联动使用")
     notify_config: dict[str, Any] | None = Field(default=None, description="日志拉取后的通知配置")
 
     @model_validator(mode="before")
@@ -389,6 +390,10 @@ class TicketLogPullCreateModel(TicketLogPullBaseModel):
         self.auto_ai_enabled = bool(self.auto_ai_enabled)
         self.ai_agent_code = str(self.ai_agent_code or "").strip() or None
         self.ai_provider_code = str(self.ai_provider_code or "").strip() or None
+        if not isinstance(self.automation_snapshot, dict):
+            self.automation_snapshot = None
+        else:
+            self.automation_snapshot = dict(self.automation_snapshot)
         if self.auto_ai_enabled and not (self.ai_provider_code or self.ai_agent_code):
             raise ValueError("日志拉取后自动AI分析时必须选择Provider或Agent")
         if self.auto_ai_enabled and not self.ticket_id:

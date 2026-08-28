@@ -15,8 +15,12 @@ entry_points:
     method: POST
     path: /ticket/issues/bind-batch
     trigger: 工单列表当前页多选批量归因
+  - type: http
+    method: POST
+    path: /ticket/issues/export-tickets
+    trigger: 问题实例管理页多选导出关联工单
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-08-27
 ---
 
 # 工单问题实例关联流程
@@ -55,6 +59,7 @@ sequenceDiagram
 | GET | `/ticket/issues/ticket-options` | `ticket:issue:query` | 工单号/标题远程搜索，最多返回 20 条 |
 | POST | `/ticket/issues/{issue_id}/tickets/bind` | `ticket:issue:bind` | 按 `ticketNo` 绑定单张工单 |
 | POST | `/ticket/issues/bind-batch` | `ticket:issue:bind` | 按 `ticketNos` 批量绑定已有 Issue |
+| POST | `/ticket/issues/export-tickets` | `ticket:issue:export` | 导出选中问题实例的关联工单 |
 | POST | `/ticket/{ticket_id}/issue/bind` | `ticket:issue:bind` | 兼容已有的内部 ID 绑定入口 |
 
 ## 业务规则
@@ -68,6 +73,12 @@ sequenceDiagram
 - 相同目标 Issue 的重复绑定幂等成功；不为批量工单两两创建 `ticket_relation`。
 - 相似度、问题类型和 AI 分类不会绕过人工确认自动写入主归因。
 - 绑定、转移和解绑写入 `TicketEventType.ISSUE_ATTRIBUTED`，包括操作人、原归属、目标归属、关系类型和备注。
+
+## 关联工单导出
+
+- 问题实例管理页面必须先选中一个或多个问题实例，随后打开列选择对话框；问题编号和问题名为不可取消的必选列。
+- 前端把 `issueId` 保持为字符串传给 Pydantic 请求模型，由接口边界解析为整数，避免 JavaScript `Number()` 损失 BIGINT 精度。
+- 后端按选中问题实例聚合其关联工单；没有关联工单的问题实例仍保留一行，以便导出数据可追溯。
 
 ## 版本信息
 

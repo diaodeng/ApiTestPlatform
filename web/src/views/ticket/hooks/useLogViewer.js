@@ -75,7 +75,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
   const {
     prepareWithDownloadProgress,
     getDownloadProgress,
-    stopAllPolling: stopLogPreparePolling,
+    observeDownloadProgress,
   } = useLogPrepareProgress();
 
   function resetLogPullForm() {
@@ -227,7 +227,6 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       window.clearTimeout(logPullRefreshTimer);
       logPullRefreshTimer = null;
     }
-    stopLogPreparePolling();
     logPullAutoRefreshing.value = false;
   }
 
@@ -255,6 +254,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       .then((response) => {
         logPullList.value = response.rows || [];
         logPullTotal.value = response.total || 0;
+        logPullList.value.forEach((item) => {
+          observeDownloadProgress(item.ticketId || currentTicketId.value, item.id);
+        });
         if (selectedLogPullRecord.value) {
           selectedLogPullRecord.value =
             logPullList.value.find((item) => item.id === selectedLogPullRecord.value.id) ||

@@ -73,6 +73,8 @@ async def init_create_table():
     _ensure_ticket_classification_columns()
     _ensure_ai_provider_preferred_executor_column()
     _ensure_ticket_ai_analysis_token_columns()
+    _ensure_ai_analysis_error_code_columns()
+    _ensure_ticket_ai_analysis_fingerprint_columns()
     _ensure_user_config_unique_index()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
@@ -609,6 +611,157 @@ def _ensure_ticket_ai_analysis_token_columns():
                 connection.execute(text(f"ALTER TABLE ticket_ai_analysis_task ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_ai_analysis_task token 统计字段失败: {exc}")
+
+
+def _ensure_ai_analysis_error_code_columns():
+    """
+    为工单 AI 任务和 AI 审计表补齐结构化错误码字段，兼容旧库。
+    :return: 无
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    table_specs = {
+        "ticket_ai_analysis_task": "失败错误码",
+        "sys_ai_task_execution": "失败错误码",
+    }
+    try:
+        with engine.begin() as connection:
+            for table_name, column_comment in table_specs.items():
+                if DATABASE_BACKEND == "mysql":
+                    exists = connection.execute(
+                        text(
+                            """
+                            SELECT 1
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = :table_name
+                              AND COLUMN_NAME = 'error_code'
+                            LIMIT 1
+                            """
+                        ),
+                        {"table_name": table_name},
+                    ).first()
+                else:
+                    columns = connection.execute(text(f"PRAGMA table_info({table_name})")).mappings().all()
+                    exists = any(str(row.get("name") or "") == "error_code" for row in columns)
+                if exists:
+                    continue
+                logger.info(f"检测到 {table_name} 缺少 error_code 列，自动补齐")
+                if DATABASE_BACKEND == "mysql":
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {table_name} ADD COLUMN error_code VARCHAR(100) NULL "
+                            f"COMMENT '{column_comment}'"
+                        )
+                    )
+                else:
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN error_code VARCHAR(100)"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 AI 分析错误码字段失败: {exc}")
+
+
+def _ensure_ticket_ai_analysis_fingerprint_columns():
+    """
+    为工单 AI 任务补齐请求指纹字段及成功结果唯一索引，兼容旧库。
+    :return: 无
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                existing_columns = {
+                    str(row.get("COLUMN_NAME") or "")
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'ticket_ai_analysis_task'
+                            """
+                        )
+                    ).mappings().all()
+                }
+                if "request_fingerprint" not in existing_columns:
+                    logger.info("检测到 ticket_ai_analysis_task 缺少 request_fingerprint，自动补齐")
+                    connection.execute(
+                        text(
+                            "ALTER TABLE ticket_ai_analysis_task ADD COLUMN request_fingerprint VARCHAR(64) NULL "
+                            "COMMENT '分析请求指纹' AFTER total_token_count"
+                        )
+                    )
+                if "success_fingerprint" not in existing_columns:
+                    logger.info("检测到 ticket_ai_analysis_task 缺少 success_fingerprint，自动补齐")
+                    connection.execute(
+                        text(
+                            "ALTER TABLE ticket_ai_analysis_task ADD COLUMN success_fingerprint VARCHAR(64) NULL "
+                            "COMMENT '成功结果唯一指纹' AFTER request_fingerprint"
+                        )
+                    )
+                index_rows = connection.execute(
+                    text(
+                        """
+                        SELECT INDEX_NAME
+                        FROM information_schema.STATISTICS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'ticket_ai_analysis_task'
+                        """
+                    )
+                ).mappings().all()
+                index_names = {str(row.get("INDEX_NAME") or "") for row in index_rows}
+                if "idx_ticket_ai_task_request_fingerprint" not in index_names:
+                    connection.execute(
+                        text(
+                            "CREATE INDEX idx_ticket_ai_task_request_fingerprint "
+                            "ON ticket_ai_analysis_task (request_fingerprint)"
+                        )
+                    )
+                if "uk_ticket_ai_task_success_fingerprint" not in index_names:
+                    connection.execute(
+                        text(
+                            "CREATE UNIQUE INDEX uk_ticket_ai_task_success_fingerprint "
+                            "ON ticket_ai_analysis_task (success_fingerprint)"
+                        )
+                    )
+                return
+
+            columns = {
+                str(row.get("name") or "")
+                for row in connection.execute(text("PRAGMA table_info(ticket_ai_analysis_task)")).mappings().all()
+            }
+            if "request_fingerprint" not in columns:
+                logger.info("检测到 sqlite ticket_ai_analysis_task 缺少 request_fingerprint，自动补齐")
+                connection.execute(
+                    text("ALTER TABLE ticket_ai_analysis_task ADD COLUMN request_fingerprint VARCHAR(64)")
+                )
+            if "success_fingerprint" not in columns:
+                logger.info("检测到 sqlite ticket_ai_analysis_task 缺少 success_fingerprint，自动补齐")
+                connection.execute(
+                    text("ALTER TABLE ticket_ai_analysis_task ADD COLUMN success_fingerprint VARCHAR(64)")
+                )
+            index_names = {
+                str(row.get("name") or "")
+                for row in connection.execute(text("PRAGMA index_list(ticket_ai_analysis_task)")).mappings().all()
+            }
+            if "idx_ticket_ai_task_request_fingerprint" not in index_names:
+                connection.execute(
+                    text(
+                        "CREATE INDEX idx_ticket_ai_task_request_fingerprint "
+                        "ON ticket_ai_analysis_task (request_fingerprint)"
+                    )
+                )
+            if "uk_ticket_ai_task_success_fingerprint" not in index_names:
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX uk_ticket_ai_task_success_fingerprint "
+                        "ON ticket_ai_analysis_task (success_fingerprint)"
+                    )
+                )
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket_ai_analysis_task 指纹字段失败: {exc}")
 
 
 def _ensure_user_config_unique_index():

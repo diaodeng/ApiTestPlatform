@@ -123,6 +123,7 @@ erDiagram
 - `TicketLogPullRecord.command_content` 还可携带 `notifyConfig`，用于在日志拉取成功、版本号提取失败或 AI 分析结束时继续沿用同一套通知配置。
 - `TicketAiRepoMapping` 记录项目、版本、仓库地址、分支、本地仓库路径和工作区根目录的兼容映射，用于历史任务审计和兜底；当前 AI Worker 执行时优先读取 Agent 本地配置中的仓库路径和工作区根目录。
 - `TicketAiAnalysisTask.analysis_context` 仅保留 `selectedAgentCode`、`forceRefresh`、`extraInstruction`、`promptLayers`、`selectedPromptTemplates`、日志记录ID等轻量任务快照，`promptLayers` 明确记录 `project`、`moduleCommon`、`moduleProject` 三层及 `defaultPromptText/hasDefaultPrompt`；完整工单/日志上下文落到工作区 `context.json`，避免任务表因超大日志包触发 MySQL `max_allowed_packet`；`Ticket.ai_analysis` 则保存最新一次分析结论。
+- 2026-08-28 起，`TicketAiAnalysisTask.request_fingerprint` 按工单、版本、日志来源、仓库分支、最终提示词、输出 schema、Provider/模型/执行器等输入生成稳定请求指纹；同指纹的成功任务写入 `success_fingerprint`，该字段有数据库唯一索引。重复提交或重试会直接复用成功任务，不重新调用 Agent；失败任务不占用成功指纹，允许原请求重试。并发任务发生唯一约束冲突时，仅赢家写入消息、RCA、快照和 AI 分析事件。
 - `TicketMessage` 是持续协同和追问的上下文来源，字段包含 `role`、`message_type`、`content`、`attachments`、来源对象和创建人信息。
 - `TicketSnapshot` 是 ACR 当前快照版本，字段包含 `version`、`summary`、`root_cause`、`solution`、`prevention`、`risk`、`owner`、`source_type` 和结构化数据。
 - `EmbeddingRecord` 继续保存工单本地向量兜底索引，唯一键为 `object_type/object_id/embedding_model/embedding_version`；当 `ticket.similarity.config.provider=qdrant` 时，Qdrant 作为主检索索引，本表仍用于回退和审计。

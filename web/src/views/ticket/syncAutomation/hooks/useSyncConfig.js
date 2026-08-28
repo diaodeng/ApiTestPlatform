@@ -301,6 +301,7 @@ export function useSyncConfig(proxy) {
         storageMode: 'local', rangeBeforeMinutes: 10, rangeAfterMinutes: 10,
         autoAiEnabled: false, aiAgentCode: '', aiProviderCode: '',
         autoAiAnalysisCondition: { analysisMode: 'always', statusFilterEnabled: false, statusCodes: [] },
+        autoLogPullStopCondition: { enabled: false, statusCodes: [], cancelActiveRecords: true },
       },
       promptTemplates: { classificationHint: '' },
       aiClassification: {
@@ -447,6 +448,19 @@ export function useSyncConfig(proxy) {
               )
             )
           : [],
+      },
+      autoLogPullStopCondition: {
+        enabled: Boolean(logPullDefaults.autoLogPullStopCondition?.enabled),
+        statusCodes: Array.isArray(logPullDefaults.autoLogPullStopCondition?.statusCodes)
+          ? Array.from(
+              new Set(
+                logPullDefaults.autoLogPullStopCondition.statusCodes
+                  .map((item) => String(item || '').trim())
+                  .filter(Boolean)
+              )
+            )
+          : [],
+        cancelActiveRecords: Boolean(logPullDefaults.autoLogPullStopCondition?.cancelActiveRecords ?? true),
       },
     }
   }
@@ -950,6 +964,15 @@ export function useSyncConfig(proxy) {
       return
     }
 
+    const stopCondition = form.logPullDefaults?.autoLogPullStopCondition || {}
+    if (
+      stopCondition.enabled &&
+      (!Array.isArray(stopCondition.statusCodes) || stopCondition.statusCodes.length === 0)
+    ) {
+      proxy.$modal.msgWarning('启用自动拉日志停止条件时，至少选择一个内部工单状态')
+      return
+    }
+
     saving.value = true
     try {
       const payload = JSON.parse(JSON.stringify(form))
@@ -1081,6 +1104,21 @@ export function useSyncConfig(proxy) {
                 )
               )
             : [],
+        },
+        autoLogPullStopCondition: {
+          enabled: Boolean(payload.logPullDefaults?.autoLogPullStopCondition?.enabled),
+          statusCodes: Array.isArray(payload.logPullDefaults?.autoLogPullStopCondition?.statusCodes)
+            ? Array.from(
+                new Set(
+                  payload.logPullDefaults.autoLogPullStopCondition.statusCodes
+                    .map((item) => String(item || '').trim())
+                    .filter(Boolean)
+                )
+              )
+            : [],
+          cancelActiveRecords: Boolean(
+            payload.logPullDefaults?.autoLogPullStopCondition?.cancelActiveRecords ?? true
+          ),
         },
       }
       payload.personReminder.appId = String(payload.personReminder?.appId || '').trim()

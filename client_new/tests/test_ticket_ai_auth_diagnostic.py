@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -191,6 +192,147 @@ class TicketAiAuthDiagnosticTests(unittest.TestCase):
             self.assertNotIn("old-key", env_text)
             self.assertNotIn("old.example", env_text)
             self.assertIn("OTHER=value", env_text)
+
+    def test_codex_result_ignores_stderr_when_json_matches_schema(self) -> None:
+        """Codex 退出成功且结果通过 schema 时，即使 stderr 有正常进度也应返回成功结果。"""
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"ticket_id": {"type": "integer"}},
+            "required": ["ticket_id"],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result_file = Path(temp_dir) / "result.json"
+            result_file.write_text('```json\n{"ticket_id": 1001}\n```', encoding="utf-8")
+
+            result = TicketAiAnalysisService._parse_worker_output(
+                provider_type="codex",
+                worker_config={"output_mode": "file"},
+                result_file=result_file,
+                raw_stdout="",
+                raw_stderr="正常进度输出，不是错误",
+                schema_payload=schema,
+            )
+
+        self.assertEqual(result, {"ticket_id": 1001})
+
+    def test_cached_result_returns_success_without_worker_execution(self) -> None:
+        """重试命中有效 result.json 时应直接成功返回，不因缓存分支字段未初始化而失败。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace_root = Path(temp_dir)
+            task_workspace = workspace_root / "ticket_1001" / "task_2001"
+            task_workspace.mkdir(parents=True)
+            cached_result = {"root_cause": "cached-result"}
+            (task_workspace / "result.json").write_text(
+                json.dumps(cached_result, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            request = {
+                "taskId": 2001,
+                "ticketId": 1001,
+                "ticket": {},
+                "mapping": {},
+                "context": {},
+                "timeline": {},
+                "resultSchema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"root_cause": {"type": "string"}},
+                    "required": ["root_cause"],
+                },
+            }
+
+            async def fake_emit_event(*_: object, **__: object) -> None:
+                """缓存命中测试不需要向服务端发送事件。"""
+
+            with patch.object(
+                TicketAiAnalysisService,
+                "_resolve_ai_repo_runtime_settings",
+                return_value=(workspace_root, workspace_root, "main"),
+            ), patch.object(TicketAiAnalysisService, "_emit_event", new=fake_emit_event):
+                result = asyncio.run(TicketAiAnalysisService.handle_request(request))
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["result"]["analysis_result"], cached_result)
+        self.assertIsNone(result["result"]["token_usage"])
+
+    def test_worker_result_rejects_invalid_schema(self) -> None:
+        """结果 JSON 可解析但不满足 schema 时，不应被当作成功结果。"""
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"ticket_id": {"type": "integer"}},
+            "required": ["ticket_id"],
+        }
+        result = TicketAiAnalysisService._parse_worker_output(
+            provider_type="codex",
+            worker_config={"output_mode": "stdout"},
+            result_file=None,
+            raw_stdout='{"ticket_id": "1001"}',
+            raw_stderr="",
+            schema_payload=schema,
+        )
+
+        self.assertIsNone(result)
+
+    def test_codex_trusts_only_current_workspace(self) -> None:
+        """任务级 Codex 配置只能加入当前工作区，不应扩大到仓库父目录。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / "codex-home"
+            workspace = root / "ticket_1001" / "task_2001"
+            workspace.mkdir(parents=True)
+
+            TicketAiAnalysisService._trust_codex_workspace(codex_home, workspace)
+
+            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
+            tomllib.loads(config_text)
+            self.assertIn(f"[projects.'{workspace.resolve()}']", config_text)
+            self.assertIn('trust_level = "trusted"', config_text)
+            self.assertNotIn(f"[projects.'{root.resolve()}']", config_text)
+
+    def test_codex_rewrites_existing_windows_workspace_trust_without_escape_error(self) -> None:
+        """重试更新已有 Windows 工作区 trusted 段落时，不应触发反斜杠替换错误。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / "codex-home"
+            workspace = root / "ticket_1001" / "task_2001"
+            workspace.mkdir(parents=True)
+
+            TicketAiAnalysisService._trust_codex_workspace(codex_home, workspace)
+            TicketAiAnalysisService._trust_codex_workspace(codex_home, workspace)
+
+            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
+            self.assertEqual(config_text.count(f"[projects.'{workspace.resolve()}']"), 1)
+            self.assertIn('trust_level = "trusted"', config_text)
+
+    def test_codex_command_uses_workspace_and_controlled_worktree_permissions(self) -> None:
+        """Codex 应以任务工作区为主目录，并只额外放行指定 worktree。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "ticket_1001" / "task_2001"
+            repo = root / "repo_worktrees" / "branch"
+            workspace.mkdir(parents=True)
+            repo.mkdir(parents=True)
+            with patch.object(
+                TicketAiAnalysisService,
+                "_resolve_provider_executable",
+                return_value=["codex", "exec"],
+            ):
+                command = TicketAiAnalysisService._build_worker_command(
+                    provider_type="codex",
+                    worker_config=TicketAiAnalysisService.PROVIDER_WORKER_MAP["codex"],
+                    repo_path=repo,
+                    workspace_dir=workspace,
+                    schema_file=None,
+                    result_file=None,
+                    selected_worker_model=None,
+                )
+
+        self.assertEqual(command[command.index("-C") + 1], str(workspace))
+        self.assertEqual(command[command.index("--add-dir") + 1], str(repo))
+        self.assertIn("--approve-for-me", command)
+        self.assertNotIn("-s", command)
 
 
 if __name__ == "__main__":

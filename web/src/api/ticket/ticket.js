@@ -41,6 +41,26 @@ export function importTicketExcel(data) {
   });
 }
 
+// 导出工单列表
+export function exportTickets(data) {
+  return request({
+    url: '/ticket/export',
+    method: 'post',
+    data,
+    responseType: 'blob',
+  });
+}
+
+// 导出问题实例关联工单
+export function exportIssueTickets(data) {
+  return request({
+    url: '/ticket/issues/export-tickets',
+    method: 'post',
+    data,
+    responseType: 'blob',
+  });
+}
+
 // 自然语言搜索工单
 export function searchTicketNaturalLanguage(query) {
   return request({

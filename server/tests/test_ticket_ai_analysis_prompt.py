@@ -90,6 +90,53 @@ class TicketAiAnalysisPromptTests(unittest.TestCase):
         self.assertIn("D:/workspace/log_cache/ticket_1/log_pull_2/source_logs/", prompt)
         self.assertNotIn("D:/workspace/task/source_logs/ 执行一次", prompt)
 
+    def test_result_schema_accepts_serialized_ids_and_analysis_extensions(self):
+        """结果 Schema 应兼容 BIGINT 字符串和提示词约定的扩展分析字段。"""
+        mapping = SimpleNamespace(
+            repo_url="https://example.invalid/repo.git",
+            branch_name="main",
+        )
+        ticket = SimpleNamespace(ticket_id=2044099516136448, project_id=2011261968542720)
+        schema = TicketAiAnalysisService._build_result_schema(ticket, mapping, "1.3.9.5")
+        payload = {
+            "ticket_id": str(ticket.ticket_id),
+            "project_id": "WE-惠康",
+            "version_key": "wemn_vender_master_1.3.9.5",
+            "repo_url": mapping.repo_url,
+            "branch_name": mapping.branch_name,
+            "root_cause": "root cause",
+            "analysis_summary": "summary",
+            "related_files": [],
+            "related_functions": [],
+            "fix_suggestion": "fix",
+            "confidence": "high",
+            "evidence": [],
+            "risk_items": [],
+            "next_steps": [],
+            "similar_cases": [],
+            "sop_suggestion": "sop",
+            "owner_suggestion": "owner",
+            "monitoring_suggestion": "monitoring",
+            "needs_human_review": False,
+        }
+
+        self.assertTrue(TicketAiAnalysisService._validate_analysis_result_schema(payload, schema))
+
+    def test_normalized_result_uses_authoritative_ticket_ids(self):
+        """归一化结果不应保留 Agent 误填的工单号或项目名称。"""
+        mapping = SimpleNamespace(repo_url="repo", branch_name="main")
+        ticket = SimpleNamespace(ticket_id=1001, project_id=2002)
+
+        result = TicketAiAnalysisService._normalize_analysis_result(
+            result_payload={"ticket_id": "wrong", "project_id": "项目名称"},
+            ticket=ticket,
+            mapping=mapping,
+            version_key="v1",
+        )
+
+        self.assertEqual(result["ticket_id"], 1001)
+        self.assertEqual(result["project_id"], 2002)
+
 
 if __name__ == "__main__":
     unittest.main()

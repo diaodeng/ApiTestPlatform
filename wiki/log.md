@@ -48,6 +48,12 @@ updated: 2026-08-25
 
 # 操作日志
 
+## [2026-08-27] FIX | 工单导出 tuple 与 Blob 响应异常
+
+- 根因：工单导出服务将分页 Pydantic 结果直接执行 `list(result)`，得到 `('rows', [...])` 字段元组；前端 request 封装对 Blob 直接返回数据，却仍读取 `response.headers`。
+- 修复：统一提取 DAO 分页/非分页结果中的 `rows`；导出请求模型支持 camelCase 和当前筛选条件；前端直接保存 Blob 并使用固定文件名。
+- 验证：定向 `ruff` 检查通过；Pydantic 导出请求别名解析和分页结果提取回归检查通过；前端生产构建待完成。
+
 ## [2026-08-25] FEAT | 工单 AI Agent 跨进程派发与并发队列
 
 - 触发：`start.sh` 以 Supervisor 分进程启动 FastAPI、Celery Worker 和 Celery Beat，自动 AI 需要在 Worker 侧安全投递到 FastAPI 内的 Agent WebSocket 连接。
@@ -2076,3 +2082,25 @@ updated: 2026-08-25
 - 根因：服务端扩展环境变量覆盖了 Provider 核心变量；Codex `config.toml` 的缩进 `base_url` 未被替换；Claude 工作区 `.env` 只追加、不覆盖旧值。
 - 修复：Provider 核心连接配置优先于 `workerEnv`，Codex 支持缩进配置覆盖，Claude `.env` 对同名变量执行覆盖。
 - 并发配置：`ticket.ai.agent.maxConcurrentTasks`，默认值 `1`，入口为“系统管理 → AI 配置中心 → Agent 并发数”。
+
+
+## [2026-08-27] 修复 | 工单与问题实例导出范围
+
+- 触发：工单列表勾选一条记录导出却返回默认 10 条；问题实例管理勾选后点击“导出工单”没有可见响应。
+- 根因：`TicketQueryModel` 只按 camelCase 别名接收输入，服务内部使用 snake_case 构造导致 `ticketIds`、`pageSize` 和 `isPage` 被静默忽略；问题实例页面维护了导出状态和请求逻辑，但遗漏了绑定状态的列选择对话框模板。
+- 修复：选中工单导出使用 `TicketQueryModel.model_validate` 按 `ticketIds/pageNum/pageSize/isPage` 构造查询；问题实例页面补齐导出列选择对话框；两处导出 ID 均保持字符串传输，交由 Pydantic 在接口边界校验并解析，避免 BIGINT 精度丢失。
+- 验证范围：新增服务回归测试，确认选中 ID、分页大小和分页标记会完整传入 DAO 查询；前端构建验证导出对话框模板与脚本可编译。
+
+## [2026-08-28] FIX | 工单日志查看准备进度复用
+
+- 触发：日志查看弹窗关闭后再次打开会重复发起准备/下载请求；离开工单详情页后重新进入也无法恢复下载进度，日志拉取记录管理页存在相同体验。
+- 修复：前端按“工单 ID + 日志拉取记录 ID”在模块级复用准备请求和进度状态；已处于 `preparing/downloading` 时只等待原任务，列表显示环形进度；重新加载列表时通过 `/ticket/logs/prepare-progress` 恢复后端 Redis 中的进度。
+- 影响范围：`web/src/views/ticket/hooks/useLogPrepareProgress.js`、`web/src/views/ticket/hooks/useLogViewer.js`、工单详情日志拉取 Tab、日志拉取记录管理页、日志查看器用户说明。
+- 验证：待执行前端生产构建和静态检查。
+## [2026-08-28] INGEST-CODE | 工单 AI Worker 失败错误码透传
+
+- 客户端对 Worker 输出进行结构化错误分类，避免工单正文中的 `Error:` 污染 Provider 异常。
+- Agent 网关保留内层 `success/errorCode/errorMessage`，服务端失败分支不再从响应文本或分析结果反向匹配异常。
+- 工单 AI 任务表和 AI 审计表增加 `error_code`，失败响应不再返回工单信息或工作区结果元数据。
+- `PermissionDenied` 作为本地诊断告警保留；与 Provider 致命错误同时出现时不覆盖主错误。
+- 本次未调整 hybrid 日志读取策略和模型上下文限制。

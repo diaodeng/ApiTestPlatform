@@ -189,7 +189,7 @@
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="340">
+      <el-table-column label="操作" width="270" align="center">
         <template #default="scope">
           <el-tooltip
             v-if="getContentDownloadProgress(scope.row)"
@@ -204,36 +204,30 @@
               :stroke-width="3"
             />
           </el-tooltip>
-          <el-button v-else link type="primary" icon="View" @click="openLogViewer(scope.row)" v-hasPermi="['ticket:logpull:query']">
-            查看日志
-          </el-button>
-          <el-button link type="primary" icon="CopyDocument" @click="handleCopyLogPull(scope.row)" :disabled="actionLoading || activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:add']">
-            复制
-          </el-button>
-          <el-button link type="danger" icon="VideoPause" @click="stopLogPull(scope.row)" :disabled="actionLoading || !activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:remove']">停止</el-button>
-          <el-button link type="warning" icon="Refresh" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']">
-            重新拉取
-          </el-button>
+          <el-button v-else circle type="primary" icon="View" title="查看日志" aria-label="查看日志" @click="openLogViewer(scope.row)" v-hasPermi="['ticket:logpull:query']" />
+          <el-button circle type="primary" icon="CopyDocument" title="复制" aria-label="复制" @click="handleCopyLogPull(scope.row)" :disabled="actionLoading || activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:add']" />
+          <el-button circle type="danger" icon="VideoPause" title="停止" aria-label="停止" @click="stopLogPull(scope.row)" :disabled="actionLoading || !activeLogPullStatuses.includes(scope.row.status)" v-hasPermi="['ticket:logpull:remove']" />
+          <el-button circle type="warning" icon="Refresh" title="重新拉取" aria-label="重新拉取" @click="retryLogPull(scope.row)" :disabled="actionLoading" v-hasPermi="['ticket:logpull:add']" />
           <el-button
-            link
+            circle
             type="success"
             icon="Download"
+            title="重新下载"
+            aria-label="重新下载"
             @click="redownloadLogPull(scope.row)"
             :disabled="actionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
             v-hasPermi="['ticket:logpull:add']"
-          >
-            重新下载
-          </el-button>
+          />
           <el-button
-            link
+            circle
             type="danger"
             icon="Delete"
+            title="删除"
+            aria-label="删除"
             @click="deleteLogPull(scope.row)"
             :disabled="actionLoading"
             v-hasPermi="['ticket:logpull:remove']"
-          >
-            删除
-          </el-button>
+          />
         </template>
       </el-table-column>
     </el-table>
@@ -481,7 +475,11 @@ import { useRouter } from 'vue-router'
 
 const { proxy } = getCurrentInstance()
 const router = useRouter()
-const { prepareWithDownloadProgress, getDownloadProgress } = useLogPrepareProgress()
+const {
+  prepareWithDownloadProgress,
+  getDownloadProgress,
+  observeDownloadProgress
+} = useLogPrepareProgress()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -599,6 +597,9 @@ function getList() {
   listTicketLogPullRecords(queryParams.value).then(response => {
     recordList.value = response.rows || []
     total.value = response.total || 0
+    recordList.value.forEach(row => {
+      observeDownloadProgress(row.ticketId || row.ticket_id, row.id)
+    })
   }).finally(() => {
     loading.value = false
   })

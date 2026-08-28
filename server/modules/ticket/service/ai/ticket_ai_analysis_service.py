@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from typing import Any
 
 import httpx
 from dotenv import dotenv_values
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config.database import SessionLocal
@@ -745,6 +747,19 @@ class TicketAiAnalysisService:
         return f"http://127.0.0.1:{AppConfig.app_port}{normalized_path}"
 
     @classmethod
+    def _build_agent_request_id(cls, task_id: int | str) -> str:
+        """
+        为一次 Agent 执行尝试生成唯一请求ID。
+
+        服务端任务重试必须绕过 Agent 网关对旧请求的失败缓存，但同一个任务的
+        请求指纹仍保持不变，用于服务端成功结果幂等。因此请求ID要区分每次
+        执行尝试，不能直接使用任务ID。
+        :param task_id: 工单 AI 分析任务ID
+        :return: 本次 Agent 执行尝试的唯一请求ID
+        """
+        return f"ticket-ai-analysis:{task_id}:attempt:{snowIdWorker.get_id()}"
+
+    @classmethod
     def _send_agent_request_via_gateway(
         cls,
         agent_code: str,
@@ -1051,6 +1066,52 @@ class TicketAiAnalysisService:
         return {}
 
     @staticmethod
+    def _resolve_agent_failure_message(
+        response_object: Any,
+        agent_response: Any,
+        response_payload: dict[str, Any],
+        raw_stdout: str = "",
+        raw_stderr: str = "",
+    ) -> str:
+        """
+        提取 Agent 失败原因，优先使用内层响应的真实错误而不是外层通用成功消息。
+        :param response_object: Agent 内层响应对象
+        :param agent_response: 网关包装响应对象
+        :param response_payload: Agent result 字典
+        :param raw_stdout: 网关响应原始文本
+        :param raw_stderr: 网关错误文本
+        :return: 面向任务记录的失败原因
+        """
+        candidates: list[Any] = []
+        if isinstance(response_payload, dict):
+            candidates.extend([response_payload.get("error_message"), response_payload.get("message")])
+        if isinstance(response_object, dict):
+            candidates.extend([response_object.get("error_message"), response_object.get("message")])
+        else:
+            candidates.extend(
+                [
+                    getattr(response_object, "error_message", None),
+                    getattr(response_object, "message", None),
+                ]
+            )
+        candidates.extend(
+            [
+                getattr(agent_response, "error_message", None),
+                getattr(agent_response, "message", None),
+            ]
+        )
+        generic_messages = {"操作成功", "success", "ok"}
+        for candidate in candidates:
+            message = str(candidate or "").strip()
+            if message and message.lower() not in generic_messages:
+                return message
+        return TicketAiAnalysisService._summarize_worker_error(
+            raw_stderr,
+            raw_stdout,
+            "AI Agent 未返回可解析的分析结果",
+        )
+
+    @staticmethod
     def _to_optional_int(value: Any) -> int | None:
         """
         将 Token 计数字段安全转换为整数。
@@ -1354,6 +1415,7 @@ class TicketAiAnalysisService:
             "provider_code",
             "model_name",
             "base_url",
+            "error_code",
             "response_text",
             "error_message",
         ):
@@ -1878,8 +1940,9 @@ class TicketAiAnalysisService:
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "ticket_id": {"type": "integer", "default": ticket.ticket_id},
-                "project_id": {"type": ["integer", "null"], "default": ticket.project_id},
+                # BIGINT 在接口和 Agent JSON 中允许按字符串传输，避免超过 JavaScript 安全整数范围。
+                "ticket_id": {"type": ["integer", "string"], "default": str(ticket.ticket_id)},
+                "project_id": {"type": ["integer", "string", "null"], "default": ticket.project_id},
                 "version_key": {"type": ["string", "null"], "default": version_key},
                 "repo_url": {"type": ["string", "null"], "default": mapping.repo_url},
                 "branch_name": {"type": ["string", "null"], "default": mapping.branch_name},
@@ -1888,10 +1951,18 @@ class TicketAiAnalysisService:
                 "related_files": {"type": "array", "items": {"type": "string"}, "default": []},
                 "related_functions": {"type": "array", "items": {"type": "string"}, "default": []},
                 "fix_suggestion": {"type": "string", "default": ""},
-                "confidence": {"type": "number", "default": 0},
+                "confidence": {"type": ["number", "string"], "default": 0},
                 "evidence": {"type": "array", "items": {"type": "string"}, "default": []},
                 "risk_items": {"type": "array", "items": {"type": "string"}, "default": []},
                 "next_steps": {"type": "array", "items": {"type": "string"}, "default": []},
+                "symptom": {"type": ["array", "string"], "default": []},
+                "investigation_steps": {"type": ["array", "string"], "default": []},
+                "prevention_actions": {"type": ["array", "string"], "default": []},
+                "similar_cases": {"type": "array", "default": []},
+                "sop_suggestion": {"type": ["array", "string"], "default": []},
+                "owner_suggestion": {"type": "string", "default": ""},
+                "monitoring_suggestion": {"type": ["array", "string"], "default": []},
+                "needs_human_review": {"type": "boolean", "default": True},
             },
             "required": [
                 "ticket_id",
@@ -2122,8 +2193,9 @@ class TicketAiAnalysisService:
         :return: 归一化结果
         """
         normalized = dict(result_payload or {})
-        normalized.setdefault("ticket_id", ticket.ticket_id)
-        normalized.setdefault("project_id", ticket.project_id)
+        # 工单和项目 ID 以服务端实体为准，避免模型把项目名称或字符串描述误写入关联字段。
+        normalized["ticket_id"] = ticket.ticket_id
+        normalized["project_id"] = ticket.project_id
         normalized.setdefault("version_key", version_key)
         normalized.setdefault("repo_url", mapping.repo_url)
         normalized.setdefault("branch_name", mapping.branch_name)
@@ -2145,6 +2217,191 @@ class TicketAiAnalysisService:
         normalized.setdefault("monitoring_suggestion", [])
         normalized.setdefault("needs_human_review", True)
         return cls._json_safe_value(normalized)
+
+    @classmethod
+    def _build_analysis_request_fingerprint(
+        cls,
+        *,
+        ticket: Ticket,
+        mapping: TicketAiRepoMapping,
+        version_key: str,
+        context_payload: dict[str, Any],
+        prompt_template: str,
+        schema_payload: dict[str, Any],
+        request: TicketAiAnalysisRequestModel,
+        task_id: int,
+    ) -> str:
+        """
+        根据会影响分析结果的输入生成稳定请求指纹。
+        工单、版本、日志来源、仓库分支、提示词、Provider/模型/执行器和 schema 均纳入指纹；
+        强制刷新额外使用当前任务ID，确保明确要求重新分析时不会命中历史成功结果。
+        :param ticket: 工单对象
+        :param mapping: 仓库映射对象
+        :param version_key: 版本标识
+        :param context_payload: 分析上下文
+        :param prompt_template: 最终提示词
+        :param schema_payload: 输出 schema
+        :param request: 用户提交参数
+        :param task_id: 当前任务ID，仅强制刷新时参与计算
+        :return: 64位十六进制请求指纹
+        """
+        ticket_payload = cls._json_safe_value(CamelCaseUtil.transform_result(ticket))
+        if isinstance(ticket_payload, dict):
+            for field_name in (
+                "aiAnalysis",
+                "ai_analysis",
+                "updateTime",
+                "update_time",
+                "updateBy",
+                "update_by",
+            ):
+                ticket_payload.pop(field_name, None)
+        fingerprint_context = cls._build_fingerprint_context(context_payload)
+        material: dict[str, Any] = {
+            "ticket": ticket_payload,
+            "version_key": version_key,
+            "mapping": {
+                "mapping_id": mapping.mapping_id,
+                "project_id": mapping.project_id,
+                "repo_url": mapping.repo_url,
+                "branch_name": mapping.branch_name,
+                "local_repo_path": mapping.local_repo_path,
+            },
+            "context": fingerprint_context,
+            "prompt_template": prompt_template,
+            "schema": cls._json_safe_value(schema_payload),
+            "provider": {
+                "provider_code": context_payload.get("selectedAiProviderCode"),
+                "provider_platform": context_payload.get("selectedAiProviderPlatform"),
+                "provider_protocol": context_payload.get("selectedAiProviderProtocol"),
+                "model": context_payload.get("selectedWorkerModel"),
+                "executor": context_payload.get("selectedExecutor"),
+                "agent_code": context_payload.get("selectedAgentCode") or request.agent_code,
+            },
+            "options": {
+                "resume": bool(request.resume),
+                "log_analysis_mode": context_payload.get("logAnalysisMode"),
+                "log_window_missing_strategy": context_payload.get("logWindowMissingStrategy"),
+            },
+        }
+        if request.force_refresh:
+            material["force_refresh_task_id"] = task_id
+        canonical = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _build_fingerprint_context(cls, context_payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        构建用于幂等指纹的上下文副本，排除本次 AI 分析产生的回写数据。
+        用户消息、非 AI 历史快照和业务事件仍保留，后续人工追问会自然形成新指纹。
+        :param context_payload: 完整 AI 分析上下文
+        :return: 不包含 AI 自身回写数据的上下文副本
+        """
+        context = cls._json_safe_value(context_payload)
+        if not isinstance(context, dict):
+            return {}
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, dict):
+            for field_name in (
+                "aiAnalysis",
+                "ai_analysis",
+                "updateTime",
+                "update_time",
+                "updateBy",
+                "update_by",
+            ):
+                ticket_context.pop(field_name, None)
+        messages = context.get("messages")
+        if isinstance(messages, list):
+            context["messages"] = [
+                item
+                for item in messages
+                if not (
+                    isinstance(item, dict)
+                    and (
+                        str(item.get("referenceType") or item.get("reference_type") or "").lower()
+                        == "ai_analysis"
+                        or (
+                            str(item.get("role") or "").lower() == "ai"
+                            and str(item.get("messageType") or item.get("message_type") or "").lower()
+                            == "analysis"
+                        )
+                    )
+                )
+            ]
+        snapshots = context.get("snapshots")
+        if isinstance(snapshots, list):
+            context["snapshots"] = [
+                item
+                for item in snapshots
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("sourceType") or item.get("source_type") or "").lower() == "ai_analysis"
+                )
+            ]
+        timeline = context.get("timeline")
+        if isinstance(timeline, list):
+            context["timeline"] = [
+                item
+                for item in timeline
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("eventType") or item.get("event_type") or "").upper()
+                    in {TicketEventType.AI_ANALYZED.value, TicketEventType.ANALYSIS.value}
+                )
+            ]
+        latest_snapshot = context.get("latestSnapshot")
+        if isinstance(latest_snapshot, dict) and str(
+            latest_snapshot.get("sourceType") or latest_snapshot.get("source_type") or ""
+        ).lower() == "ai_analysis":
+            context["latestSnapshot"] = None
+        return context
+
+    @classmethod
+    def _validate_analysis_result_schema(cls, payload: Any, schema: dict[str, Any]) -> bool:
+        """
+        校验 Agent 返回的结构化分析结果。
+        工单分析 schema 只使用基础 JSON Schema 类型、required、properties、items 和
+        additionalProperties，服务端在归一化前再次校验，避免错误结果被补默认值后误写回。
+        :param payload: Agent 返回结果
+        :param schema: 本次任务的输出 schema
+        :return: 是否通过校验
+        """
+        expected_type = schema.get("type")
+        if isinstance(expected_type, list):
+            return any(
+                cls._validate_analysis_result_schema(payload, {**schema, "type": item})
+                for item in expected_type
+            )
+        if expected_type == "object":
+            if not isinstance(payload, dict):
+                return False
+            required = schema.get("required") or []
+            properties = schema.get("properties") or {}
+            if any(field not in payload for field in required):
+                return False
+            if schema.get("additionalProperties") is False and any(key not in properties for key in payload):
+                return False
+            return all(
+                key not in payload or cls._validate_analysis_result_schema(value, child_schema)
+                for key, child_schema in properties.items()
+                for value in [payload.get(key)]
+            )
+        if expected_type == "array":
+            return isinstance(payload, list) and all(
+                cls._validate_analysis_result_schema(item, schema.get("items") or {}) for item in payload
+            )
+        if expected_type == "string":
+            return isinstance(payload, str)
+        if expected_type == "number":
+            return isinstance(payload, (int, float)) and not isinstance(payload, bool)
+        if expected_type == "integer":
+            return isinstance(payload, int) and not isinstance(payload, bool)
+        if expected_type == "null":
+            return payload is None
+        if expected_type == "boolean":
+            return isinstance(payload, bool)
+        return True
 
     @classmethod
     def _create_rca_from_result(
@@ -2284,6 +2541,44 @@ class TicketAiAnalysisService:
         )
 
     @classmethod
+    def _finish_duplicate_task_without_writeback(
+        cls,
+        db: Session,
+        task: TicketAiAnalysisTask,
+        winner: TicketAiAnalysisTask,
+        audit_execution_id: int | None = None,
+    ) -> None:
+        """
+        将并发重复任务标记为取消，不重复写入工单消息、RCA、快照和事件。
+        :param db: 数据库会话
+        :param task: 当前重复任务
+        :param winner: 已成功占用指纹的任务
+        :param audit_execution_id: 当前任务对应的审计记录ID
+        :return: 无
+        """
+        cls._mark_task_status(
+            db,
+            task.task_id,
+            status=TicketAiAnalysisStatus.CANCELED.value,
+            status_desc="重复请求已复用成功结果",
+            error_message=f"相同分析请求已由任务 {winner.task_id} 成功完成",
+            finished_at=datetime.now(),
+            command_line=task.command_line or "",
+        )
+        if audit_execution_id:
+            cls._update_execution_record(
+                db,
+                audit_execution_id,
+                status="canceled",
+                error_message=f"相同分析请求已由任务 {winner.task_id} 成功完成",
+            )
+        db.commit()
+        logger.info(
+            f"工单 AI 分析并发重复任务跳过结果写回: task_id={task.task_id}, winner_task_id={winner.task_id}, "
+            f"request_fingerprint={task.request_fingerprint}"
+        )
+
+    @classmethod
     def _mark_task_status(
         cls,
         db: Session,
@@ -2291,6 +2586,7 @@ class TicketAiAnalysisService:
         *,
         status: str,
         status_desc: str,
+        error_code: str | None = None,
         error_message: str | None = None,
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
@@ -2307,6 +2603,7 @@ class TicketAiAnalysisService:
         :param task_id: 任务ID
         :param status: 任务状态
         :param status_desc: 状态描述
+        :param error_code: 稳定的业务错误码
         :param error_message: 错误信息
         :param started_at: 开始时间
         :param finished_at: 结束时间
@@ -2318,6 +2615,7 @@ class TicketAiAnalysisService:
         update_data = {
             "status": status,
             "status_desc": status_desc,
+            "error_code": error_code,
             "error_message": error_message,
             "started_at": started_at,
             "finished_at": finished_at,
@@ -2326,6 +2624,8 @@ class TicketAiAnalysisService:
             "command_line": command_line if command_line is not None else "",
             "update_time": datetime.now(),
         }
+        if status != TicketAiAnalysisStatus.SUCCESS.value:
+            update_data["success_fingerprint"] = None
         if analysis_result is not None:
             update_data["analysis_result"] = analysis_result
         if raw_output is not None:
@@ -2447,15 +2747,10 @@ class TicketAiAnalysisService:
                 )
         if request.agent_code:
             context_payload["selectedAgentCode"] = request.agent_code
-        agent_available, agent_error_message, resolved_agent_code = cls._validate_agent_connected(
-            db, str(context_payload.get("selectedAgentCode") or "").strip()
-        )
-        if not agent_available:
-            return CrudResponseModel(is_success=False, message=agent_error_message)
-        context_payload["selectedAgentCode"] = resolved_agent_code
         if str(request.extra_instruction or "").strip():
             context_payload["extraInstruction"] = str(request.extra_instruction).strip()
         context_payload["promptLayers"] = prompt_layers
+        schema_payload = cls._build_result_schema(ticket, mapping, version_key)
         workspace_root = cls._resolve_workspace_root(db)
         task_id = snowIdWorker.get_id()
         workspace_dir = workspace_root / f"ticket_{ticket.ticket_id}" / f"task_{task_id}"
@@ -2472,6 +2767,52 @@ class TicketAiAnalysisService:
             log_analysis_mode=str(context_payload.get("logAnalysisMode") or "digest"),
             source_logs_path="{source_logs_path}",
         )
+        # 最终提示词包含系统约束和用户选择，必须以最终文本参与指纹计算。
+        request_fingerprint = cls._build_analysis_request_fingerprint(
+            ticket=ticket,
+            mapping=mapping,
+            version_key=version_key,
+            context_payload=context_payload,
+            prompt_template=prompt_template,
+            schema_payload=schema_payload,
+            request=request,
+            task_id=task_id,
+        )
+        task_context_payload["requestFingerprint"] = request_fingerprint
+
+        if not request.force_refresh:
+            successful_task = TicketAiDao.get_successful_task_by_request_fingerprint(db, request_fingerprint)
+            if successful_task:
+                logger.info(
+                    f"工单 AI 分析命中成功指纹，复用历史结果: ticket_id={ticket_id}, "
+                    f"request_fingerprint={request_fingerprint}, task_id={successful_task.task_id}"
+                )
+                return CrudResponseModel(
+                    is_success=True,
+                    message="AI分析请求已幂等命中，直接返回历史结果",
+                    result=CamelCaseUtil.transform_result(successful_task),
+                )
+            active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
+            if active_task:
+                logger.info(
+                    f"工单 AI 分析命中执行中的请求，复用任务: ticket_id={ticket_id}, "
+                    f"request_fingerprint={request_fingerprint}, task_id={active_task.task_id}"
+                )
+                return CrudResponseModel(
+                    is_success=True,
+                    message="相同AI分析请求已在执行中，直接返回原任务",
+                    result=CamelCaseUtil.transform_result(active_task),
+                )
+
+        # 幂等命中不需要 Agent 在线；只有确实要创建新任务时才校验连接状态。
+        agent_available, agent_error_message, resolved_agent_code = cls._validate_agent_connected(
+            db, str(context_payload.get("selectedAgentCode") or "").strip()
+        )
+        if not agent_available:
+            return CrudResponseModel(is_success=False, message=agent_error_message)
+        context_payload["selectedAgentCode"] = resolved_agent_code
+        task_context_payload = cls._build_task_context_snapshot(context_payload, request)
+        task_context_payload["requestFingerprint"] = request_fingerprint
 
         now = datetime.now()
         audit_execution = AiTaskExecutionDao.add_ai_task_execution_dao(
@@ -2528,6 +2869,8 @@ class TicketAiAnalysisService:
             audit_execution_id=audit_execution.execution_id,
             source_log_pull_record_id=context_payload.get("sourceLogPullRecordId"),
             source_log_view_mode=str(context_payload.get("sourceLogViewMode") or "stored"),
+            request_fingerprint=request_fingerprint,
+            success_fingerprint=None,
             submitted_by_id=cls._user_id(current_user),
             submitted_by_name=cls._user_name(current_user),
             create_by=cls._user_name(current_user),  # type: ignore[arg-type]
@@ -2591,6 +2934,26 @@ class TicketAiAnalysisService:
                 message="AI分析任务已完成，直接返回历史结果",
                 result=CamelCaseUtil.transform_result(task),
             )
+        request_fingerprint = str(getattr(task, "request_fingerprint", "") or "").strip()
+        if request_fingerprint:
+            successful_task = TicketAiDao.get_successful_task_by_request_fingerprint(db, request_fingerprint)
+            if successful_task and successful_task.task_id != task.task_id:
+                logger.info(
+                    f"工单 AI 分析重试命中成功指纹，复用历史结果: ticket_id={ticket_id}, "
+                    f"request_fingerprint={request_fingerprint}, task_id={successful_task.task_id}"
+                )
+                return CrudResponseModel(
+                    is_success=True,
+                    message="AI分析请求已幂等命中，直接返回历史结果",
+                    result=CamelCaseUtil.transform_result(successful_task),
+                )
+            active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
+            if active_task and active_task.task_id != task.task_id:
+                return CrudResponseModel(
+                    is_success=True,
+                    message="相同AI分析请求已在执行中，直接返回原任务",
+                    result=CamelCaseUtil.transform_result(active_task),
+                )
         with cls._executor_lock:
             if task_id in cls._active_task_ids:
                 return CrudResponseModel(is_success=False, message="当前AI分析任务正在执行中，请稍后重试")
@@ -2607,6 +2970,7 @@ class TicketAiAnalysisService:
                     "error_message": None,
                     "started_at": None,
                     "finished_at": None,
+                    "success_fingerprint": None,
                 }
             )
         try:
@@ -2918,13 +3282,22 @@ class TicketAiAnalysisService:
             tasks = TicketAiDao.list_recoverable_tasks(db, list(cls.ACTIVE_STATUSES))
             now = datetime.now()
             for task in tasks:
+                interrupted_message = "服务重启前任务未完成，已清理为失败"
                 cls._mark_task_status(
                     db,
                     task.task_id,
                     status=TicketAiAnalysisStatus.FAILED.value,
                     status_desc="服务重启前任务未完成，已清理为失败",
-                    error_message="服务重启前任务未完成，已清理为失败",
+                    error_code="AI_TASK_INTERRUPTED",
+                    error_message=interrupted_message,
                     finished_at=now,
+                )
+                cls._update_execution_record(
+                    db,
+                    getattr(task, "audit_execution_id", None),
+                    status="failed",
+                    error_code="AI_TASK_INTERRUPTED",
+                    error_message=interrupted_message,
                 )
             if tasks:
                 db.commit()
@@ -3013,6 +3386,7 @@ class TicketAiAnalysisService:
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="工单不存在",
+                error_code="AI_TICKET_NOT_FOUND",
                 error_message="工单不存在或已删除",
                 finished_at=datetime.now(),
             )
@@ -3020,6 +3394,7 @@ class TicketAiAnalysisService:
                 db,
                 getattr(task, "audit_execution_id", None),
                 status="failed",
+                error_code="AI_TICKET_NOT_FOUND",
                 error_message="工单不存在或已删除",
             )
             db.commit()
@@ -3059,6 +3434,7 @@ class TicketAiAnalysisService:
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="未找到仓库映射",
+                error_code="AI_REPO_MAPPING_NOT_FOUND",
                 error_message="未找到可用的项目版本仓库映射",
                 finished_at=datetime.now(),
             )
@@ -3066,6 +3442,7 @@ class TicketAiAnalysisService:
                 db,
                 audit_execution_id,
                 status="failed",
+                error_code="AI_REPO_MAPPING_NOT_FOUND",
                 error_message="未找到可用的项目版本仓库映射",
             )
             db.commit()
@@ -3154,6 +3531,7 @@ class TicketAiAnalysisService:
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="未找到Agent",
+                error_code="AI_AGENT_NOT_AVAILABLE",
                 error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
                 finished_at=datetime.now(),
                 command_line="agent:<none>",
@@ -3165,6 +3543,7 @@ class TicketAiAnalysisService:
                 provider_code=requested_provider_code or None,
                 model_name=worker_model_override or None,
                 base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
+                error_code="AI_AGENT_NOT_AVAILABLE",
                 error_message="未找到可用的 Agent，请先启动本地 Agent 并连接到服务端",
             )
             db.commit()
@@ -3203,6 +3582,8 @@ class TicketAiAnalysisService:
         request_payload: dict[str, Any] | None = None
         response_payload: dict[str, Any] = {}
         token_usage_payload: dict[str, Any] | None = None
+        error_code: str | None = None
+        failure_message: str | None = None
         try:
             request_payload = cls._build_agent_request_payload(
                 task_id=task_id,
@@ -3217,7 +3598,7 @@ class TicketAiAnalysisService:
                 result_path=result_file,
                 timeout_sec=timeout_sec,
             )
-            request_id = f"ticket-ai-analysis:{task_id}"
+            request_id = cls._build_agent_request_id(task_id)
             cls._update_execution_record(
                 db,
                 audit_execution_id,
@@ -3266,18 +3647,43 @@ class TicketAiAnalysisService:
                 status_code=getattr(agent_response, "status_code", None),
                 response_type=type(response_object).__name__ if response_object is not None else "None",
                 response_message=getattr(agent_response, "message", None),
+                response_error_code=getattr(response_object, "error_code", None),
+                response_error_message=getattr(response_object, "error_message", None),
                 response_result_preview=response_result_preview,
             )
-            if getattr(agent_response, "status_code", 500) != 200 or not bool(
-                getattr(response_object, "success", True)
-            ):
+            if getattr(agent_response, "status_code", 500) != 200:
+                error_code = "AI_AGENT_TRANSPORT_ERROR"
                 failure_message = (
-                    getattr(response_object, "message", None)
+                    getattr(response_object, "error_message", None)
+                    or getattr(response_object, "message", None)
                     or getattr(agent_response, "message", None)
-                    or "Agent 返回失败"
+                    or "Agent 网关传输失败"
                 )
-                cls._log_task_step(task_id, "FAIL", "Agent 执行失败", error=failure_message)
+                response_payload = response_dump
+                cls._log_task_step(task_id, "FAIL", "Agent HTTP 请求失败", error=failure_message)
                 raise ValueError(failure_message)
+
+            # Agent 业务失败与网关传输成功是两个独立状态。失败时不再尝试从
+            # result、响应文本或工单正文推断异常，直接使用客户端返回的结构化错误。
+            if not bool(getattr(response_object, "success", True)):
+                error_code = str(getattr(response_object, "error_code", None) or "AI_AGENT_EXECUTION_ERROR")
+                failure_message = str(
+                    getattr(response_object, "error_message", None)
+                    or getattr(response_object, "message", None)
+                    or "Agent 执行失败，但未返回错误信息"
+                )
+                response_payload = response_dump
+                cls._log_task_step(
+                    task_id,
+                    "FAIL",
+                    "Agent 返回结构化失败",
+                    error_code=error_code,
+                    error=failure_message,
+                    worker_exit_code=getattr(response_object, "worker_exit_code", None),
+                    diagnostics=getattr(response_object, "diagnostics", None),
+                )
+                raise ValueError(failure_message)
+
             response_payload = cls._extract_agent_response_result(response_object)
             result_text = ""
             if response_payload:
@@ -3293,12 +3699,13 @@ class TicketAiAnalysisService:
                 except Exception:
                     parsed_result = None
             if not isinstance(parsed_result, dict):
-                cls._log_task_step(task_id, "FAIL", "Agent 未返回可解析的分析结果")
-                failure_message = (
-                    response_payload.get("error_message")
-                    or response_payload.get("message")
-                    or getattr(agent_response, "message", None)
-                    or "AI Agent 未返回可解析的分析结果"
+                error_code = "AI_WORKER_RESULT_INVALID"
+                failure_message = "Agent 未返回可解析的分析结果"
+                cls._log_task_step(
+                    task_id,
+                    "FAIL",
+                    failure_message,
+                    error_code=error_code,
                 )
                 raise ValueError(failure_message)
             token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump, response_object)
@@ -3309,6 +3716,36 @@ class TicketAiAnalysisService:
                 mapping=mapping,
                 version_key=version_key,
             )
+            if not cls._validate_analysis_result_schema(parsed_result, schema_payload):
+                error_code = "AI_WORKER_RESULT_INVALID"
+                failure_message = "AI Agent 返回的分析结果未通过 JSON Schema 校验"
+                cls._log_task_step(
+                    task_id,
+                    "FAIL",
+                    failure_message,
+                    error_code=error_code,
+                )
+                raise ValueError(failure_message)
+
+            # 先用成功指纹占位，再执行消息、RCA、快照和事件写回，确保并发重复任务只有
+            # 一个事务可以进入成功写回流程。唯一约束冲突时，当前任务直接取消。
+            request_fingerprint = str(getattr(task, "request_fingerprint", "") or "").strip()
+            if request_fingerprint:
+                winner = TicketAiDao.get_successful_task_by_request_fingerprint(db, request_fingerprint)
+                if winner and winner.task_id != task.task_id:
+                    db.rollback()
+                    cls._finish_duplicate_task_without_writeback(db, task, winner, audit_execution_id)
+                    return
+                try:
+                    task.success_fingerprint = request_fingerprint
+                    db.flush()
+                except IntegrityError:
+                    db.rollback()
+                    winner = TicketAiDao.get_successful_task_by_request_fingerprint(db, request_fingerprint)
+                    if winner and winner.task_id != task.task_id:
+                        cls._finish_duplicate_task_without_writeback(db, task, winner, audit_execution_id)
+                        return
+                    raise
             cls._log_task_step(task_id, "PERSIST", "写回工单与 RCA 结果")
             # raw_output 仅保留摘要级输出；原始 Agent 响应中可能包含大体积日志上下文，
             # 完整内容以工作区 result.json / 分析结果结构化字段为准。
@@ -3323,10 +3760,10 @@ class TicketAiAnalysisService:
                 analysis_result=normalized,
                 raw_output=(result_text or raw_stdout or "")[:5000],
                 command_line=f"agent:{agent_code}",
-                input_token_count=(normalized_token_usage or {}).get("input_token_count"),
-                output_token_count=(normalized_token_usage or {}).get("output_token_count"),
-                total_token_count=(normalized_token_usage or {}).get("total_token_count"),
-            )
+            input_token_count=(normalized_token_usage or {}).get("input_token_count"),
+            output_token_count=(normalized_token_usage or {}).get("output_token_count"),
+            total_token_count=(normalized_token_usage or {}).get("total_token_count"),
+        )
             cls._update_execution_record(
                 db,
                 audit_execution_id,
@@ -3357,17 +3794,25 @@ class TicketAiAnalysisService:
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
             return
         except Exception as exc:
-            cls._log_task_step(task_id, "ERROR", "AI 分析任务执行失败", error=str(exc))
+            failure_code = error_code or "AI_ANALYSIS_EXECUTION_ERROR"
+            failure_message = failure_message or str(exc)
+            cls._log_task_step(
+                task_id,
+                "ERROR",
+                "AI 分析任务执行失败",
+                error_code=failure_code,
+                error=failure_message,
+            )
             logger.exception(f"AI分析任务[{task_id}] 执行失败")
             # 持久化阶段可能已经触发数据库 flush 失败，必须先回滚才能继续写入失败终态；
             # 否则 SQLAlchemy 会拒绝后续状态更新，任务会长期停留在“执行中”。
             db.rollback()
-            failure_message = cls._summarize_worker_error(raw_stderr, raw_stdout, str(exc))
             cls._mark_task_status(
                 db,
                 task_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
                 status_desc="分析失败",
+                error_code=failure_code,
                 error_message=failure_message,
                 finished_at=datetime.now(),
                 command_line=f"agent:{agent_code}",
@@ -3376,6 +3821,7 @@ class TicketAiAnalysisService:
                 db,
                 audit_execution_id,
                 status="failed",
+                error_code=failure_code,
                 provider_code=locals().get("requested_provider_code") or None,
                 model_name=locals().get("worker_model_override") or None,
                 base_url=(
