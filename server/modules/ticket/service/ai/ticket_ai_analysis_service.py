@@ -3821,8 +3821,9 @@ class TicketAiAnalysisService:
                         return
                     raise
             cls._log_task_step(task_id, "PERSIST", "写回工单与 RCA 结果")
-            # raw_output 仅保留摘要级输出；原始 Agent 响应中可能包含大体积日志上下文，
-            # 完整内容以工作区 result.json / 分析结果结构化字段为准。
+            # raw_output 仅保留摘要级输出；原始 Agent 响应中可能包含大体积日志上下文
+            # 或 Codex --json 的 JSONL 事件流，完整内容以工作区 result.json /
+            # 分析结果结构化字段为准，Token 用量经 token_usage 字段单独入库。
             cls._persist_success_result(db, task, ticket, normalized, result_text or raw_stdout, None)
             finished_at = datetime.now()
             cls._mark_task_status(

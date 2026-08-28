@@ -50,6 +50,9 @@ class TicketAiAnalysisService:
             "output_mode": "file",             # 结果从文件读取
             "output_schema_flag": "--output-schema",
             "output_file_flag": "--output-last-message",
+            # stdout 输出 JSONL 事件流，其中 turn.completed 事件携带 Token 用量；
+            # 结果本体仍从 --output-last-message 文件读取，不受事件流影响。
+            "json_output_flag": "--json",
             "resume_flag": "--resume",
             "model_flag": "-m",
             "skip_git_check_flag": "--skip-git-repo-check",
@@ -842,6 +845,12 @@ class TicketAiAnalysisService:
         if output_flag and result_file:
             command.extend([str(output_flag), str(result_file)])
 
+        # JSONL 事件流输出（仅 codex）：stdout 会输出事件流，
+        # turn.completed 事件携带每次回合的 Token 用量，用于统计累计消耗。
+        json_output_flag = worker_config.get("json_output_flag")
+        if json_output_flag:
+            command.append(str(json_output_flag))
+
         # 输出格式（仅 claude：--output-format json）
         output_format_flag = worker_config.get("output_format_flag")
         output_format = worker_config.get("output_format")
@@ -874,7 +883,6 @@ class TicketAiAnalysisService:
         return command
 
     @classmethod
-    @classmethod
     def _resolve_worker_result_text(
         cls,
         *,
@@ -902,6 +910,7 @@ class TicketAiAnalysisService:
             result_text = raw_stderr.strip()
         return result_text
 
+    @classmethod
     def _parse_worker_output(
         cls,
         *,
@@ -1127,6 +1136,165 @@ class TicketAiAnalysisService:
             if payload is not None:
                 return payload
         return None
+
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        """
+        将 Token 计数字段安全转换为整数。
+        :param value: 原始值
+        :return: 整数值，无法转换时返回 None
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        try:
+            text_value = str(value).strip().replace(",", "")
+        except Exception:
+            return None
+        if not text_value:
+            return None
+        try:
+            return int(text_value)
+        except Exception:
+            try:
+                return int(float(text_value))
+            except Exception:
+                return None
+
+    @classmethod
+    def _parse_codex_jsonl_token_usage(cls, raw_stdout: str | None) -> dict[str, Any] | None:
+        """
+        从 Codex --json 的 JSONL 事件流中解析并累加 Token 用量。
+
+        Codex 以 --json 运行时，stdout 每行输出一个 JSON 事件，回合结束事件
+        turn.completed 携带 usage 字段（input_tokens / cached_input_tokens /
+        output_tokens 等）。一次执行可能包含多个 turn（如 resume、多阶段执行），
+        这里逐行累加所有事件的用量，得到整个过程的总消耗，而不是只取最后一次。
+
+        注意：必须限定为多行事件流结构（type + usage 双特征）才解析，
+        避免 Claude 单行 JSON 输出（顶层 usage 语义为最后一次 API 调用）被误判。
+        :param raw_stdout: Worker 标准输出（JSONL 事件流文本）
+        :return: 累加后的 Token 用量字典，无有效事件时返回 None
+        """
+        if not raw_stdout or not raw_stdout.strip():
+            return None
+        total_input = 0
+        total_output = 0
+        total_cached = 0
+        total_all = 0
+        found = False
+        for line in raw_stdout.splitlines():
+            line_text = line.strip()
+            if not line_text:
+                continue
+            try:
+                event = json.loads(line_text)
+            except Exception:
+                # 事件流中混入非 JSON 行时跳过，不中断整体解析。
+                continue
+            if not isinstance(event, dict):
+                continue
+            usage = event.get("usage")
+            # 仅识别 codex 事件流形态：回合结束事件（turn.completed，兼容后续版本
+            # 可能的 thread.completed 等变体）中的 usage 为该轮增量累计。
+            # Claude 输出 type 固定为 result 且无 turn/thread 事件，不会进入此分支。
+            event_type = event.get("type")
+            if not isinstance(usage, dict) or not isinstance(event_type, str):
+                continue
+            if event_type not in ("turn.completed", "thread.completed"):
+                continue
+            input_count = cls._to_optional_int(usage.get("input_tokens")) or 0
+            output_count = cls._to_optional_int(usage.get("output_tokens")) or 0
+            cached_count = cls._to_optional_int(usage.get("cached_input_tokens")) or 0
+            found = True
+            total_input += input_count
+            total_output += output_count
+            total_cached += cached_count
+            # input_tokens 为包含缓存命中的总输入；若某版本仅输出不含缓存的口径，
+            # cached_input_tokens 大于 input 时按两者之和兜底，避免总量小于分量。
+            turn_total = input_count + output_count
+            if cached_count > input_count:
+                turn_total = cached_count + output_count
+            total_all += turn_total
+        if not found:
+            return None
+        return {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cached_input_tokens": total_cached if total_cached else None,
+            "total_tokens": total_all,
+        }
+
+    @classmethod
+    def _parse_claude_token_usage(cls, raw_stdout: str | None) -> dict[str, Any] | None:
+        """
+        从 Claude Code --output-format json 的单行 JSON 输出中解析 Token 用量。
+
+        Claude 顶层 usage 是主模型最后一次 API 调用的值（非整个任务累计）；
+        modelUsage 按模型给出本次执行的累计用量（inputTokens / outputTokens /
+        cacheReadInputTokens / cacheCreationInputTokens），这里按模型累加得到总量。
+        :param raw_stdout: Worker 标准输出（单行 JSON）
+        :return: 累加后的 Token 用量字典，无有效数据时返回 None
+        """
+        if not raw_stdout or not raw_stdout.strip():
+            return None
+        try:
+            payload = json.loads(raw_stdout.strip().splitlines()[-1])
+        except Exception:
+            return None
+        # 仅识别 Claude result 报文：type=result 且顶层有 result/num_turns 等特征；
+        # Codex 事件流最后一行是 turn.completed，不会被误解析。
+        if not isinstance(payload, dict) or payload.get("type") != "result" or payload.get("is_error"):
+            return None
+        model_usage = payload.get("modelUsage")
+        total_input = 0
+        total_output = 0
+        total_cached = 0
+        found = False
+        if isinstance(model_usage, dict) and model_usage:
+            # modelUsage 覆盖任务中实际使用的全部模型（含轻量分类等辅助模型），
+            # 逐模型累加得到整个任务的消耗。
+            for model_stat in model_usage.values():
+                if not isinstance(model_stat, dict):
+                    continue
+                input_count = cls._to_optional_int(model_stat.get("inputTokens")) or 0
+                output_count = cls._to_optional_int(model_stat.get("outputTokens")) or 0
+                cached_count = (
+                    cls._to_optional_int(model_stat.get("cacheReadInputTokens")) or 0
+                ) + (cls._to_optional_int(model_stat.get("cacheCreationInputTokens")) or 0)
+                if not input_count and not output_count and not cached_count:
+                    continue
+                found = True
+                total_input += input_count
+                total_output += output_count
+                total_cached += cached_count
+        if not found:
+            # 旧版本无 modelUsage 时回退顶层 usage：虽只是主模型最后一次调用的近似值，
+            # 也好于完全无数据；total 按 input + output 计算，避免缓存重复计入。
+            usage = payload.get("usage")
+            if not isinstance(usage, dict):
+                return None
+            input_count = cls._to_optional_int(usage.get("input_tokens")) or 0
+            output_count = cls._to_optional_int(usage.get("output_tokens")) or 0
+            if not input_count and not output_count:
+                return None
+            return {
+                "input_tokens": input_count,
+                "output_tokens": output_count,
+                "cached_input_tokens": None,
+                "total_tokens": input_count + output_count,
+            }
+        return {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cached_input_tokens": total_cached if total_cached else None,
+            "total_tokens": total_input + total_output,
+        }
 
     @classmethod
     def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
@@ -3107,12 +3275,21 @@ class TicketAiAnalysisService:
                     }
 
                 normalized_result = parsed_result
-                token_usage_payload = cls._extract_token_usage_payload(
-                    normalized_result,
-                    parsed_result,
-                    cls._extract_json_from_text(raw_stdout) if raw_stdout.strip() else None,
-                    cls._extract_json_from_text(raw_stderr) if raw_stderr.strip() else None,
-                )
+                # Token 用量解析：Codex 从 --json 事件流累加；Claude 从单行 JSON 的
+                # modelUsage 按模型累加；都没有时回退通用候选提取（结果文件内嵌 usage 等）。
+                if provider_type == "codex":
+                    token_usage_payload = cls._parse_codex_jsonl_token_usage(raw_stdout)
+                elif provider_type == "claude":
+                    token_usage_payload = cls._parse_claude_token_usage(raw_stdout)
+                else:
+                    token_usage_payload = None
+                if token_usage_payload is None:
+                    token_usage_payload = cls._extract_token_usage_payload(
+                        normalized_result,
+                        parsed_result,
+                        cls._extract_json_from_text(raw_stdout) if raw_stdout.strip() else None,
+                        cls._extract_json_from_text(raw_stderr) if raw_stderr.strip() else None,
+                    )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_finished",
@@ -3135,6 +3312,7 @@ class TicketAiAnalysisService:
                         "command_line": " ".join(command),
                         "stdout_path": str(workspace_dir / "worker.stdout.txt"),
                         "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                        "token_usage": token_usage_payload,
                     },
                 }
             finally:
