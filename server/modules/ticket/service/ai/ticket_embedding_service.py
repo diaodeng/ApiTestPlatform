@@ -36,6 +36,60 @@ class TicketEmbeddingService:
     PROVIDER_LOCAL_HASH = "local_hash"
     PROVIDER_EMBEDDING = "embedding"
     PROVIDER_QDRANT = "qdrant"
+
+    @classmethod
+    def _write_embedding_execution_record(
+        cls,
+        *,
+        ticket: Ticket,
+        embedding_config: dict[str, Any],
+        model: str,
+        text_chars: int,
+        token_usage: dict[str, Any],
+    ) -> None:
+        """
+        将外部 Embedding 调用写入 AI 审计执行记录（复用轻量 AI 审计表）。
+        写入失败只记录告警，不影响向量化主流程。
+        :param ticket: 工单对象
+        :param embedding_config: Embedding 配置（含 endpoint/model）
+        :param model: 实际使用的模型标识
+        :param text_chars: 送入向量化的文本长度
+        :param token_usage: 上游返回的 Token 用量
+        :return: 无
+        """
+        try:
+            from module_admin.service.ai_task_execution_service import AiTaskExecutionService
+
+            endpoint = str(embedding_config.get("endpoint") or "").strip()
+            execution_data = {
+                "task_type": "ticket_embedding",
+                "task_name": "工单向量化Embedding",
+                "source_type": "ticket",
+                "source_id": ticket.ticket_id,
+                "source_ref": getattr(ticket, "ticket_no", None),
+                "provider_code": "openai_compatible",
+                "model_name": model,
+                "base_url": endpoint.split("?")[0] if endpoint else None,
+                "status": "success",
+                "request_payload": {
+                    "model": model,
+                    "textChars": text_chars,
+                    "configuredDimension": embedding_config.get("dimension"),
+                },
+                "response_payload": {"vectorDimension": embedding_config.get("dimension") or None},
+                "token_usage": token_usage,
+            }
+            with SessionLocal() as audit_db:
+                result = AiTaskExecutionService.add_ai_task_execution_services(audit_db, execution_data)
+                if result.is_success:
+                    logger.info(
+                        f"外部Embedding审计记录已写入: ticket_id={ticket.ticket_id}, "
+                        f"model={model}, tokenUsage={token_usage}"
+                    )
+        except Exception as exc:
+            logger.warning(
+                f"外部Embedding审计记录写入失败: ticket_id={getattr(ticket, 'ticket_id', '-') or '-'}, error={exc}"
+            )
     DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "provider": PROVIDER_LOCAL_HASH,
@@ -386,19 +440,21 @@ class TicketEmbeddingService:
 
     @classmethod
     def embed_text(
-        cls, text: str, config: dict[str, Any] | None = None
+        cls, text: str, config: dict[str, Any] | None = None, token_usage_out: dict[str, Any] | None = None
     ) -> list[float]:
         """
         将文本转换为向量；配置本地哈希就只用本地哈希，配置外部接口就只调用外部接口。
         :param text: 原始文本
         :param config: 相似度配置
+        :param token_usage_out: 可选输出容器；外部接口调用成功后写入上游 Token 用量，
+            本地哈希模式无外部请求，不写入任何数据。
         :return: 归一化向量
         """
         embedding_config = (config or {}).get("embedding") if isinstance((config or {}).get("embedding"), dict) else {}
         provider = cls._normalize_embedding_provider(embedding_config.get("provider"))
         if provider == "openai_compatible":
             try:
-                return cls._embed_text_openai_compatible(text, embedding_config)
+                return cls._embed_text_openai_compatible(text, embedding_config, token_usage_out)
             except Exception as exc:
                 raise ExternalEmbeddingUnavailableError(
                     f"外部Embedding生成失败，严格模式不回退本地哈希: provider={provider}, error={exc}"
@@ -483,11 +539,24 @@ class TicketEmbeddingService:
                 f"oldHash={str(existing_record.content_hash or '')[:12]}, newHash={content_hash[:12]}, "
                 f"oldDimension={existing_record.embedding_dimension}, configuredDimension={configured_dimension}"
             )
-        vector = cls.embed_text(text, vector_config)
+        embedding_token_usage: dict[str, Any] = {}
+        vector = cls.embed_text(text, vector_config, token_usage_out=embedding_token_usage)
         logger.info(
             f"工单向量生成完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
-            f"vectorDimension={len(vector)}, contentHash={content_hash[:12]}"
+            f"vectorDimension={len(vector)}, contentHash={content_hash[:12]}, "
+            f"tokenUsage={embedding_token_usage or '-'}"
         )
+        # 外部 Embedding 调用写入审计执行记录；本地哈希无外部请求（用量为空）不落审计。
+        if embedding_token_usage:
+            cls._write_embedding_execution_record(
+                ticket=ticket,
+                embedding_config=vector_config.get("embedding")
+                if isinstance(vector_config.get("embedding"), dict)
+                else {},
+                model=model,
+                text_chars=len(text),
+                token_usage=embedding_token_usage,
+            )
         record = EmbeddingRecord(
             object_type="ticket",
             object_id=ticket.ticket_id,
@@ -1376,11 +1445,15 @@ class TicketEmbeddingService:
         )
 
     @classmethod
-    def _embed_text_openai_compatible(cls, text: str, embedding_config: dict[str, Any]) -> list[float]:
+    def _embed_text_openai_compatible(
+        cls, text: str, embedding_config: dict[str, Any], token_usage_out: dict[str, Any] | None = None
+    ) -> list[float]:
         """
         调用兼容 OpenAI /v1/embeddings 的接口生成向量。
         :param text: 原始文本
         :param embedding_config: Embedding 配置
+        :param token_usage_out: 可选输出容器；调用成功后会把上游 usage
+            （prompt_tokens/total_tokens）写入该 dict，供审计统计。
         :return: 向量
         """
         endpoint = str(embedding_config.get("endpoint") or "").strip()
@@ -1417,9 +1490,16 @@ class TicketEmbeddingService:
         if not isinstance(vector, list):
             raise ValueError("Embedding 接口未返回 data[0].embedding")
         result = [float(item) for item in vector]
+        # 透出上游 Token 用量；embeddings 接口的用量字段为 prompt_tokens/total_tokens
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if isinstance(token_usage_out, dict) and isinstance(usage, dict):
+            extracted = {key: usage[key] for key in ("prompt_tokens", "total_tokens") if usage.get(key) is not None}
+            if extracted:
+                token_usage_out.update(extracted)
         logger.info(
             f"外部Embedding请求完成: provider=openai_compatible, model={embedding_config.get('model')}, "
-            f"configuredDimension={dimension}, returnedDimension={len(result)}"
+            f"configuredDimension={dimension}, returnedDimension={len(result)}, "
+            f"promptTokens={(usage or {}).get('prompt_tokens') if isinstance(usage, dict) else None}"
         )
         if dimension > 0 and len(result) != dimension:
             logger.error(

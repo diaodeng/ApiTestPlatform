@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
@@ -11,6 +12,34 @@ from utils.log_util import logger
 
 # API Key mask threshold
 _API_KEY_MASK_MIN_LEN = 8
+
+
+@dataclass
+class TextGenerationResult:
+    """
+    文本生成结果。
+
+    :ivar text: 模型回复文本
+    :ivar token_usage: 上游响应中的 Token 用量（prompt_tokens/completion_tokens/total_tokens
+        或 input_tokens/output_tokens），上游未返回时为 None
+    """
+
+    text: str = ""
+    token_usage: dict[str, Any] | None = field(default=None)
+
+
+@dataclass
+class EmbeddingResult:
+    """
+    向量生成结果。
+
+    :ivar vector: 归一化前的原始向量
+    :ivar token_usage: 上游响应中的 Token 用量（embeddings 接口为 prompt_tokens），
+        上游未返回时为 None
+    """
+
+    vector: list[float] = field(default_factory=list)
+    token_usage: dict[str, Any] | None = field(default=None)
 
 
 class AiProviderProtocolService:
@@ -98,7 +127,7 @@ class AiProviderProtocolService:
         model_name: str | None = None,
     ) -> str:
         """
-        使用Provider声明的协议生成文本。
+        使用Provider声明的协议生成文本（仅返回文本，兼容旧调用方）。
         :param provider: 已保存Provider对象
         :param system_prompt: 系统提示词
         :param user_prompt: 用户提示词
@@ -107,6 +136,39 @@ class AiProviderProtocolService:
         :param api_key: 可选明文密钥，仅用于未保存草稿测试
         :param model_name: 可选覆盖模型名称，为空时使用Provider默认模型
         :return: 解析后的模型文本
+        """
+        return cls.generate_text_with_usage(
+            provider=provider,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            timeout_sec=timeout_sec,
+            api_key=api_key,
+            model_name=model_name,
+        ).text
+
+    @classmethod
+    def generate_text_with_usage(
+        cls,
+        *,
+        provider,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        timeout_sec: int | None = None,
+        api_key: str | None = None,
+        model_name: str | None = None,
+    ) -> TextGenerationResult:
+        """
+        使用Provider声明的协议生成文本，并透出上游 Token 用量。
+        :param provider: 已保存Provider对象
+        :param system_prompt: 系统提示词
+        :param user_prompt: 用户提示词
+        :param temperature: 生成温度
+        :param timeout_sec: 超时时间秒数
+        :param api_key: 可选明文密钥，仅用于未保存草稿测试
+        :param model_name: 可选覆盖模型名称，为空时使用Provider默认模型
+        :return: 文本与 Token 用量结果对象
         """
         protocol = cls._get_protocol(provider)
         model = (model_name or "").strip() or str(getattr(provider, "default_model", "") or "").strip()
@@ -126,7 +188,11 @@ class AiProviderProtocolService:
                 json=payload,
                 timeout_sec=timeout_sec,
             )
-            return cls._extract_openai_text(response.json())
+            response_payload = response.json()
+            return TextGenerationResult(
+                text=cls._extract_openai_text(response_payload),
+                token_usage=cls._extract_openai_usage(response_payload),
+            )
         if protocol == "openai_responses":
             payload = {
                 "model": model,
@@ -140,7 +206,11 @@ class AiProviderProtocolService:
                 json=payload,
                 timeout_sec=timeout_sec,
             )
-            return cls._extract_openai_text(response.json())
+            response_payload = response.json()
+            return TextGenerationResult(
+                text=cls._extract_openai_text(response_payload),
+                token_usage=cls._extract_openai_usage(response_payload),
+            )
         if protocol == "azure_openai_chat":
             payload = {
                 "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
@@ -153,7 +223,11 @@ class AiProviderProtocolService:
                 json=payload,
                 timeout_sec=timeout_sec,
             )
-            return cls._extract_openai_text(response.json())
+            response_payload = response.json()
+            return TextGenerationResult(
+                text=cls._extract_openai_text(response_payload),
+                token_usage=cls._extract_openai_usage(response_payload),
+            )
         if protocol == "anthropic_messages":
             payload = {
                 "model": model,
@@ -169,7 +243,11 @@ class AiProviderProtocolService:
                 json=payload,
                 timeout_sec=timeout_sec,
             )
-            return cls._extract_anthropic_text(response.json())
+            response_payload = response.json()
+            return TextGenerationResult(
+                text=cls._extract_anthropic_text(response_payload),
+                token_usage=cls._extract_anthropic_usage(response_payload),
+            )
         if protocol == "ollama_chat":
             payload = {
                 "model": model,
@@ -184,7 +262,11 @@ class AiProviderProtocolService:
                 json=payload,
                 timeout_sec=timeout_sec,
             )
-            return str((response.json().get("message") or {}).get("content") or "").strip()
+            response_payload = response.json()
+            return TextGenerationResult(
+                text=str((response_payload.get("message") or {}).get("content") or "").strip(),
+                token_usage=cls._extract_ollama_usage(response_payload),
+            )
         raise ValueError(f"协议{protocol}暂不支持服务端直连文本生成")
 
     @classmethod
@@ -413,3 +495,67 @@ class AiProviderProtocolService:
             for item in payload.get("content", [])
             if isinstance(item, dict) and str(item.get("type") or "") == "text" and str(item.get("text") or "").strip()
         ).strip()
+
+    @classmethod
+    def _extract_openai_usage(cls, payload: Any) -> dict[str, Any] | None:
+        """
+        提取OpenAI协议响应中的Token用量。
+
+        Chat Completions 返回 prompt_tokens/completion_tokens/total_tokens；
+        Responses 协议返回 input_tokens/output_tokens/total_tokens。
+        :param payload: 上游响应JSON
+        :return: Token用量字典，响应中无用量时返回 None
+        """
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if not isinstance(usage, dict):
+            return None
+        normalized = {
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+        }
+        # 去掉上游未返回的键，保留真实存在的计数字段
+        filtered = {key: value for key, value in normalized.items() if value is not None}
+        return filtered or None
+
+    @classmethod
+    def _extract_anthropic_usage(cls, payload: Any) -> dict[str, Any] | None:
+        """
+        提取Anthropic Messages协议响应中的Token用量。
+        :param payload: 上游响应JSON
+        :return: Token用量字典（input_tokens/output_tokens），无用量时返回 None
+        """
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if not isinstance(usage, dict):
+            return None
+        filtered = {
+            key: usage[key]
+            for key in ("input_tokens", "output_tokens")
+            if usage.get(key) is not None
+        }
+        return filtered or None
+
+    @classmethod
+    def _extract_ollama_usage(cls, payload: Any) -> dict[str, Any] | None:
+        """
+        提取Ollama协议响应中的Token用量。
+        :param payload: 上游响应JSON
+        :return: Token用量字典（prompt_tokens/eval_tokens 等），无用量时返回 None
+        """
+        if not isinstance(payload, dict):
+            return None
+        filtered = {
+            key: payload[key]
+            for key in ("prompt_eval_count", "eval_count", "total_duration")
+            if payload.get(key) is not None
+        }
+        if not filtered:
+            return None
+        # Ollama 的字段名与通用口径对齐：prompt_eval_count=输入token数，eval_count=输出token数
+        return {
+            "prompt_tokens": filtered.get("prompt_eval_count"),
+            "completion_tokens": filtered.get("eval_count"),
+            "total_tokens": filtered.get("total_tokens"),
+        }

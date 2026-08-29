@@ -217,6 +217,14 @@ Provider 未启用时，提交任务会直接拒绝。Provider 和 Agent 都为�
 | 状态 | `pending` / `running` / `success` / `failed` / `skipped` |
 | 错误信息 | 失败原因 |
 
+### 7.2 Token 用量统计口径
+
+- 轻量 AI 每次成功调用（翻译、知识提炼、分类统计、同步提取、标题总结）都会把上游返回的 Token 用量记录到审计记录的 `token_usage` 字段：OpenAI Chat 协议为 `prompt_tokens/completion_tokens/total_tokens`，Responses 协议为 `input_tokens/output_tokens/total_tokens`，Anthropic 协议为 `input_tokens/output_tokens`。
+- 上游未返回用量时 `token_usage` 为空，不影响调用本身。
+- 缓存命中（如同步提取同源缓存）不发起 AI 请求，因此没有用量记录，属正常现象。
+- 外部向量化（Embedding）调用同样进入审计，任务类型为 `ticket_embedding`，用量记录上游返回的 `prompt_tokens`；本地哈希向量化不调外部接口，不产生审计记录。
+- 专题工单 AI 分类（独立于工单分类统计的飞书群链路）新增批次审计：每个批次（一次统计任务执行）真实发生 AI 调用时写入一条汇总审计记录，任务类型 `ticket_topic_classify`，`token_usage` 为批次内所有 AI 分类调用用量的累加值；批次内全部调用失败落 `failed` 记录；关键词模式等零调用场景不落库（批次执行情况见任务日志）。
+
 ### 7.2 页面功能
 
 - 按任务类型、来源类型、Provider、状态和关键字分页查询
