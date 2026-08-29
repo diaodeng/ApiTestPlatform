@@ -6,7 +6,7 @@
         <div class="detail-meta">
           <span>{{ detail.projectName || detail.merchantName || '未填写项目' }}</span>
           <span>{{ detail.moduleName || '未填写模块' }}</span>
-          <span>{{ detail.status || '未填写状态' }}</span>
+          <el-tag :type="getStatusTagType(detail.status)">{{ formatTicketStatus(detail.status) }}</el-tag>
         </div>
       </div>
       <div class="detail-actions">
@@ -222,6 +222,7 @@
   import { computed, getCurrentInstance, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
   import { bindTicketIssue, getTicket, getTicketComments, getTicketTimeline, listTicketIssues } from '@/api/ticket/ticket';
+  import { useWorkflow } from '../hooks/useWorkflow';
 
   const props = defineProps({
     ticketId: {
@@ -232,6 +233,9 @@
 
   const { proxy } = getCurrentInstance();
   const router = useRouter();
+  // 工单状态选项：合并自定义工作流状态节点，用于把状态 code 转成状态名称展示
+  const currentTicketStatus = ref('');
+  const { ticketStatusOptions, getStatusTagType, loadWorkflowConfig } = useWorkflow(currentTicketStatus);
   const loading = ref(false);
   const activeTab = ref('overview');
   const descriptionExpanded = ref(true);
@@ -430,6 +434,15 @@
   });
 
   /**
+   * 将工单状态 code 转成状态名称。
+   * 优先匹配自定义工作流状态节点名称，未匹配到时回退默认枚举，仍无结果则原样展示。
+   */
+  function formatTicketStatus(value) {
+    const statusValue = String(value || '').trim();
+    return ticketStatusOptions.value.find((item) => item.value === statusValue)?.label || statusValue || '未填写状态';
+  }
+
+  /**
    * 加载纯净详情页所需的工单主详情。
    */
   function loadDetail() {
@@ -441,6 +454,8 @@
     return getTicket(currentTicketId)
       .then((response) => {
         detail.value = response.data || {};
+        // 同步当前状态供工作流转规则计算使用
+        currentTicketStatus.value = detail.value.status || '';
       })
       .finally(() => {
         loading.value = false;
@@ -545,6 +560,9 @@
     },
     { immediate: true }
   );
+
+  // 加载工作流状态配置，保证顶部状态显示状态名称而不是状态 code
+  loadWorkflowConfig();
 </script>
 
 <style scoped>
