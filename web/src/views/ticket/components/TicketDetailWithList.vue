@@ -1510,7 +1510,6 @@
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'collab'"
               :detail="detail"
-              :similar-tickets="similarTickets"
               @changed="refreshDetailAndNotify"
               @run-ai="openAiAnalysisDialog"
               @open-ai-history="openAiTaskHistory"
