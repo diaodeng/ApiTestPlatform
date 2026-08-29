@@ -1511,7 +1511,6 @@
               :active="detailMainTab === 'collab'"
               :detail="detail"
               @changed="refreshDetailAndNotify"
-              @run-ai="openAiAnalysisDialog"
               @open-ai-history="openAiTaskHistory"
             />
           </el-tab-pane>

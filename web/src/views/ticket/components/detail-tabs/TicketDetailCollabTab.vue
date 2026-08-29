@@ -31,7 +31,7 @@
     },
   });
 
-  const emit = defineEmits(['changed', 'run-ai', 'open-ai-history']);
+  const emit = defineEmits(['changed', 'open-ai-history']);
   const { proxy } = getCurrentInstance();
 
   const {
@@ -49,6 +49,12 @@
   const loading = ref(false);
   const messageDataText = ref('');
   const messageForm = ref(createDefaultMessageForm());
+  // 高级配置区域默认收起，展开后才能填写附件JSON。
+  const advancedCollapse = ref([]);
+  // AI 结果详情弹窗状态。
+  const detailDialogVisible = ref(false);
+  const detailDialogTitle = ref('');
+  const detailDialogContent = ref('');
   const {
     modelOptions: messageModelOptions,
     loadModelOptions: loadMessageModelOptions,
@@ -70,11 +76,15 @@
     () => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || ''
   );
   const messageItems = computed(() =>
-    (ticketMessages.value || []).map((item) => ({
-      ...item,
-      roleLabel: item.role || 'user',
-      typeLabel: item.messageType || 'question',
-    }))
+    (ticketMessages.value || [])
+      // 消息流只展示 AI 分析链路相关消息：用户提问、AI 分析结论、结论等；
+      // 快照、同步导入、事件动作等系统类消息不在本区域重复展示。
+      .filter((item) => ['question', 'analysis', 'conclusion'].includes(item.messageType))
+      .map((item) => ({
+        ...item,
+        roleLabel: item.role || 'user',
+        typeLabel: item.messageType || 'question',
+      }))
   );
 
   /**
@@ -86,6 +96,7 @@
       role: 'user',
       messageType: 'question',
       content: '',
+      // 提交消息默认触发AI追问分析（后端 runAi）。
       runAi: true,
       versionId: undefined,
       agentCode: '',
@@ -234,6 +245,17 @@
   }
 
   /**
+   * 打开消息详情弹窗，展示消息附件中的 JSON 原始数据。
+   * @param {object} item 消息对象。
+   * @returns {void}
+   */
+  function openMessageDetail(item) {
+    detailDialogTitle.value = `消息详情 · ${item.roleLabel} · ${item.typeLabel}`;
+    detailDialogContent.value = item.attachments ? formatJson(item.attachments) : item.content || '-';
+    detailDialogVisible.value = true;
+  }
+
+  /**
    * 解析协同消息附件 JSON。
    * @returns {object|undefined|null} 合法附件对象、空值或错误标记。
    */
@@ -272,7 +294,8 @@
     }).then((response) => {
       const payload = response.data || response || {};
       const aiResult = payload.result || {};
-      if (messageForm.value.runAi && !aiResult.aiSuccess) {
+      // 表单已默认携带 runAi=true，AI 追问失败时提示原因，成功时提示任务已提交。
+      if (!aiResult.aiSuccess) {
         proxy.$modal.msgWarning(
           aiResult.aiMessage || payload.message || '消息已保存，但AI追问未发起'
         );
@@ -366,14 +389,6 @@
 
 <template>
   <div v-loading="loading">
-    <div class="collab-toolbar mb16">
-      <el-button type="primary" @click="emit('run-ai')" v-hasPermi="['ticket:ai:analysis:run']">
-        发起AI分析
-      </el-button>
-      <el-button @click="emit('open-ai-history')" v-hasPermi="['ticket:ai:analysis:list']">
-        任务历史
-      </el-button>
-    </div>
     <el-row :gutter="16">
       <el-col :span="16">
         <el-form :model="messageForm" label-width="90px" class="mb16">
@@ -401,25 +416,16 @@
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="发起AI">
-                <el-switch
-                  v-model="messageForm.runAi"
-                  inline-prompt
-                  active-text="是"
-                  inactive-text="否"
-                />
+              <el-form-item label-width="0">
+                <el-button
+                  @click="emit('open-ai-history')"
+                  v-hasPermi="['ticket:ai:analysis:list']"
+                >
+                  任务历史
+                </el-button>
               </el-form-item>
             </el-col>
-            <el-col :span="24">
-              <el-alert
-                :title="`协同消息默认沿用工单发生版本：${detail.affectedVersion || '-'}。`"
-                type="info"
-                show-icon
-                :closable="false"
-                class="mb12"
-              />
-            </el-col>
-            <el-col :span="24">
+            <el-col :span="12">
               <el-form-item label="版本">
                 <el-select
                   v-model="messageForm.versionId"
@@ -437,7 +443,7 @@
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="24">
+            <el-col :span="12">
               <el-form-item label="Agent">
                 <el-select
                   v-model="messageForm.agentCode"
@@ -455,7 +461,7 @@
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="24">
+            <el-col :span="12">
               <el-form-item label="Provider">
                 <el-select
                   v-model="messageForm.aiProviderCode"
@@ -474,7 +480,7 @@
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="24">
+            <el-col :span="12">
               <el-form-item label="模型">
                 <el-select
                   v-model="messageForm.aiModelName"
@@ -505,14 +511,18 @@
               </el-form-item>
             </el-col>
             <el-col :span="24">
-              <el-form-item label="附件JSON">
-                <el-input
-                  v-model="messageDataText"
-                  type="textarea"
-                  :rows="3"
-                  placeholder='可选，如 {"traceIds":["..."],"evidence":"..."}'
-                />
-              </el-form-item>
+              <el-collapse v-model="advancedCollapse" class="collab-advanced">
+                <el-collapse-item name="advanced" title="高级选项（附件 JSON）">
+                  <el-form-item label="附件JSON" label-width="90px">
+                    <el-input
+                      v-model="messageDataText"
+                      type="textarea"
+                      :rows="3"
+                      placeholder='可选，如 {"traceIds":["..."],"evidence":"..."}'
+                    />
+                  </el-form-item>
+                </el-collapse-item>
+              </el-collapse>
             </el-col>
             <el-col :span="24">
               <el-form-item>
@@ -543,27 +553,42 @@
 
         <el-card shadow="never">
           <template #header>消息流</template>
-          <el-empty v-if="!messageItems.length" description="暂无消息" />
+          <el-empty v-if="!messageItems.length" description="暂无AI分析相关消息" />
           <div v-for="item in messageItems" :key="item.id" class="mb12">
             <div class="record-head">
               <span>{{ item.roleLabel }}</span>
               <el-tag size="small">{{ item.typeLabel }}</el-tag>
               <span>{{ parseTime(item.createTime) }}</span>
+              <el-button
+                v-if="item.attachments"
+                link
+                type="primary"
+                size="small"
+                @click="openMessageDetail(item)"
+              >
+                详情
+              </el-button>
             </div>
             <div>{{ item.content || '-' }}</div>
-            <pre v-if="item.attachments" class="json-block">{{ formatJson(item.attachments) }}</pre>
           </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <el-dialog v-model="detailDialogVisible" :title="detailDialogTitle" width="720px" append-to-body>
+      <pre class="json-block">{{ detailDialogContent }}</pre>
+      <template #footer>
+        <el-button @click="detailDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
-  .collab-toolbar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
+  .collab-advanced {
+    width: 100%;
+    border-top: none;
+    border-bottom: none;
   }
 
   .record-head {
@@ -577,8 +602,9 @@
 
   .json-block {
     padding: 10px;
-    margin: 10px 0 0;
+    margin: 0;
     overflow: auto;
+    max-height: 60vh;
     background: #f6f8fa;
     border-radius: 4px;
   }
