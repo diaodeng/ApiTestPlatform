@@ -565,11 +565,14 @@ export function listTicketLogPullRecords(query) {
 }
 
 // 查询日志拉取商家/门店联动选项
-export function getTicketLogPullVendorStoreOptions(venderNo) {
+export function getTicketLogPullVendorStoreOptions(venderNo, environment) {
+  const params = {};
+  if (venderNo) params.vender_no = venderNo;
+  if (environment) params.environment = environment;
   return request({
     url: '/ticket/log-pull/vendor-store-options',
     method: 'get',
-    params: venderNo ? { vender_no: venderNo } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   });
 }
 

@@ -734,12 +734,13 @@ class TicketLogPullService:
 
     @classmethod
     def get_vendor_store_options_services(
-        cls, query_db: Session, vender_no: str | None = None
+        cls, query_db: Session, vender_no: str | None = None, environment: str | None = None
     ) -> TicketLogPullVendorStoreOptionsModel:
         """
         获取日志拉取页面使用的商家及按需加载的门店选项。
         :param query_db: 数据库会话
         :param vender_no: 可选商户编号，传入后只查询该商户的门店
+        :param environment: 可选环境分组 key，传入后门店只返回该环境的配置
         :return: 商家/门店联动配置
         """
         cls.ensure_param_config_rows(query_db)
@@ -750,7 +751,11 @@ class TicketLogPullService:
         raw_examples = cls._json_loads(getattr(config_row, "config_value", None), [])
         resolved_vender_no = str(vender_no or "").strip()
         stores = (
-            cls._build_store_options(TicketLogPullDao.list_store_configs_by_vender_no(query_db, resolved_vender_no))
+            cls._build_store_options(
+                TicketLogPullDao.list_store_configs_by_vender_no(
+                    query_db, resolved_vender_no, environment=environment
+                )
+            )
             if resolved_vender_no
             else []
         )
@@ -799,6 +804,7 @@ class TicketLogPullService:
         file_content: bytes,
         import_mode: str,
         current_user: CurrentUserModel,
+        environment: str | None = None,
     ) -> CrudResponseModel:
         """
         导入门店配置。
@@ -806,8 +812,12 @@ class TicketLogPullService:
         :param file_content: Excel 文件内容
         :param import_mode: 导入方式，incremental 或 overwrite
         :param current_user: 当前登录用户
+        :param environment: 环境分组 key，本次导入的门店归属该环境
         :return: 导入结果
         """
+        resolved_environment = str(environment or "").strip()
+        if not resolved_environment:
+            return CrudResponseModel(is_success=False, message="导入门店配置必须选择环境")
         workbook = load_workbook(filename=BytesIO(file_content), data_only=True)
         sheet = workbook.active
         header_map = cls._build_store_header_map([cell.value for cell in sheet[1]])
@@ -823,12 +833,15 @@ class TicketLogPullService:
             return CrudResponseModel(is_success=False, message="导入方式仅支持 incremental 或 overwrite")
 
         try:
-            existing_store_map: dict[tuple[str, str, str], TicketLogPullStoreConfig] = {}
+            existing_store_map: dict[tuple[str, str, str, str], TicketLogPullStoreConfig] = {}
             if normalized_mode == "overwrite":
-                deleted_count = TicketLogPullDao.delete_all_store_configs(query_db)
+                # 覆盖导入只清空所选环境的旧数据，其他环境配置保持不变。
+                deleted_count = TicketLogPullDao.delete_store_configs_by_environment(
+                    query_db, resolved_environment
+                )
                 query_db.commit()
                 logger.info(
-                    f"门店配置导入-覆盖模式：清空旧数据 {deleted_count} 条"
+                    f"门店配置导入-覆盖模式：清空环境 {resolved_environment} 旧数据 {deleted_count} 条"
                 )
             else:
                 # 先把已有配置放入内存，避免逐行查库和重复 flush。
@@ -843,6 +856,7 @@ class TicketLogPullService:
                 "updatedCount": 0,
                 "failedRows": [],
                 "importMode": normalized_mode,
+                "environment": resolved_environment,
             }
             now = datetime.now()
             # 每 BATCH_SIZE 条提交一次，避免单次事务过大导致超时
@@ -851,7 +865,7 @@ class TicketLogPullService:
                 batch = rows[batch_start:batch_start + BATCH_SIZE]
                 for row_index, row in batch:
                     try:
-                        store = cls._build_store_config_entity(row, now)
+                        store = cls._build_store_config_entity(row, now, environment=resolved_environment)
                         match_key = cls._build_store_config_match_key(store)
                         if not any(match_key):
                             raise ValueError("vender_no/org_no/sap_org_no 至少需要填写一个")
@@ -859,6 +873,7 @@ class TicketLogPullService:
                         existing = existing_store_map.get(match_key)
                         if existing:
                             for field in (
+                                "environment",
                                 "group_no",
                                 "vender_no",
                                 "region_no",
@@ -989,14 +1004,18 @@ class TicketLogPullService:
             raise
 
     @classmethod
-    def _build_store_config_entity(cls, row: dict[str, Any], now: datetime) -> TicketLogPullStoreConfig:
+    def _build_store_config_entity(
+        cls, row: dict[str, Any], now: datetime, *, environment: str = ""
+    ) -> TicketLogPullStoreConfig:
         """
         根据导入行构建门店配置实体。
         :param row: 导入行数据
         :param now: 当前时间
+        :param environment: 环境分组 key，本次导入归属的环境
         :return: 门店配置实体
         """
         return TicketLogPullStoreConfig(
+            environment=str(environment or "").strip(),
             group_no=cls._cell_text(row.get("group_no")),
             vender_no=cls._cell_text(row.get("vender_no")),
             region_no=cls._cell_text(row.get("region_no")),
@@ -1018,14 +1037,15 @@ class TicketLogPullService:
         )
 
     @classmethod
-    def _build_store_config_match_key(cls, store: TicketLogPullStoreConfig) -> tuple[str, str, str]:
+    def _build_store_config_match_key(cls, store: TicketLogPullStoreConfig) -> tuple[str, str, str, str]:
         """
         构建门店配置去重键。
         :param store: 门店配置实体
         :return: 去重键值元组
         """
-        # 唯一键由 vender_no + org_no + sap_org_no 共同组成，必须三者同时一致才认为重复。
+        # 唯一键由 environment + vender_no + org_no + sap_org_no 共同组成，必须四者同时一致才认为重复。
         return (
+            cls._cell_text(getattr(store, "environment", "")),
             cls._cell_text(getattr(store, "vender_no", "")),
             cls._cell_text(getattr(store, "org_no", "")),
             cls._cell_text(getattr(store, "sap_org_no", "")),

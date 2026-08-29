@@ -22,7 +22,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="环境" prop="environment">
-        <el-select v-model="queryParams.environment" placeholder="全部环境" clearable style="width: 160px">
+        <el-select v-model="queryParams.environment" placeholder="全部环境" clearable style="width: 160px" @change="handleQueryEnvironmentChange">
           <el-option v-for="item in environmentOptions" :key="item.key" :label="item.label" :value="item.key" />
         </el-select>
       </el-form-item>
@@ -328,6 +328,11 @@
       @closed="resetStoreConfigQuery"
     >
       <el-form :model="storeConfigQuery" :inline="true" class="mb16">
+        <el-form-item label="环境">
+          <el-select v-model="storeConfigQuery.environment" placeholder="全部环境" clearable style="width: 160px" @change="handleStoreConfigQuery">
+            <el-option v-for="item in environmentOptions" :key="item.key" :label="item.label" :value="item.key" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="集团编号">
           <el-input v-model="storeConfigQuery.groupNo" placeholder="group_no" clearable style="width: 180px" @keyup.enter="handleStoreConfigQuery" />
         </el-form-item>
@@ -353,6 +358,9 @@
 
       <el-table v-loading="storeConfigLoading" :data="storeConfigList" row-key="id">
         <el-table-column label="ID" prop="id" width="110" />
+        <el-table-column label="环境" width="110" align="center">
+          <template #default="scope">{{ getEnvironmentLabel(scope.row.environment) }}</template>
+        </el-table-column>
         <el-table-column label="集团编号" prop="groupNo" width="120" show-overflow-tooltip />
         <el-table-column label="商户编号" prop="venderNo" width="140" show-overflow-tooltip />
         <el-table-column label="区域编号" prop="regionNo" width="120" show-overflow-tooltip />
@@ -389,10 +397,15 @@
         type="info"
         :closable="false"
         show-icon
-        title="增量导入会按 vender_no / org_no / sap_org_no 匹配，存在则覆盖；覆盖导入会先清空旧数据再导入。"
+        title="增量导入会按 环境 / vender_no / org_no / sap_org_no 匹配，存在则覆盖；覆盖导入会先清空所选环境旧数据再导入。"
         class="mb16"
       />
       <el-form :model="storeConfigImportForm" label-width="100px">
+        <el-form-item label="环境" required>
+          <el-select v-model="storeConfigImportEnvironment" placeholder="选择导入到哪个环境" style="width: 100%">
+            <el-option v-for="item in environmentOptions" :key="item.key" :label="item.label" :value="item.key" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="导入方式">
           <el-radio-group v-model="storeConfigImportMode">
             <el-radio value="incremental">增量导入</el-radio>
@@ -509,6 +522,7 @@ const storeConfigImportOpen = ref(false)
 const storeConfigImporting = ref(false)
 const storeConfigImportResult = ref(null)
 const storeConfigImportMode = ref('incremental')
+const storeConfigImportEnvironment = ref('')
 const storeConfigImportForm = ref({})
 const storeConfigUploadRef = ref()
 
@@ -530,6 +544,7 @@ const queryParams = ref({
 const storeConfigQuery = ref({
   pageNum: 1,
   pageSize: 10,
+  environment: '',
   groupNo: '',
   venderNo: '',
   orgNo: '',
@@ -682,6 +697,7 @@ function resetStoreConfigQuery() {
   storeConfigQuery.value = {
     pageNum: 1,
     pageSize: 10,
+    environment: '',
     groupNo: '',
     venderNo: '',
     orgNo: '',
@@ -691,10 +707,23 @@ function resetStoreConfigQuery() {
   loadStoreConfigList()
 }
 
+/**
+ * 环境分组 key 转展示名称，未匹配时回退原始 key，空值显示占位符。
+ * @param {string} environment 环境分组 key
+ * @returns {string} 展示名称
+ */
+function getEnvironmentLabel(environment) {
+  const key = String(environment || '').trim()
+  if (!key) return '-'
+  const matched = environmentOptions.value.find(item => item.key === key)
+  return matched?.label || key
+}
+
 function resetStoreConfigImportDialog() {
   storeConfigImportForm.value = {}
   storeConfigImportResult.value = null
   storeConfigImportMode.value = 'incremental'
+  // 环境保持上一次选择，方便同环境连续导入；选项加载后默认第一个环境。
   if (storeConfigUploadRef.value) {
     storeConfigUploadRef.value.clearFiles?.()
   }
@@ -739,9 +768,15 @@ function submitStoreConfigImport() {
     proxy.$modal.msgWarning('请先选择 xlsx 文件')
     return
   }
+  const environment = String(storeConfigImportEnvironment.value || '').trim()
+  if (!environment) {
+    proxy.$modal.msgWarning('请选择导入的环境')
+    return
+  }
   const formData = new FormData()
   formData.append('file', rawFile)
   formData.append('import_mode', storeConfigImportMode.value)
+  formData.append('environment', environment)
   storeConfigImporting.value = true
   importTicketLogPullStoreConfigs(formData).then(response => {
     storeConfigImportResult.value = response.data || null
@@ -806,8 +841,10 @@ function loadQueryStoreOptions(venderNo) {
   if (!resolvedVenderNo) {
     return Promise.resolve()
   }
+  // 查询区的门店随所选环境过滤；未选环境时后端返回全部环境门店。
+  const queryEnvironment = String(queryParams.value.environment || '').trim()
   queryStoreLoading.value = true
-  return getTicketLogPullVendorStoreOptions(resolvedVenderNo).then(response => {
+  return getTicketLogPullVendorStoreOptions(resolvedVenderNo, queryEnvironment).then(response => {
     const rows = Array.isArray(response.data?.stores) ? response.data.stores : []
     queryStoreOptions.value = rows.map(store => ({
       storeId: String(store.storeId || '').trim(),
@@ -824,6 +861,12 @@ function loadQueryStoreOptions(venderNo) {
 function handleQueryVendorChange(venderNo) {
   queryParams.value.storeId = undefined
   loadQueryStoreOptions(venderNo)
+}
+
+// 查询区环境变化后重新加载门店选项，避免门店列表跨环境混入旧数据
+function handleQueryEnvironmentChange() {
+  queryParams.value.storeId = undefined
+  loadQueryStoreOptions(queryParams.value.vendorId)
 }
 
 function openCreateDialog() {

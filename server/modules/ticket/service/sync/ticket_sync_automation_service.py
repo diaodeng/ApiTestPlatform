@@ -274,10 +274,15 @@ class TicketSyncAutomationService:
                 or str(getattr(project, "project_name", "") or "").strip()
             )
         if apply_external_mappings:
+            # 自动分析环境与日志拉取配置的默认环境一致，取其分组部分（冒号前）用于门店过滤。
+            default_log_pull_environment = str(
+                (config.get("logPullDefaults") or {}).get("environment") or ""
+            ).strip().split(":", 1)[0].strip()
             store_id, store_name = TicketSyncFieldMappingService.resolve_store_by_external_value(
                 db,
                 vendor_id=vendor_id,
                 ticket_store=ticket_store,
+                environment=default_log_pull_environment,
             )
         else:
             store_id, store_name = "", ""
@@ -286,6 +291,7 @@ class TicketSyncAutomationService:
                 db,
                 vendor_id=vendor_id,
                 ticket_store=ticket_store,
+                environment=default_log_pull_environment,
             )
             if apply_external_mappings
             else []
@@ -768,10 +774,15 @@ class TicketSyncAutomationService:
                     elif resolved_store_id and not store_mapping_ambiguous:
                         # 按商家过滤后的门店中校验 org_no 是否匹配。
                         if resolved_vendor_id:
+                            # 门店配置按环境隔离，使用运行时环境分组（group:item 的 group 部分）校验。
+                            runtime_environment_group = str(
+                                runtime_config.get("environment") or ""
+                            ).strip().split(":", 1)[0].strip()
                             store_verified = TicketLogPullDao.verify_store_by_org_no(
                                 db,
                                 vendor_no=str(resolved_vendor_id),
                                 org_no=resolved_store_id,
+                                environment=runtime_environment_group,
                             )
                             if not store_verified:
                                 missing_log_pull_fields.append("storeId(门店未匹配到正确的org_no)")

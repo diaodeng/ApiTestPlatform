@@ -196,6 +196,7 @@ class TicketLogPullStoreConfigBaseModel(TicketLogPullBaseModel):
     """
 
     id: int | None = None
+    environment: str = Field(default="", description="环境分组key，来自日志拉取外部接口配置的分组")
     group_no: str = Field(default="", description="集团编号")
     vender_no: str = Field(default="", description="商户编号")
     region_no: str = Field(default="", description="区域编号")
@@ -222,6 +223,7 @@ class TicketLogPullStoreConfigQueryModel(QueryModel):
     工单日志拉取门店配置查询模型。
     """
 
+    environment: str | None = Field(default=None, description="环境分组key，精确匹配")
     group_no: str | None = Field(default=None, description="集团编号")
     vender_no: str | None = Field(default=None, description="商户编号")
     org_no: str | None = Field(default=None, description="机构编号")
