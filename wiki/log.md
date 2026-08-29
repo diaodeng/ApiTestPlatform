@@ -1,7 +1,8 @@
 ## [2026-08-29] FEAT | 协同/AI 标签页简化与消息流收敛
 
 - 触发：用户指出协同/AI tab 中“发起AI分析”按钮与“提交消息”（runAi=true）后端等价（均走 `TicketAiAnalysisService.create_analysis_task_services`），按钮冗余；表单字段平铺过长；消息流混入同步导入、快照等系统消息；AI 结果 JSON 直接平铺撑开页面。
-- 实现：`TicketDetailCollabTab.vue` 移除顶部“发起AI分析”按钮和 `run-ai` 事件，`任务历史` 按钮移入角色/类型所在行；版本+Agent、Provider+模型 同行两列布局；附件 JSON 放入默认收起的 `el-collapse` 高级选项；消息流按 `messageType in (question/analysis/conclusion)` 过滤（快照 snapshot、同步导入 sync_import、事件动作、系统建单不再展示）；消息附件不再平铺，改为“详情”按钮 + `el-dialog` 弹窗查看格式化 JSON。
+- 实现：`TicketDetailCollabTab.vue` 移除顶部“发起AI分析”按钮和 `run-ai` 事件，`任务历史` 按钮移入角色/类型所在行；内容列 span 16→24 铺满整行（原右侧 8 栅格为相似工单卡片）；版本+Agent、Provider+模型 同行两列布局；附件 JSON 放入默认收起的 `el-collapse` 高级选项；消息流按 `messageType in (question/analysis/conclusion)` 过滤（快照 snapshot、同步导入 sync_import、事件动作、系统建单不再展示）；消息附件不再平铺，改为“详情”按钮 + `el-dialog` 弹窗查看格式化 JSON。
+- 修正：初版误删了第一行“发起AI”开关（`runAi` 控件，控制提交消息是否触发AI追问，默认开启）；开关不是与“发起AI分析”按钮等价的冗余项而是独立功能，已恢复到第一行，提交提示逻辑同步恢复按开关状态判断。
 - 调用方同步：`TicketDetailWithList.vue` 协同 tab 不再监听 `run-ai`；概览 tab 的发起弹窗入口保留（用于日志时间窗等高级参数场景）。
 - 契约：后端零改动，`POST /ticket/{ticket_id}/messages` 与页面接口契约不变，过滤纯前端完成。
 - 验证：`npx vite build --mode production` 构建通过；更新 `web/public/docs/ticket_detail.md` 协同/AI 章节、新增更新记录 `2026-08-29-collab-tab-simplify.md`。

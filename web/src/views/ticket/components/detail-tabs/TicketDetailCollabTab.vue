@@ -294,8 +294,8 @@
     }).then((response) => {
       const payload = response.data || response || {};
       const aiResult = payload.result || {};
-      // 表单已默认携带 runAi=true，AI 追问失败时提示原因，成功时提示任务已提交。
-      if (!aiResult.aiSuccess) {
+      // 按表单“发起AI”开关决定是否提示AI追问结果；开关关闭时只提示消息提交成功。
+      if (messageForm.value.runAi && !aiResult.aiSuccess) {
         proxy.$modal.msgWarning(
           aiResult.aiMessage || payload.message || '消息已保存，但AI追问未发起'
         );
@@ -390,10 +390,10 @@
 <template>
   <div v-loading="loading">
     <el-row :gutter="16">
-      <el-col :span="16">
+      <el-col :span="24">
         <el-form :model="messageForm" label-width="90px" class="mb16">
           <el-row :gutter="12">
-            <el-col :span="8">
+            <el-col :span="6">
               <el-form-item label="角色">
                 <el-select v-model="messageForm.role">
                   <el-option label="提问人" value="user" />
@@ -404,7 +404,7 @@
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="6">
               <el-form-item label="类型">
                 <el-select v-model="messageForm.messageType">
                   <el-option label="追问" value="question" />
@@ -415,7 +415,17 @@
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="8">
+            <el-col :span="6">
+              <el-form-item label="发起AI">
+                <el-switch
+                  v-model="messageForm.runAi"
+                  inline-prompt
+                  active-text="是"
+                  inactive-text="否"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
               <el-form-item label-width="0">
                 <el-button
                   @click="emit('open-ai-history')"
