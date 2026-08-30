@@ -1317,6 +1317,44 @@
           <el-descriptions-item label="内部优先级">{{
             detail.internalPriority || '-'
           }}</el-descriptions-item>
+          <el-descriptions-item label="问题实例操作" :span="3">
+            <el-button
+              v-if="!detail.issueId"
+              link
+              type="primary"
+              @click="openIssueCreateBindDialog"
+              v-hasPermi="['ticket:issue:add']"
+            >
+              新建问题实例并绑定
+            </el-button>
+            <el-button
+              v-if="!detail.issueId"
+              link
+              type="primary"
+              @click="openIssueBindExistingDialog"
+              v-hasPermi="['ticket:issue:bind']"
+            >
+              关联已有问题
+            </el-button>
+            <el-button
+              v-if="detail.issueId"
+              link
+              type="warning"
+              @click="openIssueBindExistingDialog"
+              v-hasPermi="['ticket:issue:bind']"
+            >
+              更换问题
+            </el-button>
+            <el-button
+              v-if="detail.issueId"
+              link
+              type="danger"
+              @click="handleUnbindIssue"
+              v-hasPermi="['ticket:issue:remove']"
+            >
+              解除归因
+            </el-button>
+          </el-descriptions-item>
           <template v-if="detailMoreInfoExpanded">
             <el-descriptions-item label="1线人员">{{
               detail.firstLineAssigneeName || '-'
@@ -1392,44 +1430,6 @@
             <el-descriptions-item label="解决方案" :span="3">{{
               detail.solution || '-'
             }}</el-descriptions-item>
-            <el-descriptions-item label="问题实例操作" :span="3">
-              <el-button
-                v-if="!detail.issueId"
-                link
-                type="primary"
-                @click="openIssueCreateBindDialog"
-                v-hasPermi="['ticket:issue:add']"
-              >
-                新建问题实例并绑定
-              </el-button>
-              <el-button
-                v-if="!detail.issueId"
-                link
-                type="primary"
-                @click="openIssueBindExistingDialog"
-                v-hasPermi="['ticket:issue:bind']"
-              >
-                关联已有问题
-              </el-button>
-              <el-button
-                v-if="detail.issueId"
-                link
-                type="warning"
-                @click="openIssueBindExistingDialog"
-                v-hasPermi="['ticket:issue:bind']"
-              >
-                更换问题
-              </el-button>
-              <el-button
-                v-if="detail.issueId"
-                link
-                type="danger"
-                @click="handleUnbindIssue"
-                v-hasPermi="['ticket:issue:remove']"
-              >
-                解除归因
-              </el-button>
-            </el-descriptions-item>
           </template>
         </el-descriptions>
         <div class="ticket-detail-description">

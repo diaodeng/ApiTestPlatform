@@ -347,6 +347,7 @@ graph TD
   - `TicketAiDao.list_recoverable_tasks` 增加 prompt/raw_output/analysis_context 的 defer；`_serialize_task_summary` 显式剔除 `promptText/rawOutput/analysisContext`，防止摘要序列化时延迟列逐行回表。
   - `_update_execution_record` 对审计写入集中裁剪：响应文本按 `EXECUTION_TEXT_MAX_CHARS`（20000 字符）截断；`request_payload/response_payload/token_usage` 经 `_compact_execution_payload` 把超过 20000 字符的字符串字段替换为占位文本、超 200 项的列表截断。AI 分析请求载荷中的 80 万字节日志正文不再整包写入内存和审计长文本列。
   - 成功任务的 `raw_output` 写库前截断到 5000 字符，完整内容以工作区 result 文件与分析结果结构化字段为准。
+- 2026-08-30 修复 `_serialize_task_summary` 结论字段键名不匹配：`analysis_result` 入库键为 snake_case（`analysis_summary/root_cause/fix_suggestion`），摘要提取曾用驼峰键导致概览 `latestAiAnalysis` 三个结论字段恒为空；现以 snake_case 优先、驼峰兼容读取。`TicketReadService.get_summary` 的 `latestAiAnalysis` 与工单列表 `get_list_services` 摘要同源受益。注意轻量概览不返回 `latestSnapshot`，概览快照字段展示依赖独立快照接口或完整详情链路。
 
 ## 参见
 

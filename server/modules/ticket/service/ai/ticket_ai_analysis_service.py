@@ -3318,13 +3318,15 @@ class TicketAiAnalysisService:
         for heavy_key in ("promptText", "rawOutput", "analysisContext"):
             item.pop(heavy_key, None)
         result_payload = item.get("analysisResult") if isinstance(item, dict) else None
+        if not isinstance(result_payload, dict):
+            result_payload = {}
+        # analysis_result 入库键为 snake_case（_normalize_analysis_result 写入），
+        # 兼容驼峰键仅防止历史上存在异常写入；取值顺序 snake_case 优先。
         item["analysisSummary"] = (
-            (result_payload or {}).get("analysisSummary") if isinstance(result_payload, dict) else None
+            result_payload.get("analysis_summary") or result_payload.get("analysisSummary")
         )
-        item["rootCause"] = (result_payload or {}).get("rootCause") if isinstance(result_payload, dict) else None
-        item["fixSuggestion"] = (
-            (result_payload or {}).get("fixSuggestion") if isinstance(result_payload, dict) else None
-        )
+        item["rootCause"] = result_payload.get("root_cause") or result_payload.get("rootCause")
+        item["fixSuggestion"] = result_payload.get("fix_suggestion") or result_payload.get("fixSuggestion")
         return item
 
     @classmethod
