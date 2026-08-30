@@ -117,15 +117,22 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="AI分析" name="collab">
+        <TicketDetailCollabTab
+          :ticket-id="props.ticketId"
+          :active="activeTab === 'collab'"
+          :detail="detail"
+          :show-ai-history="false"
+          @changed="loadDetail"
+        />
+      </el-tab-pane>
+
       <el-tab-pane label="评论" name="comments">
-        <el-empty v-if="!commentList.length" description="暂无评论" />
-        <div v-for="item in commentList" :key="item.commentId || item.id" class="comment-item">
-          <div class="comment-meta">
-            <strong>{{ item.createdByName || item.operatorName || item.createBy || '-' }}</strong>
-            <span>{{ formatDateTime(item.createTime) }}</span>
-          </div>
-          <div class="pre-line">{{ item.content || '-' }}</div>
-        </div>
+        <TicketDetailCommentsTab
+          :ticket-id="props.ticketId"
+          :active="activeTab === 'comments'"
+          @changed="loadDetail"
+        />
       </el-tab-pane>
 
       <el-tab-pane label="历史" name="history">
@@ -221,7 +228,9 @@
 <script setup>
   import { computed, getCurrentInstance, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
-  import { bindTicketIssue, getTicket, getTicketComments, getTicketTimeline, listTicketIssues } from '@/api/ticket/ticket';
+  import { bindTicketIssue, getTicket, getTicketTimeline, listTicketIssues } from '@/api/ticket/ticket';
+  import TicketDetailCollabTab from './detail-tabs/TicketDetailCollabTab.vue';
+  import TicketDetailCommentsTab from './detail-tabs/TicketDetailCommentsTab.vue';
   import { useWorkflow } from '../hooks/useWorkflow';
 
   const props = defineProps({
@@ -241,8 +250,6 @@
   const descriptionExpanded = ref(true);
   const translationExpanded = ref(true);
   const detail = ref({});
-  const commentList = ref([]);
-  const commentLoaded = ref(false);
   const timeline = ref({});
   const timelineLoaded = ref(false);
   // 问题实例关联弹窗状态
@@ -463,19 +470,6 @@
   }
 
   /**
-   * 按需加载评论，避免首次打开详情页时请求无关数据。
-   */
-  function loadComments() {
-    if (commentLoaded.value || !props.ticketId) {
-      return;
-    }
-    getTicketComments(props.ticketId).then((response) => {
-      commentList.value = response.data || [];
-      commentLoaded.value = true;
-    });
-  }
-
-  /**
    * 按需加载历史时间线，保持纯净详情页首屏轻量。
    */
   function loadTimeline() {
@@ -492,9 +486,6 @@
    * 切换详情页标签时补充加载当前标签需要的数据。
    */
   function handleTabChange(tabName) {
-    if (tabName === 'comments') {
-      loadComments();
-    }
     if (tabName === 'history') {
       loadTimeline();
     }
@@ -552,8 +543,6 @@
       activeTab.value = 'overview';
       descriptionExpanded.value = true;
       translationExpanded.value = true;
-      commentList.value = [];
-      commentLoaded.value = false;
       timeline.value = {};
       timelineLoaded.value = false;
       loadDetail();

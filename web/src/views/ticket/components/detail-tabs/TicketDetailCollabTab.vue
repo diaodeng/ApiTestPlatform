@@ -1,6 +1,7 @@
 <script setup name="TicketDetailCollabTab">
   import { computed, ref, watch } from 'vue';
   import { getCurrentInstance } from 'vue';
+  import { Operation, Setting } from '@element-plus/icons-vue';
   import {
     addTicketMessage,
     addTicketSnapshot,
@@ -29,6 +30,10 @@
       type: Object,
       default: null,
     },
+    showAiHistory: {
+      type: Boolean,
+      default: true,
+    },
   });
 
   const emit = defineEmits(['changed', 'open-ai-history']);
@@ -55,6 +60,9 @@
   const detailDialogVisible = ref(false);
   const detailDialogTitle = ref('');
   const detailDialogContent = ref('');
+  const messageSubmitting = ref(false);
+  const snapshotSaving = ref(false);
+  const knowledgeGenerating = ref(false);
   const {
     modelOptions: messageModelOptions,
     loadModelOptions: loadMessageModelOptions,
@@ -79,7 +87,11 @@
     (ticketMessages.value || [])
       // 消息流只展示 AI 分析链路相关消息：用户提问、AI 分析结论、结论等；
       // 快照、同步导入、事件动作等系统类消息不在本区域重复展示。
-      .filter((item) => ['question', 'analysis', 'conclusion'].includes(item.messageType))
+      .filter(
+        (item) =>
+          (item.role === 'user' && item.messageType === 'question') ||
+          (item.role === 'ai' && ['analysis', 'conclusion'].includes(item.messageType))
+      )
       .map((item) => ({
         ...item,
         roleLabel: item.role || 'user',
@@ -274,6 +286,7 @@
    * @returns {void}
    */
   function submitMessage() {
+    if (messageSubmitting.value) return;
     if (!resolvedTicketId.value) {
       proxy.$modal.msgWarning('工单ID无效，无法提交消息');
       return;
@@ -287,25 +300,28 @@
     const attachments = parseMessageAttachments();
     if (attachments === null) return;
     saveTicketAiPreferencePatch({ aiModelName: messageForm.value.aiModelName || '' });
+    messageSubmitting.value = true;
     addTicketMessage(resolvedTicketId.value, {
       ...messageForm.value,
+      role: 'user',
+      messageType: 'question',
+      runAi: true,
       content,
       attachments,
     }).then((response) => {
       const payload = response.data || response || {};
       const aiResult = payload.result || {};
-      // 按表单“发起AI”开关决定是否提示AI追问结果；开关关闭时只提示消息提交成功。
-      if (messageForm.value.runAi && !aiResult.aiSuccess) {
+      if (!aiResult.aiSuccess) {
         proxy.$modal.msgWarning(
           aiResult.aiMessage || payload.message || '消息已保存，但AI追问未发起'
         );
       } else {
-        proxy.$modal.msgSuccess(
-          payload.message || (aiResult.aiSuccess ? 'AI追问任务已提交' : '消息提交成功')
-        );
+        proxy.$modal.msgSuccess(payload.message || '已发送，AI分析任务已提交');
       }
       resetMessageForm();
       refreshAfterChanged();
+    }).finally(() => {
+      messageSubmitting.value = false;
     });
   }
 
@@ -314,10 +330,12 @@
    * @returns {Promise<void>} 保存完成 Promise。
    */
   function saveSnapshotFromCurrentState() {
+    if (snapshotSaving.value) return Promise.resolve();
     if (!resolvedTicketId.value) {
       proxy.$modal.msgWarning('工单ID无效，无法保存快照');
       return Promise.resolve();
     }
+    snapshotSaving.value = true;
     return addTicketSnapshot(resolvedTicketId.value, {
       summary: latestSnapshotSummary.value || detail.value.description || '',
       rootCause: detail.value.rootCause || '',
@@ -334,6 +352,8 @@
     }).then(() => {
       proxy.$modal.msgSuccess('快照已保存');
       refreshAfterChanged();
+    }).finally(() => {
+      snapshotSaving.value = false;
     });
   }
 
@@ -342,13 +362,17 @@
    * @returns {void}
    */
   function generateKnowledgeFromTicket() {
+    if (knowledgeGenerating.value) return;
     if (!resolvedTicketId.value) {
       proxy.$modal.msgWarning('工单ID无效，无法生成知识库案例');
       return;
     }
+    knowledgeGenerating.value = true;
     extractTicketKnowledge(resolvedTicketId.value).then(() => {
       proxy.$modal.msgSuccess('知识库案例已生成');
       refreshAfterChanged();
+    }).finally(() => {
+      knowledgeGenerating.value = false;
     });
   }
 
@@ -388,187 +412,29 @@
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-row :gutter="16">
-      <el-col :span="24">
-        <el-form :model="messageForm" label-width="90px" class="mb16">
-          <el-row :gutter="12">
-            <el-col :span="6">
-              <el-form-item label="角色">
-                <el-select v-model="messageForm.role">
-                  <el-option label="提问人" value="user" />
-                  <el-option label="AI" value="ai" />
-                  <el-option label="开发" value="developer" />
-                  <el-option label="测试" value="tester" />
-                  <el-option label="系统" value="system" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="6">
-              <el-form-item label="类型">
-                <el-select v-model="messageForm.messageType">
-                  <el-option label="追问" value="question" />
-                  <el-option label="分析" value="analysis" />
-                  <el-option label="日志" value="log" />
-                  <el-option label="结论" value="conclusion" />
-                  <el-option label="动作" value="action" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="6">
-              <el-form-item label="发起AI">
-                <el-switch
-                  v-model="messageForm.runAi"
-                  inline-prompt
-                  active-text="是"
-                  inactive-text="否"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="6">
-              <el-form-item label-width="0">
-                <el-button
-                  @click="emit('open-ai-history')"
-                  v-hasPermi="['ticket:ai:analysis:list']"
-                >
-                  任务历史
-                </el-button>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="版本">
-                <el-select
-                  v-model="messageForm.versionId"
-                  placeholder="请选择版本"
-                  filterable
-                  clearable
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="item in detailVersionOptions"
-                    :key="item.value"
-                    :label="item.label"
-                    :value="item.value"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="Agent">
-                <el-select
-                  v-model="messageForm.agentCode"
-                  placeholder="可选"
-                  filterable
-                  clearable
-                  @change="handleMessageAgentChange"
-                >
-                  <el-option
-                    v-for="item in agentOptions"
-                    :key="item.agentCode"
-                    :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
-                    :value="item.agentCode"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="Provider">
-                <el-select
-                  v-model="messageForm.aiProviderCode"
-                  placeholder="可选"
-                  filterable
-                  clearable
-                  style="width: 100%"
-                  @change="handleMessageProviderChange"
-                >
-                  <el-option
-                    v-for="item in providerOptions"
-                    :key="item.providerCode"
-                    :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
-                    :value="item.providerCode"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="模型">
-                <el-select
-                  v-model="messageForm.aiModelName"
-                  placeholder="留空使用默认模型"
-                  filterable
-                  clearable
-                  style="width: 100%"
-                  :disabled="!messageForm.aiProviderCode"
-                  @change="handleMessageModelChange"
-                >
-                  <el-option
-                    v-for="item in (messageModelOptions || [])"
-                    :key="item.modelId"
-                    :label="item.displayName || item.modelId"
-                    :value="item.modelId"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="内容">
-                <el-input
-                  v-model="messageForm.content"
-                  type="textarea"
-                  :rows="4"
-                  placeholder="补充追问、开发反馈、排查动作或AI结论"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-collapse v-model="advancedCollapse" class="collab-advanced">
-                <el-collapse-item name="advanced" title="高级选项（附件 JSON）">
-                  <el-form-item label="附件JSON" label-width="90px">
-                    <el-input
-                      v-model="messageDataText"
-                      type="textarea"
-                      :rows="3"
-                      placeholder='可选，如 {"traceIds":["..."],"evidence":"..."}'
-                    />
-                  </el-form-item>
-                </el-collapse-item>
-              </el-collapse>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item>
-                <el-button type="primary" @click="submitMessage" v-hasPermi="['ticket:message:add']"
-                  >提交消息</el-button
-                >
-                <el-button @click="resetMessageForm">重置</el-button>
-                <el-button
-                  type="success"
-                  plain
-                  @click="saveSnapshotFromCurrentState"
-                  v-hasPermi="['ticket:snapshot:add']"
-                >
-                  生成快照
-                </el-button>
-                <el-button
-                  type="warning"
-                  plain
-                  @click="generateKnowledgeFromTicket"
-                  v-hasPermi="['ticket:knowledge:add']"
-                >
-                  生成知识库
-                </el-button>
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </el-form>
+  <div v-loading="loading" class="ai-analysis-tab">
+    <section class="ai-records-panel">
+      <div class="ai-section-heading">
+        <div>
+          <div class="ai-section-title">AI分析记录</div>
+          <div class="ai-section-caption">查看追问、分析结果和结构化结论，继续追问可发起新一轮分析</div>
+        </div>
+      </div>
 
-        <el-card shadow="never">
-          <template #header>消息流</template>
-          <el-empty v-if="!messageItems.length" description="暂无AI分析相关消息" />
-          <div v-for="item in messageItems" :key="item.id" class="mb12">
+      <el-card shadow="never" class="ai-records-card">
+        <el-empty v-if="!messageItems.length" description="暂无AI分析记录，输入追问后发送" />
+        <div v-else class="ai-record-list">
+          <article
+            v-for="item in messageItems"
+            :key="item.id"
+            :class="['ai-record', item.role === 'ai' ? 'ai-record--assistant' : 'ai-record--user']"
+          >
             <div class="record-head">
-              <span>{{ item.roleLabel }}</span>
-              <el-tag size="small">{{ item.typeLabel }}</el-tag>
-              <span>{{ parseTime(item.createTime) }}</span>
+              <span class="record-author">{{ item.role === 'ai' ? 'AI分析' : '我的追问' }}</span>
+              <el-tag v-if="item.role === 'ai'" size="small" type="success" effect="plain">
+                {{ item.typeLabel }}
+              </el-tag>
+              <span class="record-time">{{ parseTime(item.createTime) }}</span>
               <el-button
                 v-if="item.attachments"
                 link
@@ -576,14 +442,181 @@
                 size="small"
                 @click="openMessageDetail(item)"
               >
-                详情
+                查看详情
               </el-button>
             </div>
-            <div>{{ item.content || '-' }}</div>
+            <div class="record-content">{{ item.content || '-' }}</div>
+          </article>
+        </div>
+      </el-card>
+    </section>
+
+    <section class="ai-composer" aria-label="AI追问编辑区">
+      <div class="ai-config-bar">
+        <div class="ai-config-heading">
+          <el-icon><Setting /></el-icon>
+          <span>AI配置</span>
+          <span class="ai-config-hint">本次追问使用</span>
+        </div>
+        <el-form :model="messageForm" class="ai-config-form" @submit.prevent>
+          <el-form-item label="版本">
+            <el-select
+              v-model="messageForm.versionId"
+              size="small"
+              placeholder="请选择版本"
+              filterable
+              clearable
+              class="ai-config-select ai-config-select--version"
+            >
+              <el-option
+                v-for="item in detailVersionOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Agent">
+            <el-select
+              v-model="messageForm.agentCode"
+              size="small"
+              placeholder="可选"
+              filterable
+              clearable
+              class="ai-config-select"
+              @change="handleMessageAgentChange"
+            >
+              <el-option
+                v-for="item in agentOptions"
+                :key="item.agentCode"
+                :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                :value="item.agentCode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Provider">
+            <el-select
+              v-model="messageForm.aiProviderCode"
+              size="small"
+              placeholder="可选"
+              filterable
+              clearable
+              class="ai-config-select"
+              @change="handleMessageProviderChange"
+            >
+              <el-option
+                v-for="item in providerOptions"
+                :key="item.providerCode"
+                :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
+                :value="item.providerCode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模型">
+            <el-select
+              v-model="messageForm.aiModelName"
+              size="small"
+              placeholder="默认模型"
+              filterable
+              clearable
+              class="ai-config-select"
+              :disabled="!messageForm.aiProviderCode"
+              @change="handleMessageModelChange"
+            >
+              <el-option
+                v-for="item in (messageModelOptions || [])"
+                :key="item.modelId"
+                :label="item.displayName || item.modelId"
+                :value="item.modelId"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div class="ai-composer-body">
+        <el-input
+          v-model="messageForm.content"
+          type="textarea"
+          :rows="3"
+          resize="none"
+          maxlength="4000"
+          show-word-limit
+          placeholder="输入本次分析重点或追问内容"
+          class="ai-composer-input"
+          @keydown.meta.enter.prevent="submitMessage"
+          @keydown.ctrl.enter.prevent="submitMessage"
+        />
+        <el-collapse v-model="advancedCollapse" class="collab-advanced">
+          <el-collapse-item name="advanced" title="分析上下文 JSON（可选）">
+            <el-input
+              v-model="messageDataText"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              placeholder='如 {"traceIds":["..."],"evidence":"..."}'
+            />
+          </el-collapse-item>
+        </el-collapse>
+        <div class="ai-composer-footer">
+          <span class="ai-composer-tip">Enter 换行，Ctrl/⌘ + Enter 发送并分析</span>
+          <div class="ai-composer-actions">
+            <el-button link :disabled="messageSubmitting" @click="resetMessageForm">重置</el-button>
+            <el-button
+              type="primary"
+              :icon="Promotion"
+              :loading="messageSubmitting"
+              :disabled="messageSubmitting || !String(messageForm.content || '').trim()"
+              @click="submitMessage"
+              v-hasPermi="['ticket:message:add']"
+            >
+              发送并分析
+            </el-button>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </div>
+      </div>
+    </section>
+
+    <section class="ai-actions-bar">
+      <div class="ai-actions-title">
+        <el-icon><Operation /></el-icon>
+        <span>分析结果操作</span>
+      </div>
+      <div class="ai-actions-buttons">
+        <el-button
+          type="success"
+          plain
+          :icon="Document"
+          :loading="snapshotSaving"
+          :disabled="snapshotSaving || knowledgeGenerating"
+          @click="saveSnapshotFromCurrentState"
+          v-hasPermi="['ticket:snapshot:add']"
+        >
+          生成快照
+        </el-button>
+        <el-button
+          type="warning"
+          plain
+          :icon="Collection"
+          :loading="knowledgeGenerating"
+          :disabled="snapshotSaving || knowledgeGenerating"
+          @click="generateKnowledgeFromTicket"
+          v-hasPermi="['ticket:knowledge:add']"
+        >
+          生成知识库
+        </el-button>
+        <el-button
+          v-if="showAiHistory"
+          link
+          type="primary"
+          :icon="Clock"
+          @click="emit('open-ai-history')"
+          v-hasPermi="['ticket:ai:analysis:list']"
+        >
+          任务历史
+        </el-button>
+      </div>
+    </section>
 
     <el-dialog v-model="detailDialogVisible" :title="detailDialogTitle" width="720px" append-to-body>
       <pre class="json-block">{{ detailDialogContent }}</pre>
@@ -595,19 +628,237 @@
 </template>
 
 <style scoped>
-  .collab-advanced {
-    width: 100%;
-    border-top: none;
-    border-bottom: none;
+  .ai-analysis-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .ai-records-panel,
+  .ai-composer,
+  .ai-actions-bar {
+    border: 1px solid #e4e7ed;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .ai-section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px 10px;
+  }
+
+  .ai-section-title {
+    color: #303133;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .ai-section-caption {
+    margin-top: 4px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .ai-records-card {
+    border: 0;
+    border-top: 1px solid #f0f2f5;
+    border-radius: 0 0 10px 10px;
+  }
+
+  .ai-record-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 420px;
+    padding: 2px 4px 4px;
+    overflow-y: auto;
+  }
+
+  .ai-record {
+    max-width: 88%;
+    padding: 11px 13px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+  }
+
+  .ai-record--user {
+    align-self: flex-end;
+    background: #f0f7ff;
+    border-color: #c6e2ff;
+  }
+
+  .ai-record--assistant {
+    align-self: flex-start;
+    background: #f8fafc;
   }
 
   .record-head {
     display: flex;
-    gap: 12px;
     align-items: center;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin-bottom: 7px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .record-author {
+    color: #606266;
+    font-weight: 600;
+  }
+
+  .record-time {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  .record-content {
+    color: #303133;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .ai-composer {
+    padding: 12px;
+    background: #fbfcfe;
+  }
+
+  .ai-config-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 10px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .ai-config-heading {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    color: #303133;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .ai-config-hint {
+    color: #a8abb2;
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .ai-config-form {
+    display: grid;
+    flex: 1;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 8px;
+  }
+
+  .ai-config-form :deep(.el-form-item) {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .ai-config-form :deep(.el-form-item__label) {
+    padding-right: 5px;
+    color: #909399;
+    font-size: 12px;
+    line-height: 28px;
+  }
+
+  .ai-config-form :deep(.el-form-item__content) {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ai-config-select {
+    width: 100%;
+  }
+
+  .ai-composer-body {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #dcdfe6;
+    border-radius: 8px;
+    background: #fff;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .ai-composer-body:focus-within {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgb(64 158 255 / 12%);
+  }
+
+  .ai-composer-input :deep(.el-textarea__inner) {
+    padding: 4px 2px;
+    border: 0;
+    box-shadow: none;
+    line-height: 1.6;
+  }
+
+  .collab-advanced {
+    border-top: 1px solid #f0f2f5;
+    border-bottom: 0;
+  }
+
+  .collab-advanced :deep(.el-collapse-item__header) {
+    height: 32px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .collab-advanced :deep(.el-collapse-item__wrap) {
+    border-bottom: 0;
+  }
+
+  .ai-composer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 8px;
+  }
+
+  .ai-composer-tip {
+    color: #a8abb2;
+    font-size: 12px;
+  }
+
+  .ai-composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .ai-actions-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 14px;
+    background: #fbfcfe;
+  }
+
+  .ai-actions-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: #606266;
     font-size: 13px;
+    font-weight: 600;
+  }
+
+  .ai-actions-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .json-block {
@@ -617,5 +868,38 @@
     max-height: 60vh;
     background: #f6f8fa;
     border-radius: 4px;
+  }
+
+  @media (max-width: 900px) {
+    .ai-config-bar {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ai-config-form {
+      width: 100%;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 600px) {
+    .ai-record {
+      max-width: 100%;
+    }
+
+    .ai-config-form {
+      grid-template-columns: 1fr;
+    }
+
+    .ai-composer-footer,
+    .ai-actions-bar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .ai-actions-buttons {
+      flex-wrap: wrap;
+    }
   }
 </style>

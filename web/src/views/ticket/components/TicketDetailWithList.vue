@@ -1505,7 +1505,7 @@
             />
           </el-tab-pane>
 
-          <el-tab-pane label="协同/AI" name="collab" lazy>
+          <el-tab-pane label="AI分析" name="collab" lazy>
             <TicketDetailCollabTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'collab'"

@@ -1,4 +1,10 @@
-## [2026-08-29] FEAT | 协同/AI 标签页简化与消息流收敛
+## [2026-08-30] FEAT | 工单详情 AI分析与评论区布局收敛
+
+- 触发：AI分析追问区同时暴露角色、类型、发起AI开关，配置项和操作按钮占用空间较大，普通评论与 AI 分析职责边界不够清晰。
+- 实现：详情页 Tab 更名为“AI分析”，固定追问消息为用户提问并自动触发 AI；保留版本、Agent、Provider、模型和附件 JSON 配置，收纳为紧凑配置条与分析上下文入口；消息记录采用 AI/用户区分的气泡布局；生成快照、生成知识库、任务历史统一为结果操作区，顺序固定为快照、知识库、任务历史。
+- 评论：保留原评论接口、内部评论、权限、时间线和外部同步语义，仅优化评论 composer、消息块、发送中禁用与空状态；独立详情页复用 `TicketDetailCommentsTab`，与列表详情弹窗行为一致。评论提交不触发 AI。
+- 契约：后端接口和数据模型不变，前端仅收敛字段展示和交互布局；AI 结果附件详情继续保留。
+
 
 - 触发：用户指出协同/AI tab 中“发起AI分析”按钮与“提交消息”（runAi=true）后端等价（均走 `TicketAiAnalysisService.create_analysis_task_services`），按钮冗余；表单字段平铺过长；消息流混入同步导入、快照等系统消息；AI 结果 JSON 直接平铺撑开页面。
 - 实现：`TicketDetailCollabTab.vue` 移除顶部“发起AI分析”按钮和 `run-ai` 事件，`任务历史` 按钮移入角色/类型所在行；内容列 span 16→24 铺满整行（原右侧 8 栅格为相似工单卡片）；版本+Agent、Provider+模型 同行两列布局；附件 JSON 放入默认收起的 `el-collapse` 高级选项；消息流按 `messageType in (question/analysis/conclusion)` 过滤（快照 snapshot、同步导入 sync_import、事件动作、系统建单不再展示）；消息附件不再平铺，改为“详情”按钮 + `el-dialog` 弹窗查看格式化 JSON。
