@@ -557,7 +557,7 @@ class TicketLogPullDao:
         """
         分页查询门店配置。
         :param db: 数据库会话
-        :param query: 查询参数
+        :param query: 查询参数，environment 传入时按环境精确匹配，未传时返回全部环境
         :return: 分页结果
         """
         keyword = str(query.keyword or "").strip()
@@ -574,7 +574,10 @@ class TicketLogPullDao:
                     TicketLogPullStoreConfig.company_no.like(f"%{keyword}%"),
                 ]
             )
+        # 环境过滤：传值精确匹配；未传不过滤，返回全部环境的门店。
+        environment = str(query.environment or "").strip()
         record_query = db.query(TicketLogPullStoreConfig).filter(
+            TicketLogPullStoreConfig.environment == environment if environment else True,
             TicketLogPullStoreConfig.group_no == query.group_no if query.group_no else True,
             TicketLogPullStoreConfig.vender_no == query.vender_no if query.vender_no else True,
             TicketLogPullStoreConfig.org_no == query.org_no if query.org_no else True,
@@ -601,41 +604,54 @@ class TicketLogPullDao:
         )
 
     @classmethod
-    def list_store_configs_by_vender_no(cls, db: Session, vender_no: str) -> list[TicketLogPullStoreConfig]:
+    def list_store_configs_by_vender_no(
+        cls, db: Session, vender_no: str, environment: str | None = None
+    ) -> list[TicketLogPullStoreConfig]:
         """
-        按商户编号查询门店配置，供日志拉取弹窗按需加载门店。
+        按商户编号和环境查询门店配置，供日志拉取弹窗按需加载门店。
         :param db: 数据库会话
         :param vender_no: 商户编号
-        :return: 当前商户下的门店配置列表
+        :param environment: 环境分组 key，传入时只返回该环境的门店
+        :return: 当前商户（及环境）下的门店配置列表
         """
         resolved_vender_no = str(vender_no or "").strip()
         if not resolved_vender_no:
             return []
-        return (
-            db.query(TicketLogPullStoreConfig)
-            .filter(TicketLogPullStoreConfig.vender_no == resolved_vender_no)
-            .order_by(TicketLogPullStoreConfig.org_name.asc(), TicketLogPullStoreConfig.id.asc())
-            .all()
+        query = db.query(TicketLogPullStoreConfig).filter(
+            TicketLogPullStoreConfig.vender_no == resolved_vender_no
         )
+        resolved_environment = str(environment or "").strip()
+        if resolved_environment:
+            query = query.filter(TicketLogPullStoreConfig.environment == resolved_environment)
+        return query.order_by(TicketLogPullStoreConfig.org_name.asc(), TicketLogPullStoreConfig.id.asc()).all()
 
     @classmethod
     def get_store_config_by_match(
-        cls, db: Session, *, vender_no: str = "", org_no: str = "", sap_org_no: str = ""
+        cls,
+        db: Session,
+        *,
+        vender_no: str = "",
+        org_no: str = "",
+        sap_org_no: str = "",
+        environment: str = "",
     ) -> TicketLogPullStoreConfig | None:
         """
-        按 vender_no + org_no + sap_org_no 联合唯一键查找门店配置。
+        按 environment + vender_no + org_no + sap_org_no 联合唯一键查找门店配置。
         :param db: 数据库会话
         :param vender_no: 商户编号
         :param org_no: 机构编号
         :param sap_org_no: SAP机构编号
+        :param environment: 环境分组 key
         :return: 匹配到的配置
         """
         query = db.query(TicketLogPullStoreConfig)
         vender_no = str(vender_no or "").strip()
         org_no = str(org_no or "").strip()
         sap_org_no = str(sap_org_no or "").strip()
+        environment = str(environment or "").strip()
         return (
             query.filter(
+                func.coalesce(TicketLogPullStoreConfig.environment, "") == environment,
                 func.coalesce(TicketLogPullStoreConfig.vender_no, "") == vender_no,
                 func.coalesce(TicketLogPullStoreConfig.org_no, "") == org_no,
                 func.coalesce(TicketLogPullStoreConfig.sap_org_no, "") == sap_org_no,
@@ -659,9 +675,11 @@ class TicketLogPullDao:
                 vender_no=store.vender_no,
                 org_no=store.org_no or "",
                 sap_org_no=store.sap_org_no or "",
+                environment=store.environment or "",
             )
         if existing:
             for field in (
+                "environment",
                 "group_no",
                 "vender_no",
                 "region_no",
@@ -696,6 +714,21 @@ class TicketLogPullDao:
         :return: 受影响行数
         """
         return db.query(TicketLogPullStoreConfig).delete(synchronize_session=False)
+
+    @classmethod
+    def delete_store_configs_by_environment(cls, db: Session, environment: str) -> int:
+        """
+        删除指定环境的门店配置，供覆盖导入只清空所选环境旧数据使用。
+        :param db: 数据库会话
+        :param environment: 环境分组 key
+        :return: 受影响行数
+        """
+        resolved_environment = str(environment or "").strip()
+        return (
+            db.query(TicketLogPullStoreConfig)
+            .filter(TicketLogPullStoreConfig.environment == resolved_environment)
+            .delete(synchronize_session=False)
+        )
 
     @classmethod
     def list_project_vendor_maps(
@@ -775,25 +808,26 @@ class TicketLogPullDao:
 
     @classmethod
     def verify_store_by_org_no(
-        cls, db: Session, *, vendor_no: str, org_no: str
+        cls, db: Session, *, vendor_no: str, org_no: str, environment: str | None = None
     ) -> bool:
         """
-        按商家编号 + org_no 校验门店是否存在于 ticket_log_pull_store_config 表中。
+        按环境 + 商家编号 + org_no 校验门店是否存在于 ticket_log_pull_store_config 表中。
         :param db: 数据库会话
         :param vendor_no: 商户编号
         :param org_no: 机构编号
+        :param environment: 环境分组 key，传入时只校验该环境的门店
         :return: 匹配到记录返回 True，否则返回 False
         """
         resolved_vendor_no = str(vendor_no or "").strip()
         resolved_org = str(org_no or "").strip()
         if not resolved_vendor_no or not resolved_org:
             return False
-        row = (
-            db.query(TicketLogPullStoreConfig)
-            .filter(
-                TicketLogPullStoreConfig.vender_no == resolved_vendor_no,
-                TicketLogPullStoreConfig.org_no == resolved_org,
-            )
-            .first()
+        query = db.query(TicketLogPullStoreConfig).filter(
+            TicketLogPullStoreConfig.vender_no == resolved_vendor_no,
+            TicketLogPullStoreConfig.org_no == resolved_org,
         )
+        resolved_environment = str(environment or "").strip()
+        if resolved_environment:
+            query = query.filter(TicketLogPullStoreConfig.environment == resolved_environment)
+        row = query.first()
         return row is not None

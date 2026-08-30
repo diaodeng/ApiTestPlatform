@@ -1,11 +1,10 @@
 <script setup name="TicketDetailCollabTab">
   import { computed, ref, watch } from 'vue';
   import { getCurrentInstance } from 'vue';
-  import { useRouter } from 'vue-router';
+  import { Operation, Setting } from '@element-plus/icons-vue';
   import {
     addTicketMessage,
     addTicketSnapshot,
-    bindTicketIssueFromSimilar,
     extractTicketKnowledge,
     getTicketMessagesPage,
     getTicketSnapshotsPage,
@@ -31,15 +30,14 @@
       type: Object,
       default: null,
     },
-    similarTickets: {
-      type: Array,
-      default: () => [],
+    showAiHistory: {
+      type: Boolean,
+      default: true,
     },
   });
 
-  const emit = defineEmits(['changed', 'run-ai', 'open-ai-history']);
+  const emit = defineEmits(['changed', 'open-ai-history']);
   const { proxy } = getCurrentInstance();
-  const router = useRouter();
 
   const {
     agentOptions,
@@ -55,8 +53,16 @@
   const detail = ref({});
   const loading = ref(false);
   const messageDataText = ref('');
-  const issueActionLoading = ref(false);
   const messageForm = ref(createDefaultMessageForm());
+  // 高级配置区域默认收起，展开后才能填写附件JSON。
+  const advancedCollapse = ref([]);
+  // AI 结果详情弹窗状态。
+  const detailDialogVisible = ref(false);
+  const detailDialogTitle = ref('');
+  const detailDialogContent = ref('');
+  const messageSubmitting = ref(false);
+  const snapshotSaving = ref(false);
+  const knowledgeGenerating = ref(false);
   const {
     modelOptions: messageModelOptions,
     loadModelOptions: loadMessageModelOptions,
@@ -71,7 +77,6 @@
 
   const ticketMessages = ref([]);
   const ticketSnapshots = ref([]);
-  const similarTickets = computed(() => props.similarTickets || []);
   const latestSnapshot = computed(
     () => ticketSnapshots.value[0] || detail.value.latestSnapshot || null
   );
@@ -79,11 +84,19 @@
     () => latestSnapshot.value?.summary || detail.value.rootCause || detail.value.description || ''
   );
   const messageItems = computed(() =>
-    (ticketMessages.value || []).map((item) => ({
-      ...item,
-      roleLabel: item.role || 'user',
-      typeLabel: item.messageType || 'question',
-    }))
+    (ticketMessages.value || [])
+      // 消息流只展示 AI 分析链路相关消息：用户提问、AI 分析结论、结论等；
+      // 快照、同步导入、事件动作等系统类消息不在本区域重复展示。
+      .filter(
+        (item) =>
+          (item.role === 'user' && item.messageType === 'question') ||
+          (item.role === 'ai' && ['analysis', 'conclusion'].includes(item.messageType))
+      )
+      .map((item) => ({
+        ...item,
+        roleLabel: item.role || 'user',
+        typeLabel: item.messageType || 'question',
+      }))
   );
 
   /**
@@ -95,6 +108,7 @@
       role: 'user',
       messageType: 'question',
       content: '',
+      // 提交消息默认触发AI追问分析（后端 runAi）。
       runAi: true,
       versionId: undefined,
       agentCode: '',
@@ -243,6 +257,17 @@
   }
 
   /**
+   * 打开消息详情弹窗，展示消息附件中的 JSON 原始数据。
+   * @param {object} item 消息对象。
+   * @returns {void}
+   */
+  function openMessageDetail(item) {
+    detailDialogTitle.value = `消息详情 · ${item.roleLabel} · ${item.typeLabel}`;
+    detailDialogContent.value = item.attachments ? formatJson(item.attachments) : item.content || '-';
+    detailDialogVisible.value = true;
+  }
+
+  /**
    * 解析协同消息附件 JSON。
    * @returns {object|undefined|null} 合法附件对象、空值或错误标记。
    */
@@ -261,6 +286,7 @@
    * @returns {void}
    */
   function submitMessage() {
+    if (messageSubmitting.value) return;
     if (!resolvedTicketId.value) {
       proxy.$modal.msgWarning('工单ID无效，无法提交消息');
       return;
@@ -274,24 +300,28 @@
     const attachments = parseMessageAttachments();
     if (attachments === null) return;
     saveTicketAiPreferencePatch({ aiModelName: messageForm.value.aiModelName || '' });
+    messageSubmitting.value = true;
     addTicketMessage(resolvedTicketId.value, {
       ...messageForm.value,
+      role: 'user',
+      messageType: 'question',
+      runAi: true,
       content,
       attachments,
     }).then((response) => {
       const payload = response.data || response || {};
       const aiResult = payload.result || {};
-      if (messageForm.value.runAi && !aiResult.aiSuccess) {
+      if (!aiResult.aiSuccess) {
         proxy.$modal.msgWarning(
           aiResult.aiMessage || payload.message || '消息已保存，但AI追问未发起'
         );
       } else {
-        proxy.$modal.msgSuccess(
-          payload.message || (aiResult.aiSuccess ? 'AI追问任务已提交' : '消息提交成功')
-        );
+        proxy.$modal.msgSuccess(payload.message || '已发送，AI分析任务已提交');
       }
       resetMessageForm();
       refreshAfterChanged();
+    }).finally(() => {
+      messageSubmitting.value = false;
     });
   }
 
@@ -300,10 +330,12 @@
    * @returns {Promise<void>} 保存完成 Promise。
    */
   function saveSnapshotFromCurrentState() {
+    if (snapshotSaving.value) return Promise.resolve();
     if (!resolvedTicketId.value) {
       proxy.$modal.msgWarning('工单ID无效，无法保存快照');
       return Promise.resolve();
     }
+    snapshotSaving.value = true;
     return addTicketSnapshot(resolvedTicketId.value, {
       summary: latestSnapshotSummary.value || detail.value.description || '',
       rootCause: detail.value.rootCause || '',
@@ -320,6 +352,8 @@
     }).then(() => {
       proxy.$modal.msgSuccess('快照已保存');
       refreshAfterChanged();
+    }).finally(() => {
+      snapshotSaving.value = false;
     });
   }
 
@@ -328,97 +362,18 @@
    * @returns {void}
    */
   function generateKnowledgeFromTicket() {
+    if (knowledgeGenerating.value) return;
     if (!resolvedTicketId.value) {
       proxy.$modal.msgWarning('工单ID无效，无法生成知识库案例');
       return;
     }
+    knowledgeGenerating.value = true;
     extractTicketKnowledge(resolvedTicketId.value).then(() => {
       proxy.$modal.msgSuccess('知识库案例已生成');
       refreshAfterChanged();
+    }).finally(() => {
+      knowledgeGenerating.value = false;
     });
-  }
-
-  /**
-   * 解析外部工单详情链接。
-   * @param {object} ticketRow 工单行。
-   * @returns {string} 外部链接。
-   */
-  function resolveTicketDetailUrl(ticketRow) {
-    const row = ticketRow || {};
-    const syncSummary = row.syncSummary || row.sync_summary || {};
-    const extraData = row.extraData || row.extra_data || {};
-    const externalSync = extraData.externalSync || extraData.external_sync || {};
-    const source = externalSync.source || {};
-    return String(
-      row.ticketUrl ||
-        row.ticket_url ||
-        row.url ||
-        syncSummary.ticketUrl ||
-        syncSummary.ticket_url ||
-        syncSummary.sourceRecordUrl ||
-        syncSummary.source_record_url ||
-        source.ticketUrl ||
-        source.ticket_url ||
-        source.recordUrl ||
-        source.record_url ||
-        ''
-    ).trim();
-  }
-
-  /**
-   * 打开外部工单详情。
-   * @param {object} ticketRow 工单行。
-   * @returns {void}
-   */
-  function openTicketLink(ticketRow) {
-    const url = resolveTicketDetailUrl(ticketRow);
-    if (!url) {
-      proxy.$modal.msgWarning('当前工单未配置详情链接');
-      return;
-    }
-    window.open(url, '_blank', 'noopener');
-  }
-
-  /**
-   * 打开系统内工单详情页。
-   * @param {object} ticketRow 工单行。
-   * @returns {void}
-   */
-  function openSystemTicketDetail(ticketRow) {
-    const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id);
-    if (!Number.isFinite(ticketId) || ticketId <= 0) return;
-    const resolved = router.resolve({ name: 'TicketDetail', params: { ticketId } });
-    window.open(resolved.href, '_blank');
-  }
-
-  /**
-   * 将当前工单与相似工单归入同一问题。
-   * @param {object} item 相似工单。
-   * @returns {void}
-   */
-  function handleBindIssueFromSimilar(item) {
-    const similarTicketId = Number(item?.ticketId || item?.ticket_id);
-    if (!resolvedTicketId.value || !similarTicketId) {
-      proxy.$modal.msgWarning('相似工单ID无效，无法归因');
-      return;
-    }
-    proxy.$modal
-      .confirm(`是否确认将当前工单与 ${item.ticketNo || similarTicketId} 归入同一问题？`)
-      .then(() => {
-        issueActionLoading.value = true;
-        return bindTicketIssueFromSimilar(resolvedTicketId.value, {
-          similarTicketId,
-          confidence: item.score,
-          relationType: 'similar',
-        });
-      })
-      .then(() => {
-        proxy.$modal.msgSuccess('相似工单归因已确认');
-        refreshAfterChanged();
-      })
-      .finally(() => {
-        issueActionLoading.value = false;
-      });
   }
 
   watch(
@@ -457,286 +412,494 @@
 </script>
 
 <template>
-  <div v-loading="loading">
-    <div class="collab-toolbar mb16">
-      <el-button type="primary" @click="emit('run-ai')" v-hasPermi="['ticket:ai:analysis:run']">
-        发起AI分析
-      </el-button>
-      <el-button @click="emit('open-ai-history')" v-hasPermi="['ticket:ai:analysis:list']">
-        任务历史
-      </el-button>
-    </div>
-    <el-row :gutter="16">
-      <el-col :span="16">
-        <el-form :model="messageForm" label-width="90px" class="mb16">
-          <el-row :gutter="12">
-            <el-col :span="8">
-              <el-form-item label="角色">
-                <el-select v-model="messageForm.role">
-                  <el-option label="提问人" value="user" />
-                  <el-option label="AI" value="ai" />
-                  <el-option label="开发" value="developer" />
-                  <el-option label="测试" value="tester" />
-                  <el-option label="系统" value="system" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="类型">
-                <el-select v-model="messageForm.messageType">
-                  <el-option label="追问" value="question" />
-                  <el-option label="分析" value="analysis" />
-                  <el-option label="日志" value="log" />
-                  <el-option label="结论" value="conclusion" />
-                  <el-option label="动作" value="action" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="发起AI">
-                <el-switch
-                  v-model="messageForm.runAi"
-                  inline-prompt
-                  active-text="是"
-                  inactive-text="否"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-alert
-                :title="`协同消息默认沿用工单发生版本：${detail.affectedVersion || '-'}。`"
-                type="info"
-                show-icon
-                :closable="false"
-                class="mb12"
-              />
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="版本">
-                <el-select
-                  v-model="messageForm.versionId"
-                  placeholder="请选择版本"
-                  filterable
-                  clearable
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="item in detailVersionOptions"
-                    :key="item.value"
-                    :label="item.label"
-                    :value="item.value"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="Agent">
-                <el-select
-                  v-model="messageForm.agentCode"
-                  placeholder="可选"
-                  filterable
-                  clearable
-                  @change="handleMessageAgentChange"
-                >
-                  <el-option
-                    v-for="item in agentOptions"
-                    :key="item.agentCode"
-                    :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
-                    :value="item.agentCode"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="Provider">
-                <el-select
-                  v-model="messageForm.aiProviderCode"
-                  placeholder="可选"
-                  filterable
-                  clearable
-                  style="width: 100%"
-                  @change="handleMessageProviderChange"
-                >
-                  <el-option
-                    v-for="item in providerOptions"
-                    :key="item.providerCode"
-                    :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
-                    :value="item.providerCode"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="模型">
-                <el-select
-                  v-model="messageForm.aiModelName"
-                  placeholder="留空使用默认模型"
-                  filterable
-                  clearable
-                  style="width: 100%"
-                  :disabled="!messageForm.aiProviderCode"
-                  @change="handleMessageModelChange"
-                >
-                  <el-option
-                    v-for="item in (messageModelOptions || [])"
-                    :key="item.modelId"
-                    :label="item.displayName || item.modelId"
-                    :value="item.modelId"
-                  />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="内容">
-                <el-input
-                  v-model="messageForm.content"
-                  type="textarea"
-                  :rows="4"
-                  placeholder="补充追问、开发反馈、排查动作或AI结论"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item label="附件JSON">
-                <el-input
-                  v-model="messageDataText"
-                  type="textarea"
-                  :rows="3"
-                  placeholder='可选，如 {"traceIds":["..."],"evidence":"..."}'
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="24">
-              <el-form-item>
-                <el-button type="primary" @click="submitMessage" v-hasPermi="['ticket:message:add']"
-                  >提交消息</el-button
-                >
-                <el-button @click="resetMessageForm">重置</el-button>
-                <el-button
-                  type="success"
-                  plain
-                  @click="saveSnapshotFromCurrentState"
-                  v-hasPermi="['ticket:snapshot:add']"
-                >
-                  生成快照
-                </el-button>
-                <el-button
-                  type="warning"
-                  plain
-                  @click="generateKnowledgeFromTicket"
-                  v-hasPermi="['ticket:knowledge:add']"
-                >
-                  生成知识库
-                </el-button>
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </el-form>
+  <div v-loading="loading" class="ai-analysis-tab">
+    <section class="ai-records-panel">
+      <div class="ai-section-heading">
+        <div>
+          <div class="ai-section-title">AI分析记录</div>
+          <div class="ai-section-caption">查看追问、分析结果和结构化结论，继续追问可发起新一轮分析</div>
+        </div>
+      </div>
 
-        <el-card shadow="never">
-          <template #header>消息流</template>
-          <el-empty v-if="!messageItems.length" description="暂无消息" />
-          <div v-for="item in messageItems" :key="item.id" class="mb12">
+      <el-card shadow="never" class="ai-records-card">
+        <el-empty v-if="!messageItems.length" description="暂无AI分析记录，输入追问后发送" />
+        <div v-else class="ai-record-list">
+          <article
+            v-for="item in messageItems"
+            :key="item.id"
+            :class="['ai-record', item.role === 'ai' ? 'ai-record--assistant' : 'ai-record--user']"
+          >
             <div class="record-head">
-              <span>{{ item.roleLabel }}</span>
-              <el-tag size="small">{{ item.typeLabel }}</el-tag>
-              <span>{{ parseTime(item.createTime) }}</span>
-            </div>
-            <div>{{ item.content || '-' }}</div>
-            <pre v-if="item.attachments" class="json-block">{{ formatJson(item.attachments) }}</pre>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="never">
-          <template #header>相似工单</template>
-          <el-empty v-if="!similarTickets.length" description="暂无相似工单" />
-          <div v-for="item in similarTickets" :key="item.ticketId" class="similar-item">
-            <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
-            <div class="similar-meta">
-              <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
-              <span>{{ item.rootCause || '-' }}</span>
-            </div>
-            <div class="similar-actions">
-              <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)"
-                >系统详情</el-link
-              >
-              <el-link
-                v-if="resolveTicketDetailUrl(item)"
-                type="info"
-                underline="never"
-                @click="openTicketLink(item)"
-              >
-                飞书详情
-              </el-link>
+              <span class="record-author">{{ item.role === 'ai' ? 'AI分析' : '我的追问' }}</span>
+              <el-tag v-if="item.role === 'ai'" size="small" type="success" effect="plain">
+                {{ item.typeLabel }}
+              </el-tag>
+              <span class="record-time">{{ parseTime(item.createTime) }}</span>
               <el-button
+                v-if="item.attachments"
                 link
-                type="success"
-                :loading="issueActionLoading"
-                @click="handleBindIssueFromSimilar(item)"
-                v-hasPermi="['ticket:issue:bind']"
+                type="primary"
+                size="small"
+                @click="openMessageDetail(item)"
               >
-                归入同一问题
+                查看详情
               </el-button>
             </div>
+            <div class="record-content">{{ item.content || '-' }}</div>
+          </article>
+        </div>
+      </el-card>
+    </section>
+
+    <section class="ai-composer" aria-label="AI追问编辑区">
+      <div class="ai-config-bar">
+        <div class="ai-config-heading">
+          <el-icon><Setting /></el-icon>
+          <span>AI配置</span>
+          <span class="ai-config-hint">本次追问使用</span>
+        </div>
+        <el-form :model="messageForm" class="ai-config-form" @submit.prevent>
+          <el-form-item label="版本">
+            <el-select
+              v-model="messageForm.versionId"
+              size="small"
+              placeholder="请选择版本"
+              filterable
+              clearable
+              class="ai-config-select ai-config-select--version"
+            >
+              <el-option
+                v-for="item in detailVersionOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Agent">
+            <el-select
+              v-model="messageForm.agentCode"
+              size="small"
+              placeholder="可选"
+              filterable
+              clearable
+              class="ai-config-select"
+              @change="handleMessageAgentChange"
+            >
+              <el-option
+                v-for="item in agentOptions"
+                :key="item.agentCode"
+                :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                :value="item.agentCode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Provider">
+            <el-select
+              v-model="messageForm.aiProviderCode"
+              size="small"
+              placeholder="可选"
+              filterable
+              clearable
+              class="ai-config-select"
+              @change="handleMessageProviderChange"
+            >
+              <el-option
+                v-for="item in providerOptions"
+                :key="item.providerCode"
+                :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? `- ${item.defaultModel}` : ''}`"
+                :value="item.providerCode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模型">
+            <el-select
+              v-model="messageForm.aiModelName"
+              size="small"
+              placeholder="默认模型"
+              filterable
+              clearable
+              class="ai-config-select"
+              :disabled="!messageForm.aiProviderCode"
+              @change="handleMessageModelChange"
+            >
+              <el-option
+                v-for="item in (messageModelOptions || [])"
+                :key="item.modelId"
+                :label="item.displayName || item.modelId"
+                :value="item.modelId"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div class="ai-composer-body">
+        <el-input
+          v-model="messageForm.content"
+          type="textarea"
+          :rows="3"
+          resize="none"
+          maxlength="4000"
+          show-word-limit
+          placeholder="输入本次分析重点或追问内容"
+          class="ai-composer-input"
+          @keydown.meta.enter.prevent="submitMessage"
+          @keydown.ctrl.enter.prevent="submitMessage"
+        />
+        <el-collapse v-model="advancedCollapse" class="collab-advanced">
+          <el-collapse-item name="advanced" title="分析上下文 JSON（可选）">
+            <el-input
+              v-model="messageDataText"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              placeholder='如 {"traceIds":["..."],"evidence":"..."}'
+            />
+          </el-collapse-item>
+        </el-collapse>
+        <div class="ai-composer-footer">
+          <span class="ai-composer-tip">Enter 换行，Ctrl/⌘ + Enter 发送并分析</span>
+          <div class="ai-composer-actions">
+            <el-button link :disabled="messageSubmitting" @click="resetMessageForm">重置</el-button>
+            <el-button
+              type="primary"
+              :icon="Promotion"
+              :loading="messageSubmitting"
+              :disabled="messageSubmitting || !String(messageForm.content || '').trim()"
+              @click="submitMessage"
+              v-hasPermi="['ticket:message:add']"
+            >
+              发送并分析
+            </el-button>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </div>
+      </div>
+    </section>
+
+    <section class="ai-actions-bar">
+      <div class="ai-actions-title">
+        <el-icon><Operation /></el-icon>
+        <span>分析结果操作</span>
+      </div>
+      <div class="ai-actions-buttons">
+        <el-button
+          type="success"
+          plain
+          :icon="Document"
+          :loading="snapshotSaving"
+          :disabled="snapshotSaving || knowledgeGenerating"
+          @click="saveSnapshotFromCurrentState"
+          v-hasPermi="['ticket:snapshot:add']"
+        >
+          生成快照
+        </el-button>
+        <el-button
+          type="warning"
+          plain
+          :icon="Collection"
+          :loading="knowledgeGenerating"
+          :disabled="snapshotSaving || knowledgeGenerating"
+          @click="generateKnowledgeFromTicket"
+          v-hasPermi="['ticket:knowledge:add']"
+        >
+          生成知识库
+        </el-button>
+        <el-button
+          v-if="showAiHistory"
+          link
+          type="primary"
+          :icon="Clock"
+          @click="emit('open-ai-history')"
+          v-hasPermi="['ticket:ai:analysis:list']"
+        >
+          任务历史
+        </el-button>
+      </div>
+    </section>
+
+    <el-dialog v-model="detailDialogVisible" :title="detailDialogTitle" width="720px" append-to-body>
+      <pre class="json-block">{{ detailDialogContent }}</pre>
+      <template #footer>
+        <el-button @click="detailDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
-  .collab-toolbar {
+  .ai-analysis-tab {
     display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .ai-records-panel,
+  .ai-composer,
+  .ai-actions-bar {
+    border: 1px solid #e4e7ed;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .ai-section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
     gap: 12px;
-    align-items: center;
+    padding: 14px 16px 10px;
+  }
+
+  .ai-section-title {
+    color: #303133;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .ai-section-caption {
+    margin-top: 4px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .ai-records-card {
+    border: 0;
+    border-top: 1px solid #f0f2f5;
+    border-radius: 0 0 10px 10px;
+  }
+
+  .ai-record-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 420px;
+    padding: 2px 4px 4px;
+    overflow-y: auto;
+  }
+
+  .ai-record {
+    max-width: 88%;
+    padding: 11px 13px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+  }
+
+  .ai-record--user {
+    align-self: flex-end;
+    background: #f0f7ff;
+    border-color: #c6e2ff;
+  }
+
+  .ai-record--assistant {
+    align-self: flex-start;
+    background: #f8fafc;
   }
 
   .record-head {
     display: flex;
-    gap: 12px;
     align-items: center;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin-bottom: 7px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .record-author {
+    color: #606266;
+    font-weight: 600;
+  }
+
+  .record-time {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  .record-content {
+    color: #303133;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .ai-composer {
+    padding: 12px;
+    background: #fbfcfe;
+  }
+
+  .ai-config-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 10px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .ai-config-heading {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    color: #303133;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .ai-config-hint {
+    color: #a8abb2;
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .ai-config-form {
+    display: grid;
+    flex: 1;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 8px;
+  }
+
+  .ai-config-form :deep(.el-form-item) {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .ai-config-form :deep(.el-form-item__label) {
+    padding-right: 5px;
+    color: #909399;
+    font-size: 12px;
+    line-height: 28px;
+  }
+
+  .ai-config-form :deep(.el-form-item__content) {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ai-config-select {
+    width: 100%;
+  }
+
+  .ai-composer-body {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #dcdfe6;
+    border-radius: 8px;
+    background: #fff;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .ai-composer-body:focus-within {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgb(64 158 255 / 12%);
+  }
+
+  .ai-composer-input :deep(.el-textarea__inner) {
+    padding: 4px 2px;
+    border: 0;
+    box-shadow: none;
+    line-height: 1.6;
+  }
+
+  .collab-advanced {
+    border-top: 1px solid #f0f2f5;
+    border-bottom: 0;
+  }
+
+  .collab-advanced :deep(.el-collapse-item__header) {
+    height: 32px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .collab-advanced :deep(.el-collapse-item__wrap) {
+    border-bottom: 0;
+  }
+
+  .ai-composer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 8px;
+  }
+
+  .ai-composer-tip {
+    color: #a8abb2;
+    font-size: 12px;
+  }
+
+  .ai-composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .ai-actions-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 14px;
+    background: #fbfcfe;
+  }
+
+  .ai-actions-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: #606266;
     font-size: 13px;
+    font-weight: 600;
+  }
+
+  .ai-actions-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .json-block {
     padding: 10px;
-    margin: 10px 0 0;
+    margin: 0;
     overflow: auto;
+    max-height: 60vh;
     background: #f6f8fa;
     border-radius: 4px;
   }
 
-  .similar-item {
-    padding: 10px 0;
-    border-bottom: 1px solid #ebeef5;
+  @media (max-width: 900px) {
+    .ai-config-bar {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ai-config-form {
+      width: 100%;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
-  .similar-item:last-child {
-    border-bottom: 0;
-  }
+  @media (max-width: 600px) {
+    .ai-record {
+      max-width: 100%;
+    }
 
-  .similar-title {
-    margin-bottom: 4px;
-    font-weight: 600;
-  }
+    .ai-config-form {
+      grid-template-columns: 1fr;
+    }
 
-  .similar-meta {
-    display: flex;
-    gap: 10px;
-    color: #606266;
-    font-size: 12px;
-  }
+    .ai-composer-footer,
+    .ai-actions-bar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
 
-  .similar-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    margin-top: 6px;
-    font-size: 12px;
+    .ai-actions-buttons {
+      flex-wrap: wrap;
+    }
   }
 </style>

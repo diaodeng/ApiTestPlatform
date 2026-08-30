@@ -75,6 +75,52 @@ class TicketTopicStatsServiceTests(unittest.TestCase):
 
         self.assertEqual(status, "有结论")
 
+    def test_accumulate_token_usage_sums_across_calls(self):
+        """批次内多次 AI 调用的用量应累加，而不是保留最后一次。"""
+        target = {}
+
+        TicketTopicStatsService._accumulate_token_usage(
+            target, {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}
+        )
+        TicketTopicStatsService._accumulate_token_usage(
+            target, {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60}
+        )
+
+        self.assertEqual(target, {"input_tokens": 150, "output_tokens": 30, "total_tokens": 180})
+
+    def test_accumulate_token_usage_supports_prompt_keys(self):
+        """chat_completions 口径（prompt_tokens 等）也应正确累加。"""
+        target = {}
+
+        TicketTopicStatsService._accumulate_token_usage(
+            target, {"prompt_tokens": 95, "completion_tokens": 9, "total_tokens": 104}
+        )
+        TicketTopicStatsService._accumulate_token_usage(
+            target, {"prompt_tokens": 88, "completion_tokens": 7, "total_tokens": 95}
+        )
+
+        self.assertEqual(target, {"prompt_tokens": 183, "completion_tokens": 16, "total_tokens": 199})
+
+    def test_track_ai_call_counts(self):
+        """调用开始/结束计数应正确区分成功与失败。"""
+        stats = {}
+
+        TicketTopicStatsService._track_ai_call_start(stats)
+        TicketTopicStatsService._track_ai_call_end(stats, success=True)
+        TicketTopicStatsService._track_ai_call_start(stats)
+        TicketTopicStatsService._track_ai_call_end(stats, success=False)
+
+        self.assertEqual(
+            stats,
+            {"ai_call_count": 2, "ai_success_count": 1, "ai_failed_count": 1},
+        )
+
+    def test_track_ai_call_ignores_none_container(self):
+        """未传入统计容器时不应报错。"""
+        TicketTopicStatsService._track_ai_call_start(None)
+        TicketTopicStatsService._track_ai_call_end(None, success=True)
+        TicketTopicStatsService._accumulate_token_usage(None, {"input_tokens": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

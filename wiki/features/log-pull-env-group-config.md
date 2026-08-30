@@ -6,11 +6,13 @@ source_type: code
 knowledge_state: stable
 confidence: high
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-29
 related_files:
   - server/modules/ticket/entity/vo/ticket_log_pull_vo.py
   - server/modules/ticket/controller/ticket_log_pull_controller.py
   - server/modules/ticket/service/log_pull/ticket_log_pull_service.py
+  - server/modules/ticket/dao/ticket_log_pull_dao.py
+  - server/modules/ticket/service/sync/ticket_sync_field_mapping_service.py
   - web/src/components/ticket/LogPullConfigFields.vue
   - web/src/views/ticket/logPullRecord/index.vue
   - web/src/views/ticket/syncAutomation/index.vue
@@ -95,6 +97,26 @@ related_files:
 - `TicketLogPullRecord.environment` 字段存储 `group_key:item_key` 格式（如 `uat:uat2`）
 - 历史记录存储旧环境 key 仍可兼容，`_get_external_config_dict` 会遍历分组查找匹配
 
+## 门店配置的环境隔离（2026-08-29 新增）
+
+`ticket_log_pull_store_config` 表增加 `environment` 字段（存环境分组 key，如 `prod`/`uat`），门店配置按环境隔离：
+
+- **唯一键升级**：`environment + vender_no + org_no + sap_org_no` 四元组，同一门店可在不同环境各存一条
+- **门店下拉联动**：拉取日志弹窗、记录查询区的门店选项均随所选环境分组过滤（`vendor-store-options` 接口新增 `environment` 参数）
+- **导入归属环境**：导入弹窗必选环境，Excel 表格与解析逻辑不变；增量导入按四元组匹配，覆盖导入**只清空所选环境**旧数据
+- **列表过滤**：门店配置列表弹窗支持按环境筛选并展示环境列；查询为精确匹配，环境为空的存量记录只能通过"全部环境"查询或空环境链路命中
+- **自动分析联动**：自动识别/校验门店时使用同步配置 `logPullDefaults.environment`（`group:item` 格式）的**分组部分**过滤门店配置；`verify_store_by_org_no`、`list_store_candidates_by_external_value`、`resolve_store_by_external_value` 均已带上该环境
+
+### 相关 DAO 方法签名变更
+
+| 方法 | 变更 |
+|------|------|
+| `list_store_configs_by_vender_no(db, vender_no, environment=None)` | 新增环境参数 |
+| `verify_store_by_org_no(db, *, vendor_no, org_no, environment=None)` | 新增环境参数 |
+| `get_store_config_by_match(..., environment="")` | 匹配键加入环境 |
+| `delete_store_configs_by_environment(db, environment)` | 新增：按环境删除，供覆盖导入使用 |
+| `import_store_config_services(..., environment=None)` | 新增环境参数，未传拒绝导入 |
+
 ## 匹配逻辑
 
 1. 用户选择环境分组（如 `uat`）
@@ -110,8 +132,10 @@ related_files:
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/ticket/log-pull/vendor-store-options` | 商家/门店联动选项（environments 返回 `[{key,label}]` 格式） |
+| GET | `/ticket/log-pull/vendor-store-options?environment=` | 商家/门店联动选项（environments 返回 `[{key,label}]`；`environment` 传入时门店只返回该环境配置） |
 | GET | `/ticket/log-pull/resolve-env-item?group_key=&vender_no=` | 解析环境分组+商家匹配的子环境列表 |
+| GET | `/ticket/log-pull/store-configs?environment=` | 门店配置分页列表（支持环境过滤） |
+| POST | `/ticket/log-pull/store-configs/import` | 导入门店配置（Form 需带 `environment`） |
 | GET | `/ticket/log-pull/external-config` | 获取分组格式外部接口配置 |
 | PUT | `/ticket/log-pull/external-config` | 保存分组格式外部接口配置 |
 

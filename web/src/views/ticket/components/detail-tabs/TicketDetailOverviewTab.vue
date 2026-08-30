@@ -69,7 +69,7 @@
     risk: latestSnapshot.value?.risk || '',
     owner: latestSnapshot.value?.owner || '',
   }));
-  const latestSimilarTickets = computed(() => (props.similarTickets || []).slice(0, 3));
+  const latestSimilarTickets = computed(() => (props.similarTickets || []).slice(0, 5));
 
   /**
    * 加载概览 tab 需要的工单快照、AI 任务和相似工单数据。

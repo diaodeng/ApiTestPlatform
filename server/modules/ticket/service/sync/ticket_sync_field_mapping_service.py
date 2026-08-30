@@ -696,26 +696,27 @@ class TicketSyncFieldMappingService:
         *,
         vendor_id: int | None,
         ticket_store: str,
+        environment: str | None = None,
     ) -> list[dict[str, str]]:
         """
         查询商家下与外部门店编码匹配的全部有效候选。
         :param db: 数据库会话
         :param vendor_id: 已匹配商家ID
         :param ticket_store: 外部门店字段，通常对应 sap_org_no
+        :param environment: 环境分组 key，传入时只匹配该环境的门店配置
         :return: 去重后的候选门店列表
         """
         store_text = str(ticket_store or "").strip()
         if not store_text or not vendor_id:
             return []
-        rows = (
-            db.query(TicketLogPullStoreConfig)
-            .filter(
-                TicketLogPullStoreConfig.sap_org_no == store_text,
-                TicketLogPullStoreConfig.vender_no == str(vendor_id),
-            )
-            .order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc())
-            .all()
+        query = db.query(TicketLogPullStoreConfig).filter(
+            TicketLogPullStoreConfig.sap_org_no == store_text,
+            TicketLogPullStoreConfig.vender_no == str(vendor_id),
         )
+        resolved_environment = str(environment or "").strip()
+        if resolved_environment:
+            query = query.filter(TicketLogPullStoreConfig.environment == resolved_environment)
+        rows = query.order_by(TicketLogPullStoreConfig.modifid.desc(), TicketLogPullStoreConfig.id.desc()).all()
         candidates: list[dict[str, str]] = []
         seen_org_nos: set[str] = set()
         for row in rows:
@@ -739,12 +740,14 @@ class TicketSyncFieldMappingService:
         *,
         vendor_id: int | None,
         ticket_store: str,
+        environment: str | None = None,
     ) -> tuple[str, str]:
         """
         按商家ID + 外部门店字段（sap_org_no）匹配门店配置。
         :param db: 数据库会话
         :param vendor_id: 已匹配商家ID
         :param ticket_store: 外部门店字段
+        :param environment: 环境分组 key，传入时只匹配该环境的门店配置
         :return: (store_id, store_name)
         """
         store_text = str(ticket_store or "").strip()
@@ -757,6 +760,7 @@ class TicketSyncFieldMappingService:
             db,
             vendor_id=vendor_id,
             ticket_store=store_text,
+            environment=environment,
         )
         if len(candidates) != 1:
             return store_text, ""

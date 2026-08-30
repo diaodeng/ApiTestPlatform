@@ -89,11 +89,14 @@ class TicketLogPullStoreConfig(Base):
         Index("idx_ticket_log_pull_store_config_org_no", "org_no"),
         Index("idx_ticket_log_pull_store_config_sap_org_no", "sap_org_no"),
         Index("idx_ticket_log_pull_store_config_group_no", "group_no"),
+        Index("idx_ticket_log_pull_store_config_environment", "environment"),
     )
 
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, nullable=False, unique=True, default=snowIdWorker.get_id, comment="配置ID"
     )
+    # 环境分组 key，来自 ticket.logPull.external 的分组（如 prod/uat）；空串表示历史存量数据。
+    environment: Mapped[str] = mapped_column(String(50), nullable=False, default="", comment="环境分组key")
     group_no: Mapped[str] = mapped_column(String(30), nullable=False, default="", comment="集团编号")
     vender_no: Mapped[str] = mapped_column(String(30), nullable=False, default="", comment="商户编号")
     region_no: Mapped[str] = mapped_column(String(30), nullable=False, default="", comment="区域编号")

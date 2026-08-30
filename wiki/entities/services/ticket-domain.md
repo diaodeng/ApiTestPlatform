@@ -245,7 +245,7 @@ graph TD
 - 自动化关注范围由 `TicketAutomationScopeService` 统一判定，支持模块 ID、模块 Code 和模块名称关键字；启用但未配置任何条件时不限制范围。统计查询会同时使用已解析模块 ID与原始模块名称关键字，兼容历史工单 `module_id` 为空的情况；范围判定审计写入 `ticket.extra_data.automation_scope`。
 - 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 按根消息中的“主题”文本归类促销、券、会员和印花；`主题:` 与 `主题：` 都可识别，英文专题关键词按词边界匹配，详情、回复和飞书富文本元数据不再参与专题分类，避免非券类工单被隐藏字段、人员 ID 或单词内部片段误判。
 - 该任务支持通过定时任务参数补充分类和状态关键词：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，传入后会与代码内置默认关键词合并，不传则继续使用默认关键词口径。
-- 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
+- 工单详情页 AI分析 Tab 承载 AI 分析相关消息和用户追问：用户追问固定以 `role=user/message_type=question/run_ai=true` 提交，页面不再暴露角色、类型和发起AI开关；版本、Agent、Provider、模型和分析上下文 JSON 仍可在紧凑配置区查看和编辑。普通人工沟通统一进入评论 Tab，评论保留独立接口、内部评论、时间线和外部同步语义，不触发 AI 分析；列表详情弹窗与独立详情页均使用统一的 AI分析和评论展示组件，任务历史在具备父级任务弹窗的详情入口打开。
 - 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
 - 工单描述翻译使用 `ticket.sync.automation.translateConfig` 的总开关、场景开关、Provider 和提示词：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。
 - 自动群推送条件中的 `status` 是工作流状态编码，`status_name` 是按编码查询到的工作流状态显示名。中文状态表达式必须使用 `status_name`；状态配置不存在时该字段为空字符串。

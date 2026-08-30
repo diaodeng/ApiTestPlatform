@@ -971,7 +971,7 @@ class TicketLightAiService:
             ),
         )
         try:
-            raw_text = cls._call_model_api(
+            raw_text, token_usage = cls._call_model_api(
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -985,6 +985,7 @@ class TicketLightAiService:
                 status="success",
                 response_text=raw_text,
                 response_payload={"rawText": raw_text, "parsed": parsed_data},
+                token_usage=token_usage,
             )
             return parsed_data, {
                 "provider_code": provider_code,
@@ -992,6 +993,7 @@ class TicketLightAiService:
                 "status": "success",
                 "raw_text": raw_text,
                 "parsed": parsed_data,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             logger.warning(f"工单知识库提炼失败，已回退规则提炼: {exc}")
@@ -1074,23 +1076,23 @@ class TicketLightAiService:
         temperature: float = 0.2,
         timeout_sec: int | None = None,
         model_name: str | None = None,
-    ) -> str:
+    ) -> tuple[str, dict[str, Any] | None]:
         """
-        调用具备工单轻量AI能力的Provider文本生成接口。
+        调用具备工单轻量AI能力的Provider文本生成接口，并透出 Token 用量。
         :param provider: Provider数据库对象
         :param system_prompt: 系统提示词
         :param user_prompt: 用户提示词
         :param temperature: 温度参数
         :param timeout_sec: 超时时间
         :param model_name: 可选覆盖模型名称，为空时使用Provider默认模型
-        :return: 模型回复文本
+        :return: (模型回复文本, Token用量字典)，上游未返回用量时用量为 None
         """
         AiProviderCapabilityService.require_provider_eligibility(
             provider,
             usage="ticket_light_text",
             executor="direct_http",
         )
-        content = AiProviderProtocolService.generate_text(
+        generation_result = AiProviderProtocolService.generate_text_with_usage(
             provider=provider,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1098,10 +1100,11 @@ class TicketLightAiService:
             timeout_sec=timeout_sec or cls.DEFAULT_TIMEOUT_SEC,
             model_name=model_name,
         )
+        content = generation_result.text
         logger.debug(f"调用AI返回结果：{content}")
         if not str(content or "").strip():
             raise ValueError("AI接口未返回可解析的内容")
-        return str(content).strip()
+        return str(content).strip(), generation_result.token_usage
 
     @classmethod
     def extract_ticket_sync_fields(
@@ -1295,7 +1298,7 @@ class TicketLightAiService:
             ),
         )
         try:
-            response_text = cls._call_model_api(
+            response_text, token_usage = cls._call_model_api(
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -1374,6 +1377,7 @@ class TicketLightAiService:
                     "normalized": extracted,
                     "machineNumberWarnings": machine_number_warnings,
                 },
+                token_usage=token_usage,
             )
             return extracted, {
                 "provider_code": provider_code,
@@ -1387,6 +1391,7 @@ class TicketLightAiService:
                 "sourceSnapshot": source_snapshot,
                 "success": True,
                 "cacheHit": False,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
@@ -1550,15 +1555,13 @@ class TicketLightAiService:
             ),
         )
         try:
-            summary_title = str(
-                cls._call_model_api(
-                    provider=provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model_name=model_name if model_name else None,
-                )
-                or ""
-            ).strip()
+            raw_summary, token_usage = cls._call_model_api(
+                provider=provider,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_name=model_name if model_name else None,
+            )
+            summary_title = str(raw_summary or "").strip()
             summary_title = summary_title.replace("\r", " ").replace("\n", " ").strip()
             cls._finish_execution_record(
                 db,
@@ -1566,11 +1569,13 @@ class TicketLightAiService:
                 status="success",
                 response_text=summary_title,
                 response_payload={"summaryTitle": summary_title},
+                token_usage=token_usage,
             )
             return summary_title, {
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
                 "summary_title": summary_title,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             logger.warning(f"工单标题总结失败，已回退描述截断: {exc}")
@@ -1750,13 +1755,11 @@ class TicketLightAiService:
         )
         logger.debug(f"工单AI分类统计参数：system_prompt： {system_prompt}, user_prompt: {user_prompt}")
         try:
-            response_text = str(
-                cls._call_model_api(
-                    provider=provider, system_prompt=system_prompt, user_prompt=user_prompt,
-                    model_name=default_model_name if default_model_name else None,
-                )
-                or ""
-            ).strip()
+            response_text, token_usage = cls._call_model_api(
+                provider=provider, system_prompt=system_prompt, user_prompt=user_prompt,
+                model_name=default_model_name if default_model_name else None,
+            )
+            response_text = response_text.strip()
 
             parsed_payload = cls._extract_json_object(response_text)
             normalized_result = cls._normalize_structured_classification_result(
@@ -1770,6 +1773,7 @@ class TicketLightAiService:
                 status="success",
                 response_text=response_text,
                 response_payload=normalized_result,
+                token_usage=token_usage,
             )
 
             logger.info(
@@ -1780,6 +1784,7 @@ class TicketLightAiService:
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
                 "skipped": False,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             logger.warning(f"工单AI分类统计失败: {exc}")
@@ -1918,7 +1923,7 @@ class TicketLightAiService:
             ),
         )
         try:
-            translated_text = cls._call_model_api(
+            translated_text, token_usage = cls._call_model_api(
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -1930,6 +1935,7 @@ class TicketLightAiService:
                 status="success",
                 response_text=translated_text,
                 response_payload={"translatedText": translated_text},
+                token_usage=token_usage,
             )
         except Exception as exc:
             logger.warning(f"工单翻译失败，已回退原文: {exc}")
@@ -1952,4 +1958,5 @@ class TicketLightAiService:
             "provider_code": provider_code,
             "prompt_code": prompt_code,
             "translated_text": translated_text,
+            "token_usage": token_usage,
         }
