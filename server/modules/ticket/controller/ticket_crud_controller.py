@@ -9,6 +9,7 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
+from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.vo.ticket_export_vo import TicketExportRequestModel
 from modules.ticket.entity.vo.ticket_read_vo import (
     TicketMessagesPageQueryModel,
@@ -23,12 +24,14 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketMessageCreateModel,
     TicketQueryModel,
     TicketRcaModel,
+    TicketSimilarityCaseStatusModel,
     TicketSnapshotModel,
     TicketStatusChangeModel,
     TicketUpdateModel,
     TicketUserOptionQueryModel,
 )
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
 from modules.ticket.service.core.ticket_import_service import TicketImportService
 from modules.ticket.service.core.ticket_read_service import TicketReadService
 from modules.ticket.service.core.ticket_service import TicketService
@@ -37,6 +40,7 @@ from utils.log_util import logger
 from utils.response_util import ResponseUtil
 
 ticketCrudController = APIRouter(prefix="/ticket", dependencies=[Depends(LoginService.get_current_user)])
+
 
 @ticketCrudController.get("/list", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:list"))])
 async def get_ticket_list(
@@ -133,18 +137,16 @@ async def search_ticket_natural_language(
         search_results = await run_in_threadpool(TicketEmbeddingService.search_tickets, query_db, keyword, limit)
         if not search_results:
             return ResponseUtil.success(data=[])
-        
+
         # 提取工单ID列表和分数映射
         ticket_id_score_map = {
-            item.get("ticketId"): item.get("score", 0)
-            for item in search_results
-            if item.get("ticketId")
+            item.get("ticketId"): item.get("score", 0) for item in search_results if item.get("ticketId")
         }
         ticket_ids = list(ticket_id_score_map.keys())
-        
+
         if not ticket_ids:
             return ResponseUtil.success(data=[])
-        
+
         # 自然语言搜索按相似度排序，清除关键字和排序字段
         # keyword 会被 DAO 层当作 SQL LIKE 条件，自然语言文本不适合 LIKE 匹配，必须清除
         query.keyword = None
@@ -153,7 +155,7 @@ async def search_ticket_natural_language(
         query.sort_order = None
         query.is_page = False
         query_result = await run_in_threadpool(TicketService.get_ticket_list_services, query_db, query)
-        
+
         rows = (
             query_result
             if isinstance(query_result, list)
@@ -174,6 +176,8 @@ async def search_ticket_natural_language(
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
 @ticketCrudController.post("", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:add"))])
 @log_decorator(title="工单管理", business_type=1)
 async def add_ticket(
@@ -201,6 +205,7 @@ async def add_ticket(
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
 
 @ticketCrudController.put("", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:edit"))])
 @log_decorator(title="工单管理", business_type=2)
@@ -321,6 +326,44 @@ async def get_ticket_similar_tickets(
         return ResponseUtil.error(msg=str(e))
 
 
+@ticketCrudController.post(
+    "/{ticket_id:int}/similarity-case/status",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:similarity:case"))],
+)
+async def update_ticket_similarity_case_status(
+    request: Request,
+    ticket_id: int,
+    payload: TicketSimilarityCaseStatusModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """更新相似处理案例状态并记录人工确认。"""
+    try:
+        ticket = await run_in_threadpool(TicketDao.get_ticket_by_id, query_db, ticket_id)
+        if not ticket:
+            return ResponseUtil.failure(msg="工单不存在")
+        operator_name = current_user.user.user_name if current_user and current_user.user else "system"
+        case = await run_in_threadpool(
+            TicketSimilarityCaseService.update_status_with_event,
+            query_db,
+            ticket,
+            payload.status,
+            operator_name,
+            current_user.user.user_id if current_user and current_user.user else None,
+            payload.remark or "",
+        )
+        await run_in_threadpool(query_db.commit)
+        if case.case_status in {"draft", "verified"}:
+            TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id, case.case_status)
+        return ResponseUtil.success(
+            data={"ticketId": str(ticket_id), "caseStatus": case.case_status}, msg="案例状态更新成功"
+        )
+    except Exception as exc:
+        query_db.rollback()
+        logger.exception(exc)
+        return ResponseUtil.error(msg=str(exc))
+
+
 @ticketCrudController.get(
     "/{ticket_id:int}/messages/page", dependencies=[Depends(CheckUserInterfaceAuth("ticket:message:list"))]
 )
@@ -372,6 +415,8 @@ async def get_ticket_detail(request: Request, ticket_id: int, query_db: Session 
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
 @ticketCrudController.post(
     "/{ticket_id:int}/assign", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:assign"))]
 )
@@ -662,6 +707,8 @@ async def extract_ticket_knowledge(
         await run_in_threadpool(query_db.rollback)
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
 @ticketCrudController.get(
     "/users/options",
     dependencies=[Depends(CheckUserInterfaceAuth(["ticket:ticket:assign", "ticket:workflow:edit"], False))],
@@ -680,9 +727,7 @@ async def get_ticket_user_options(
     """
     try:
         return ResponseUtil.success(
-            data=await run_in_threadpool(
-                TicketService.get_user_options_services, query_db, query.keyword, query.limit
-            )
+            data=await run_in_threadpool(TicketService.get_user_options_services, query_db, query.keyword, query.limit)
         )
     except Exception as e:
         logger.exception(e)
@@ -719,14 +764,11 @@ async def get_ticket_module_options(
     """
     try:
         return ResponseUtil.success(
-            data=await run_in_threadpool(
-                TicketService.get_module_options_services, query_db, projectId
-            )
+            data=await run_in_threadpool(TicketService.get_module_options_services, query_db, projectId)
         )
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
-
 
 
 # === 工单导出 ===
@@ -755,6 +797,7 @@ async def export_ticket_list(
             export_request,
         )
         from datetime import datetime
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"工单列表导出_{timestamp}.xlsx"
         return Response(

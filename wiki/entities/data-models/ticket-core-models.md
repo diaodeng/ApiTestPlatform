@@ -126,10 +126,9 @@ erDiagram
 - 2026-08-28 起，`TicketAiAnalysisTask.request_fingerprint` 按工单、版本、日志来源、仓库分支、最终提示词、输出 schema、Provider/模型/执行器等输入生成稳定请求指纹；同指纹的成功任务写入 `success_fingerprint`，该字段有数据库唯一索引。重复提交或重试会直接复用成功任务，不重新调用 Agent；失败任务不占用成功指纹，允许原请求重试。并发任务发生唯一约束冲突时，仅赢家写入消息、RCA、快照和 AI 分析事件。
 - `TicketMessage` 是持续协同和追问的上下文来源，字段包含 `role`、`message_type`、`content`、`attachments`、来源对象和创建人信息。
 - `TicketSnapshot` 是 ACR 当前快照版本，字段包含 `version`、`summary`、`root_cause`、`solution`、`prevention`、`risk`、`owner`、`source_type` 和结构化数据。
-- `EmbeddingRecord` 继续保存工单本地向量兜底索引，唯一键为 `object_type/object_id/embedding_model/embedding_version`；当 `ticket.similarity.config.provider=qdrant` 时，Qdrant 作为主检索索引，本表仍用于回退和审计。
-- 相似度重建会按工单标题、描述、AI 摘要、根因、解决方案和 RCA 重新计算 `EmbeddingRecord.embedding/content_hash`，并可同步写入 Qdrant payload。
-- 2026-07-11 起，工单详情页相似查询优先复用当前工单已保存的 `EmbeddingRecord.embedding`。查询前会按当前配置重新计算标准文本 `content_hash`，并校验模型、版本和维度；缺失或过期时同步刷新当前工单向量，刷新成功后继续使用新向量查询相似工单。
-- `ticket.similarity.config` 是系统参数 JSON，不新增业务表；其中 `sceneTriggers` 控制外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀是否自动刷新向量。
+- `EmbeddingRecord` 按 `embedding_scope` 保存工单症状、案例草稿和已验证案例向量；旧记录迁移为 `symptom`。`ticket_similarity_profile` 保存环境和画像版本，`ticket_similarity_signal` 保存错误码、Trace/Request ID 等精确信号，`ticket_similarity_case` 保存案例状态、确认信息和索引状态。项目、模块和版本中心 ID 继续以 `Ticket` 主数据为准，不整体拆分 `extra_data`。
+- 表现相似默认只使用标题、描述、稳定摘要、症状和重要关键词；根因、解决方案、排查、证据和验证方式只进入案例向量。生产使用外部 Embedding 时，MySQL 通过分批扫描计算余弦相似度，精确信号通过普通索引召回；Qdrant 保留为可选开发/未来加速 Provider。
+- AI 分析成功或人工 RCA 保存后创建 `draft` 案例；人工确认后变为 `verified`，驳回为 `rejected`。案例状态不等于 Issue 归因，案例内容变化会使已验证状态回退为草稿。
 - `ticket.statistics.time.config` 是系统参数 JSON，用于配置统计页默认时间范围和周趋势分桶；自然日快照由 `TicketStatisticsDaily` 承载，业务周快照由 `TicketStatisticsPeriodSnapshot` 承载。
 
 - `ticket_issue` 的业务号绑定和批量归因不改变 `first_ticket_id`、`ticket.issue_id` 等内部主键关联：接口新增 `firstTicketNo` 和 `ticketNos` 业务字段，问题详情按工单关联的版本中心 ID 展示发生、计划修复、实际修复和实际发版版本。

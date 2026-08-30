@@ -1030,6 +1030,15 @@ class TicketEmbeddingRebuildRequestModel(BaseModel):
         return self
 
 
+class TicketSimilarityCaseStatusModel(BaseModel):
+    """相似处理案例状态变更请求。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    status: str = Field(description="案例状态：draft/verified/rejected")
+    remark: str | None = Field(default="", max_length=2000, description="状态变更说明")
+
+
 class TicketSimilarityConfigModel(BaseModel):
     """
     工单相似度配置模型，用于可视化保存 Provider、Embedding、Qdrant 和场景触发开关。

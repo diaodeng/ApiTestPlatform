@@ -1,4 +1,11 @@
-## [2026-08-30] FEAT | 工单详情 AI分析与评论区布局收敛
+## [2026-08-30] INGEST-CODE | 相似工单症状/案例索引与混合召回
+- 触发：确认生产无 Qdrant 时按 MySQL + 外部 Embedding 落地相似工单准确性改造。
+- 架构层：工单域 / 相似检索 / 案例生命周期 / 详情页。
+- 新增：`TicketSimilarityProfile`、`TicketSimilaritySignal`、`TicketSimilarityCase`，以及 `EmbeddingRecord.embedding_scope`。
+- 变更传播链：工单入库/更新 -> 画像和精确信号 -> symptom 向量；AI/RCA 结论 -> draft 案例 -> 人工确认 verified -> 独立案例向量；详情 -> 精确候选 + MySQL 分批向量扫描 + 可解释重排。
+- 生产边界：Embedding 继续为生产 Provider，local_hash 保留测试，Qdrant 不作为生产依赖；不整体拆分 `ticket.extra_data`。
+- 文档：新增 `web/public/docs/ticket_similarity.md`、`web/public/docs/updates/2026-08-30-ticket-similarity-case-index.md`、`wiki/flows/ticket-similarity-case-flow.md`。
+
 
 - 触发：AI分析追问区同时暴露角色、类型、发起AI开关，配置项和操作按钮占用空间较大，普通评论与 AI 分析职责边界不够清晰。
 - 实现：详情页 Tab 更名为“AI分析”，固定追问消息为用户提问并自动触发 AI；保留版本、Agent、Provider、模型和附件 JSON 配置，收纳为紧凑配置条与分析上下文入口；消息记录采用 AI/用户区分的气泡布局；生成快照、生成知识库、任务历史统一为结果操作区，顺序固定为快照、知识库、任务历史。

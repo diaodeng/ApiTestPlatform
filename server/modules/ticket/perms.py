@@ -120,6 +120,7 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("ticket.ticket.import", "工单导入", "ticket.ticket", "ticket:ticket:import", 8),
     F("ticket.ticket.export", "工单导出", "ticket.ticket", "ticket:ticket:export", 9),
     F("ticket.similarity.rebuild", "相似工单向量重建", "ticket.ticket", "ticket:similarity:rebuild", 9),
+    F("ticket.similarity.case", "相似案例确认", "ticket.ticket", "ticket:similarity:case", 10),
     F("ticket.message.list", "协同消息查询", "ticket.ticket", "ticket:message:list", 10),
     F("ticket.message.add", "协同消息新增", "ticket.ticket", "ticket:message:add", 11),
     F("ticket.snapshot.add", "ACR快照新增", "ticket.ticket", "ticket:snapshot:add", 12),

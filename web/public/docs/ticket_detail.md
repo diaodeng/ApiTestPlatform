@@ -33,7 +33,7 @@
 
 ### 相似工单
 
-相似工单在概览区域独立加载，加载期间显示 loading。接口返回后按相似度显示摘要列表，默认展示前 5 条；没有结果时显示“暂无相似工单”，向量尚未准备好或查询失败时显示对应状态和提示。相似工单只返回编号、标题、状态、项目/模块、分类、优先级、严重等级、根因/解决方式、关闭结果和相似度等摘要字段，不返回完整描述和扩展数据。
+相似工单支持展示综合分、匹配类型、命中的错误码/Trace/项目/模块/环境和明确冲突。`matchType=symptom` 表示表现相似，`matchType=case` 表示存在处理案例索引；案例状态可能为草稿、已验证或已驳回。带有案例草稿的候选可在详情中点击 **确认案例**，确认要求存在根因、解决方案以及证据或验证方式。案例确认只沉淀处理经验，不会自动修改问题实例归因；“归入同一问题”仍需单独人工确认。
 
 相似工单支持：
 
@@ -77,7 +77,8 @@
 | 接口 | 用途 | 默认数量/限制 |
 | --- | --- | --- |
 | `GET /ticket/{ticket_id}/summary` | 主工单概览和当前提示词层摘要 | 单个工单，不包含消息、快照和相似列表 |
-| `GET /ticket/{ticket_id}/similar-tickets?limit=5` | 相似工单摘要 | 默认 5，范围 1~100 |
+| `GET /ticket/{ticket_id}/similar-tickets?limit=5` | 相似工单和处理案例摘要，包含综合分、命中原因、冲突和案例状态 | 默认 5，范围 1~100 |
+| `POST /ticket/{ticket_id}/similarity-case/status` | 确认、驳回或回退处理案例状态 | 需要 `ticket:similarity:case` |
 | `GET /ticket/{ticket_id}/messages/page?limit=20` | AI分析记录与追问消息 | 默认 20，最大 100 |
 | `GET /ticket/{ticket_id}/snapshots/page?limit=10` | ACR 快照 | 默认 10，最大 100 |
 | `GET /ticket/{ticket_id}/comments` | 普通评论 | 按评论 Tab 激活时读取 |

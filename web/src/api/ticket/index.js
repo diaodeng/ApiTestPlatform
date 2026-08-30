@@ -10,6 +10,8 @@ export {
   updateTicket,
   delTicket,
   getTicket,
+  getTicketSummary,
+  getTicketSimilarTickets,
 } from './crud';
 
 export {
@@ -93,6 +95,7 @@ export {
   bindTicketIssue,
   createAndBindTicketIssue,
   bindTicketIssueFromSimilar,
+  updateTicketSimilarityCaseStatus,
   unbindTicketIssue,
   addTicketRelation,
   confirmTicketRelation,

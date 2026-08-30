@@ -17,6 +17,9 @@ from modules.ticket.entity.do.ticket_do import (
     TicketEvent,
     TicketMessage,
     TicketRca,
+    TicketSimilarityCase,
+    TicketSimilarityProfile,
+    TicketSimilaritySignal,
     TicketSnapshot,
     TicketStatusHistory,
     WorkflowStatus,
@@ -175,10 +178,7 @@ def _json_safe_value(value: Any) -> Any:
     if isinstance(value, set):
         return [_json_safe_value(item) for item in value]
     if hasattr(value, "__table__"):
-        return {
-            column.name: _json_safe_value(getattr(value, column.name))
-            for column in value.__table__.columns
-        }
+        return {column.name: _json_safe_value(getattr(value, column.name)) for column in value.__table__.columns}
     if hasattr(value, "model_dump"):
         try:
             return _json_safe_value(value.model_dump(by_alias=False, exclude_none=False))
@@ -563,15 +563,9 @@ class TicketDao:
                 continue
             if module_id > 0:
                 resolved_ids.add(module_id)
-        module_codes = {
-            str(item or "").strip().casefold()
-            for item in (module_codes or [])
-            if str(item or "").strip()
-        }
+        module_codes = {str(item or "").strip().casefold() for item in (module_codes or []) if str(item or "").strip()}
         keywords = [
-            str(item or "").strip().casefold()
-            for item in (module_name_includes or [])
-            if str(item or "").strip()
+            str(item or "").strip().casefold() for item in (module_name_includes or []) if str(item or "").strip()
         ]
         if not module_codes and not keywords:
             return sorted(resolved_ids)
@@ -583,9 +577,12 @@ class TicketDao:
         for module_id, module_name, module_code in module_rows:
             normalized_name = str(module_name or "").strip().casefold()
             normalized_code = str(module_code or "").strip().casefold()
-            if normalized_code in module_codes or (normalized_name and any(keyword in normalized_name for keyword in keywords)):
+            if normalized_code in module_codes or (
+                normalized_name and any(keyword in normalized_name for keyword in keywords)
+            ):
                 resolved_ids.add(int(module_id))
         return sorted(resolved_ids)
+
     """
     工单模块数据库访问层。
     """
@@ -620,11 +617,7 @@ class TicketDao:
         """
         if not ticket_nos:
             return set()
-        rows = (
-            db.query(Ticket.ticket_no)
-            .filter(Ticket.ticket_no.in_(ticket_nos))
-            .all()
-        )
+        rows = db.query(Ticket.ticket_no).filter(Ticket.ticket_no.in_(ticket_nos)).all()
         return {row[0] for row in rows}
 
     @classmethod
@@ -821,10 +814,7 @@ class TicketDao:
                 pulled_expired = (
                     consumer_status == "pulled"
                     and last_revision == current_revision
-                    and (
-                        last_pulled_at is None
-                        or (now - last_pulled_at).total_seconds() >= pulled_retry_seconds
-                    )
+                    and (last_pulled_at is None or (now - last_pulled_at).total_seconds() >= pulled_retry_seconds)
                 )
                 should_return_ticket = (delivered_revision < current_revision and not pulled_active) or pulled_expired
                 if current_revision > 0 and should_return_ticket:
@@ -1104,10 +1094,7 @@ class TicketDao:
         :return: 下一个版本号
         """
         latest_version = (
-            db.query(func.max(TicketSnapshot.version))
-            .filter(TicketSnapshot.ticket_id == ticket_id)
-            .scalar()
-            or 0
+            db.query(func.max(TicketSnapshot.version)).filter(TicketSnapshot.ticket_id == ticket_id).scalar() or 0
         )
         return int(latest_version) + 1
 
@@ -1540,10 +1527,7 @@ class TicketDao:
             .all()
         )
         source_rows = (
-            db.query(Ticket.source, func.count(Ticket.ticket_id))
-            .filter(base_filter)
-            .group_by(Ticket.source)
-            .all()
+            db.query(Ticket.source, func.count(Ticket.ticket_id)).filter(base_filter).group_by(Ticket.source).all()
         )
         priority_rows = (
             db.query(Ticket.internal_priority, func.count(Ticket.ticket_id))
@@ -1706,12 +1690,7 @@ class TicketDao:
         if end_time:
             filters.append(submit_time_expr <= end_time)
 
-        rows = (
-            db.query(Ticket)
-            .filter(and_(*filters))
-            .order_by(submit_time_expr.asc(), Ticket.ticket_id.asc())
-            .all()
-        )
+        rows = db.query(Ticket).filter(and_(*filters)).order_by(submit_time_expr.asc(), Ticket.ticket_id.asc()).all()
         submit_time_map = {ticket.ticket_id: ticket.submit_time for ticket in rows}
         bucket_map: dict[date, dict[str, Any]] = {}
         event_times = [
@@ -1759,9 +1738,7 @@ class TicketDao:
             if end_time and value > end_time:
                 return None
             return bucket_map.get(
-                cls._trend_bucket_start(
-                    value, normalized_granularity, normalized_week_bucket_mode, week_bucket_config
-                )
+                cls._trend_bucket_start(value, normalized_granularity, normalized_week_bucket_mode, week_bucket_config)
             )
 
         for ticket in rows:
@@ -1786,8 +1763,7 @@ class TicketDao:
                 )
                 cls._increase_counter(
                     create_bucket["problem_pattern_counts"],
-                    str(ticket.problem_pattern_name or ticket.problem_pattern_code or "未填写").strip()
-                    or "未填写",
+                    str(ticket.problem_pattern_name or ticket.problem_pattern_code or "未填写").strip() or "未填写",
                 )
             closed_bucket = get_bucket_for_time(getattr(ticket, "closed_at", None))
             if closed_bucket:
@@ -1914,15 +1890,22 @@ class TicketDao:
             .filter(
                 EmbeddingRecord.object_type == record.object_type,
                 EmbeddingRecord.object_id == record.object_id,
+                EmbeddingRecord.embedding_scope == record.embedding_scope,
                 EmbeddingRecord.embedding_model == record.embedding_model,
                 EmbeddingRecord.embedding_version == record.embedding_version,
             )
             .first()
         )
         if existing:
+            existing.embedding_scope = record.embedding_scope
             existing.embedding_dimension = record.embedding_dimension
             existing.embedding = record.embedding
             existing.content_hash = record.content_hash
+            existing.metadata_snapshot = record.metadata_snapshot
+            existing.quality_status = record.quality_status
+            existing.source_revision = record.source_revision
+            existing.verified_at = record.verified_at
+            existing.verified_by = record.verified_by
             existing.create_time = datetime.now()
             db.flush()
             return existing
@@ -1938,14 +1921,16 @@ class TicketDao:
         object_id: int,
         model: str,
         version: str,
+        embedding_scope: str = "symptom",
     ) -> EmbeddingRecord | None:
         """
-        按对象、模型和版本查询单条向量记录，用于向量化幂等判断。
+        按对象、用途、模型和版本查询单条向量记录，用于向量化幂等判断。
         :param db: 数据库会话
         :param object_type: 对象类型
         :param object_id: 对象ID
         :param model: 向量模型
         :param version: 向量版本
+        :param embedding_scope: 向量用途，默认症状索引
         :return: 命中的向量记录
         """
         return (
@@ -1953,6 +1938,7 @@ class TicketDao:
             .filter(
                 EmbeddingRecord.object_type == object_type,
                 EmbeddingRecord.object_id == object_id,
+                EmbeddingRecord.embedding_scope == (str(embedding_scope or "symptom").strip() or "symptom"),
                 EmbeddingRecord.embedding_model == model,
                 EmbeddingRecord.embedding_version == version,
             )
@@ -1961,24 +1947,120 @@ class TicketDao:
 
     @classmethod
     def list_ticket_embedding_records(
-        cls, db: Session, model: str = "local-hash", version: str = "v1"
+        cls,
+        db: Session,
+        model: str = "local-hash",
+        version: str = "v1",
+        embedding_scope: str = "symptom",
+        batch_size: int | None = None,
     ) -> list[EmbeddingRecord]:
         """
-        查询工单向量记录。
+        查询指定用途的工单向量记录；batch_size 用于 MySQL 应用层分批扫描。
         :param db: 数据库会话
         :param model: 向量模型标识
         :param version: 向量版本
-        :return: 向量记录列表
+        :param embedding_scope: 向量用途
+        :param batch_size: 可选数据库批量读取大小
+        :return: 工单向量记录列表或可迭代查询结果
         """
-        return (
+        query = (
             db.query(EmbeddingRecord)
             .filter(
                 EmbeddingRecord.object_type == "ticket",
+                EmbeddingRecord.embedding_scope == (str(embedding_scope or "symptom").strip() or "symptom"),
                 EmbeddingRecord.embedding_model == model,
                 EmbeddingRecord.embedding_version == version,
             )
+            .order_by(EmbeddingRecord.id.asc())
+        )
+        if batch_size:
+            return query.yield_per(max(int(batch_size), 1))
+        return query.all()
+
+    @classmethod
+    def get_ticket_similarity_profile(cls, db: Session, ticket_id: int) -> TicketSimilarityProfile | None:
+        """按工单ID读取相似检索画像。"""
+        return db.query(TicketSimilarityProfile).filter(TicketSimilarityProfile.ticket_id == ticket_id).first()
+
+    @classmethod
+    def upsert_ticket_similarity_profile(cls, db: Session, profile: TicketSimilarityProfile) -> TicketSimilarityProfile:
+        """新增或更新工单相似检索画像。"""
+        existing = cls.get_ticket_similarity_profile(db, profile.ticket_id)
+        if not existing:
+            db.add(profile)
+            db.flush()
+            return profile
+        for key in (
+            "environment",
+            "normalized_version_key",
+            "extraction_source",
+            "extraction_confidence",
+            "profile_revision",
+            "content_hash",
+        ):
+            setattr(existing, key, getattr(profile, key))
+        existing.updated_at = datetime.now()
+        db.flush()
+        return existing
+
+    @classmethod
+    def list_ticket_similarity_signals(cls, db: Session, ticket_id: int) -> list[TicketSimilaritySignal]:
+        """读取工单全部精确信号。"""
+        return db.query(TicketSimilaritySignal).filter(TicketSimilaritySignal.ticket_id == ticket_id).all()
+
+    @classmethod
+    def list_ticket_ids_by_similarity_signals(
+        cls, db: Session, signal_type: str, signal_values: list[str]
+    ) -> dict[int, set[str]]:
+        """按信号类型和值批量查询命中的工单ID。"""
+        values = [str(item or "").strip() for item in signal_values if str(item or "").strip()]
+        if not values:
+            return {}
+        rows = (
+            db.query(TicketSimilaritySignal)
+            .filter(
+                TicketSimilaritySignal.signal_type == signal_type,
+                TicketSimilaritySignal.signal_value.in_(values),
+            )
             .all()
         )
+        result: dict[int, set[str]] = {}
+        for row in rows:
+            result.setdefault(int(row.ticket_id), set()).add(str(row.signal_value))
+        return result
+
+    @classmethod
+    def get_ticket_similarity_case(cls, db: Session, ticket_id: int) -> TicketSimilarityCase | None:
+        """按工单ID读取相似处理案例。"""
+        return db.query(TicketSimilarityCase).filter(TicketSimilarityCase.ticket_id == ticket_id).first()
+
+    @classmethod
+    def upsert_ticket_similarity_case(cls, db: Session, case: TicketSimilarityCase) -> TicketSimilarityCase:
+        """新增或更新相似处理案例，保留人工确认状态。"""
+        existing = cls.get_ticket_similarity_case(db, case.ticket_id)
+        if not existing:
+            db.add(case)
+            db.flush()
+            return case
+        for key in (
+            "case_status",
+            "case_source",
+            "case_revision",
+            "content_hash",
+            "root_cause_summary",
+            "solution_summary",
+            "evidence_summary",
+            "investigation_summary",
+            "verify_summary",
+            "reusable",
+            "last_index_status",
+            "last_index_error",
+            "last_indexed_at",
+        ):
+            setattr(existing, key, getattr(case, key))
+        existing.updated_at = datetime.now()
+        db.flush()
+        return existing
 
     @classmethod
     def list_tickets_for_embedding(
@@ -2088,7 +2170,5 @@ class TicketDao:
         if not user_id:
             return None
         return (
-            db.query(SysUser)
-            .filter(SysUser.user_id == user_id, SysUser.del_flag == "0", SysUser.status == "0")
-            .first()
+            db.query(SysUser).filter(SysUser.user_id == user_id, SysUser.del_flag == "0", SysUser.status == "0").first()
         )

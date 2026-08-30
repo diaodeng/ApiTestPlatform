@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_hybrid_similarity_service import TicketHybridSimilarityService
 
 
 class TicketSimilarityQueryService:
@@ -58,12 +59,22 @@ class TicketSimilarityQueryService:
                 similar_status = "ready"
                 similar_message = embedding_context["message"]
             if similar_status == "ready":
-                similar_tickets = TicketEmbeddingService.search_tickets_by_vector(
-                    query_db,
-                    embedding_context.get("vector") or [],
-                    limit,
-                    config,
-                    exclude_ticket_id=ticket_id,
+                similar_tickets = (
+                    TicketHybridSimilarityService.search_by_vector(
+                        query_db,
+                        ticket,
+                        embedding_context.get("vector") or [],
+                        limit,
+                        config,
+                    )
+                    if getattr(ticket, "ticket_id", None) and hasattr(query_db, "query")
+                    else TicketEmbeddingService.search_tickets_by_vector(
+                        query_db,
+                        embedding_context.get("vector") or [],
+                        limit,
+                        config,
+                        exclude_ticket_id=ticket_id,
+                    )
                 )
         except Exception as exc:
             query_db.rollback()

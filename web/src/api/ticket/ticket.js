@@ -122,6 +122,14 @@ export function getTicketSimilarTickets(ticketId, params = {}) {
   });
 }
 
+// 更新相似处理案例状态
+export function updateTicketSimilarityCaseStatus(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/similarity-case/status`,
+    method: 'post',
+    data,
+  });
+}
 // 查询工单详情（兼容旧完整详情契约）
 export function getTicket(ticketId) {
   return request({
@@ -129,6 +137,7 @@ export function getTicket(ticketId) {
     method: 'get',
   });
 }
+
 
 // 查询工单分页协同消息
 export function getTicketMessagesPage(ticketId, params = {}) {

@@ -106,6 +106,22 @@
               <span>相似度 {{ formatPercent(item.score) }}</span>
               <span>{{ item.moduleName || '-' }}</span>
               <span>{{ item.status || '-' }}</span>
+              <el-tag v-if="item.caseStatus && item.caseStatus !== 'none'" size="small" effect="plain">
+                {{ formatCaseStatus(item.caseStatus) }}
+              </el-tag>
+              <el-button
+                v-if="item.caseStatus === 'draft'"
+                v-hasPermi="['ticket:similarity:case']"
+                link
+                type="success"
+                @click="confirmSimilarCase(item)"
+              >
+                确认案例
+              </el-button>
+            </div>
+            <div v-if="item.matchReasons?.length || item.conflicts?.length" class="detail-meta">
+              <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
+              <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
             </div>
           </div>
           <div class="similar-actions">
@@ -228,7 +244,13 @@
 <script setup>
   import { computed, getCurrentInstance, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
-  import { bindTicketIssue, getTicket, getTicketTimeline, listTicketIssues } from '@/api/ticket/ticket';
+  import {
+    bindTicketIssue,
+    getTicket,
+    getTicketTimeline,
+    listTicketIssues,
+    updateTicketSimilarityCaseStatus,
+  } from '@/api/ticket/ticket';
   import TicketDetailCollabTab from './detail-tabs/TicketDetailCollabTab.vue';
   import TicketDetailCommentsTab from './detail-tabs/TicketDetailCommentsTab.vue';
   import { useWorkflow } from '../hooks/useWorkflow';
@@ -501,9 +523,28 @@
     return '未填写';
   }
 
+  function confirmSimilarCase(item) {
+    const ticketId = item?.ticketId || item?.ticket_id;
+    if (!ticketId) return;
+    proxy.$modal.confirm('确认将该工单沉淀为可复用处理案例吗？').then(() => {
+      return updateTicketSimilarityCaseStatus(ticketId, {
+        status: 'verified',
+        remark: '详情页人工确认案例可复用',
+      });
+    }).then(() => {
+      proxy.$modal.msgSuccess('案例已确认');
+      loadDetail();
+    }).catch(() => {});
+  }
+
   function formatPercent(value) {
     const numeric = Number(value || 0);
     return `${(numeric * 100).toFixed(1)}%`;
+  }
+
+  function formatCaseStatus(value) {
+    const labels = { draft: '案例草稿', verified: '已验证案例', rejected: '已驳回' };
+    return labels[String(value || '')] || String(value || '');
   }
 
   function formatDateTime(value) {

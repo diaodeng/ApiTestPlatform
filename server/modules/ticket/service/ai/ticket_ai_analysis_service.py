@@ -61,6 +61,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from utils.api_key_util import ApiKeyUtil
@@ -952,9 +953,7 @@ class TicketAiAnalysisService:
         # 先合并扩展环境变量，再写入 Provider 的核心连接信息。
         # workerEnv 只用于补充 Worker 参数，不能覆盖当前工单明确选择的 Provider
         # 的密钥、地址和模型，否则会出现“界面选择了 Provider，但 Agent 仍调用旧地址”的问题。
-        env_overrides: dict[str, str] = cls._normalize_provider_worker_env(
-            getattr(provider, "worker_env", None)
-        )
+        env_overrides: dict[str, str] = cls._normalize_provider_worker_env(getattr(provider, "worker_env", None))
         try:
             secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
         except Exception as exc:
@@ -1293,9 +1292,7 @@ class TicketAiAnalysisService:
             return int(task.audit_execution_id)
 
         context_payload = (
-            task.analysis_context
-            if isinstance(task.analysis_context, dict)
-            else cls._loads(task.analysis_context, {})
+            task.analysis_context if isinstance(task.analysis_context, dict) else cls._loads(task.analysis_context, {})
         )
         provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip() or None
         selected_provider = AiProviderDao.get_ai_provider_by_code(db, provider_code) if provider_code else None
@@ -1355,7 +1352,7 @@ class TicketAiAnalysisService:
         if len(text) <= cls.EXECUTION_TEXT_MAX_CHARS:
             return text
         return (
-            f"{text[:cls.EXECUTION_TEXT_MAX_CHARS]}\n...（审计文本超长已截断，原始 {len(text)} 字符，"
+            f"{text[: cls.EXECUTION_TEXT_MAX_CHARS]}\n...（审计文本超长已截断，原始 {len(text)} 字符，"
             f"完整内容见任务工作区）..."
         )
 
@@ -1379,9 +1376,7 @@ class TicketAiAnalysisService:
             if isinstance(node, str):
                 if len(node) <= cls.EXECUTION_PAYLOAD_MAX_CHARS:
                     return node
-                return (
-                    f"{node[:512]}...（审计载荷长文本已截断，原始 {len(node)} 字符）"
-                )
+                return f"{node[:512]}...（审计载荷长文本已截断，原始 {len(node)} 字符）"
             if isinstance(node, dict):
                 return {key: _walk(item, depth + 1) for key, item in node.items()}
             if isinstance(node, list):
@@ -2334,12 +2329,10 @@ class TicketAiAnalysisService:
                 if not (
                     isinstance(item, dict)
                     and (
-                        str(item.get("referenceType") or item.get("reference_type") or "").lower()
-                        == "ai_analysis"
+                        str(item.get("referenceType") or item.get("reference_type") or "").lower() == "ai_analysis"
                         or (
                             str(item.get("role") or "").lower() == "ai"
-                            and str(item.get("messageType") or item.get("message_type") or "").lower()
-                            == "analysis"
+                            and str(item.get("messageType") or item.get("message_type") or "").lower() == "analysis"
                         )
                     )
                 )
@@ -2366,9 +2359,11 @@ class TicketAiAnalysisService:
                 )
             ]
         latest_snapshot = context.get("latestSnapshot")
-        if isinstance(latest_snapshot, dict) and str(
-            latest_snapshot.get("sourceType") or latest_snapshot.get("source_type") or ""
-        ).lower() == "ai_analysis":
+        if (
+            isinstance(latest_snapshot, dict)
+            and str(latest_snapshot.get("sourceType") or latest_snapshot.get("source_type") or "").lower()
+            == "ai_analysis"
+        ):
             context["latestSnapshot"] = None
         return context
 
@@ -2415,8 +2410,7 @@ class TicketAiAnalysisService:
         if isinstance(expected_type, list):
             # 联合类型：任一分支通过即通过，全部分支失败才报告违规。
             branch_violations = [
-                cls._collect_schema_violations(payload, {**schema, "type": item}, path)
-                for item in expected_type
+                cls._collect_schema_violations(payload, {**schema, "type": item}, path) for item in expected_type
             ]
             if all(branch_violations):
                 expected_desc = "/".join(expected_type)
@@ -2428,14 +2422,10 @@ class TicketAiAnalysisService:
             violations: list[str] = []
             required = schema.get("required") or []
             properties = schema.get("properties") or {}
-            violations.extend(
-                f"{path}.{field}: required 字段缺失" for field in required if field not in payload
-            )
+            violations.extend(f"{path}.{field}: required 字段缺失" for field in required if field not in payload)
             if schema.get("additionalProperties") is False:
                 violations.extend(
-                    f"{path}.{key}: additionalProperties 不允许的额外字段"
-                    for key in payload
-                    if key not in properties
+                    f"{path}.{key}: additionalProperties 不允许的额外字段" for key in payload if key not in properties
                 )
             for key, child_schema in properties.items():
                 if key in payload:
@@ -2565,7 +2555,8 @@ class TicketAiAnalysisService:
                 create_time=now,
             ),
         )
-        cls._create_rca_from_result(db, ticket, result_payload, current_user)
+        rca = cls._create_rca_from_result(db, ticket, result_payload, current_user)
+        TicketSimilarityCaseService.upsert_draft(db, ticket, rca=rca, source="ai")
         TicketDao.add_snapshot(
             db,
             TicketSnapshot(
@@ -2892,9 +2883,7 @@ class TicketAiAnalysisService:
                 source_id=ticket.ticket_id,
                 source_ref=ticket.ticket_no or str(ticket.ticket_id),
                 provider_code=(
-                    selected_provider.provider_code
-                    if selected_provider
-                    else (selected_provider_code or None)
+                    selected_provider.provider_code if selected_provider else (selected_provider_code or None)
                 ),
                 model_name=requested_model_name or (selected_provider.default_model if selected_provider else None),
                 base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
@@ -3322,9 +3311,7 @@ class TicketAiAnalysisService:
             result_payload = {}
         # analysis_result 入库键为 snake_case（_normalize_analysis_result 写入），
         # 兼容驼峰键仅防止历史上存在异常写入；取值顺序 snake_case 优先。
-        item["analysisSummary"] = (
-            result_payload.get("analysis_summary") or result_payload.get("analysisSummary")
-        )
+        item["analysisSummary"] = result_payload.get("analysis_summary") or result_payload.get("analysisSummary")
         item["rootCause"] = result_payload.get("root_cause") or result_payload.get("rootCause")
         item["fixSuggestion"] = result_payload.get("fix_suggestion") or result_payload.get("fixSuggestion")
         return item
@@ -3473,9 +3460,7 @@ class TicketAiAnalysisService:
         notify_config: dict[str, Any] | None = None
         if getattr(task, "source_log_pull_record_id", None):
             # 仅读取 command_content 中的通知配置，使用轻量查询避免加载压缩正文。
-            source_log_pull_record = TicketLogPullDao.get_record_meta_by_id(
-                db, int(task.source_log_pull_record_id)
-            )
+            source_log_pull_record = TicketLogPullDao.get_record_meta_by_id(db, int(task.source_log_pull_record_id))
         if source_log_pull_record and isinstance(source_log_pull_record.command_content, dict):
             notify_config = source_log_pull_record.command_content.get(
                 "notifyConfig"
@@ -3837,10 +3822,10 @@ class TicketAiAnalysisService:
                 analysis_result=normalized,
                 raw_output=(result_text or raw_stdout or "")[:5000],
                 command_line=f"agent:{agent_code}",
-            input_token_count=(normalized_token_usage or {}).get("input_token_count"),
-            output_token_count=(normalized_token_usage or {}).get("output_token_count"),
-            total_token_count=(normalized_token_usage or {}).get("total_token_count"),
-        )
+                input_token_count=(normalized_token_usage or {}).get("input_token_count"),
+                output_token_count=(normalized_token_usage or {}).get("output_token_count"),
+                total_token_count=(normalized_token_usage or {}).get("total_token_count"),
+            )
             cls._update_execution_record(
                 db,
                 audit_execution_id,
@@ -3853,6 +3838,7 @@ class TicketAiAnalysisService:
                 token_usage=token_usage_payload,
             )
             db.commit()
+            TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)
             cls._finalize_sync_publish_after_ai(
                 db,
                 ticket_id=ticket.ticket_id,
