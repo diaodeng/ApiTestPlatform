@@ -6,12 +6,21 @@
 """
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 TicketAiTestTaskType = Literal["sync_extract", "classification", "translate", "title_summary", "knowledge"]
 
 
-class TicketAiTestOptionsModel(BaseModel):
+class _CamelModel(BaseModel):
+    """
+    测试工作台契约模型基类：接受前端 camelCase 字段，也兼容 snake_case。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class TicketAiTestOptionsModel(_CamelModel):
     """
     手动测试工作台选项响应模型。
     """
@@ -28,7 +37,7 @@ class TicketAiTestOptionsModel(BaseModel):
     )
 
 
-class TicketAiTestTicketSearchItemModel(BaseModel):
+class TicketAiTestTicketSearchItemModel(_CamelModel):
     """
     测试工作台工单搜索结果项。
     """
@@ -40,7 +49,7 @@ class TicketAiTestTicketSearchItemModel(BaseModel):
     create_time: str = Field(default="", description="创建时间")
 
 
-class TicketAiTestTicketSearchResponseModel(BaseModel):
+class TicketAiTestTicketSearchResponseModel(_CamelModel):
     """
     测试工作台工单搜索响应模型。
     """
@@ -48,7 +57,7 @@ class TicketAiTestTicketSearchResponseModel(BaseModel):
     rows: list[TicketAiTestTicketSearchItemModel] = Field(default_factory=list, description="工单列表")
 
 
-class TicketAiTestRunModel(BaseModel):
+class TicketAiTestRunModel(_CamelModel):
     """
     手动测试执行请求模型。
     """
@@ -67,7 +76,7 @@ class TicketAiTestRunModel(BaseModel):
     )
 
 
-class TicketAiTestRunResponseModel(BaseModel):
+class TicketAiTestRunResponseModel(_CamelModel):
     """
     手动测试执行响应模型。
     """
