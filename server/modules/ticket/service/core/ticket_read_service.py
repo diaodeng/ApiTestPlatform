@@ -175,10 +175,14 @@ class TicketReadService:
             return None
         result = TicketSimilarityQueryService.search_similar_tickets_by_ticket(db, ticket_id, limit=limit)
         items = [cls._project_similar_item(item) for item in result.get("similarTickets") or []]
+        symptom_items = [cls._project_similar_item(item) for item in result.get("symptomTickets") or []]
+        case_items = [cls._project_similar_item(item) for item in result.get("caseTickets") or []]
         response = TicketSimilarResponseModel(
             status=str(result.get("similarEmbeddingStatus") or "disabled"),
             message=str(result.get("similarEmbeddingMessage") or ""),
             items=items,
+            symptom_tickets=symptom_items,
+            case_tickets=case_items,
         )
         logger.info(
             f"相似工单查询完成 | ticket_id={ticket_id} limit={limit} status={response.status} count={len(items)}"

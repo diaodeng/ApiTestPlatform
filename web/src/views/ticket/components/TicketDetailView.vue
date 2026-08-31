@@ -98,39 +98,47 @@
           class="mb12"
           :title="detail.similarEmbeddingMessage || '当前相似工单向量不可用'"
         />
-        <el-empty v-if="!similarTickets.length" description="暂无相似工单" />
-        <div v-for="item in similarTickets" :key="item.ticketId" class="similar-item">
-          <div>
-            <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
-            <div class="detail-meta">
-              <span>相似度 {{ formatPercent(item.score) }}</span>
-              <span>{{ item.moduleName || '-' }}</span>
-              <span>{{ item.status || '-' }}</span>
-              <el-tag v-if="item.caseStatus && item.caseStatus !== 'none'" size="small" effect="plain">
-                {{ formatCaseStatus(item.caseStatus) }}
-              </el-tag>
-              <el-button
-                v-if="item.caseStatus === 'draft'"
-                v-hasPermi="['ticket:similarity:case']"
-                link
-                type="success"
-                @click="confirmSimilarCase(item)"
-              >
-                确认案例
+        <section class="similar-group">
+          <h4>工单内容相似</h4>
+          <el-empty v-if="!symptomTickets.length" description="暂无内容相似工单" />
+          <div v-for="item in symptomTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
+            <div>
+              <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
+              <div class="detail-meta">
+                <span>相似度 {{ formatPercent(item.score) }}</span>
+                <span>{{ item.moduleName || '-' }}</span>
+                <span>{{ item.status || '-' }}</span>
+              </div>
+              <div v-if="item.matchReasons?.length || item.conflicts?.length" class="detail-meta">
+                <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
+                <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
+              </div>
+            </div>
+            <div class="similar-actions">
+              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+              <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
+                飞书详情
               </el-button>
             </div>
-            <div v-if="item.matchReasons?.length || item.conflicts?.length" class="detail-meta">
-              <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
-              <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
+          </div>
+        </section>
+        <section class="similar-group similar-group--case">
+          <h4>处理案例相似</h4>
+          <el-empty v-if="!caseTickets.length" description="暂无处理案例" />
+          <div v-for="item in caseTickets" :key="`case-${item.ticketId}`" class="similar-item">
+            <div>
+              <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
+              <div class="detail-meta">
+                <span>相似度 {{ formatPercent(item.score) }}</span>
+                <span>{{ formatCaseStatus(item.caseStatus) }}</span>
+              </div>
+              <div class="detail-meta">根因：{{ item.rootCause || '-' }}</div>
+            </div>
+            <div class="similar-actions">
+              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
             </div>
           </div>
-          <div class="similar-actions">
-            <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
-            <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
-              飞书详情
-            </el-button>
-          </div>
-        </div>
+        </section>
       </el-tab-pane>
 
       <el-tab-pane label="AI分析" name="collab">
@@ -444,6 +452,16 @@
       ''
   );
   const similarTickets = computed(() => (Array.isArray(detail.value.similarTickets) ? detail.value.similarTickets : []));
+  const symptomTickets = computed(() =>
+    Array.isArray(detail.value.symptomTickets)
+      ? detail.value.symptomTickets
+      : similarTickets.value.filter((item) => item.matchType !== 'case')
+  );
+  const caseTickets = computed(() =>
+    Array.isArray(detail.value.caseTickets)
+      ? detail.value.caseTickets
+      : similarTickets.value.filter((item) => item.matchType === 'case')
+  );
   const timelineRows = computed(() => {
     const source = timeline.value || {};
     const rows = [

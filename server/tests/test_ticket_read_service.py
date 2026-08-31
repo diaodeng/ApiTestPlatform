@@ -39,6 +39,25 @@ def test_similar_item_uses_summary_whitelist_and_string_id():
     assert "extraData" not in payload
 
 
+def test_similar_item_projects_match_details():
+    """相似工单投影应保留标题、工单号和混合检索解释字段。"""
+    item = TicketReadService._project_similar_item(
+        {
+            "ticketId": 2,
+            "ticketNo": "INC00001793483",
+            "title": "POS销售失败",
+            "matchType": "symptom",
+            "matchReasons": ["错误码一致"],
+            "conflicts": [],
+        }
+    )
+    payload = item.model_dump(by_alias=True)
+    assert payload["ticketNo"] == "INC00001793483"
+    assert payload["title"] == "POS销售失败"
+    assert payload["matchType"] == "symptom"
+    assert payload["matchReasons"] == ["错误码一致"]
+
+
 def test_messages_page_returns_latest_limit_and_has_more(monkeypatch):
     """消息按需接口应返回最近数量，并正确标记是否还有更早记录。"""
     ticket = SimpleNamespace(ticket_id=1)

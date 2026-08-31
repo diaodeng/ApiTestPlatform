@@ -89,6 +89,8 @@ class TicketSimilarResponseModel(BaseModel):
     status: str
     message: str = ""
     items: list[TicketSimilarItemModel] = Field(default_factory=list)
+    symptom_tickets: list[TicketSimilarItemModel] = Field(default_factory=list)
+    case_tickets: list[TicketSimilarItemModel] = Field(default_factory=list)
 
 
 class TicketMessagePageItemModel(BaseModel):

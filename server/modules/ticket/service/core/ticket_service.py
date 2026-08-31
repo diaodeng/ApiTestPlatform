@@ -2001,6 +2001,8 @@ class TicketService:
             "snapshots": CamelCaseUtil.transform_result(snapshots),
             "latestSnapshot": CamelCaseUtil.transform_result(snapshots[0]) if snapshots else None,
             "similarTickets": similarity_result.get("similarTickets") or [],
+            "symptomTickets": similarity_result.get("symptomTickets") or [],
+            "caseTickets": similarity_result.get("caseTickets") or [],
             "similarEmbeddingStatus": similarity_result.get("similarEmbeddingStatus") or "disabled",
             "similarEmbeddingMessage": similarity_result.get("similarEmbeddingMessage") or "",
         }

@@ -10,6 +10,7 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_similarity_profile_service import TicketSimilarityProfileService
+from utils.common_util import CamelCaseUtil
 
 
 class TicketHybridSimilarityService:
@@ -23,34 +24,38 @@ class TicketHybridSimilarityService:
         vector: list[float],
         limit: int,
         config: dict[str, Any],
+        *,
+        embedding_scopes: tuple[str, ...] | None = None,
+        match_type: str = "symptom",
+        include_exact_signal_candidates: bool = True,
     ) -> list[dict[str, Any]]:
-        """查询向量候选并按错误码、Trace、项目、模块和案例状态重排。"""
+        """按指定向量用途查询候选并执行可解释重排。"""
         candidate_limit = min(max(int(limit or 5) * 5, 10), 100)
+        scopes = embedding_scopes or (TicketEmbeddingService.SCOPE_SYMPTOM,)
         provider = TicketEmbeddingService._normalize_provider(config.get("provider"))
         if provider == TicketEmbeddingService.PROVIDER_QDRANT:
+            if match_type == "case":
+                return []
             return TicketEmbeddingService.search_tickets_by_vector(
                 db, vector, limit, config, exclude_ticket_id=source_ticket.ticket_id
             )
         scored: dict[int, float] = {}
-        for scope in (
-            TicketEmbeddingService.SCOPE_SYMPTOM,
-            TicketEmbeddingService.SCOPE_CASE_DRAFT,
-            TicketEmbeddingService.SCOPE_CASE_VERIFIED,
-        ):
+        for scope in scopes:
             scope_scored = TicketEmbeddingService.search_embedding_records_by_vector(
                 db, vector, candidate_limit, config, provider, embedding_scope=scope
             )
             for ticket_id, score in scope_scored.items():
                 scored[ticket_id] = max(scored.get(ticket_id, 0.0), score)
         source_meta = TicketSimilarityProfileService.get_metadata(db, source_ticket)
-        source_signals = source_meta.get("signals") if isinstance(source_meta.get("signals"), dict) else {}
-        for signal_type in ("trace_id", "request_id", "error_code"):
-            signal_hits = TicketDao.list_ticket_ids_by_similarity_signals(
-                db, signal_type, list(source_signals.get(signal_type) or [])
-            )
-            for ticket_id in signal_hits:
-                if ticket_id != source_ticket.ticket_id:
-                    scored.setdefault(ticket_id, 0.0)
+        if include_exact_signal_candidates:
+            source_signals = source_meta.get("signals") if isinstance(source_meta.get("signals"), dict) else {}
+            for signal_type in ("trace_id", "request_id", "error_code"):
+                signal_hits = TicketDao.list_ticket_ids_by_similarity_signals(
+                    db, signal_type, list(source_signals.get(signal_type) or [])
+                )
+                for ticket_id in signal_hits:
+                    if ticket_id != source_ticket.ticket_id:
+                        scored.setdefault(ticket_id, 0.0)
         ticket_map = {row.ticket_id: row for row in TicketDao.get_tickets_by_ids(db, list(scored.keys()))}
         result: list[dict[str, Any]] = []
         for ticket_id, semantic_score in scored.items():
@@ -74,6 +79,7 @@ class TicketHybridSimilarityService:
             )
             result.append(
                 {
+                    **CamelCaseUtil.transform_result(candidate),
                     "ticketId": ticket_id,
                     "score": round(max(min(final_score, 1.0), -1.0), 4),
                     "semanticScore": round(float(semantic_score), 4),
@@ -81,7 +87,7 @@ class TicketHybridSimilarityService:
                     "exactSignalScore": round(exact_score, 4),
                     "contextScore": round(context_score, 4),
                     "caseStatus": case_status,
-                    "matchType": "case" if case_status in {"draft", "verified"} else "symptom",
+                    "matchType": match_type,
                     "matchReasons": reasons,
                     "conflicts": conflicts,
                 }

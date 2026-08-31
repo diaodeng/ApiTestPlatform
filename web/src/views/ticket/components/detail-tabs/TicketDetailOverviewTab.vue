@@ -20,6 +20,14 @@
       type: Array,
       default: () => [],
     },
+    symptomTickets: {
+      type: Array,
+      default: () => [],
+    },
+    caseTickets: {
+      type: Array,
+      default: () => [],
+    },
     similarLoading: {
       type: Boolean,
       default: false,
@@ -70,6 +78,12 @@
     owner: latestSnapshot.value?.owner || '',
   }));
   const latestSimilarTickets = computed(() => (props.similarTickets || []).slice(0, 5));
+  const symptomSimilarTickets = computed(() =>
+    (props.symptomTickets?.length ? props.symptomTickets : latestSimilarTickets.value.filter((item) => item.matchType !== 'case')).slice(0, 5)
+  );
+  const caseSimilarTickets = computed(() =>
+    (props.caseTickets?.length ? props.caseTickets : latestSimilarTickets.value.filter((item) => item.matchType === 'case')).slice(0, 5)
+  );
 
   /**
    * 加载概览 tab 需要的工单快照、AI 任务和相似工单数据。
@@ -364,34 +378,31 @@
       </el-card>
     </el-col>
     <el-col :span="8">
-        <el-card shadow="never" v-loading="similarLoading">
-          <template #header>相似工单</template>
-          <el-alert
-            v-if="similarError"
-            type="error"
-            :closable="false"
-            :title="similarError"
-            class="mb12"
-          />
-          <el-empty
-            v-else-if="similarStatus === 'ready' && !latestSimilarTickets.length"
-            description="暂无相似工单"
-          />
-          <el-empty
-            v-else-if="similarStatus === 'pending'"
-            description="相似工单正在生成，请稍后刷新"
-          />
-          <div v-for="item in latestSimilarTickets" :key="item.ticketId" class="similar-item">
-
+      <el-card shadow="never" v-loading="similarLoading">
+        <template #header>工单内容相似</template>
+        <el-alert
+          v-if="similarError"
+          type="error"
+          :closable="false"
+          :title="similarError"
+          class="mb12"
+        />
+        <el-empty
+          v-else-if="similarStatus === 'ready' && !symptomSimilarTickets.length"
+          description="暂无内容相似工单"
+        />
+        <el-empty
+          v-else-if="similarStatus === 'pending'"
+          description="相似工单正在生成，请稍后刷新"
+        />
+        <div v-for="item in symptomSimilarTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
           <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
           <div class="similar-meta">
             <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
-            <span>{{ item.rootCause || '-' }}</span>
+            <span>{{ item.moduleName || '-' }}</span>
           </div>
           <div class="similar-actions">
-            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)"
-              >系统详情</el-link
-            >
+            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)">系统详情</el-link>
             <el-link
               v-if="resolveTicketDetailUrl(item)"
               type="info"
@@ -409,6 +420,21 @@
             >
               归入同一问题
             </el-button>
+          </div>
+        </div>
+      </el-card>
+      <el-card shadow="never" class="mt16">
+        <template #header>处理案例相似</template>
+        <el-empty v-if="!caseSimilarTickets.length" description="暂无可复用处理案例" />
+        <div v-for="item in caseSimilarTickets" :key="`case-${item.ticketId}`" class="similar-item">
+          <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
+          <div class="similar-meta">
+            <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
+            <span>{{ item.caseStatus === 'verified' ? '已验证案例' : '案例草稿' }}</span>
+          </div>
+          <div class="similar-meta">根因：{{ item.rootCause || '-' }}</div>
+          <div class="similar-actions">
+            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)">系统详情</el-link>
           </div>
         </div>
       </el-card>

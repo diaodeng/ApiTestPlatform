@@ -850,6 +850,7 @@ class TicketEmbeddingService:
         query_db: Session,
         ticket: Ticket,
         config: dict[str, Any] | None = None,
+        embedding_scope: str = SCOPE_SYMPTOM,
     ) -> dict[str, Any]:
         """
         读取当前工单可复用的向量上下文，不触发外部 Embedding。
@@ -867,11 +868,17 @@ class TicketEmbeddingService:
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
         dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        normalized_scope = str(embedding_scope or cls.SCOPE_SYMPTOM).strip() or cls.SCOPE_SYMPTOM
         rca_map = TicketDao.list_rca_by_ticket_ids(query_db, [ticket.ticket_id])
-        text = cls.build_ticket_text(ticket, rca=rca_map.get(ticket.ticket_id), config=active_config)
-        content_hash = cls._embedding_content_hash(text, {**active_config, "embeddingScope": cls.SCOPE_SYMPTOM})
+        text = cls.build_ticket_text(
+            ticket,
+            rca=rca_map.get(ticket.ticket_id),
+            config=active_config,
+            scope=normalized_scope,
+        )
+        content_hash = cls._embedding_content_hash(text, {**active_config, "embeddingScope": normalized_scope})
         record = TicketDao.get_embedding_record(
-            query_db, "ticket", ticket.ticket_id, model, version, embedding_scope=cls.SCOPE_SYMPTOM
+            query_db, "ticket", ticket.ticket_id, model, version, embedding_scope=normalized_scope
         )
         if not record or not isinstance(record.embedding, list):
             return {

@@ -109,6 +109,8 @@
   const detail = ref({});
   const detailLoading = ref(false);
   const similarTickets = ref([]);
+  const symptomTickets = ref([]);
+  const caseTickets = ref([]);
   const similarLoading = ref(false);
   const similarError = ref('');
   const similarStatus = ref('idle');
@@ -391,6 +393,8 @@
     detail.value = {};
     detailLoading.value = false;
     similarTickets.value = [];
+    symptomTickets.value = [];
+    caseTickets.value = [];
     similarLoading.value = false;
     similarError.value = '';
     similarStatus.value = 'idle';
@@ -405,12 +409,16 @@
         if (!isCurrentDetailRequest(ticketId, generation)) return;
         const payload = response?.data || {};
         similarTickets.value = payload.items || [];
+        symptomTickets.value = payload.symptomTickets || payload.items?.filter((item) => item.matchType !== 'case') || [];
+        caseTickets.value = payload.caseTickets || payload.items?.filter((item) => item.matchType === 'case') || [];
         similarStatus.value = payload.status || 'ready';
         similarError.value = payload.message || '';
       })
       .catch((error) => {
         if (!isCurrentDetailRequest(ticketId, generation)) return;
         similarTickets.value = [];
+    symptomTickets.value = [];
+    caseTickets.value = [];
         similarStatus.value = 'failed';
         similarError.value = error?.message || '相似工单加载失败';
       })
@@ -1171,6 +1179,8 @@
     detail.value = {};
     detailLoading.value = false;
     similarTickets.value = [];
+    symptomTickets.value = [];
+    caseTickets.value = [];
     similarLoading.value = false;
     similarError.value = '';
     similarStatus.value = 'idle';
@@ -1483,6 +1493,8 @@
               :active="detailMainTab === 'overview'"
               :detail="detail"
               :similar-tickets="similarTickets"
+              :symptom-tickets="symptomTickets"
+              :case-tickets="caseTickets"
               :similar-loading="similarLoading"
               :similar-error="similarError"
               :similar-status="similarStatus"
