@@ -47,6 +47,7 @@ scope: server/modules/ticket, web/src
 - 首次上线修复：`/ticket/ai-test/options` 曾报 500（`string indices must be integers`），原因是构建模板任务类型归属时把 `TASK_DEFAULT_PROMPT_CODES.items()` 解包出的字符串误当字典取键；已修复并用真实数据库连接验证任务类型、Provider、模型目录和提示词模板均正常返回。新增回归测试 `tests/test_ticket_ai_test_options.py` 覆盖该结构。
 - 二次上线修复：`/ticket/ai-test/run` 报 422（`task_type/ticket_no/provider_code Field required`），原因是请求契约模型未配置 camelCase 别名，前端发送 `taskType/ticketNo/providerCode` 无法匹配 snake_case 字段；已为全部契约模型补 `alias_generator=to_camel, populate_by_name=True`（项目 vo 惯例），camelCase 与 snake_case 入参双向验证通过。
 - 部署注意：13:42 的 prod 部署 tag（`master20260831134229`）指向修复前的提交 `f8e9ba9`，options 500 实为 prod 运行旧代码；修复提交为 `1454516`，**prod 需重新部署到该提交之后**才能生效。
+- 页面滚动修复：页面内容（工单上下文、测试结果）超出视口后无法上下滚动。根因是全局 `.app-container` 为 flex 列布局，页面在 `app-main`（flex 容器）中被压缩进视口高度；对齐项目其他长页面（syncAutomation/aiconfig）的做法，为页面根 class 补 `display: block; width: 100%; align-self: stretch; box-sizing: border-box`，内容按文档流自然撑开，由 `app-main` 滚动。
 
 ## 注意事项
 

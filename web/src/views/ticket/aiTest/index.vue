@@ -1,5 +1,5 @@
 <template>
-  <div class="app-container">
+  <div class="app-container ticket-ai-test-page">
     <el-card shadow="never" class="test-card">
       <template #header>
         <div class="card-header">
@@ -397,6 +397,15 @@ loadOptions();
 </script>
 
 <style scoped>
+/* 对齐项目其他长页面：覆盖全局 .app-container 的 flex 列布局，
+   让内容按文档流自然撑开，超出部分由 app-main 滚动。 */
+.ticket-ai-test-page {
+  display: block;
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+
 .test-card {
   margin-bottom: 16px;
 }
