@@ -44,6 +44,7 @@ scope: server/modules/ticket, web/src
 - `uv run ruff check` 新增文件全部通过；`server.py` 存量 I001 与本次无关。
 - 后端完整导入验证通过（server 模块 + 测试服务 + 5 类任务定义）。
 - 前端 `npx vite build --mode production` 构建成功，页面代码进入产物。
+- 首次上线修复：`/ticket/ai-test/options` 曾报 500（`string indices must be integers`），原因是构建模板任务类型归属时把 `TASK_DEFAULT_PROMPT_CODES.items()` 解包出的字符串误当字典取键；已修复并用真实数据库连接验证任务类型、Provider、模型目录和提示词模板均正常返回。新增回归测试 `tests/test_ticket_ai_test_options.py` 覆盖该结构。
 
 ## 注意事项
 

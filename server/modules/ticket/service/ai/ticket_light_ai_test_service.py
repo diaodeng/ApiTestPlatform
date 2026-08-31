@@ -113,7 +113,11 @@ class TicketLightAiTestService:
             template_code = str(getattr(item, "template_code", "") or "").strip()
             if not template_code:
                 continue
-            task_types = [task["value"] for task, code in TASK_DEFAULT_PROMPT_CODES.items() if code == template_code]
+            task_types = [
+                task_type
+                for task_type, default_code in TASK_DEFAULT_PROMPT_CODES.items()
+                if default_code == template_code
+            ]
             templates.append(
                 {
                     "templateCode": template_code,
