@@ -1,3 +1,12 @@
+## [2026-08-31] INGEST-CODE | 工单轻量AI手动测试工作台
+- 触发：需要按工单/Provider/模型/提示词组合试运行轻量 AI（信息提取、分类、翻译、标题总结、知识提炼），验证不同模型与提示词改法的效果，不影响线上工单。
+- 架构层：工单域 / 轻量AI / 测试工作台。
+- 新增：`TicketLightAiTestService`（测试编排，复用生产提示词渲染与归一化方法；不读场景开关/不读写提取缓存/不回写工单；审计 task_type 追加 `_test`）、`ticket_ai_test_vo.py`（Pydantic 契约）、`ticket_ai_test_controller.py`（options/tickets/context/prompt-content/run 五接口，均 run_in_threadpool，权限 `ticket:ai:test:run`）、前端 `web/src/api/ticket/aiTest.js` 与 `web/src/views/ticket/aiTest/index.vue`（任务类型/工单远程搜索/Provider-模型联动/提示词模板回填+临时编辑/结果面板含告警与Token）。
+- 菜单：`perms.py` 新增 `ticket.ai.test`（工单管理 → 轻量AI测试），启动时 sync_registered_menus 自动同步，角色需勾选后可见。
+- 生产同构点：机台编号归一化（含 machineNumberWarnings）、提示词变量渲染、分类结构化归一化与生产完全一致，测试结论可直接参考。
+- 验证：新增文件 ruff 全部通过；server 模块与服务导入验证通过；前端 `vite build --mode production` 构建成功。
+- 文档：新增 `web/public/docs/ticket_ai_test.md`（用户说明）、`web/public/docs/updates/2026-08-31-ticket-ai-test-workbench.md`，更新 `web/public/docs/updates/history.md`。
+
 ## [2026-08-31] FIX | 相似工单向量刷新 quality_status 非空约束报错
 - 触发：详情页相似工单报 `Column 'quality_status' cannot be null`（MySQL 1048），SQL 为 `embedding_record` 的 UPDATE；分析确认影响所有"已有向量记录刷新"场景。
 - 架构层：工单域 / AI 向量服务 / 向量记录持久化。

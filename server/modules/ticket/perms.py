@@ -268,6 +268,17 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         4,
         remark="工单统计菜单",
     ),
+    C(
+        "ticket.ai.test",
+        "轻量AI测试",
+        "ticket.root",
+        "aiTest",
+        "ticket/aiTest/index",
+        "ticket:ai:test:run",
+        "cpu",
+        9,
+        remark="工单轻量AI手动测试工作台菜单",
+    ),
 )
 
 

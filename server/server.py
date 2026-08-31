@@ -62,6 +62,7 @@ from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
 from modules.ticket.controller.ticket_ai_controller import ticketAiController
+from modules.ticket.controller.ticket_ai_test_controller import ticketAiTestController
 from modules.ticket.controller.ticket_config_controller import ticketConfigController
 from modules.ticket.controller.ticket_controller import ticketWebhookController
 from modules.ticket.controller.ticket_crud_controller import ticketCrudController
@@ -195,6 +196,7 @@ controller_list = [
     {"router": ticketReleaseController, "tags": ["工单版本治理"]},
     {"router": ticketVersionController, "tags": ["工单版本中心"]},
     {"router": ticketAiController, "tags": ["工单AI分析"]},
+    {"router": ticketAiTestController, "tags": ["工单AI测试"]},
     {"router": ticketConfigController, "tags": ["工单配置"]},
     {"router": ticketWebhookController, "tags": ["工单消息回调"]},
 ]
