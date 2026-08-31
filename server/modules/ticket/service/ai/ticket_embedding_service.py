@@ -566,6 +566,9 @@ class TicketEmbeddingService:
             embedding=vector,
             content_hash=content_hash,
             metadata_snapshot=metadata_snapshot,
+            # quality_status 为非空列；upsert 更新分支直接用新对象属性覆盖旧行，
+            # ORM 的 Python 侧 default 只对 INSERT 生效，必须显式赋值，否则 UPDATE 写入 NULL 触发 1048。
+            quality_status="ready",
             source_revision=metadata_snapshot.get("profileRevision"),
             create_time=datetime.now(),
         )

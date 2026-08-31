@@ -1,3 +1,13 @@
+## [2026-08-31] FIX | 相似工单向量刷新 quality_status 非空约束报错
+- 触发：详情页相似工单报 `Column 'quality_status' cannot be null`（MySQL 1048），SQL 为 `embedding_record` 的 UPDATE；分析确认影响所有"已有向量记录刷新"场景。
+- 架构层：工单域 / AI 向量服务 / 向量记录持久化。
+- 根因：提交 5b2fc713 为 `embedding_record` 新增非空列 `quality_status`（DDL 带 DEFAULT 'ready'，存量行无损）；但 `vectorize_ticket` 构造新 `EmbeddingRecord` 未显式赋值该字段，`TicketDao.upsert_embedding_record` 更新分支直接用新对象属性覆盖旧行，ORM Python 侧 default 只对 INSERT 生效，UPDATE 写入 NULL 报 1048。因同提交修改了向量字段方案（哈希含字段列表），存量向量哈希全部失配被判 stale，详情页自动刷新高频命中该路径。
+- 影响面：详情页相似工单、消息面板 `get_messages_services`、相似案例索引（标 last_index_status=failed）、manualCreate/manualUpdate/closeKnowledge/外部同步场景触发刷新（被 try/except 吞掉、向量静默过期）、`/ticket/similarity/rebuild`。AI 分析主链路（`search_tickets` 关键词检索）只读不写、不报错，但其 similarTickets 是新旧方案错配匹配，相关性劣化。
+- 实现：方案 A——`ticket_embedding_service.py` 构造记录处显式 `quality_status="ready"`，不依赖隐式默认值；未加防御性兜底（唯一写入点已保证）。数据无需修复（DDL 默认值已回填存量行）。
+- 测试：新增回归用例 `test_vectorize_ticket_builds_record_with_quality_status`（捕获构造对象断言字段非空），验证移除修复时失败、恢复后通过；套件 25 用例全部通过；ruff 通过。
+- 文档：新增 `web/public/docs/updates/2026-08-31-ticket-similarity-quality-status-fix.md`，更新 `web/public/docs/updates/history.md` 与本文档（ticket-domain.md 向量服务段落）。
+- 后续：修复上线后建议执行一次全量向量重建，把存量向量统一到新文本方案，消除新旧方案错配；外部 Embedding 配置注意 Token 消耗。
+
 ## [2026-08-31] INGEST-CODE | 工单AI提取参数回填日志拉取提示快照
 - 触发：工单 INC00001904725 AI 提取出 logDate=2026-08-29，但详情页手动拉日志弹窗不回填日期；确认延后处理链路从不重建 `log_pull_hints`。
 - 架构层：工单域 / 同步延后处理 / 日志拉取提示快照。

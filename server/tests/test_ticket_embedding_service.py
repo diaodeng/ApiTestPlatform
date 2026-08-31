@@ -440,6 +440,55 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         self.assertEqual(result["similarEmbeddingMessage"], "当前工单向量已刷新后完成相似工单查询。")
         self.assertEqual(result["similarTickets"], [{"ticketId": 2, "score": 0.9}])
 
+    def test_vectorize_ticket_builds_record_with_quality_status(self):
+        """刷新已有向量记录时构造的新对象必须带非空 quality_status，否则 upsert UPDATE 分支写入 NULL 报 1048。"""
+        ticket = type(
+            "Ticket",
+            (),
+            {
+                "ticket_id": 2044153936673792,
+                "ticket_no": "T20260831001",
+                "title": "登录失败",
+                "description": "用户反馈登录失败",
+                "ai_analysis": None,
+                "tags": [],
+            },
+        )()
+        query_db = type("QueryDb", (), {})()
+        config = {"provider": "local_hash", "threshold": 0}
+        captured: dict = {}
+
+        def fake_upsert(_db, record):
+            captured["record"] = record
+            return record
+
+        with (
+            patch.object(TicketEmbeddingService, "get_similarity_config", return_value=config),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.get_embedding_record",
+                return_value=None,
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketSimilarityProfileService.upsert_profile",
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketSimilarityProfileService.get_metadata",
+                return_value={"profileRevision": 1},
+            ),
+            patch.object(
+                TicketEmbeddingService, "embed_text", return_value=[0.1, 0.2, 0.3]
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.upsert_embedding_record",
+                side_effect=fake_upsert,
+            ),
+        ):
+            saved = TicketEmbeddingService.vectorize_ticket(query_db, ticket)
+
+        self.assertIs(saved, captured["record"])
+        # 回归断言：非空列缺失会让已有记录的 UPDATE 语句带上 NULL 直接失败。
+        self.assertEqual(captured["record"].quality_status, "ready")
+
     def test_qdrant_cache_vector_search_uses_given_vector(self):
         """Qdrant 详情查询应直接使用缓存向量，不先生成查询向量。"""
         response = self._response(200, {"result": []})
