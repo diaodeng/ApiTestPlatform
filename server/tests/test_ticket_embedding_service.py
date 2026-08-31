@@ -472,5 +472,52 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         self.assertEqual(post_mock.call_args.kwargs["json"]["vector"], [1.0, 0.0, 0.0])
 
 
+class TicketHybridSimilarityServiceTests(unittest.TestCase):
+    """验证混合相似召回的候选过滤和字段装配。"""
+
+    def test_search_by_vector_excludes_source_ticket(self):
+        """向量候选包含当前工单自身时，最终结果必须排除自身。"""
+        from types import SimpleNamespace
+
+        from modules.ticket.service.ai.ticket_hybrid_similarity_service import TicketHybridSimilarityService
+
+        source_ticket = SimpleNamespace(ticket_id=1, title="当前工单", description="描述", project_id=10, module_id=20)
+        candidate = SimpleNamespace(ticket_id=2, title="其他工单", description="描述", project_id=10, module_id=20)
+        config = {"provider": "embedding", "threshold": 0}
+        with (
+            patch(
+                "modules.ticket.service.ai.ticket_hybrid_similarity_service.TicketEmbeddingService.search_embedding_records_by_vector",
+                return_value={1: 1.0, 2: 0.9},
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_hybrid_similarity_service.TicketSimilarityProfileService.get_metadata",
+                return_value={"signals": {}, "environment": ""},
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_hybrid_similarity_service.TicketDao.list_ticket_ids_by_similarity_signals",
+                return_value={},
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_hybrid_similarity_service.TicketDao.get_tickets_by_ids",
+                return_value=[source_ticket, candidate],
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_hybrid_similarity_service.TicketDao.get_ticket_similarity_case",
+                return_value=None,
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_hybrid_similarity_service.CamelCaseUtil.transform_result",
+                side_effect=lambda row: {"ticketId": row.ticket_id, "title": row.title},
+            ),
+        ):
+            result = TicketHybridSimilarityService.search_by_vector(
+                object(), source_ticket, [1.0, 0.0, 0.0], 5, config
+            )
+
+        result_ids = [item["ticketId"] for item in result]
+        self.assertNotIn(1, result_ids)
+        self.assertIn(2, result_ids)
+
+
 if __name__ == "__main__":
     unittest.main()
