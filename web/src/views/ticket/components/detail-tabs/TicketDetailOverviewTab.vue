@@ -315,7 +315,7 @@
             </el-button-group>
           </div>
         </template>
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="3" border>
           <el-descriptions-item label="最新执行状态">
             <el-tag
               v-if="latestAiAnalysisTask?.status"
@@ -349,22 +349,22 @@
           <el-descriptions-item label="总 Token">
             {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.totalTokenCount) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="摘要" :span="2">{{
+          <el-descriptions-item label="摘要" :span="3">{{
             latestConclusion.summary || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="根因" :span="2">{{
+          <el-descriptions-item label="根因" :span="3">{{
             latestConclusion.rootCause || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="解决方案" :span="2">{{
+          <el-descriptions-item label="解决方案" :span="3">{{
             latestConclusion.solution || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="预防建议" :span="2">{{
+          <el-descriptions-item label="预防建议" :span="3">{{
             latestConclusion.prevention || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="风险说明" :span="2">{{
+          <el-descriptions-item label="风险说明" :span="3">{{
             latestConclusion.risk || '-'
           }}</el-descriptions-item>
-          <el-descriptions-item label="负责人" :span="2">{{
+          <el-descriptions-item label="负责人" :span="3">{{
             latestConclusion.owner || '-'
           }}</el-descriptions-item>
         </el-descriptions>

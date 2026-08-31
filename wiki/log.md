@@ -1,3 +1,12 @@
+## [2026-08-31] INGEST-CODE | 工单AI提取机台编号覆盖逻辑修复
+- 触发：工单 INC00001899231 模型正确返回 posNo=24，但后处理用正则从全文取第一个 `POS+数字` 匹配（POS#05，门店排查时检查的机台）无条件覆盖，导致自动化按 5 号机拉日志。
+- 架构层：工单域 / 轻量AI统一提取 / 机台编号归一化。
+- 实现：`TicketLightAiService._normalize_sync_extract_machine_numbers` 重写为模型结果优先策略；新增 `_extract_all_explicit_machine_nos`（全部候选去重）与 `_reconcile_machine_no_with_source`（单字段对齐：模型有效且命中候选直接采信；原文唯一候选冲突才纠正；多候选冲突保留模型值并告警；模型无效/遗漏时原文候选兜底）。金额拦截仍在 `_normalize_pos_or_sco_no`，防金额误判能力不回退。
+- 契约：`machineNumberWarnings` 告警文案更新（新增"已保留模型值，请人工复核"等），仅在审计与日志中使用，接口结构不变。
+- 缓存边界：本次不改缓存机制；`extra_data.ai_sync_extract` 以 `sourceHash + promptHash` 命中，代码变更不使旧缓存失效，存量错误结果需清缓存或等源数据/提示词变更后自然重提。
+- 测试：`tests/test_ticket_sync_ai_extract_safety.py` 更新金额纠正用例文案，新增多候选保留模型值（INC00001899231 回归）、命中候选无告警、单候选纠正、候选兜底、原文无候选 5 个用例，13 个用例全部通过；`test_ticket_sync_mapping_boundary.py` 的 13 个失败经 stash 对比确认为存量问题。
+- 文档：新增 `web/public/docs/updates/2026-08-31-ticket-ai-extract-machine-no-override-fix.md`，更新 `web/public/docs/ticket-sync-automation.md` 归一化策略说明与 `web/public/docs/updates/history.md`。
+
 ## [2026-08-30] INGEST-CODE | 相似工单症状/案例索引与混合召回
 - 触发：确认生产无 Qdrant 时按 MySQL + 外部 Embedding 落地相似工单准确性改造。
 - 架构层：工单域 / 相似检索 / 案例生命周期 / 详情页。
