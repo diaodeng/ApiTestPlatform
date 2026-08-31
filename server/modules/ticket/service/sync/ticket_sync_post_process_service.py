@@ -22,6 +22,7 @@ from modules.ticket.service.sync.ticket_automation_scope_service import TicketAu
 from modules.ticket.service.sync.ticket_sync_ai_field_service import TicketSyncAiFieldService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
@@ -278,6 +279,18 @@ class TicketSyncPostProcessService:
                 if not incoming_title and not existing_title and ai_extract_title:
                     update_data["title"] = ai_extract_title
                     extra_data["title_summary"] = {"mode": "ai_extract", "title": ai_extract_title}
+                # AI 回填后重建日志拉取提示快照，把提取出的门店、POS/SCO 和日期同步到
+                # extra_data.log_pull_hints，供详情页手动拉日志弹窗回填使用。
+                refreshed_hints = TicketSyncPayloadService.refresh_log_pull_hints(
+                    extra_data=extra_data,
+                    sync_object=sync_object,
+                    detected=detected,
+                    incoming_project_value=TicketSyncFieldMappingService.has_incoming_project_value(
+                        sync_object, detected
+                    ),
+                )
+                if refreshed_hints:
+                    extra_data["log_pull_hints"] = refreshed_hints
             except Exception as exc:
                 logger.warning(f"外部工单同步延后统一提取失败: ticket_no={sync_object.ticket_no}, error={exc}")
                 ai_extract_result = {}

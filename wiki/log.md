@@ -1,3 +1,12 @@
+## [2026-08-31] INGEST-CODE | 工单AI提取参数回填日志拉取提示快照
+- 触发：工单 INC00001904725 AI 提取出 logDate=2026-08-29，但详情页手动拉日志弹窗不回填日期；确认延后处理链路从不重建 `log_pull_hints`。
+- 架构层：工单域 / 同步延后处理 / 日志拉取提示快照。
+- 原因：bitable_pull 走"快速入库+延后处理"两段式，主入库阶段 AI 未执行，`build_upsert_payload` 构建的 hints 缺 modifyTime/posNo（飞书中文时间键不匹配标准键）；延后处理阶段 AI 提取回填后只更新 `ai_sync_extract`/标题/翻译，不回写 hints，弹窗读不到。
+- 实现：`TicketSyncPayloadService` 新增公开方法 `refresh_log_pull_hints`（原内联逻辑抽取 + posNo 兜底补充 log_pull_config 来源，与自动化取值顺序一致）；主路径改为调用该方法（行为不变）；延后处理在 AI 回填并重新 detect 后调用并持久化。
+- 回显语义：手动拉取参数保存在 `ticket_log_pull_record`，详情页弹窗经 `latestLogPull` 回显最近一次记录参数（用户实际操作优先于 AI 提取值）；`log_pull_hints` 修复后承载 AI 提取值。
+- 测试：新增 `tests/test_ticket_sync_log_pull_hints.py` 4 用例（AI 值进 hints、scoNo 回退、AI 空值保留已有 hints、主路径 payload 写入）全部通过；相关套件 29 用例通过；boundary 套件失败集合 md5 与基线一致（存量问题）。
+- 文档：新增 `web/public/docs/updates/2026-08-31-ticket-ai-extract-hints-backfill.md`，更新 `web/public/docs/ticket_log_pull.md` 回填来源说明与 `web/public/docs/updates/history.md`。
+
 ## [2026-08-31] INGEST-CODE | 工单AI提取机台编号覆盖逻辑修复
 - 触发：工单 INC00001899231 模型正确返回 posNo=24，但后处理用正则从全文取第一个 `POS+数字` 匹配（POS#05，门店排查时检查的机台）无条件覆盖，导致自动化按 5 号机拉日志。
 - 架构层：工单域 / 轻量AI统一提取 / 机台编号归一化。

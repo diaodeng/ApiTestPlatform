@@ -539,9 +539,9 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
     <el-table-column label="拉取参数" min-width="180" show-overflow-tooltip>
       <template #default="scope">{{ formatLogPullParameter(scope.row) }}</template>
     </el-table-column>
-    <el-table-column label="商家" prop="vendorId" width="50" show-overflow-tooltip />
-    <el-table-column label="门店" prop="storeId" min-width="50" show-overflow-tooltip />
-    <el-table-column label="POSID" prop="posNo" width="50" show-overflow-tooltip />
+    <el-table-column label="商家" prop="vendorId" width="80" show-overflow-tooltip />
+    <el-table-column label="门店" prop="storeId" min-width="80" show-overflow-tooltip />
+    <el-table-column label="POSID" prop="posNo" width="80" show-overflow-tooltip />
     <el-table-column label="状态" min-width="170">
       <template #default="scope">
         <el-tag :type="getLogPullStatusTagType(scope.row.status)">

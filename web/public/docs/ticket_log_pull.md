@@ -28,10 +28,15 @@
 
 从工单详情的「日志拉取」Tab 打开提交弹窗时，系统会按以下来源回填商家、门店、POS 和拉取日期：
 
-1. 最近一次日志拉取记录；
-2. 工单同步保存的 `extraData.externalSync.source` 或 `extraData.logPullHints`；
+1. 工单同步保存的 `extraData.logPullHints`（含 AI 统一提取出的门店、POS/SCO 和日志日期）；
+2. 最近一次日志拉取记录（手动拉取过的商家、门店、POS 和日期会在此保留，再次打开弹窗时自动回显）；
 3. 工单自动化配置 `extraData.ticketAutomation.logPullConfig`；
 4. 历史同步字段 `extraData.external_field_mapping.ticketStore`（作为门店原始值兜底）。
+
+说明：
+
+- 多维表格主动拉取等延后处理场景下，AI 提取完成后会重建 `logPullHints`，提取出的日期和机台同样能回填弹窗。
+- 手动拉取提交后，参数保存在拉取记录中；后续打开弹窗时记录回显优先于 AI 提取值，即用户最近一次实际使用的参数优先。
 
 门店配置由 `/ticket/log-pull/vendor-store-options` 按当前商家和环境懒加载（门店配置按环境隔离，只返回所选环境的门店），选项显示格式为：
 
