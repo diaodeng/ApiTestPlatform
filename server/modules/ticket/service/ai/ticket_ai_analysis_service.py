@@ -1898,6 +1898,8 @@ class TicketAiAnalysisService:
 5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
    去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
    写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
+   注意：JSON 字符串值内部的英文双引号必须写成 \" 转义；描述中引用中文术语请使用
+   中文引号（“”），不要直接输出未转义的英文双引号，否则结果无法通过解析校验。
 6. 结果必须包含以下核心字段，输出严格按 schema 返回：
    - ticket_id
    - project_id

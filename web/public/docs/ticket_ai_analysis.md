@@ -15,6 +15,7 @@
 - Schema 兼容接口中按字符串传输的 BIGINT ID，并包含 `symptom`、`similar_cases`、`sop_suggestion`、`owner_suggestion`、`monitoring_suggestion` 等可选增强字段；字段缺省时由服务端补默认值。
 - 增强字段（含 `similar_cases`）接受数组或叙述字符串两种输出：模型写成叙述文字时不会导致校验失败，服务端归一化会自动把字符串包装为单元素数组再写回结果。
 - 分析结果未通过 JSON Schema 校验时，任务失败信息会包含具体违规字段明细（如 `$.similar_cases: 期望 array，实际 string`），无需人工比对结果文件定位。
+- 模型输出 JSON 时字符串值内部可能带未转义的英文双引号（如中文叙述里引用术语），会导致 JSON 解析失败。系统会自动尝试修复此类引号并重新解析；修复失败时以 `AI_WORKER_RESULT_UNPARSEABLE` 诊断项上报原始文本特征。提示词也已要求模型使用中文引号或转义双引号，从源头减少该问题。
 
 ## Token 用量统计
 

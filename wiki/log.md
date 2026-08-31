@@ -1,3 +1,14 @@
+## [2026-08-31] FIX | 工单AI分析结果未转义引号修复
+- 触发：工单 INC00001904725 第二次分析失败（task_2045268316707840，prod，Provider=openai_com/deepseek-v4-flash，与 08-28 失败的 shuidi 不同）：Worker 正常退出且 result.json 内容完整，但报 `AI_WORKER_RESULT_UNPARSEABLE`，文本预览以 ```json 开头。
+- 架构层：工单域 / 深度AI分析 / Agent 端结果解析。
+- 根因：result.json 带 ```json 围栏（已有剥离兜底），但剥离后仍非法——`root_cause` 字符串值内部输出未转义英文双引号（`停留在"恢复中"（Pending）状态`），json.loads 在 line 7 column 113 报 `Expecting ',' delimiter`。deepseek-v4-flash 即使有 --output-schema 约束也不遵守字符串转义规则。
+- 链路确认：执行/解析/Schema 校验都在 Agent 侧（client_new `ticket_ai_analysis_service.py`），服务端只下发任务、记录转发错误和写回结果；错误日志出现在 Agent 日志属正常架构。服务端 `_read_json_file` 只读自产 context.json，无需同步修复。
+- 实现：client_new 新增 `_repair_unescaped_quotes`（结构化扫描：字符串内部后跟非 `, } ] :` 结构符的引号补 `\"` 转义，修复结果必须能通过 json.loads 且为 dict 才采纳）；`_extract_json_from_text` 在常规解析全部失败后调用该兜底；两端 prompt 第 5 条新增转义约束（英文双引号必须 `\"`，引用中文术语用中文引号）从源头减少非法输出。Agent 端修复后的结果仍经 accept_candidate Schema 校验，防线未绕过。
+- 测试：client_new 新增 `tests/test_ticket_ai_json_quote_repair.py` 5 用例（围栏内修复、纯文本修复、合法 JSON 不改写、真实结束引号不误转义、无法修复返回 None）全部通过；既有 27 个 AI 测试通过；server prompt 套件 5 用例通过；ruff/py_compile 通过。
+- 端到端：用真实失败 result.json 走 `_parse_worker_output` 完整链路（含真实 Schema）解析成功，14 字段完整、引号内容正确保留。
+- 文档：新增 `web/public/docs/changelog/2026-08-31-ticket-ai-analysis-unescaped-quote-fix.md`，更新 `web/public/docs/ticket_ai_analysis.md` 解析兼容说明。
+- 后续：需更新并重启本机 Agent 生效；该工单修复后在页面重新发起 AI 分析即可。
+
 ## [2026-08-31] INGEST-CODE | 工单轻量AI手动测试工作台
 - 触发：需要按工单/Provider/模型/提示词组合试运行轻量 AI（信息提取、分类、翻译、标题总结、知识提炼），验证不同模型与提示词改法的效果，不影响线上工单。
 - 架构层：工单域 / 轻量AI / 测试工作台。

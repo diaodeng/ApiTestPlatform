@@ -1296,6 +1296,68 @@ class TicketAiAnalysisService:
             "total_tokens": total_input + total_output,
         }
 
+    @staticmethod
+    def _repair_unescaped_quotes(text: str) -> str | None:
+        """
+        尝试修复 JSON 字符串值内部未转义的英文双引号。
+
+        部分模型（如 deepseek-v4-flash）即使通过 --output-schema 约束，
+        仍可能在字符串值中输出未转义双引号（例如：停留在"恢复中"（Pending）状态），
+        导致 JSON 本身非法。这里做一次结构化扫描：
+        - 在字符串内部遇到未转义引号时，按"引号后紧跟 , } ] : 或文本结束"判断
+          它是否为键/值的真实结束符；不是则补反斜杠转义为值内部字符。
+        - 修复结果必须能通过 json.loads 且为 dict，否则放弃修复返回 None，
+          保持与修复前一致的行为（解析失败）。
+        :param text: 原始文本（应已剥离 Markdown 代码块围栏）
+        :return: 修复后的 JSON 文本；无法修复时返回 None
+        """
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        candidate = text[start : end + 1]
+
+        in_string = False
+        repaired_chars: list[str] = []
+        index = 0
+        length = len(candidate)
+        while index < length:
+            ch = candidate[index]
+            if not in_string:
+                # 字符串外：引号视为字符串开始，其余字符原样保留
+                if ch == '"':
+                    in_string = True
+                repaired_chars.append(ch)
+                index += 1
+                continue
+            if ch == "\\" and index + 1 < length:
+                # 已转义序列原样保留（如 \" \\ \n）
+                repaired_chars.append(candidate[index : index + 2])
+                index += 2
+                continue
+            if ch == '"':
+                # 字符串内的引号：后紧跟结构符（, } ] :)或文本结束时视为真实结束符，
+                # 否则视为值内部未转义引号，转义后继续
+                after = candidate[index + 1 :].lstrip()
+                if after.startswith((",", "}", "]", ":")) or after == "":
+                    in_string = False
+                    repaired_chars.append(ch)
+                else:
+                    repaired_chars.append('\\"')
+                index += 1
+                continue
+            repaired_chars.append(ch)
+            index += 1
+
+        repaired = "".join(repaired_chars)
+        try:
+            payload = json.loads(repaired)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return repaired
+
     @classmethod
     def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
         """
@@ -1320,6 +1382,22 @@ class TicketAiAnalysisService:
                 return json.loads(text[start:end + 1])
             except Exception:
                 pass
+        # 常规解析失败后，兜底修复字符串值内部未转义的双引号
+        # （例如 deepseek-v4-flash 输出：停留在"恢复中"（Pending）状态）。
+        for source in (
+            json_block_match.group(1) if json_block_match else None,
+            text[start:end + 1] if start >= 0 and end > start else None,
+        ):
+            if not source:
+                continue
+            repaired = cls._repair_unescaped_quotes(source)
+            if repaired is not None:
+                try:
+                    payload = json.loads(repaired)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    return payload
         return None
 
     @classmethod
@@ -2619,6 +2697,8 @@ class TicketAiAnalysisService:
 5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
    去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
    写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
+   注意：JSON 字符串值内部的英文双引号必须写成 \\" 转义；描述中引用中文术语请使用
+   中文引号（“”），不要直接输出未转义的英文双引号，否则结果无法通过解析校验。
 6. 结果必须包含以下字段；如果某些扩展字段暂时无法确定，请用空字符串、空数组或 false 占位，不要省略：
    - ticket_id
    - project_id
