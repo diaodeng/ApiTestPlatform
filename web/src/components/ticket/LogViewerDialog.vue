@@ -1021,9 +1021,10 @@ function loadMemoryMetrics() {
     .catch(async (error) => {
       // 用户主动中止（关闭面板/刷新）不算错误
       if (error?.name === 'AbortError') return
-      // 后端尚未包含流式接口（404）时，降级为一次性接口，保证图表可用
-      if (Number(error?.status) === 404) {
-        memoryFallbackNotice.value = '当前后端暂不支持实时进度，正在一次性分析（稍等片刻出图）…'
+      // 流式通道不可用（404 旧后端 / 613 等网关自定义码 / 网络错误）时，
+      // 降级为一次性接口，保证图表功能不被网关阻断
+      if (Number(error?.status) === 404 || Number(error?.status) === 613 || !Number(error?.status)) {
+        memoryFallbackNotice.value = '实时进度通道不可用（网关不支持流式转发），正在一次性分析（稍等片刻出图）…'
         try {
           const response = await getTicketLogMemoryMetrics({ ticketId, recordId, maxPoints: 2000 })
           memoryMetrics.value = response?.data || null
