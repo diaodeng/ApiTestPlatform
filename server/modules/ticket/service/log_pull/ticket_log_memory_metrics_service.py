@@ -230,7 +230,11 @@ class TicketLogMemoryMetricsService:
             try:
                 # 复用日志搜索管道（rg 流式优先，缺失 rg 自动降级 Python）：
                 # 固定关键字过滤监控行、不取上下文，把内存与传输体积降到最低；
-                # 逐文件调用以保留文件级进度与硬上限提前终止能力
+                # 逐文件调用以保留文件级进度与硬上限提前终止能力。
+                # 逐文件搜索时统一走 Python 降级判断以外的轻量路径不可行（LogService.search
+                # 每次都会读库取保护配置并做线程池校准，实测单次约 100ms），
+                # 因此这里只在首个文件用 db 读取配置，后续文件传 db=None 走默认值兜底，
+                # 同一批扫描内保护阈值保持一致，避免 200 文件时累计 20s+ 的重复查库开销
                 remaining = _MAX_RAW_POINT_COUNT - parsed_count
                 hits = LogService.search(
                     ticket_id,
@@ -241,7 +245,7 @@ class TicketLogMemoryMetricsService:
                     with_context=False,
                     record_id=record_id,
                     file_paths=[relative_name],
-                    db=db,
+                    db=db if index == 0 else None,
                 )
                 total_hits += len(hits)
                 for hit in hits:
