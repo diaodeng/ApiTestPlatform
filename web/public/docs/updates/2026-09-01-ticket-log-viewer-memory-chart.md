@@ -31,3 +31,5 @@
 - `web/src/components/ticket/LogViewerDialog.vue`
 - `web/public/docs/ticket_log_viewer.md`
 - 缺陷修复（同日）：手写 fetch 拼接 baseURL 产生 `//ticket/...` 双斜杠，网关按路径转发返回 404；修复为先去掉 base 尾部斜杠再拼接（日志内容流式接口同类隐患一并修复），并增加流式 404 时自动降级为一次性 POST 接口的兜底逻辑。
+- 兜底增强（同日）：测试环境网关对流式转发返回自定义 613 错误码，降级条件从“仅 404”放宽为“流式请求任何失败（含网关自定义状态码/网络错误）”，确保图表功能不被网关阻断；进度面板会提示“实时进度通道不可用”。
+- 根因更正（同日）：流式接口 613 的真正根因是后端事件生成器直接 yield dict，StreamingResponse 序列化失败（dict 缺少 encode），网关收到中断响应返回自定义错误码；已修复为按既有日志内容流式接口的模式序列化为 UTF-8 NDJSON 字节（Pydantic 模型转 camelCase JSON、datetime 转字符串），本地 TestClient 与 NDJSON 解析回归通过。此前“网关不支持流式”的判断不成立，前端多级降级逻辑保留作为兜底。

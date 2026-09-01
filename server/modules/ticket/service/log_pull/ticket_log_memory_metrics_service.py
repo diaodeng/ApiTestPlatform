@@ -9,11 +9,14 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from modules.ticket.entity.vo.ticket_log_pull_vo import (
@@ -63,6 +66,45 @@ class TicketLogMemoryMetricsService:
             if event.get("type") == "error":
                 raise RuntimeError(str(event.get("message") or "内存分析失败"))
         return cls._build_empty_model(int(request.ticket_id or 0), request.record_id, "内存分析未返回结果")
+
+    @classmethod
+    def iter_collect_metrics_stream(
+        cls, request: TicketLogMemoryMetricsRequestModel, db: Session | None = None
+    ) -> Iterator[bytes]:
+        """
+        以 NDJSON 字节流形式输出内存分析事件，供 StreamingResponse 直接消费。
+
+        StreamingResponse 只接受 str/bytes 块，这里把事件字典序列化为
+        UTF-8 编码的单行 JSON（与日志内容流式接口的输出格式保持一致）。
+
+        :param request: 内存分析请求参数
+        :param db: 数据库会话，用于读取日志搜索资源保护配置
+        :return: NDJSON 字节迭代器
+        """
+        for event in cls.iter_collect_metrics_events(request, db):
+            yield cls._memory_metrics_event_bytes(event)
+
+    @classmethod
+    def _memory_metrics_event_bytes(cls, event: dict[str, Any]) -> bytes:
+        """
+        将内存分析事件序列化为 NDJSON 字节块。
+
+        事件中的 Pydantic 模型按 camelCase 别名转 JSON 兼容字典，
+        datetime 转为 ``yyyy-MM-dd HH:mm:ss.SSS`` 字符串，保证前端可直接解析。
+
+        :param event: 事件字典
+        :return: UTF-8 编码的单行 JSON 字节
+        """
+
+        def json_default(obj: object) -> object:
+            """JSON 序列化兜底：BaseModel 转 camelCase 字典，datetime 转标准字符串。"""
+            if isinstance(obj, BaseModel):
+                return obj.model_dump(by_alias=True, mode="json")
+            if isinstance(obj, datetime):
+                return obj.isoformat(sep=" ", timespec="milliseconds")
+            return str(obj)
+
+        return (json.dumps(event, ensure_ascii=False, default=json_default) + "\n").encode("utf-8")
 
     @classmethod
     def iter_collect_metrics_events(
