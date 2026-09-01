@@ -51,6 +51,32 @@
         />
         <slot name="toolbar-actions" />
         <el-button type="warning" :loading="searching" @click="loadErrors">异常提取</el-button>
+        <el-button type="success" :loading="memoryLoading" @click="toggleMemoryPanel">内存分析</el-button>
+      </div>
+
+      <!-- 内存分析面板：展示日志中 Process cpu/mem/threads 监控曲线 -->
+      <div v-if="memoryPanelVisible" class="log-view-panel mb16">
+        <div class="panel-header mb8 log-view-panel-header">
+          <span>内存分析（Process 资源监控）</span>
+          <div class="panel-inline">
+            <el-button link type="primary" :loading="memoryLoading" @click="loadMemoryMetrics">刷新</el-button>
+            <el-button link type="primary" @click="memoryPanelVisible = false">关闭</el-button>
+          </div>
+        </div>
+        <div v-loading="memoryLoading">
+          <el-alert
+            v-if="memoryError"
+            type="error"
+            show-icon
+            :closable="false"
+            :title="memoryError"
+          />
+          <LogMemoryChartPanel
+            v-else
+            :metrics="memoryMetrics"
+            :empty-text="memoryMetrics?.message || '当前日志中未找到 Process 资源监控数据'"
+          />
+        </div>
       </div>
 
       <!-- 异常摘要 -->
@@ -267,8 +293,10 @@ import {
   getTicketLogContext,
   getTicketLogErrors,
   getTicketLogLineContent,
+  getTicketLogMemoryMetrics,
 } from '@/api/ticket/ticket'
 import { useLogPrepareProgress } from '@/views/ticket/hooks/useLogPrepareProgress'
+import LogMemoryChartPanel from './LogMemoryChartPanel.vue'
 
 const props = defineProps({
   /** 控制弹窗可见性 */
@@ -311,6 +339,11 @@ const resultViewMode = ref('normal')
 const contextViewMode = ref('normal')
 const wrapEnabled = ref(false)
 const availableFiles = ref([])
+// ── 内存分析状态 ──
+const memoryPanelVisible = ref(false)
+const memoryLoading = ref(false)
+const memoryMetrics = ref(null)
+const memoryError = ref('')
 const hasFullscreenPanel = computed(
   () => resultViewMode.value === 'fullscreen' || contextViewMode.value === 'fullscreen'
     || hasExpandedFullscreen.value
@@ -812,6 +845,10 @@ function resetViewerState() {
   loadingLineSet.value.clear()
   expandedModeMap.value = {}
   copySuccessMap.value = {}
+  memoryPanelVisible.value = false
+  memoryLoading.value = false
+  memoryMetrics.value = null
+  memoryError.value = ''
 }
 
 /**
@@ -840,6 +877,40 @@ function loadFileOptions(ticketId, recordId) {
       if (visible.value && props.record?.id === recordId) {
         availableFiles.value = []
       }
+    })
+}
+
+/**
+ * 切换内存分析面板显示，首次展开时自动加载当前记录的监控数据。
+ * @returns {void} 无返回值
+ */
+function toggleMemoryPanel() {
+  memoryPanelVisible.value = !memoryPanelVisible.value
+  if (memoryPanelVisible.value && !memoryMetrics.value) {
+    loadMemoryMetrics()
+  }
+}
+
+/**
+ * 加载当前日志拉取记录的进程资源监控数据，用于内存分析图表。
+ * @returns {void} 无返回值
+ */
+function loadMemoryMetrics() {
+  const ticketId = props.record?.ticketId || 0
+  const recordId = props.record?.id
+  if (!recordId) return
+  memoryLoading.value = true
+  memoryError.value = ''
+  getTicketLogMemoryMetrics({ ticketId, recordId })
+    .then((response) => {
+      memoryMetrics.value = response?.data || null
+    })
+    .catch((error) => {
+      memoryError.value = String(error?.message || error || '内存分析数据加载失败')
+      memoryMetrics.value = null
+    })
+    .finally(() => {
+      memoryLoading.value = false
     })
 }
 

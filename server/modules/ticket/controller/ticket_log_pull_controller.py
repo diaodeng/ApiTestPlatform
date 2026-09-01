@@ -15,6 +15,7 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogErrorsRequestModel,
+    TicketLogMemoryMetricsRequestModel,
     TicketLogPrepareRequestModel,
     TicketLogPullContentQueryModel,
     TicketLogPullCreateModel,
@@ -27,6 +28,9 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogPullStoreConfigQueryModel,
     TicketLogSearchRequestModel,
     TicketLogSearchTimeRequestModel,
+)
+from modules.ticket.service.log_pull.ticket_log_memory_metrics_service import (
+    TicketLogMemoryMetricsService,
 )
 from modules.ticket.service.log_pull.ticket_log_prepare_progress_service import TicketLogPrepareProgressService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
@@ -592,6 +596,35 @@ async def get_ticket_log_line_content(
     try:
         content = await run_in_threadpool(LogService.read_line_content, ticket_id, file, line, record_id)
         return PlainTextResponse(content=content, media_type="text/plain; charset=utf-8")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.post(
+    "/logs/memory-metrics",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def get_ticket_log_memory_metrics(
+    request: Request,
+    metrics_object: TicketLogMemoryMetricsRequestModel,
+    query_db: Session = Depends(get_db),
+):
+    """
+    提取工单日志进程资源监控数据接口。
+
+    从已准备完成的日志文件中解析 Process cpu/mem/threads 监控数据，
+    供日志查看器的内存分析图表展示。
+    :param request: 请求对象
+    :param metrics_object: 内存分析请求参数
+    :param query_db: 数据库会话，用于读取日志搜索资源保护配置
+    :return: 资源监控数据点与汇总信息
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketLogMemoryMetricsService.collect_metrics, metrics_object, query_db
+        )
+        return ResponseUtil.success(data=result)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

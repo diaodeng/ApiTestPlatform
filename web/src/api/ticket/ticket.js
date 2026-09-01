@@ -907,6 +907,15 @@ export function getTicketLogLineContent(query) {
   });
 }
 
+// 提取工单日志进程资源监控数据（内存/CPU/线程分析图表）
+export function getTicketLogMemoryMetrics(data) {
+  return request({
+    url: '/ticket/logs/memory-metrics',
+    method: 'post',
+    data,
+  });
+}
+
 // 保存工单RCA
 export function saveTicketRca(ticketId, data) {
   return request({

@@ -1,3 +1,11 @@
+## [2026-09-01] FEAT | 日志查看器内置内存分析图表
+
+- 触发：排查工单内存问题时需要先拉取日志，再在本地用 plot_memory.py 脚本生成内存曲线图片，链路割裂且结果不便留存。
+- 实现：后端新增 `POST /ticket/logs/memory-metrics`（权限 `ticket:logpull:query`），由新子服务 `TicketLogMemoryMetricsService` 定位解压目录、筛选日志文件并调用新工具 `TicketLogMemoryMetricsUtil` 解析 `Process cpu/mem/threads` 监控行，返回数据点与汇总；前端在 `LogViewerDialog` 工具栏新增"内存分析"按钮，展开新组件 `LogMemoryChartPanel` 用 ECharts 绘制内存（Mb/%）、CPU、线程三张曲线，支持降采样（默认上限 2000 点）与汇总展示。
+- 边界：不改变既有日志准备/搜索链路；文件数量超过 `maxSearchFileCount` 保护阈值时要求指定文件范围；无监控行时返回明确提示而不是兜底伪造数据。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md`（新增 2.5 内存分析、FAQ），新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-viewer-memory-chart.md`。
+- 验证：后端 `ruff check` 通过，解析/合并/降采样/文件筛选冒烟测试通过，控制器路由注册检查通过；前端 `npm run build:prod` 构建通过。
+
 ## [2026-09-01] FIX | 工单概览AI结论换行保留与AI分析追问记录补全
 - 触发：用户反馈工单详情页概览tab的摘要/根因/解决方案/预防建议/风险说明挤成一行；AI分析tab记录只显示AI结果看不到用户追问（如prod工单INC00001904725，任务2045329100889088的 analysis_context.extraInstruction 中明确有追问文本，但 ticket_message 无对应 question 记录）。
 - 架构层：工单域 / 工单详情前端 + AI分析任务创建服务。
