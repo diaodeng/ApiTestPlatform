@@ -792,7 +792,10 @@ export function getTicketLogPullContent(recordId, query) {
 
 // 流式查询日志拉取文本内容，按 NDJSON 事件逐块回调
 export async function streamTicketLogPullContent(recordId, query, handlers = {}) {
-  const baseURL = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || '';
+  // 手写 fetch 不会像 axios 一样归一化斜杠，必须先去掉 base 尾部的 /，避免 //ticket 双斜杠 404
+  const baseURL = String(
+    window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || ''
+  ).replace(/\/+$/, '');
   const queryText = tansParams(sanitizeQueryParams(query || {})).replace(/&$/, '');
   const url = `${baseURL}/ticket/log-pulls/${recordId}/content/stream${queryText ? `?${queryText}` : ''}`;
   const headers = {};
@@ -837,7 +840,10 @@ export async function streamTicketLogPullContent(recordId, query, handlers = {})
 
 // 流式提取工单日志内存分析数据，按 NDJSON 事件回调解析进度与结果
 export async function streamTicketLogMemoryMetrics(query, handlers = {}) {
-  const baseURL = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || '';
+  // 手写 fetch 不会像 axios 一样归一化斜杠，必须先去掉 base 尾部的 /，避免 //ticket 双斜杠 404
+  const baseURL = String(
+    window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || ''
+  ).replace(/\/+$/, '');
   const queryText = tansParams(sanitizeQueryParams(query || {})).replace(/&$/, '');
   const url = `${baseURL}/ticket/logs/memory-metrics/stream${queryText ? `?${queryText}` : ''}`;
   const headers = {};
@@ -846,7 +852,10 @@ export async function streamTicketLogMemoryMetrics(query, handlers = {}) {
   }
   const response = await fetch(url, { method: 'GET', headers, signal: handlers.signal });
   if (!response.ok || !response.body) {
-    throw new Error(`内存分析流式读取失败: ${response.status}`);
+    // 携带状态码，便于调用方针对 404（旧后端无流式接口）做降级处理
+    const error = new Error(`内存分析流式读取失败: ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');

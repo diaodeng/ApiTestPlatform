@@ -30,3 +30,4 @@
 - `web/src/components/ticket/LogMemoryChartPanel.vue`
 - `web/src/components/ticket/LogViewerDialog.vue`
 - `web/public/docs/ticket_log_viewer.md`
+- 缺陷修复（同日）：手写 fetch 拼接 baseURL 产生 `//ticket/...` 双斜杠，网关按路径转发返回 404；修复为先去掉 base 尾部斜杠再拼接（日志内容流式接口同类隐患一并修复），并增加流式 404 时自动降级为一次性 POST 接口的兜底逻辑。

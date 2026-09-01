@@ -73,7 +73,8 @@
               striped-flow
             />
             <div class="log-memory-progress-text">
-              <span v-if="memoryProgress.fileCount">
+              <span v-if="memoryFallbackNotice">{{ memoryFallbackNotice }}</span>
+              <span v-else-if="memoryProgress.fileCount">
                 正在解析日志 {{ memoryProgress.fileIndex }}/{{ memoryProgress.fileCount }}：{{ memoryProgress.file }}
               </span>
               <span v-else>正在准备内存分析任务…</span>
@@ -313,6 +314,7 @@ import {
   getTicketLogContext,
   getTicketLogErrors,
   getTicketLogLineContent,
+  getTicketLogMemoryMetrics,
   streamTicketLogMemoryMetrics,
 } from '@/api/ticket/ticket'
 import { useLogPrepareProgress } from '@/views/ticket/hooks/useLogPrepareProgress'
@@ -369,6 +371,7 @@ const memoryProgress = ref({ percent: 0, file: '', fileIndex: 0, fileCount: 0, p
 const memoryElapsedSeconds = ref(0)
 const memoryElapsedTimer = ref(null)
 const memoryAbortController = ref(null)
+const memoryFallbackNotice = ref('')
 const memoryProgressPercent = computed(() =>
   Math.min(99, Math.max(1, Math.round(Number(memoryProgress.value.percent) || 0)))
 )
@@ -917,6 +920,7 @@ function resetViewerState() {
   memoryLoading.value = false
   memoryMetrics.value = null
   memoryError.value = ''
+  memoryFallbackNotice.value = ''
   abortMemoryAnalysis()
 }
 
@@ -980,6 +984,7 @@ function loadMemoryMetrics() {
   memoryError.value = ''
   memoryMetrics.value = null
   memoryProgress.value = { percent: 0, file: '', fileIndex: 0, fileCount: 0, points: 0 }
+  memoryFallbackNotice.value = ''
   startMemoryElapsedTimer()
   const finishLoading = () => {
     if (memoryAbortController.value === controller) {
@@ -1013,9 +1018,25 @@ function loadMemoryMetrics() {
       },
     }
   )
-    .catch((error) => {
+    .catch(async (error) => {
       // 用户主动中止（关闭面板/刷新）不算错误
       if (error?.name === 'AbortError') return
+      // 后端尚未包含流式接口（404）时，降级为一次性接口，保证图表可用
+      if (Number(error?.status) === 404) {
+        memoryFallbackNotice.value = '当前后端暂不支持实时进度，正在一次性分析（稍等片刻出图）…'
+        try {
+          const response = await getTicketLogMemoryMetrics({ ticketId, recordId, maxPoints: 2000 })
+          memoryMetrics.value = response?.data || null
+        } catch (fallbackError) {
+          memoryError.value = String(
+            fallbackError?.message || fallbackError || '内存分析数据加载失败'
+          )
+          memoryMetrics.value = null
+        }
+        memoryFallbackNotice.value = ''
+        finishLoading()
+        return
+      }
       memoryError.value = String(error?.message || error || '内存分析数据加载失败')
       memoryMetrics.value = null
       finishLoading()
