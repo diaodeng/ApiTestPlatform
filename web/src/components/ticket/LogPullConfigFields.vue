@@ -466,7 +466,9 @@ function loadStoreOptions(venderNo) {
   }
   const requestSeq = ++storeOptionsRequestSeq
   fetchedStoreOptions.value = []
-  return getTicketLogPullVendorStoreOptions(resolvedVenderNo).then(response => {
+  // 门店配置按环境隔离，加载时带上当前选择的环境分组 key。
+  const currentEnvironment = String(model.value?.environment || '').trim()
+  return getTicketLogPullVendorStoreOptions(resolvedVenderNo, currentEnvironment).then(response => {
     if (requestSeq !== storeOptionsRequestSeq) {
       return
     }
@@ -636,6 +638,19 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  () => model.value?.environment,
+  (environment, oldEnvironment) => {
+    // 环境切换后门店列表按新环境过滤；已选门店若不属于新环境，syncStoreSelection 不会改写，
+    // 由门店匹配提示（storeHintMessage）警示用户重新选择。
+    if (String(environment || '').trim() !== String(oldEnvironment || '').trim()) {
+      loadStoreOptions(model.value?.vendorId).then(() => {
+        syncStoreSelection()
+      })
+    }
+  }
 )
 
 watch(

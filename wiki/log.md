@@ -6,7 +6,98 @@
 - 文档：更新 `web/public/docs/ticket_log_viewer.md`（新增 2.5 内存分析、FAQ），新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-viewer-memory-chart.md`。
 - 验证：后端 `ruff check` 通过，解析/合并/降采样/文件筛选冒烟测试通过，控制器路由注册检查通过；前端 `npm run build:prod` 构建通过。
 
-## [2026-08-28] FEAT | 日志拉取管理关联工单跳转
+## [2026-09-01] FIX | 工单概览AI结论换行保留与AI分析追问记录补全
+- 触发：用户反馈工单详情页概览tab的摘要/根因/解决方案/预防建议/风险说明挤成一行；AI分析tab记录只显示AI结果看不到用户追问（如prod工单INC00001904725，任务2045329100889088的 analysis_context.extraInstruction 中明确有追问文本，但 ticket_message 无对应 question 记录）。
+- 架构层：工单域 / 工单详情前端 + AI分析任务创建服务。
+- 根因1（格式）：`TicketDetailOverviewTab.vue` 五个结论字段直接 `{{ }}` 插值渲染，HTML 折叠换行；AI分析tab的 `.record-content` 有 `white-space: pre-wrap` 所以正常。
+- 根因2（追问丢失）：两条链路行为不一致——AI分析tab追问框先写 question 消息再触发分析（ticket_service.add_message），而“发起AI分析”弹窗走 `create_analysis_task_services` 只把 extraInstruction 放进提示词和 analysis_context，从不写 question 消息。
+- 实现：概览tab五个字段改用 `.pre-wrap-text`（pre-wrap + break-word + line-height 1.65）容器；`create_analysis_task_services` 在 `TicketAiDao.add_task` 同一事务内补写 `role=user, message_type=question` 消息（content=extraInstruction，reference_type=ai_analysis，reference_id=task_id）；请求模型新增 `skipQuestionMessage` 字段，协同消息链路（已提前写 question）传 True 防重复；幂等命中/执行中分支在写消息前 return、重试只更新状态、日志拉取自动分析无 extraInstruction，均不产生重复或空消息。
+- 验证：ruff 通过；`test_ticket_ai_token_usage.py` + `test_ticket_log_pull_retry_guard.py` 21 用例通过；`vite build --mode production` 构建成功；prod 库确认 INC00001904725 的 extraInstruction 完整保留在任务上下文。
+- 文档：更新 `web/public/docs/ticket_detail.md`（主概览格式说明、AI分析记录追问说明），新增 `web/public/docs/updates/2026-09-01-ticket-overview-prewrap-and-ai-question-message.md`。
+- 后续：存量任务的追问仍只在任务详情 analysis_context 中，不补写消息；需重启后端并发布前端生效。
+
+## [2026-09-01] FIX | AI执行审计类型中文显示与详情按钮权限
+- 触发：AI执行审计页面任务类型下拉只有两个中文选项、列表显示英文编码；来源类型同样显示英文（如 `external_sync_sync_extract`）；操作列看不到任何按钮。
+- 架构层：系统管理域 / AI执行审计 / 前端页面 + 权限注册。
+- 根因1（英文编码）：前端 `aitaskexecution/index.vue` 枚举写死且过时——任务类型只有 `ticket_translate`/`ticket_knowledge_extract` 两项，来源类型 4 项与实际写入值完全对不上；`formatTaskType`/`formatSourceType` 匹配不到时回显英文原值。数据库实际分布：task_type 有 `ticket_sync_extract`(1688)/`ticket_translate`(603)/`ticket_stat_classify`(366)/`ticket_category_classify`(16)/`ticket_embedding`(2)；source_type 以 `{同步场景}_{动作}` 拼接为主（external_sync_sync_extract、bitable_pull_sync_extract、*_auto_category 等）。
+- 根因2（无按钮）：详情按钮绑定 `system:aitaskexecution:query`，但 `perms.py` 只注册了 `...:list`，query 权限字符不存在；`v-hasPermi` 对无权限用户直接移除按钮节点。后端详情接口本就校验 query 权限，故正确修法是补权限定义而非改权限字符。
+- 实现：前端补全 9 种任务类型 + 固定/拼接两类来源类型枚举，并新增 `{场景}_{动作}` 规则翻译（SOURCE_SCENE_LABELS/SOURCE_ACTION_LABELS，场景含 external_sync/bitable_pull/remote_pull，动作含 sync_extract/auto_category/status_change_auto_category）；后端 `perms.py` 新增 `admin.system.aitaskexecution.query` F 按钮定义（挂在 aitaskexecution 菜单下，order=1），启动时 sync_registered_menus 自动落库。
+- 数据操作：已通过最小 app 执行 sync_registered_menus 落库新按钮（menu_id=295，parent=245）；参照 `system:aiprompt:query` 授权惯例，将 menu_id=295 INSERT 授权给管理员角色（role_id=3）；超管角色（role_id=1）走 `*:*:*` 通配无需授权。
+- 验证：`uv run ruff check module_admin/perms.py` 通过；MENU_DEFS 无重复 key；`vite build --mode production` 构建成功；数据库确认按钮菜单与角色授权生效。
+- 文档：更新 `web/public/docs/ai_ticket_light_ai.md` 第七章（新增 7.2 任务类型与来源类型说明表、7.4 权限说明），新增 `web/public/docs/updates/2026-09-01-aitask-execution-type-labels-and-detail-permission.md`。
+- 后续：普通角色如需看详情按钮，需在角色管理勾选“AI执行审计详情”；后续新增任务类型/来源类型时前端枚举需同步维护，拼接来源可依赖规则翻译兜底。
+
+## [2026-08-31] FIX | 工单AI分析结果未转义引号修复
+- 触发：工单 INC00001904725 第二次分析失败（task_2045268316707840，prod，Provider=openai_com/deepseek-v4-flash，与 08-28 失败的 shuidi 不同）：Worker 正常退出且 result.json 内容完整，但报 `AI_WORKER_RESULT_UNPARSEABLE`，文本预览以 ```json 开头。
+- 架构层：工单域 / 深度AI分析 / Agent 端结果解析。
+- 根因：result.json 带 ```json 围栏（已有剥离兜底），但剥离后仍非法——`root_cause` 字符串值内部输出未转义英文双引号（`停留在"恢复中"（Pending）状态`），json.loads 在 line 7 column 113 报 `Expecting ',' delimiter`。deepseek-v4-flash 即使有 --output-schema 约束也不遵守字符串转义规则。
+- 链路确认：执行/解析/Schema 校验都在 Agent 侧（client_new `ticket_ai_analysis_service.py`），服务端只下发任务、记录转发错误和写回结果；错误日志出现在 Agent 日志属正常架构。服务端 `_read_json_file` 只读自产 context.json，无需同步修复。
+- 实现：client_new 新增 `_repair_unescaped_quotes`（结构化扫描：字符串内部后跟非 `, } ] :` 结构符的引号补 `\"` 转义，修复结果必须能通过 json.loads 且为 dict 才采纳）；`_extract_json_from_text` 在常规解析全部失败后调用该兜底；两端 prompt 第 5 条新增转义约束（英文双引号必须 `\"`，引用中文术语用中文引号）从源头减少非法输出。Agent 端修复后的结果仍经 accept_candidate Schema 校验，防线未绕过。
+- 测试：client_new 新增 `tests/test_ticket_ai_json_quote_repair.py` 5 用例（围栏内修复、纯文本修复、合法 JSON 不改写、真实结束引号不误转义、无法修复返回 None）全部通过；既有 27 个 AI 测试通过；server prompt 套件 5 用例通过；ruff/py_compile 通过。
+- 端到端：用真实失败 result.json 走 `_parse_worker_output` 完整链路（含真实 Schema）解析成功，14 字段完整、引号内容正确保留。
+- 文档：新增 `web/public/docs/changelog/2026-08-31-ticket-ai-analysis-unescaped-quote-fix.md`，更新 `web/public/docs/ticket_ai_analysis.md` 解析兼容说明。
+- 后续：需更新并重启本机 Agent 生效；该工单修复后在页面重新发起 AI 分析即可。
+
+## [2026-08-31] INGEST-CODE | 工单轻量AI手动测试工作台
+- 触发：需要按工单/Provider/模型/提示词组合试运行轻量 AI（信息提取、分类、翻译、标题总结、知识提炼），验证不同模型与提示词改法的效果，不影响线上工单。
+- 架构层：工单域 / 轻量AI / 测试工作台。
+- 新增：`TicketLightAiTestService`（测试编排，复用生产提示词渲染与归一化方法；不读场景开关/不读写提取缓存/不回写工单；审计 task_type 追加 `_test`）、`ticket_ai_test_vo.py`（Pydantic 契约）、`ticket_ai_test_controller.py`（options/tickets/context/prompt-content/run 五接口，均 run_in_threadpool，权限 `ticket:ai:test:run`）、前端 `web/src/api/ticket/aiTest.js` 与 `web/src/views/ticket/aiTest/index.vue`（任务类型/工单远程搜索/Provider-模型联动/提示词模板回填+临时编辑/结果面板含告警与Token）。
+- 菜单：`perms.py` 新增 `ticket.ai.test`（工单管理 → 轻量AI测试），启动时 sync_registered_menus 自动同步，角色需勾选后可见。
+- 生产同构点：机台编号归一化（含 machineNumberWarnings）、提示词变量渲染、分类结构化归一化与生产完全一致，测试结论可直接参考。
+- 验证：新增文件 ruff 全部通过；server 模块与服务导入验证通过；前端 `vite build --mode production` 构建成功。
+- 文档：新增 `web/public/docs/ticket_ai_test.md`（用户说明）、`web/public/docs/updates/2026-08-31-ticket-ai-test-workbench.md`，更新 `web/public/docs/updates/history.md`。
+
+## [2026-08-31] FIX | 相似工单向量刷新 quality_status 非空约束报错
+- 触发：详情页相似工单报 `Column 'quality_status' cannot be null`（MySQL 1048），SQL 为 `embedding_record` 的 UPDATE；分析确认影响所有"已有向量记录刷新"场景。
+- 架构层：工单域 / AI 向量服务 / 向量记录持久化。
+- 根因：提交 5b2fc713 为 `embedding_record` 新增非空列 `quality_status`（DDL 带 DEFAULT 'ready'，存量行无损）；但 `vectorize_ticket` 构造新 `EmbeddingRecord` 未显式赋值该字段，`TicketDao.upsert_embedding_record` 更新分支直接用新对象属性覆盖旧行，ORM Python 侧 default 只对 INSERT 生效，UPDATE 写入 NULL 报 1048。因同提交修改了向量字段方案（哈希含字段列表），存量向量哈希全部失配被判 stale，详情页自动刷新高频命中该路径。
+- 影响面：详情页相似工单、消息面板 `get_messages_services`、相似案例索引（标 last_index_status=failed）、manualCreate/manualUpdate/closeKnowledge/外部同步场景触发刷新（被 try/except 吞掉、向量静默过期）、`/ticket/similarity/rebuild`。AI 分析主链路（`search_tickets` 关键词检索）只读不写、不报错，但其 similarTickets 是新旧方案错配匹配，相关性劣化。
+- 实现：方案 A——`ticket_embedding_service.py` 构造记录处显式 `quality_status="ready"`，不依赖隐式默认值；未加防御性兜底（唯一写入点已保证）。数据无需修复（DDL 默认值已回填存量行）。
+- 测试：新增回归用例 `test_vectorize_ticket_builds_record_with_quality_status`（捕获构造对象断言字段非空），验证移除修复时失败、恢复后通过；套件 25 用例全部通过；ruff 通过。
+- 文档：新增 `web/public/docs/updates/2026-08-31-ticket-similarity-quality-status-fix.md`，更新 `web/public/docs/updates/history.md` 与本文档（ticket-domain.md 向量服务段落）。
+- 后续：修复上线后建议执行一次全量向量重建，把存量向量统一到新文本方案，消除新旧方案错配；外部 Embedding 配置注意 Token 消耗。
+
+## [2026-08-31] INGEST-CODE | 工单AI提取参数回填日志拉取提示快照
+- 触发：工单 INC00001904725 AI 提取出 logDate=2026-08-29，但详情页手动拉日志弹窗不回填日期；确认延后处理链路从不重建 `log_pull_hints`。
+- 架构层：工单域 / 同步延后处理 / 日志拉取提示快照。
+- 原因：bitable_pull 走"快速入库+延后处理"两段式，主入库阶段 AI 未执行，`build_upsert_payload` 构建的 hints 缺 modifyTime/posNo（飞书中文时间键不匹配标准键）；延后处理阶段 AI 提取回填后只更新 `ai_sync_extract`/标题/翻译，不回写 hints，弹窗读不到。
+- 实现：`TicketSyncPayloadService` 新增公开方法 `refresh_log_pull_hints`（原内联逻辑抽取 + posNo 兜底补充 log_pull_config 来源，与自动化取值顺序一致）；主路径改为调用该方法（行为不变）；延后处理在 AI 回填并重新 detect 后调用并持久化。
+- 回显语义：手动拉取参数保存在 `ticket_log_pull_record`，详情页弹窗经 `latestLogPull` 回显最近一次记录参数（用户实际操作优先于 AI 提取值）；`log_pull_hints` 修复后承载 AI 提取值。
+- 测试：新增 `tests/test_ticket_sync_log_pull_hints.py` 4 用例（AI 值进 hints、scoNo 回退、AI 空值保留已有 hints、主路径 payload 写入）全部通过；相关套件 29 用例通过；boundary 套件失败集合 md5 与基线一致（存量问题）。
+- 文档：新增 `web/public/docs/updates/2026-08-31-ticket-ai-extract-hints-backfill.md`，更新 `web/public/docs/ticket_log_pull.md` 回填来源说明与 `web/public/docs/updates/history.md`。
+
+## [2026-08-31] INGEST-CODE | 工单AI提取机台编号覆盖逻辑修复
+- 触发：工单 INC00001899231 模型正确返回 posNo=24，但后处理用正则从全文取第一个 `POS+数字` 匹配（POS#05，门店排查时检查的机台）无条件覆盖，导致自动化按 5 号机拉日志。
+- 架构层：工单域 / 轻量AI统一提取 / 机台编号归一化。
+- 实现：`TicketLightAiService._normalize_sync_extract_machine_numbers` 重写为模型结果优先策略；新增 `_extract_all_explicit_machine_nos`（全部候选去重）与 `_reconcile_machine_no_with_source`（单字段对齐：模型有效且命中候选直接采信；原文唯一候选冲突才纠正；多候选冲突保留模型值并告警；模型无效/遗漏时原文候选兜底）。金额拦截仍在 `_normalize_pos_or_sco_no`，防金额误判能力不回退。
+- 契约：`machineNumberWarnings` 告警文案更新（新增"已保留模型值，请人工复核"等），仅在审计与日志中使用，接口结构不变。
+- 缓存边界：本次不改缓存机制；`extra_data.ai_sync_extract` 以 `sourceHash + promptHash` 命中，代码变更不使旧缓存失效，存量错误结果需清缓存或等源数据/提示词变更后自然重提。
+- 测试：`tests/test_ticket_sync_ai_extract_safety.py` 更新金额纠正用例文案，新增多候选保留模型值（INC00001899231 回归）、命中候选无告警、单候选纠正、候选兜底、原文无候选 5 个用例，13 个用例全部通过；`test_ticket_sync_mapping_boundary.py` 的 13 个失败经 stash 对比确认为存量问题。
+- 文档：新增 `web/public/docs/updates/2026-08-31-ticket-ai-extract-machine-no-override-fix.md`，更新 `web/public/docs/ticket-sync-automation.md` 归一化策略说明与 `web/public/docs/updates/history.md`。
+
+## [2026-08-30] INGEST-CODE | 相似工单症状/案例索引与混合召回
+- 触发：确认生产无 Qdrant 时按 MySQL + 外部 Embedding 落地相似工单准确性改造。
+- 架构层：工单域 / 相似检索 / 案例生命周期 / 详情页。
+- 新增：`TicketSimilarityProfile`、`TicketSimilaritySignal`、`TicketSimilarityCase`，以及 `EmbeddingRecord.embedding_scope`。
+- 变更传播链：工单入库/更新 -> 画像和精确信号 -> symptom 向量；AI/RCA 结论 -> draft 案例 -> 人工确认 verified -> 独立案例向量；详情 -> 精确候选 + MySQL 分批向量扫描 + 可解释重排。
+- 生产边界：Embedding 继续为生产 Provider，local_hash 保留测试，Qdrant 不作为生产依赖；不整体拆分 `ticket.extra_data`。
+- 文档：新增 `web/public/docs/ticket_similarity.md`、`web/public/docs/updates/2026-08-30-ticket-similarity-case-index.md`、`wiki/flows/ticket-similarity-case-flow.md`。
+
+
+- 触发：AI分析追问区同时暴露角色、类型、发起AI开关，配置项和操作按钮占用空间较大，普通评论与 AI 分析职责边界不够清晰。
+- 实现：详情页 Tab 更名为“AI分析”，固定追问消息为用户提问并自动触发 AI；保留版本、Agent、Provider、模型和附件 JSON 配置，收纳为紧凑配置条与分析上下文入口；消息记录采用 AI/用户区分的气泡布局；生成快照、生成知识库、任务历史统一为结果操作区，顺序固定为快照、知识库、任务历史。
+- 评论：保留原评论接口、内部评论、权限、时间线和外部同步语义，仅优化评论 composer、消息块、发送中禁用与空状态；独立详情页复用 `TicketDetailCommentsTab`，与列表详情弹窗行为一致。评论提交不触发 AI。
+- 契约：后端接口和数据模型不变，前端仅收敛字段展示和交互布局；AI 结果附件详情继续保留。
+
+
+- 触发：用户指出协同/AI tab 中“发起AI分析”按钮与“提交消息”（runAi=true）后端等价（均走 `TicketAiAnalysisService.create_analysis_task_services`），按钮冗余；表单字段平铺过长；消息流混入同步导入、快照等系统消息；AI 结果 JSON 直接平铺撑开页面。
+- 实现：`TicketDetailCollabTab.vue` 移除顶部“发起AI分析”按钮和 `run-ai` 事件，`任务历史` 按钮移入角色/类型所在行；内容列 span 16→24 铺满整行（原右侧 8 栅格为相似工单卡片）；版本+Agent、Provider+模型 同行两列布局；附件 JSON 放入默认收起的 `el-collapse` 高级选项；消息流按 `messageType in (question/analysis/conclusion)` 过滤（快照 snapshot、同步导入 sync_import、事件动作、系统建单不再展示）；消息附件不再平铺，改为“详情”按钮 + `el-dialog` 弹窗查看格式化 JSON。
+- 修正：初版误删了第一行“发起AI”开关（`runAi` 控件，控制提交消息是否触发AI追问，默认开启）；开关不是与“发起AI分析”按钮等价的冗余项而是独立功能，已恢复到第一行，提交提示逻辑同步恢复按开关状态判断。
+- 调用方同步：`TicketDetailWithList.vue` 协同 tab 不再监听 `run-ai`；概览 tab 的发起弹窗入口保留（用于日志时间窗等高级参数场景）。
+- 契约：后端零改动，`POST /ticket/{ticket_id}/messages` 与页面接口契约不变，过滤纯前端完成。
+- 验证：`npx vite build --mode production` 构建通过；更新 `web/public/docs/ticket_detail.md` 协同/AI 章节、新增更新记录 `2026-08-29-collab-tab-simplify.md`。
+
+
 
 - 触发：日志拉取管理列表展示了工单编号/标题，但无法直接进入工单明细，排查链路需要手动搜索工单。
 - 实现：`web/src/views/ticket/logPullRecord/index.vue` 的「关联工单」列增加点击事件，通过命名路由 `TicketDetail` 解析站内地址并新标签页打开；工单 ID 使用字符串传参，避免大整数精度问题。

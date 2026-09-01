@@ -512,14 +512,13 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
 <template>
   <div class="panel-header mb16">
     <div class="panel-inline">
-      <span>拉取记录</span>
-      <el-tag v-if="logPullAutoRefreshing" size="small" type="warning">自动刷新中</el-tag>
-    </div>
-    <div class="panel-inline">
       <el-button type="primary" @click="openLogPullSubmitDialog" v-hasPermi="['ticket:logpull:add']"
         >拉取日志</el-button
       >
       <el-button link type="primary" @click="loadLogPullList">刷新</el-button>
+    </div>
+    <div class="panel-inline">
+      <el-tag v-if="logPullAutoRefreshing" size="small" type="warning">自动刷新中</el-tag>
     </div>
   </div>
   <el-table
@@ -540,9 +539,9 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
     <el-table-column label="拉取参数" min-width="180" show-overflow-tooltip>
       <template #default="scope">{{ formatLogPullParameter(scope.row) }}</template>
     </el-table-column>
-    <el-table-column label="商家" prop="vendorId" width="110" show-overflow-tooltip />
-    <el-table-column label="门店" prop="storeId" min-width="150" show-overflow-tooltip />
-    <el-table-column label="POSID" prop="posNo" width="110" show-overflow-tooltip />
+    <el-table-column label="商家" prop="vendorId" width="80" show-overflow-tooltip />
+    <el-table-column label="门店" prop="storeId" min-width="80" show-overflow-tooltip />
+    <el-table-column label="POSID" prop="posNo" width="80" show-overflow-tooltip />
     <el-table-column label="状态" min-width="170">
       <template #default="scope">
         <el-tag :type="getLogPullStatusTagType(scope.row.status)">
@@ -570,17 +569,15 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         <span v-else>-</span>
       </template>
     </el-table-column>
-    <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
+    <el-table-column label="原始压缩包" min-width="100" show-overflow-tooltip>
       <template #default="scope">
         <el-link
           v-if="getLogPullOriginalDownloadUrl(scope.row)"
           type="primary"
           :href="getLogPullOriginalDownloadUrl(scope.row)"
           target="_blank"
-          @click.prevent="downloadLogPullOriginal(scope.row)"
-          @contextmenu.prevent="copyLogPullOriginalDownloadUrl(scope.row)"
         >
-          {{ getLogPullOriginalDownloadUrl(scope.row) }}
+            原始下载地址
         </el-link>
         <span v-else>-</span>
       </template>

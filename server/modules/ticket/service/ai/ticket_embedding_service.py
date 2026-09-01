@@ -14,6 +14,7 @@ from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import EmbeddingRecord, Ticket, TicketRca
+from modules.ticket.service.ai.ticket_similarity_profile_service import TicketSimilarityProfileService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 
@@ -36,6 +37,65 @@ class TicketEmbeddingService:
     PROVIDER_LOCAL_HASH = "local_hash"
     PROVIDER_EMBEDDING = "embedding"
     PROVIDER_QDRANT = "qdrant"
+    SCOPE_SYMPTOM = "symptom"
+    SCOPE_CASE_DRAFT = "case_draft"
+    SCOPE_CASE_VERIFIED = "case_verified"
+    CASE_SCOPES = {SCOPE_CASE_DRAFT, SCOPE_CASE_VERIFIED}
+
+    @classmethod
+    def _write_embedding_execution_record(
+        cls,
+        *,
+        ticket: Ticket,
+        embedding_config: dict[str, Any],
+        model: str,
+        text_chars: int,
+        token_usage: dict[str, Any],
+    ) -> None:
+        """
+        将外部 Embedding 调用写入 AI 审计执行记录（复用轻量 AI 审计表）。
+        写入失败只记录告警，不影响向量化主流程。
+        :param ticket: 工单对象
+        :param embedding_config: Embedding 配置（含 endpoint/model）
+        :param model: 实际使用的模型标识
+        :param text_chars: 送入向量化的文本长度
+        :param token_usage: 上游返回的 Token 用量
+        :return: 无
+        """
+        try:
+            from module_admin.service.ai_task_execution_service import AiTaskExecutionService
+
+            endpoint = str(embedding_config.get("endpoint") or "").strip()
+            execution_data = {
+                "task_type": "ticket_embedding",
+                "task_name": "工单向量化Embedding",
+                "source_type": "ticket",
+                "source_id": ticket.ticket_id,
+                "source_ref": getattr(ticket, "ticket_no", None),
+                "provider_code": "openai_compatible",
+                "model_name": model,
+                "base_url": endpoint.split("?")[0] if endpoint else None,
+                "status": "success",
+                "request_payload": {
+                    "model": model,
+                    "textChars": text_chars,
+                    "configuredDimension": embedding_config.get("dimension"),
+                },
+                "response_payload": {"vectorDimension": embedding_config.get("dimension") or None},
+                "token_usage": token_usage,
+            }
+            with SessionLocal() as audit_db:
+                result = AiTaskExecutionService.add_ai_task_execution_services(audit_db, execution_data)
+                if result.is_success:
+                    logger.info(
+                        f"外部Embedding审计记录已写入: ticket_id={ticket.ticket_id}, "
+                        f"model={model}, tokenUsage={token_usage}"
+                    )
+        except Exception as exc:
+            logger.warning(
+                f"外部Embedding审计记录写入失败: ticket_id={getattr(ticket, 'ticket_id', '-') or '-'}, error={exc}"
+            )
+
     DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "provider": PROVIDER_LOCAL_HASH,
@@ -45,18 +105,7 @@ class TicketEmbeddingService:
         "threshold": 0.05,
         "keywordWeight": 0.15,
         "vectorWeight": 0.85,
-        "fields": [
-            "ticketNo",
-            "title",
-            "description",
-            "aiSummary",
-            "rootCause",
-            "solution",
-            "rca",
-            "moduleName",
-            "categoryName",
-            "tags",
-        ],
+        "fields": ["title", "description", "aiSummary", "symptom", "importantKeywords"],
         "embedding": {
             "provider": PROVIDER_LOCAL_HASH,
             "model": MODEL,
@@ -301,9 +350,7 @@ class TicketEmbeddingService:
             )
             return False
         cls.vectorize_ticket(query_db, ticket, rca=rca, config=active_config)
-        logger.info(
-            f"工单场景向量刷新完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, scene={scene}"
-        )
+        logger.info(f"工单场景向量刷新完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, scene={scene}")
         return True
 
     @classmethod
@@ -338,67 +385,64 @@ class TicketEmbeddingService:
         ticket: Ticket,
         rca: TicketRca | None = None,
         config: dict[str, Any] | None = None,
+        scope: str = SCOPE_SYMPTOM,
     ) -> str:
         """
-        拼接工单可检索文本，优先覆盖标题、描述、AI 摘要和 RCA 结构化信息。
+        按索引用途构建工单文本，症状和处理案例不混用。
         :param ticket: 工单对象
         :param rca: 可选 RCA 对象
         :param config: 相似度配置
-        :return: 用于向量化和自然语言搜索的文本
+        :param scope: symptom、case_draft 或 case_verified
+        :return: 用于向量化的稳定文本
         """
-        fields = set((config or {}).get("fields") or cls.DEFAULT_CONFIG["fields"])
+        normalized_scope = str(scope or cls.SCOPE_SYMPTOM).strip() or cls.SCOPE_SYMPTOM
         ai_payload = ticket.ai_analysis if isinstance(ticket.ai_analysis, dict) else {}
-        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        parts: list[Any] = []
+        if normalized_scope in cls.CASE_SCOPES:
+            rca = rca or TicketRca()
+            parts = [
+                f"问题症状：{rca.symptom or ticket.description or ''}",
+                f"关键证据：{rca.impact_scope or ''}",
+                f"排查过程：{rca.investigation_process or ''}",
+                f"确认根因：{rca.root_cause_detail or ticket.root_cause or ai_payload.get('root_cause') or ''}",
+                f"解决方案：{rca.fix_solution or ticket.solution or ai_payload.get('fix_suggestion') or ''}",
+                f"验证方式：{rca.verify_method or ''}",
+                f"预防方案：{rca.prevention_solution or ''}",
+            ]
+            return "\n".join(item for item in parts if item.split("：", 1)[1].strip())
+        configured_fields = (config or {}).get("fields") or cls.DEFAULT_CONFIG["fields"]
+        fields = []
+        for field in configured_fields:
+            field_name = str(field or "").strip()
+            if field_name and field_name not in fields:
+                fields.append(field_name)
         field_map = {
-            "ticketNo": ticket.ticket_no,
             "title": ticket.title,
             "description": ticket.description,
-            "originDescription": extra_data.get("origin_description"),
             "aiSummary": ai_payload.get("analysis_summary") or ai_payload.get("summary"),
-            "rootCause": ticket.root_cause or ai_payload.get("root_cause"),
-            "solution": ticket.solution or ai_payload.get("fix_suggestion"),
-            "moduleName": ticket.module_name,
-            "categoryName": ticket.category_name,
-            "issueTypeName": getattr(ticket, "issue_type_name", None),
-            "status": ticket.status,
-            "assignee": ticket.current_assignee_name,
+            "symptom": rca.symptom if rca else None,
+            "importantKeywords": " ".join(str(item).strip() for item in (ticket.tags or []) if str(item).strip())
+            if isinstance(ticket.tags, list)
+            else "",
         }
-        for key, value in field_map.items():
-            if key in fields:
-                parts.append(value)
-        if "tags" in fields and ticket.tags:
-            parts.append(" ".join(ticket.tags) if isinstance(ticket.tags, list) else str(ticket.tags))
-        if "rca" in fields and rca:
-            parts.extend(
-                [
-                    rca.symptom,
-                    rca.impact_scope,
-                    rca.reproduce_steps,
-                    rca.investigation_process,
-                    rca.root_cause_detail,
-                    rca.fix_solution,
-                    rca.verify_method,
-                    rca.prevention_solution,
-                ]
-            )
-        return "\n".join(str(item) for item in parts if item)
+        return "\n".join(str(field_map[key]) for key in fields if key in field_map and field_map[key])
 
     @classmethod
     def embed_text(
-        cls, text: str, config: dict[str, Any] | None = None
+        cls, text: str, config: dict[str, Any] | None = None, token_usage_out: dict[str, Any] | None = None
     ) -> list[float]:
         """
         将文本转换为向量；配置本地哈希就只用本地哈希，配置外部接口就只调用外部接口。
         :param text: 原始文本
         :param config: 相似度配置
+        :param token_usage_out: 可选输出容器；外部接口调用成功后写入上游 Token 用量，
+            本地哈希模式无外部请求，不写入任何数据。
         :return: 归一化向量
         """
         embedding_config = (config or {}).get("embedding") if isinstance((config or {}).get("embedding"), dict) else {}
         provider = cls._normalize_embedding_provider(embedding_config.get("provider"))
         if provider == "openai_compatible":
             try:
-                return cls._embed_text_openai_compatible(text, embedding_config)
+                return cls._embed_text_openai_compatible(text, embedding_config, token_usage_out)
             except Exception as exc:
                 raise ExternalEmbeddingUnavailableError(
                     f"外部Embedding生成失败，严格模式不回退本地哈希: provider={provider}, error={exc}"
@@ -416,6 +460,7 @@ class TicketEmbeddingService:
         config: dict[str, Any] | None = None,
         sync_qdrant: bool | None = None,
         force_rebuild: bool = False,
+        embedding_scope: str = SCOPE_SYMPTOM,
     ) -> EmbeddingRecord:
         """
         为单个工单生成或更新向量记录，并按配置同步外部向量库。
@@ -430,12 +475,21 @@ class TicketEmbeddingService:
         active_config = config or cls.get_similarity_config(query_db)
         vector_provider = cls._normalize_provider(active_config.get("provider"))
         vector_config = cls._config_for_vector_provider(active_config, vector_provider)
-        text = cls.build_ticket_text(ticket, rca=rca, config=active_config)
+        normalized_scope = str(embedding_scope or cls.SCOPE_SYMPTOM).strip() or cls.SCOPE_SYMPTOM
+        if normalized_scope not in {cls.SCOPE_SYMPTOM, *cls.CASE_SCOPES}:
+            raise ValueError(f"不支持的工单向量用途: {normalized_scope}")
+        text = cls.build_ticket_text(ticket, rca=rca, config=active_config, scope=normalized_scope)
+        metadata_snapshot: dict[str, Any] = {}
+        try:
+            TicketSimilarityProfileService.upsert_profile(query_db, ticket, source="vectorize")
+            metadata_snapshot = TicketSimilarityProfileService.get_metadata(query_db, ticket)
+        except Exception as exc:
+            logger.warning(f"工单相似画像更新失败，继续向量化: ticket_id={ticket.ticket_id}, error={exc}")
         embedding_config = vector_config.get("embedding") if isinstance(vector_config.get("embedding"), dict) else {}
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
         configured_dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
-        content_hash = cls._embedding_content_hash(text, active_config)
+        content_hash = cls._embedding_content_hash(text, {**active_config, "embeddingScope": normalized_scope})
         should_sync_qdrant = vector_provider == cls.PROVIDER_QDRANT
         if sync_qdrant is not None and bool(sync_qdrant) != should_sync_qdrant:
             logger.info(
@@ -450,7 +504,9 @@ class TicketEmbeddingService:
             f"configuredDimension={embedding_config.get('dimension')}, shouldSyncQdrant={should_sync_qdrant}, "
             f"textChars={len(text)}"
         )
-        existing_record = TicketDao.get_embedding_record(query_db, "ticket", ticket.ticket_id, model, version)
+        existing_record = TicketDao.get_embedding_record(
+            query_db, "ticket", ticket.ticket_id, model, version, embedding_scope=normalized_scope
+        )
         if cls._can_reuse_embedding_record(existing_record, content_hash, configured_dimension, force_rebuild):
             logger.info(
                 f"跳过外部Embedding请求: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
@@ -474,8 +530,7 @@ class TicketEmbeddingService:
             return existing_record
         if existing_record and force_rebuild:
             logger.info(
-                f"强制重建向量: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
-                f"reason=forceRebuild=true"
+                f"强制重建向量: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, reason=forceRebuild=true"
             )
         elif existing_record:
             logger.info(
@@ -483,19 +538,38 @@ class TicketEmbeddingService:
                 f"oldHash={str(existing_record.content_hash or '')[:12]}, newHash={content_hash[:12]}, "
                 f"oldDimension={existing_record.embedding_dimension}, configuredDimension={configured_dimension}"
             )
-        vector = cls.embed_text(text, vector_config)
+        embedding_token_usage: dict[str, Any] = {}
+        vector = cls.embed_text(text, vector_config, token_usage_out=embedding_token_usage)
         logger.info(
             f"工单向量生成完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, "
-            f"vectorDimension={len(vector)}, contentHash={content_hash[:12]}"
+            f"vectorDimension={len(vector)}, contentHash={content_hash[:12]}, "
+            f"tokenUsage={embedding_token_usage or '-'}"
         )
+        # 外部 Embedding 调用写入审计执行记录；本地哈希无外部请求（用量为空）不落审计。
+        if embedding_token_usage:
+            cls._write_embedding_execution_record(
+                ticket=ticket,
+                embedding_config=vector_config.get("embedding")
+                if isinstance(vector_config.get("embedding"), dict)
+                else {},
+                model=model,
+                text_chars=len(text),
+                token_usage=embedding_token_usage,
+            )
         record = EmbeddingRecord(
             object_type="ticket",
             object_id=ticket.ticket_id,
+            embedding_scope=normalized_scope,
             embedding_model=model,
             embedding_version=version,
             embedding_dimension=len(vector),
             embedding=vector,
             content_hash=content_hash,
+            metadata_snapshot=metadata_snapshot,
+            # quality_status 为非空列；upsert 更新分支直接用新对象属性覆盖旧行，
+            # ORM 的 Python 侧 default 只对 INSERT 生效，必须显式赋值，否则 UPDATE 写入 NULL 触发 1048。
+            quality_status="ready",
+            source_revision=metadata_snapshot.get("profileRevision"),
             create_time=datetime.now(),
         )
         saved_record = TicketDao.upsert_embedding_record(query_db, record)
@@ -662,8 +736,7 @@ class TicketEmbeddingService:
                     failed += 1
                     failed_items.append({"ticketId": ticket.ticket_id, "ticketNo": ticket.ticket_no, "error": str(exc)})
                     logger.warning(
-                        f"工单向量重建失败: ticket_id={ticket.ticket_id}, "
-                        f"ticket_no={ticket.ticket_no}, error={exc}"
+                        f"工单向量重建失败: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, error={exc}"
                     )
             query_db.commit()
             logger.info(
@@ -780,6 +853,7 @@ class TicketEmbeddingService:
         query_db: Session,
         ticket: Ticket,
         config: dict[str, Any] | None = None,
+        embedding_scope: str = SCOPE_SYMPTOM,
     ) -> dict[str, Any]:
         """
         读取当前工单可复用的向量上下文，不触发外部 Embedding。
@@ -797,10 +871,18 @@ class TicketEmbeddingService:
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
         dimension = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        normalized_scope = str(embedding_scope or cls.SCOPE_SYMPTOM).strip() or cls.SCOPE_SYMPTOM
         rca_map = TicketDao.list_rca_by_ticket_ids(query_db, [ticket.ticket_id])
-        text = cls.build_ticket_text(ticket, rca=rca_map.get(ticket.ticket_id), config=active_config)
-        content_hash = cls._embedding_content_hash(text, active_config)
-        record = TicketDao.get_embedding_record(query_db, "ticket", ticket.ticket_id, model, version)
+        text = cls.build_ticket_text(
+            ticket,
+            rca=rca_map.get(ticket.ticket_id),
+            config=active_config,
+            scope=normalized_scope,
+        )
+        content_hash = cls._embedding_content_hash(text, {**active_config, "embeddingScope": normalized_scope})
+        record = TicketDao.get_embedding_record(
+            query_db, "ticket", ticket.ticket_id, model, version, embedding_scope=normalized_scope
+        )
         if not record or not isinstance(record.embedding, list):
             return {
                 "status": "missing",
@@ -847,6 +929,7 @@ class TicketEmbeddingService:
         limit: int,
         config: dict[str, Any],
         exclude_ticket_id: int | None = None,
+        use_hybrid: bool = False,
     ) -> list[dict]:
         """
         使用已保存向量查询相似工单，不触发外部 Embedding。
@@ -875,6 +958,7 @@ class TicketEmbeddingService:
         limit: int,
         config: dict[str, Any],
         provider: str,
+        embedding_scope: str = SCOPE_SYMPTOM,
     ) -> dict[int, float]:
         """
         使用数据库中保存的向量记录计算相似度。
@@ -890,7 +974,9 @@ class TicketEmbeddingService:
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
         scored: dict[int, float] = {}
-        for record in TicketDao.list_ticket_embedding_records(query_db, model, version):
+        for record in TicketDao.list_ticket_embedding_records(
+            query_db, model, version, embedding_scope=cls.SCOPE_SYMPTOM, batch_size=500
+        ):
             if not isinstance(record.embedding, list):
                 continue
             score = cls._cosine(query_vector, record.embedding)
@@ -958,7 +1044,9 @@ class TicketEmbeddingService:
         model = cls.MODEL
         version = cls.VERSION
         scored: dict[int, float] = {}
-        for record in TicketDao.list_ticket_embedding_records(query_db, model, version):
+        for record in TicketDao.list_ticket_embedding_records(
+            query_db, model, version, embedding_scope=cls.SCOPE_SYMPTOM, batch_size=500
+        ):
             if not isinstance(record.embedding, list):
                 continue
             score = cls._cosine(query_vector, record.embedding)
@@ -990,7 +1078,9 @@ class TicketEmbeddingService:
         vector_config = cls._config_for_vector_provider(config, cls.PROVIDER_EMBEDDING)
         query_vector = cls.embed_text(keyword, vector_config)
         scored: dict[int, float] = {}
-        for record in TicketDao.list_ticket_embedding_records(query_db, model, version):
+        for record in TicketDao.list_ticket_embedding_records(
+            query_db, model, version, embedding_scope=cls.SCOPE_SYMPTOM, batch_size=500
+        ):
             if not isinstance(record.embedding, list):
                 continue
             score = cls._cosine(query_vector, record.embedding)
@@ -1217,7 +1307,7 @@ class TicketEmbeddingService:
         timeout = cls._safe_int(qdrant_config.get("timeoutSeconds"), 15, 1, 120)
         response = httpx.get(url, headers=headers, timeout=timeout)
         cls._raise_for_qdrant_status(response, "查询 collection 列表")
-        rows = ((response.json().get("result") or {}).get("collections") or [])
+        rows = (response.json().get("result") or {}).get("collections") or []
         collections: list[dict[str, Any]] = []
         for row in rows:
             collection_name = str((row or {}).get("name") or "").strip()
@@ -1370,17 +1460,26 @@ class TicketEmbeddingService:
         if response.status_code < 400:
             return
         detail = response.text[:1000] if response.text else ""
+        try:
+            request = response.request
+        except RuntimeError:
+            request = httpx.Request("GET", "http://qdrant.invalid")
         raise httpx.HTTPStatusError(
             f"Qdrant请求失败: action={action}, status={response.status_code}, detail={detail}",
+            request=request,
             response=response,
         )
 
     @classmethod
-    def _embed_text_openai_compatible(cls, text: str, embedding_config: dict[str, Any]) -> list[float]:
+    def _embed_text_openai_compatible(
+        cls, text: str, embedding_config: dict[str, Any], token_usage_out: dict[str, Any] | None = None
+    ) -> list[float]:
         """
         调用兼容 OpenAI /v1/embeddings 的接口生成向量。
         :param text: 原始文本
         :param embedding_config: Embedding 配置
+        :param token_usage_out: 可选输出容器；调用成功后会把上游 usage
+            （prompt_tokens/total_tokens）写入该 dict，供审计统计。
         :return: 向量
         """
         endpoint = str(embedding_config.get("endpoint") or "").strip()
@@ -1411,15 +1510,31 @@ class TicketEmbeddingService:
                 f"请求embeddings接口异常: endpoint={endpoint.split('?')[0]}, "
                 f"headerKeys={list(headers.keys())}, response={response.text}"
             )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                request = response.request
+            except RuntimeError:
+                request = httpx.Request("POST", endpoint)
+            raise httpx.HTTPStatusError(
+                f"Embedding请求失败: status={response.status_code}, detail={response.text[:1000]}",
+                request=request,
+                response=response,
+            )
         data = response.json()
         vector = ((data.get("data") or [{}])[0] or {}).get("embedding")
         if not isinstance(vector, list):
             raise ValueError("Embedding 接口未返回 data[0].embedding")
         result = [float(item) for item in vector]
+        # 透出上游 Token 用量；embeddings 接口的用量字段为 prompt_tokens/total_tokens
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if isinstance(token_usage_out, dict) and isinstance(usage, dict):
+            extracted = {key: usage[key] for key in ("prompt_tokens", "total_tokens") if usage.get(key) is not None}
+            if extracted:
+                token_usage_out.update(extracted)
         logger.info(
             f"外部Embedding请求完成: provider=openai_compatible, model={embedding_config.get('model')}, "
-            f"configuredDimension={dimension}, returnedDimension={len(result)}"
+            f"configuredDimension={dimension}, returnedDimension={len(result)}, "
+            f"promptTokens={(usage or {}).get('prompt_tokens') if isinstance(usage, dict) else None}"
         )
         if dimension > 0 and len(result) != dimension:
             logger.error(
@@ -1553,10 +1668,11 @@ class TicketEmbeddingService:
         normalized["threshold"] = cls._safe_float(normalized.get("threshold"), 0.05, -1.0, 1.0)
         normalized["keywordWeight"] = cls._safe_float(normalized.get("keywordWeight"), 0.15, 0.0, 1.0)
         normalized["vectorWeight"] = cls._safe_float(normalized.get("vectorWeight"), 0.85, 0.0, 1.0)
+        allowed_fields = {"title", "description", "aiSummary", "symptom", "importantKeywords"}
         normalized["fields"] = [
             str(item or "").strip()
             for item in normalized.get("fields", [])
-            if str(item or "").strip()
+            if str(item or "").strip() in allowed_fields
         ] or list(cls.DEFAULT_CONFIG["fields"])
         embedding_config = normalized.get("embedding") if isinstance(normalized.get("embedding"), dict) else {}
         embedding_config["provider"] = cls._normalize_embedding_provider(embedding_config.get("provider"))

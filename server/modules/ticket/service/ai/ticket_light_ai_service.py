@@ -510,6 +510,28 @@ class TicketLightAiService:
         return number if number > 0 else None
 
     @classmethod
+    def _extract_all_explicit_machine_nos(cls, text: str, label: str) -> list[int]:
+        """提取原文中全部带机台语义的编号候选，按出现顺序去重。"""
+        if not text:
+            return []
+        escaped_label = re.escape(label)
+        result: list[int] = []
+        for matched in re.finditer(
+            rf"(?:^|[^A-Za-z0-9]){escaped_label}\s*[-#号编号:]?\s*(\d{{1,10}})"
+            rf"|(?:^|[^A-Za-z0-9])#?\s*(\d{{1,10}})\s*{escaped_label}(?:\b|[^A-Za-z0-9])"
+            rf"|(?:^|[^A-Za-z0-9])(?:\d{{1,10}})\s*号?{escaped_label}(?:\b|[^A-Za-z0-9])",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            candidates = [item for item in matched.groups() if item]
+            if not candidates:
+                continue
+            number = int(candidates[0])
+            if number > 0 and number not in result:
+                result.append(number)
+        return result
+
+    @classmethod
     def _normalize_sync_extract_machine_numbers(
         cls,
         parsed_payload: dict[str, Any],
@@ -517,7 +539,15 @@ class TicketLightAiService:
         content: str,
         raw_payload: dict[str, Any] | None,
     ) -> tuple[int | None, int | None, list[str]]:
-        """统一校验模型结果与原文中的明确机台语义，返回校验告警。"""
+        """
+        校验模型机台编号结果与原文机台语义的一致性，返回校验告警。
+
+        归一化策略为模型结果优先：模型具备语义判断能力，只有当模型返回无效值时
+        才用原文正则候选兜底；模型返回了有效编号且原文只存在唯一机台候选并与模型
+        冲突时，判定模型极大概率误判（如把金额片段当编号），用原文唯一候选纠正。
+        原文出现多个机台候选时（常见于"检查过A机、故障在B机"的工单），不猜测该信
+        哪一个，保留模型结果并输出告警供人工复核。
+        """
         raw_pos_value = (
             parsed_payload.get("posNo")
             or parsed_payload.get("pos_no")
@@ -540,23 +570,58 @@ class TicketLightAiService:
             ) if item
         )
         warnings: list[str] = []
-        explicit_pos = cls._extract_explicit_machine_no(source_text, "POS")
-        explicit_sco = cls._extract_explicit_machine_no(source_text, "SCO")
-        if explicit_pos:
-            if pos_no and pos_no != explicit_pos:
-                warnings.append(f"模型POS={pos_no}与原文明确POS={explicit_pos}不一致，已采用原文值")
-            elif pos_no is None and str(raw_pos_value or "").strip():
-                warnings.append(f"模型POS值{raw_pos_value}无效，已采用原文明确POS={explicit_pos}")
-            pos_no = explicit_pos
-        if explicit_sco:
-            if sco_no and sco_no != explicit_sco:
-                warnings.append(f"模型SCO={sco_no}与原文明确SCO={explicit_sco}不一致，已采用原文值")
-            elif sco_no is None and str(raw_sco_value or "").strip():
-                warnings.append(f"模型SCO值{raw_sco_value}无效，已采用原文明确SCO={explicit_sco}")
-            sco_no = explicit_sco
+        pos_candidates = cls._extract_all_explicit_machine_nos(source_text, "POS")
+        sco_candidates = cls._extract_all_explicit_machine_nos(source_text, "SCO")
+        pos_no = cls._reconcile_machine_no_with_source(
+            "POS", pos_no, raw_pos_value, pos_candidates, warnings
+        )
+        sco_no = cls._reconcile_machine_no_with_source(
+            "SCO", sco_no, raw_sco_value, sco_candidates, warnings
+        )
         if pos_no and sco_no and pos_no == sco_no:
             warnings.append("POS与SCO编号相同，请确认原文机台语义")
         return pos_no, sco_no, warnings
+
+    @classmethod
+    def _reconcile_machine_no_with_source(
+        cls,
+        label: str,
+        model_no: int | None,
+        raw_value: Any,
+        candidates: list[int],
+        warnings: list[str],
+    ) -> int | None:
+        """
+        按模型优先策略对齐单个机台编号与原文候选。
+
+        :param label: 机台标签（POS/SCO），用于告警文案。
+        :param model_no: 模型返回并归一化后的编号，无效为 None。
+        :param raw_value: 模型返回的原始值，用于判断模型是否填写了该字段。
+        :param candidates: 原文中全部机台语义编号候选（按出现顺序去重）。
+        :param warnings: 告警收集列表。
+        :return: 对齐后的最终编号。
+        """
+        if not candidates:
+            return model_no
+        if model_no is None:
+            # 模型未给出有效编号：原文存在候选时兜底采用原文第一个候选。
+            if str(raw_value or "").strip():
+                warnings.append(f"模型{label}值{raw_value}无效，已采用原文候选{label}={candidates[0]}")
+            else:
+                # 模型未填写该字段且原文有明确候选：视为模型遗漏，采用候选并提示。
+                warnings.append(f"原文存在明确{label}={candidates[0]}，模型未提取，已采用原文值")
+            return candidates[0]
+        if model_no in candidates:
+            return model_no
+        if len(candidates) == 1:
+            # 原文只有一个机台候选且与模型结果冲突：模型大概率误判，用原文唯一候选纠正。
+            warnings.append(f"模型{label}={model_no}与原文唯一机台候选{label}={candidates[0]}不一致，已采用原文值")
+            return candidates[0]
+        # 原文有多个机台候选且模型结果不在其中：无法确定正确值，保留模型结果并告警供人工复核。
+        warnings.append(
+            f"模型{label}={model_no}不在原文机台候选{candidates}中，已保留模型值，请人工复核"
+        )
+        return model_no
 
     @classmethod
     def _normalize_log_date_text(cls, value: Any, default_year: int | None = None) -> str:
@@ -971,7 +1036,7 @@ class TicketLightAiService:
             ),
         )
         try:
-            raw_text = cls._call_model_api(
+            raw_text, token_usage = cls._call_model_api(
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -985,6 +1050,7 @@ class TicketLightAiService:
                 status="success",
                 response_text=raw_text,
                 response_payload={"rawText": raw_text, "parsed": parsed_data},
+                token_usage=token_usage,
             )
             return parsed_data, {
                 "provider_code": provider_code,
@@ -992,6 +1058,7 @@ class TicketLightAiService:
                 "status": "success",
                 "raw_text": raw_text,
                 "parsed": parsed_data,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             logger.warning(f"工单知识库提炼失败，已回退规则提炼: {exc}")
@@ -1074,23 +1141,23 @@ class TicketLightAiService:
         temperature: float = 0.2,
         timeout_sec: int | None = None,
         model_name: str | None = None,
-    ) -> str:
+    ) -> tuple[str, dict[str, Any] | None]:
         """
-        调用具备工单轻量AI能力的Provider文本生成接口。
+        调用具备工单轻量AI能力的Provider文本生成接口，并透出 Token 用量。
         :param provider: Provider数据库对象
         :param system_prompt: 系统提示词
         :param user_prompt: 用户提示词
         :param temperature: 温度参数
         :param timeout_sec: 超时时间
         :param model_name: 可选覆盖模型名称，为空时使用Provider默认模型
-        :return: 模型回复文本
+        :return: (模型回复文本, Token用量字典)，上游未返回用量时用量为 None
         """
         AiProviderCapabilityService.require_provider_eligibility(
             provider,
             usage="ticket_light_text",
             executor="direct_http",
         )
-        content = AiProviderProtocolService.generate_text(
+        generation_result = AiProviderProtocolService.generate_text_with_usage(
             provider=provider,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1098,10 +1165,11 @@ class TicketLightAiService:
             timeout_sec=timeout_sec or cls.DEFAULT_TIMEOUT_SEC,
             model_name=model_name,
         )
+        content = generation_result.text
         logger.debug(f"调用AI返回结果：{content}")
         if not str(content or "").strip():
             raise ValueError("AI接口未返回可解析的内容")
-        return str(content).strip()
+        return str(content).strip(), generation_result.token_usage
 
     @classmethod
     def extract_ticket_sync_fields(
@@ -1295,7 +1363,7 @@ class TicketLightAiService:
             ),
         )
         try:
-            response_text = cls._call_model_api(
+            response_text, token_usage = cls._call_model_api(
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -1374,6 +1442,7 @@ class TicketLightAiService:
                     "normalized": extracted,
                     "machineNumberWarnings": machine_number_warnings,
                 },
+                token_usage=token_usage,
             )
             return extracted, {
                 "provider_code": provider_code,
@@ -1387,6 +1456,7 @@ class TicketLightAiService:
                 "sourceSnapshot": source_snapshot,
                 "success": True,
                 "cacheHit": False,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             cls._finish_execution_record(db, execution_id, status="failed", error_message=str(exc))
@@ -1550,15 +1620,13 @@ class TicketLightAiService:
             ),
         )
         try:
-            summary_title = str(
-                cls._call_model_api(
-                    provider=provider,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    model_name=model_name if model_name else None,
-                )
-                or ""
-            ).strip()
+            raw_summary, token_usage = cls._call_model_api(
+                provider=provider,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_name=model_name if model_name else None,
+            )
+            summary_title = str(raw_summary or "").strip()
             summary_title = summary_title.replace("\r", " ").replace("\n", " ").strip()
             cls._finish_execution_record(
                 db,
@@ -1566,11 +1634,13 @@ class TicketLightAiService:
                 status="success",
                 response_text=summary_title,
                 response_payload={"summaryTitle": summary_title},
+                token_usage=token_usage,
             )
             return summary_title, {
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
                 "summary_title": summary_title,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             logger.warning(f"工单标题总结失败，已回退描述截断: {exc}")
@@ -1750,13 +1820,11 @@ class TicketLightAiService:
         )
         logger.debug(f"工单AI分类统计参数：system_prompt： {system_prompt}, user_prompt: {user_prompt}")
         try:
-            response_text = str(
-                cls._call_model_api(
-                    provider=provider, system_prompt=system_prompt, user_prompt=user_prompt,
-                    model_name=default_model_name if default_model_name else None,
-                )
-                or ""
-            ).strip()
+            response_text, token_usage = cls._call_model_api(
+                provider=provider, system_prompt=system_prompt, user_prompt=user_prompt,
+                model_name=default_model_name if default_model_name else None,
+            )
+            response_text = response_text.strip()
 
             parsed_payload = cls._extract_json_object(response_text)
             normalized_result = cls._normalize_structured_classification_result(
@@ -1770,6 +1838,7 @@ class TicketLightAiService:
                 status="success",
                 response_text=response_text,
                 response_payload=normalized_result,
+                token_usage=token_usage,
             )
 
             logger.info(
@@ -1780,6 +1849,7 @@ class TicketLightAiService:
                 "provider_code": provider_code,
                 "prompt_code": prompt_code,
                 "skipped": False,
+                "token_usage": token_usage,
             }
         except Exception as exc:
             logger.warning(f"工单AI分类统计失败: {exc}")
@@ -1918,7 +1988,7 @@ class TicketLightAiService:
             ),
         )
         try:
-            translated_text = cls._call_model_api(
+            translated_text, token_usage = cls._call_model_api(
                 provider=provider,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -1930,6 +2000,7 @@ class TicketLightAiService:
                 status="success",
                 response_text=translated_text,
                 response_payload={"translatedText": translated_text},
+                token_usage=token_usage,
             )
         except Exception as exc:
             logger.warning(f"工单翻译失败，已回退原文: {exc}")
@@ -1952,4 +2023,5 @@ class TicketLightAiService:
             "provider_code": provider_code,
             "prompt_code": prompt_code,
             "translated_text": translated_text,
+            "token_usage": token_usage,
         }

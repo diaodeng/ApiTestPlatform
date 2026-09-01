@@ -49,6 +49,7 @@ from modules.ticket.service.ai.ticket_auto_classification_service import TicketA
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
 from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimilarityQueryService
 from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.collaboration.ticket_message_sync_service import TicketMessageSyncService
@@ -1270,8 +1271,11 @@ class TicketService:
             data["update_by"] = _user_name(current_user)
             data["update_time"] = datetime.now()
             if (
-                ("issue_type_id" in data and str(data.get("issue_type_id") or "").strip() != str(ticket.issue_type_id or "").strip())
-                or ("issue_type_name" in data and str(data.get("issue_type_name") or "").strip() != str(ticket.issue_type_name or "").strip())
+                "issue_type_id" in data
+                and str(data.get("issue_type_id") or "").strip() != str(ticket.issue_type_id or "").strip()
+            ) or (
+                "issue_type_name" in data
+                and str(data.get("issue_type_name") or "").strip() != str(ticket.issue_type_name or "").strip()
             ):
                 data["classification_source"] = "manual"
                 data["classification_rule_id"] = ""
@@ -1997,6 +2001,8 @@ class TicketService:
             "snapshots": CamelCaseUtil.transform_result(snapshots),
             "latestSnapshot": CamelCaseUtil.transform_result(snapshots[0]) if snapshots else None,
             "similarTickets": similarity_result.get("similarTickets") or [],
+            "symptomTickets": similarity_result.get("symptomTickets") or [],
+            "caseTickets": similarity_result.get("caseTickets") or [],
             "similarEmbeddingStatus": similarity_result.get("similarEmbeddingStatus") or "disabled",
             "similarEmbeddingMessage": similarity_result.get("similarEmbeddingMessage") or "",
         }
@@ -2069,6 +2075,8 @@ class TicketService:
                             aiModelName=message_object.ai_model_name,
                             forceRefresh=True,
                             extraInstruction=content,
+                            # 本条消息本身已作为 question 写入消息流，任务创建时不再重复写追问消息
+                            skipQuestionMessage=True,
                         )
                         ai_result = TicketAiAnalysisService.create_analysis_task_services(
                             query_db,
@@ -2332,7 +2340,10 @@ class TicketService:
                 source_type="rca",
                 source_id=rca.id,
             )
+            case = TicketSimilarityCaseService.upsert_draft(query_db, ticket, rca=rca, source="rca")
             query_db.commit()
+            if case:
+                TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)
             return CrudResponseModel(is_success=True, message="RCA保存成功", result=CamelCaseUtil.transform_result(rca))
         except Exception:
             query_db.rollback()
@@ -2559,13 +2570,15 @@ class TicketService:
             code = str(module.module_code or "").strip()
             if code:
                 seen_codes.add(code)
-            result.append({
-                "moduleId": module.module_id,
-                "moduleName": module.module_name,
-                "moduleCode": code,
-                "projectId": module.project_id,
-                "label": module.module_name,
-            })
+            result.append(
+                {
+                    "moduleId": module.module_id,
+                    "moduleName": module.module_name,
+                    "moduleCode": code,
+                    "projectId": module.project_id,
+                    "label": module.module_name,
+                }
+            )
 
         # 从同步配置 moduleMappings 中提取额外的 moduleCode
         try:
@@ -2576,13 +2589,15 @@ class TicketService:
                 code = str(mapping.get("moduleCode") or mapping.get("module_code") or "").strip()
                 if code and code not in seen_codes:
                     seen_codes.add(code)
-                    result.append({
-                        "moduleId": None,
-                        "moduleName": code,
-                        "moduleCode": code,
-                        "projectId": SyncUtil.safe_int(mapping.get("projectId") or mapping.get("project_id")),
-                        "label": code,
-                    })
+                    result.append(
+                        {
+                            "moduleId": None,
+                            "moduleName": code,
+                            "moduleCode": code,
+                            "projectId": SyncUtil.safe_int(mapping.get("projectId") or mapping.get("project_id")),
+                            "label": code,
+                        }
+                    )
         except Exception:
             pass
 

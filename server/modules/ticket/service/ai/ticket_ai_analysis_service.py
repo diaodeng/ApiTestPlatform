@@ -61,6 +61,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from utils.api_key_util import ApiKeyUtil
@@ -952,9 +953,7 @@ class TicketAiAnalysisService:
         # 先合并扩展环境变量，再写入 Provider 的核心连接信息。
         # workerEnv 只用于补充 Worker 参数，不能覆盖当前工单明确选择的 Provider
         # 的密钥、地址和模型，否则会出现“界面选择了 Provider，但 Agent 仍调用旧地址”的问题。
-        env_overrides: dict[str, str] = cls._normalize_provider_worker_env(
-            getattr(provider, "worker_env", None)
-        )
+        env_overrides: dict[str, str] = cls._normalize_provider_worker_env(getattr(provider, "worker_env", None))
         try:
             secret_key = ApiKeyUtil.decrypt_api_key(provider.api_key_cipher_text)
         except Exception as exc:
@@ -1293,9 +1292,7 @@ class TicketAiAnalysisService:
             return int(task.audit_execution_id)
 
         context_payload = (
-            task.analysis_context
-            if isinstance(task.analysis_context, dict)
-            else cls._loads(task.analysis_context, {})
+            task.analysis_context if isinstance(task.analysis_context, dict) else cls._loads(task.analysis_context, {})
         )
         provider_code = str((context_payload or {}).get("selectedAiProviderCode") or "").strip() or None
         selected_provider = AiProviderDao.get_ai_provider_by_code(db, provider_code) if provider_code else None
@@ -1355,7 +1352,7 @@ class TicketAiAnalysisService:
         if len(text) <= cls.EXECUTION_TEXT_MAX_CHARS:
             return text
         return (
-            f"{text[:cls.EXECUTION_TEXT_MAX_CHARS]}\n...（审计文本超长已截断，原始 {len(text)} 字符，"
+            f"{text[: cls.EXECUTION_TEXT_MAX_CHARS]}\n...（审计文本超长已截断，原始 {len(text)} 字符，"
             f"完整内容见任务工作区）..."
         )
 
@@ -1379,9 +1376,7 @@ class TicketAiAnalysisService:
             if isinstance(node, str):
                 if len(node) <= cls.EXECUTION_PAYLOAD_MAX_CHARS:
                     return node
-                return (
-                    f"{node[:512]}...（审计载荷长文本已截断，原始 {len(node)} 字符）"
-                )
+                return f"{node[:512]}...（审计载荷长文本已截断，原始 {len(node)} 字符）"
             if isinstance(node, dict):
                 return {key: _walk(item, depth + 1) for key, item in node.items()}
             if isinstance(node, list):
@@ -1903,6 +1898,8 @@ class TicketAiAnalysisService:
 5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
    去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
    写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
+   注意：JSON 字符串值内部的英文双引号必须写成 \" 转义；描述中引用中文术语请使用
+   中文引号（“”），不要直接输出未转义的英文双引号，否则结果无法通过解析校验。
 6. 结果必须包含以下核心字段，输出严格按 schema 返回：
    - ticket_id
    - project_id
@@ -1958,7 +1955,9 @@ class TicketAiAnalysisService:
                 "symptom": {"type": ["array", "string"], "default": []},
                 "investigation_steps": {"type": ["array", "string"], "default": []},
                 "prevention_actions": {"type": ["array", "string"], "default": []},
-                "similar_cases": {"type": "array", "default": []},
+                # 与其他增强字段一致允许 string：模型倾向把历史相似工单写成叙述文字，
+                # 仅允许 array 曾导致 AI_WORKER_RESULT_INVALID（如 INC00001894981 分析失败）。
+                "similar_cases": {"type": ["array", "string"], "default": []},
                 "sop_suggestion": {"type": ["array", "string"], "default": []},
                 "owner_suggestion": {"type": "string", "default": ""},
                 "monitoring_suggestion": {"type": ["array", "string"], "default": []},
@@ -2216,6 +2215,19 @@ class TicketAiAnalysisService:
         normalized.setdefault("owner_suggestion", "")
         normalized.setdefault("monitoring_suggestion", [])
         normalized.setdefault("needs_human_review", True)
+        # 模型可能把增强字段写成叙述字符串而非数组（schema 已放宽为双类型），
+        # 这里统一包装为单元素数组，保证下游 RCA 结构化数据和前端拿到稳定类型。
+        flexible_fields = (
+            "symptom",
+            "investigation_steps",
+            "prevention_actions",
+            "similar_cases",
+            "sop_suggestion",
+            "monitoring_suggestion",
+        )
+        for flexible_field in flexible_fields:
+            if isinstance(normalized.get(flexible_field), str):
+                normalized[flexible_field] = [normalized[flexible_field]] if normalized[flexible_field].strip() else []
         return cls._json_safe_value(normalized)
 
     @classmethod
@@ -2319,12 +2331,10 @@ class TicketAiAnalysisService:
                 if not (
                     isinstance(item, dict)
                     and (
-                        str(item.get("referenceType") or item.get("reference_type") or "").lower()
-                        == "ai_analysis"
+                        str(item.get("referenceType") or item.get("reference_type") or "").lower() == "ai_analysis"
                         or (
                             str(item.get("role") or "").lower() == "ai"
-                            and str(item.get("messageType") or item.get("message_type") or "").lower()
-                            == "analysis"
+                            and str(item.get("messageType") or item.get("message_type") or "").lower() == "analysis"
                         )
                     )
                 )
@@ -2351,9 +2361,11 @@ class TicketAiAnalysisService:
                 )
             ]
         latest_snapshot = context.get("latestSnapshot")
-        if isinstance(latest_snapshot, dict) and str(
-            latest_snapshot.get("sourceType") or latest_snapshot.get("source_type") or ""
-        ).lower() == "ai_analysis":
+        if (
+            isinstance(latest_snapshot, dict)
+            and str(latest_snapshot.get("sourceType") or latest_snapshot.get("source_type") or "").lower()
+            == "ai_analysis"
+        ):
             context["latestSnapshot"] = None
         return context
 
@@ -2367,41 +2379,89 @@ class TicketAiAnalysisService:
         :param schema: 本次任务的输出 schema
         :return: 是否通过校验
         """
+        return not cls._collect_schema_violations(payload, schema)
+
+    @classmethod
+    def _collect_schema_violations(cls, payload: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+        """
+        收集结构化分析结果相对输出 Schema 的全部违规路径，用于失败诊断。
+        判定规则与 _validate_analysis_result_schema 完全一致，只是把违规点以
+        `字段路径: 期望类型/实际类型` 的形式返回，便于直接写入日志和 error_message。
+        :param payload: Agent 返回结果
+        :param schema: 本次任务的输出 schema
+        :param path: 当前校验的 JSON 路径
+        :return: 违规描述列表，空列表表示通过校验
+        """
         expected_type = schema.get("type")
+
+        def _type_name(value: Any) -> str:
+            if value is None:
+                return "null"
+            if isinstance(value, bool):
+                return "boolean"
+            if isinstance(value, (int, float)):
+                return "number"
+            if isinstance(value, str):
+                return "string"
+            if isinstance(value, list):
+                return "array"
+            if isinstance(value, dict):
+                return "object"
+            return type(value).__name__
+
         if isinstance(expected_type, list):
-            return any(
-                cls._validate_analysis_result_schema(payload, {**schema, "type": item})
-                for item in expected_type
-            )
+            # 联合类型：任一分支通过即通过，全部分支失败才报告违规。
+            branch_violations = [
+                cls._collect_schema_violations(payload, {**schema, "type": item}, path) for item in expected_type
+            ]
+            if all(branch_violations):
+                expected_desc = "/".join(expected_type)
+                return [f"{path}: 期望 {expected_desc}，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "object":
             if not isinstance(payload, dict):
-                return False
+                return [f"{path}: 期望 object，实际 {_type_name(payload)}"]
+            violations: list[str] = []
             required = schema.get("required") or []
             properties = schema.get("properties") or {}
-            if any(field not in payload for field in required):
-                return False
-            if schema.get("additionalProperties") is False and any(key not in properties for key in payload):
-                return False
-            return all(
-                key not in payload or cls._validate_analysis_result_schema(value, child_schema)
-                for key, child_schema in properties.items()
-                for value in [payload.get(key)]
-            )
+            violations.extend(f"{path}.{field}: required 字段缺失" for field in required if field not in payload)
+            if schema.get("additionalProperties") is False:
+                violations.extend(
+                    f"{path}.{key}: additionalProperties 不允许的额外字段" for key in payload if key not in properties
+                )
+            for key, child_schema in properties.items():
+                if key in payload:
+                    violations.extend(cls._collect_schema_violations(payload[key], child_schema, f"{path}.{key}"))
+            return violations
         if expected_type == "array":
-            return isinstance(payload, list) and all(
-                cls._validate_analysis_result_schema(item, schema.get("items") or {}) for item in payload
-            )
+            if not isinstance(payload, list):
+                return [f"{path}: 期望 array，实际 {_type_name(payload)}"]
+            violations = []
+            items_schema = schema.get("items") or {}
+            for index, item in enumerate(payload):
+                violations.extend(cls._collect_schema_violations(item, items_schema, f"{path}[{index}]"))
+            return violations
         if expected_type == "string":
-            return isinstance(payload, str)
+            if not isinstance(payload, str):
+                return [f"{path}: 期望 string，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "number":
-            return isinstance(payload, (int, float)) and not isinstance(payload, bool)
+            if not (isinstance(payload, (int, float)) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 number，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "integer":
-            return isinstance(payload, int) and not isinstance(payload, bool)
+            if not (isinstance(payload, int) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 integer，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "null":
-            return payload is None
+            if payload is not None:
+                return [f"{path}: 期望 null，实际 {_type_name(payload)}"]
+            return []
         if expected_type == "boolean":
-            return isinstance(payload, bool)
-        return True
+            if not isinstance(payload, bool):
+                return [f"{path}: 期望 boolean，实际 {_type_name(payload)}"]
+            return []
+        return []
 
     @classmethod
     def _create_rca_from_result(
@@ -2497,7 +2557,8 @@ class TicketAiAnalysisService:
                 create_time=now,
             ),
         )
-        cls._create_rca_from_result(db, ticket, result_payload, current_user)
+        rca = cls._create_rca_from_result(db, ticket, result_payload, current_user)
+        TicketSimilarityCaseService.upsert_draft(db, ticket, rca=rca, source="ai")
         TicketDao.add_snapshot(
             db,
             TicketSnapshot(
@@ -2824,9 +2885,7 @@ class TicketAiAnalysisService:
                 source_id=ticket.ticket_id,
                 source_ref=ticket.ticket_no or str(ticket.ticket_id),
                 provider_code=(
-                    selected_provider.provider_code
-                    if selected_provider
-                    else (selected_provider_code or None)
+                    selected_provider.provider_code if selected_provider else (selected_provider_code or None)
                 ),
                 model_name=requested_model_name or (selected_provider.default_model if selected_provider else None),
                 base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
@@ -2881,6 +2940,25 @@ class TicketAiAnalysisService:
         try:
             cls._mark_repo_default_if_needed(db, mapping)
             TicketAiDao.add_task(db, task)
+            # 实际创建新任务时，把用户本次分析的重点说明（追问内容）写入消息流，
+            # 供 AI 分析记录区完整展示“我的追问 → AI分析”链路。
+            # 协同消息链路已提前写入 question 消息（skip_question_message=True），此处不再重复。
+            extra_instruction_text = str(request.extra_instruction or "").strip()
+            if not request.skip_question_message and extra_instruction_text:
+                TicketDao.add_message(
+                    db,
+                    TicketMessage(
+                        ticket_id=ticket.ticket_id,
+                        role="user",
+                        message_type="question",
+                        content=extra_instruction_text,
+                        reference_type="ai_analysis",
+                        reference_id=task.task_id,
+                        created_by_id=cls._user_id(current_user),
+                        created_by_name=cls._user_name(current_user) or "system",
+                        create_time=now,
+                    ),
+                )
             TicketDao.add_event(
                 db,
                 TicketEvent(
@@ -3250,13 +3328,13 @@ class TicketAiAnalysisService:
         for heavy_key in ("promptText", "rawOutput", "analysisContext"):
             item.pop(heavy_key, None)
         result_payload = item.get("analysisResult") if isinstance(item, dict) else None
-        item["analysisSummary"] = (
-            (result_payload or {}).get("analysisSummary") if isinstance(result_payload, dict) else None
-        )
-        item["rootCause"] = (result_payload or {}).get("rootCause") if isinstance(result_payload, dict) else None
-        item["fixSuggestion"] = (
-            (result_payload or {}).get("fixSuggestion") if isinstance(result_payload, dict) else None
-        )
+        if not isinstance(result_payload, dict):
+            result_payload = {}
+        # analysis_result 入库键为 snake_case（_normalize_analysis_result 写入），
+        # 兼容驼峰键仅防止历史上存在异常写入；取值顺序 snake_case 优先。
+        item["analysisSummary"] = result_payload.get("analysis_summary") or result_payload.get("analysisSummary")
+        item["rootCause"] = result_payload.get("root_cause") or result_payload.get("rootCause")
+        item["fixSuggestion"] = result_payload.get("fix_suggestion") or result_payload.get("fixSuggestion")
         return item
 
     @classmethod
@@ -3403,9 +3481,7 @@ class TicketAiAnalysisService:
         notify_config: dict[str, Any] | None = None
         if getattr(task, "source_log_pull_record_id", None):
             # 仅读取 command_content 中的通知配置，使用轻量查询避免加载压缩正文。
-            source_log_pull_record = TicketLogPullDao.get_record_meta_by_id(
-                db, int(task.source_log_pull_record_id)
-            )
+            source_log_pull_record = TicketLogPullDao.get_record_meta_by_id(db, int(task.source_log_pull_record_id))
         if source_log_pull_record and isinstance(source_log_pull_record.command_content, dict):
             notify_config = source_log_pull_record.command_content.get(
                 "notifyConfig"
@@ -3718,12 +3794,18 @@ class TicketAiAnalysisService:
             )
             if not cls._validate_analysis_result_schema(parsed_result, schema_payload):
                 error_code = "AI_WORKER_RESULT_INVALID"
+                # 输出具体违规字段，避免只留笼统信息导致需要人工比对 result.json 定位。
+                schema_violations = cls._collect_schema_violations(parsed_result, schema_payload)
+                violation_summary = "; ".join(schema_violations[:10])
                 failure_message = "AI Agent 返回的分析结果未通过 JSON Schema 校验"
+                if violation_summary:
+                    failure_message = f"{failure_message}: {violation_summary}"
                 cls._log_task_step(
                     task_id,
                     "FAIL",
                     failure_message,
                     error_code=error_code,
+                    violations=schema_violations,
                 )
                 raise ValueError(failure_message)
 
@@ -3747,8 +3829,9 @@ class TicketAiAnalysisService:
                         return
                     raise
             cls._log_task_step(task_id, "PERSIST", "写回工单与 RCA 结果")
-            # raw_output 仅保留摘要级输出；原始 Agent 响应中可能包含大体积日志上下文，
-            # 完整内容以工作区 result.json / 分析结果结构化字段为准。
+            # raw_output 仅保留摘要级输出；原始 Agent 响应中可能包含大体积日志上下文
+            # 或 Codex --json 的 JSONL 事件流，完整内容以工作区 result.json /
+            # 分析结果结构化字段为准，Token 用量经 token_usage 字段单独入库。
             cls._persist_success_result(db, task, ticket, normalized, result_text or raw_stdout, None)
             finished_at = datetime.now()
             cls._mark_task_status(
@@ -3760,10 +3843,10 @@ class TicketAiAnalysisService:
                 analysis_result=normalized,
                 raw_output=(result_text or raw_stdout or "")[:5000],
                 command_line=f"agent:{agent_code}",
-            input_token_count=(normalized_token_usage or {}).get("input_token_count"),
-            output_token_count=(normalized_token_usage or {}).get("output_token_count"),
-            total_token_count=(normalized_token_usage or {}).get("total_token_count"),
-        )
+                input_token_count=(normalized_token_usage or {}).get("input_token_count"),
+                output_token_count=(normalized_token_usage or {}).get("output_token_count"),
+                total_token_count=(normalized_token_usage or {}).get("total_token_count"),
+            )
             cls._update_execution_record(
                 db,
                 audit_execution_id,
@@ -3776,6 +3859,7 @@ class TicketAiAnalysisService:
                 token_usage=token_usage_payload,
             )
             db.commit()
+            TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)
             cls._finalize_sync_publish_after_ai(
                 db,
                 ticket_id=ticket.ticket_id,

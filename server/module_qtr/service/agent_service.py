@@ -380,6 +380,9 @@ class AgentResponseWebUI(BaseModel):
     recording_id: int | str | None = None
     result: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
+    # Worker 执行过程消耗的 Token 用量（含多回合累加结果），
+    # 由 AI 分析 Agent 客户端回传，服务端据此入库统计。
+    token_usage: dict[str, Any] | None = None
 
 
 class HandleResponse(BaseModel):

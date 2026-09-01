@@ -518,9 +518,13 @@ class TicketAiAnalysisRequestModel(BaseModel):
     )
     log_begin_time: datetime | str | None = Field(default=None, description="AI分析日志窗口开始时间")
     log_end_time: datetime | str | None = Field(default=None, description="AI分析日志窗口结束时间")
-    log_point_time: datetime | str | None = Field(default=None, description="AI分析日志时间点")
+    log_point_time: datetime | str | None = Field(default=None, description="AI分析时间点")
     range_before_minutes: int | None = Field(default=None, description="AI分析时间点前回溯分钟数")
     range_after_minutes: int | None = Field(default=None, description="AI分析时间点后延伸分钟数")
+    skip_question_message: bool = Field(
+        default=False,
+        description="是否跳过写入用户追问消息；协同消息链路已提前写入 question 消息时置为 True，避免重复记录",
+    )
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -1028,6 +1032,15 @@ class TicketEmbeddingRebuildRequestModel(BaseModel):
         self.provider = str(self.provider or "").strip() or None
         self.force_rebuild = bool(self.force_rebuild)
         return self
+
+
+class TicketSimilarityCaseStatusModel(BaseModel):
+    """相似处理案例状态变更请求。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    status: str = Field(description="案例状态：draft/verified/rejected")
+    remark: str | None = Field(default="", max_length=2000, description="状态变更说明")
 
 
 class TicketSimilarityConfigModel(BaseModel):

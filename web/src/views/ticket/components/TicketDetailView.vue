@@ -6,10 +6,21 @@
         <div class="detail-meta">
           <span>{{ detail.projectName || detail.merchantName || '未填写项目' }}</span>
           <span>{{ detail.moduleName || '未填写模块' }}</span>
-          <span>{{ detail.status || '未填写状态' }}</span>
+          <el-tag :type="getStatusTagType(detail.status)">{{ formatTicketStatus(detail.status) }}</el-tag>
         </div>
       </div>
-      <el-button icon="Refresh" @click="loadDetail">刷新</el-button>
+      <div class="detail-actions">
+        <el-button
+          v-hasPermi="['ticket:issue:bind']"
+          type="primary"
+          plain
+          icon="Connection"
+          @click="openIssueBindDialog"
+        >
+          {{ detail.issueId ? '更换问题实例' : '关联问题实例' }}
+        </el-button>
+        <el-button icon="Refresh" @click="loadDetail">刷新</el-button>
+      </div>
     </div>
 
     <el-descriptions :column="3" border>
@@ -87,34 +98,65 @@
           class="mb12"
           :title="detail.similarEmbeddingMessage || '当前相似工单向量不可用'"
         />
-        <el-empty v-if="!similarTickets.length" description="暂无相似工单" />
-        <div v-for="item in similarTickets" :key="item.ticketId" class="similar-item">
-          <div>
-            <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
-            <div class="detail-meta">
-              <span>相似度 {{ formatPercent(item.score) }}</span>
-              <span>{{ item.moduleName || '-' }}</span>
-              <span>{{ item.status || '-' }}</span>
+        <section class="similar-group">
+          <h4>工单内容相似</h4>
+          <el-empty v-if="!symptomTickets.length" description="暂无内容相似工单" />
+          <div v-for="item in symptomTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
+            <div>
+              <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
+              <div class="detail-meta">
+                <span>相似度 {{ formatPercent(item.score) }}</span>
+                <span>{{ item.moduleName || '-' }}</span>
+                <span>{{ item.status || '-' }}</span>
+              </div>
+              <div v-if="item.matchReasons?.length || item.conflicts?.length" class="detail-meta">
+                <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
+                <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
+              </div>
+            </div>
+            <div class="similar-actions">
+              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+              <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
+                飞书详情
+              </el-button>
             </div>
           </div>
-          <div class="similar-actions">
-            <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
-            <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
-              飞书详情
-            </el-button>
+        </section>
+        <section class="similar-group similar-group--case">
+          <h4>处理案例相似</h4>
+          <el-empty v-if="!caseTickets.length" description="暂无处理案例" />
+          <div v-for="item in caseTickets" :key="`case-${item.ticketId}`" class="similar-item">
+            <div>
+              <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
+              <div class="detail-meta">
+                <span>相似度 {{ formatPercent(item.score) }}</span>
+                <span>{{ formatCaseStatus(item.caseStatus) }}</span>
+              </div>
+              <div class="detail-meta">根因：{{ item.rootCause || '-' }}</div>
+            </div>
+            <div class="similar-actions">
+              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+            </div>
           </div>
-        </div>
+        </section>
+      </el-tab-pane>
+
+      <el-tab-pane label="AI分析" name="collab">
+        <TicketDetailCollabTab
+          :ticket-id="props.ticketId"
+          :active="activeTab === 'collab'"
+          :detail="detail"
+          :show-ai-history="false"
+          @changed="loadDetail"
+        />
       </el-tab-pane>
 
       <el-tab-pane label="评论" name="comments">
-        <el-empty v-if="!commentList.length" description="暂无评论" />
-        <div v-for="item in commentList" :key="item.commentId || item.id" class="comment-item">
-          <div class="comment-meta">
-            <strong>{{ item.createdByName || item.operatorName || item.createBy || '-' }}</strong>
-            <span>{{ formatDateTime(item.createTime) }}</span>
-          </div>
-          <div class="pre-line">{{ item.content || '-' }}</div>
-        </div>
+        <TicketDetailCommentsTab
+          :ticket-id="props.ticketId"
+          :active="activeTab === 'comments'"
+          @changed="loadDetail"
+        />
       </el-tab-pane>
 
       <el-tab-pane label="历史" name="history">
@@ -131,13 +173,95 @@
         </el-timeline>
       </el-tab-pane>
     </el-tabs>
+
+    <el-dialog
+      v-model="issueBindOpen"
+      :title="detail.issueId ? '更换问题实例' : '关联问题实例'"
+      width="720px"
+      append-to-body
+      destroy-on-close
+      @closed="resetIssueBindForm"
+    >
+      <el-alert
+        v-if="detail.issueId"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="mb12"
+        :title="`当前已归属问题：${detail.issueNo || detail.issueId} ${detail.issueTitle || ''}`"
+      />
+      <el-form :model="issueBindForm" label-width="110px">
+        <el-form-item label="目标问题实例" required>
+          <el-select
+            v-model="issueBindForm.issueId"
+            filterable
+            remote
+            reserve-keyword
+            clearable
+            placeholder="输入问题编号或标题搜索"
+            :remote-method="searchIssueBindOptions"
+            :loading="issueBindOptionLoading"
+            style="width: 100%"
+            @focus="searchIssueBindOptions('')"
+          >
+            <el-option
+              v-for="item in issueBindOptions"
+              :key="item.issueId"
+              :label="formatIssueBindOption(item)"
+              :value="item.issueId"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="归因类型">
+          <el-select v-model="issueBindForm.relationType" style="width: 100%">
+            <el-option label="手工归因" value="manual" />
+            <el-option label="主问题" value="primary" />
+            <el-option label="重复工单" value="duplicate" />
+            <el-option label="相关工单" value="related" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="已确认">
+          <el-switch v-model="issueBindForm.confirmed" />
+        </el-form-item>
+        <el-form-item label="归因说明">
+          <el-input
+            v-model="issueBindForm.remark"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="可选，说明本次归因依据"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="issueBindSubmitting" @click="issueBindOpen = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="issueBindSubmitting"
+          :disabled="issueBindSubmitting"
+          @click="submitIssueBind"
+        >
+          确认关联
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-  import { computed, ref, watch } from 'vue';
+  import { computed, getCurrentInstance, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
-  import { getTicket, getTicketComments, getTicketTimeline } from '@/api/ticket/ticket';
+  import {
+    bindTicketIssue,
+    getTicket,
+    getTicketTimeline,
+    listTicketIssues,
+    updateTicketSimilarityCaseStatus,
+  } from '@/api/ticket/ticket';
+  import TicketDetailCollabTab from './detail-tabs/TicketDetailCollabTab.vue';
+  import TicketDetailCommentsTab from './detail-tabs/TicketDetailCommentsTab.vue';
+  import { useWorkflow } from '../hooks/useWorkflow';
 
   const props = defineProps({
     ticketId: {
@@ -146,16 +270,149 @@
     },
   });
 
+  const { proxy } = getCurrentInstance();
   const router = useRouter();
+  // 工单状态选项：合并自定义工作流状态节点，用于把状态 code 转成状态名称展示
+  const currentTicketStatus = ref('');
+  const { ticketStatusOptions, getStatusTagType, loadWorkflowConfig } = useWorkflow(currentTicketStatus);
   const loading = ref(false);
   const activeTab = ref('overview');
   const descriptionExpanded = ref(true);
   const translationExpanded = ref(true);
   const detail = ref({});
-  const commentList = ref([]);
-  const commentLoaded = ref(false);
   const timeline = ref({});
   const timelineLoaded = ref(false);
+  // 问题实例关联弹窗状态
+  const issueBindOpen = ref(false);
+  const issueBindSubmitting = ref(false);
+  const issueBindOptionLoading = ref(false);
+  const issueBindOptions = ref([]);
+  const issueBindForm = ref(createDefaultIssueBindForm());
+
+  /**
+   * 构建问题实例关联表单默认值。
+   * 已有问题归属时，预填当前归属的问题实例和归因类型，方便直接查看或换绑。
+   */
+  function createDefaultIssueBindForm() {
+    return {
+      issueId: undefined,
+      relationType: 'manual',
+      confirmed: true,
+      remark: '',
+    };
+  }
+
+  /**
+   * 拼接问题实例下拉选项的展示文案：编号 + 标题 + 状态。
+   */
+  function formatIssueBindOption(item) {
+    return [item.issueNo || item.issueId, item.title, item.status ? `【${item.status}】` : '']
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  /**
+   * 打开关联问题实例弹窗，并预置当前归属问题为第一个选项。
+   */
+  function openIssueBindDialog() {
+    if (!detail.value.ticketId) {
+      proxy.$modal.msgWarning('请先等待工单详情加载完成');
+      return;
+    }
+    issueBindForm.value = {
+      ...createDefaultIssueBindForm(),
+      relationType: detail.value.issueRelationType || 'manual',
+      confirmed: detail.value.issueConfirmed !== false,
+    };
+    // 当前已归属的问题始终保留在选项中，避免搜索结果中不含当前问题时丢失显示
+    issueBindOptions.value = detail.value.issueId
+      ? [{
+          issueId: detail.value.issueId,
+          issueNo: detail.value.issueNo,
+          title: detail.value.issueTitle,
+          status: detail.value.issueStatus,
+        }]
+      : [];
+    issueBindOpen.value = true;
+  }
+
+  /**
+   * 远程搜索问题实例选项，按关键字匹配编号、标题和摘要。
+   */
+  function searchIssueBindOptions(keyword) {
+    const text = String(keyword || '').trim();
+    if (!text) {
+      return Promise.resolve(issueBindOptions.value);
+    }
+    issueBindOptionLoading.value = true;
+    return listTicketIssues({
+      keyword: text,
+      projectId: detail.value.projectId || undefined,
+      moduleId: detail.value.moduleId || undefined,
+      pageNum: 1,
+      pageSize: 20,
+    })
+      .then((response) => {
+        const rows = response.rows || response.data || [];
+        // 搜索结果中保留当前已归属的问题实例，保证换绑场景下选项不丢失
+        const current = issueBindOptions.value.find(
+          (item) => String(item.issueId) === String(detail.value.issueId)
+        );
+        issueBindOptions.value =
+          current && !rows.some((item) => String(item.issueId) === String(current.issueId))
+            ? [current, ...rows]
+            : rows;
+        return issueBindOptions.value;
+      })
+      .finally(() => {
+        issueBindOptionLoading.value = false;
+      });
+  }
+
+  /**
+   * 重置关联问题实例弹窗状态。
+   */
+  function resetIssueBindForm() {
+    issueBindForm.value = createDefaultIssueBindForm();
+    issueBindOptions.value = [];
+    issueBindSubmitting.value = false;
+    issueBindOptionLoading.value = false;
+  }
+
+  /**
+   * 提交工单与问题实例的关联。
+   * 已有问题归属且选择了不同问题时需要二次确认；同一问题重复提交幂等成功。
+   */
+  function submitIssueBind() {
+    const targetIssueId = issueBindForm.value.issueId;
+    if (!targetIssueId) {
+      proxy.$modal.msgWarning('请选择目标问题实例');
+      return;
+    }
+    const currentIssueId = detail.value.issueId;
+    const execute = () => {
+      issueBindSubmitting.value = true;
+      return bindTicketIssue(detail.value.ticketId, {
+        issueId: targetIssueId,
+        relationType: issueBindForm.value.relationType || 'manual',
+        confirmed: issueBindForm.value.confirmed !== false,
+        remark: String(issueBindForm.value.remark || '').trim() || undefined,
+      })
+        .then(() => {
+          proxy.$modal.msgSuccess(currentIssueId ? '问题实例已更换' : '问题实例关联成功');
+          issueBindOpen.value = false;
+          loadDetail();
+        })
+        .finally(() => {
+          issueBindSubmitting.value = false;
+        });
+    };
+    if (currentIssueId && String(currentIssueId) !== String(targetIssueId)) {
+      proxy.$modal.confirm('当前工单已有问题归属，是否确认更换为所选问题？').then(execute);
+      return;
+    }
+    execute();
+  }
 
   const detailOriginalDescription = computed(() => {
     const extraData = detail.value.extraData || {};
@@ -195,6 +452,16 @@
       ''
   );
   const similarTickets = computed(() => (Array.isArray(detail.value.similarTickets) ? detail.value.similarTickets : []));
+  const symptomTickets = computed(() =>
+    Array.isArray(detail.value.symptomTickets)
+      ? detail.value.symptomTickets
+      : similarTickets.value.filter((item) => item.matchType !== 'case')
+  );
+  const caseTickets = computed(() =>
+    Array.isArray(detail.value.caseTickets)
+      ? detail.value.caseTickets
+      : similarTickets.value.filter((item) => item.matchType === 'case')
+  );
   const timelineRows = computed(() => {
     const source = timeline.value || {};
     const rows = [
@@ -214,6 +481,15 @@
   });
 
   /**
+   * 将工单状态 code 转成状态名称。
+   * 优先匹配自定义工作流状态节点名称，未匹配到时回退默认枚举，仍无结果则原样展示。
+   */
+  function formatTicketStatus(value) {
+    const statusValue = String(value || '').trim();
+    return ticketStatusOptions.value.find((item) => item.value === statusValue)?.label || statusValue || '未填写状态';
+  }
+
+  /**
    * 加载纯净详情页所需的工单主详情。
    */
   function loadDetail() {
@@ -225,23 +501,12 @@
     return getTicket(currentTicketId)
       .then((response) => {
         detail.value = response.data || {};
+        // 同步当前状态供工作流转规则计算使用
+        currentTicketStatus.value = detail.value.status || '';
       })
       .finally(() => {
         loading.value = false;
       });
-  }
-
-  /**
-   * 按需加载评论，避免首次打开详情页时请求无关数据。
-   */
-  function loadComments() {
-    if (commentLoaded.value || !props.ticketId) {
-      return;
-    }
-    getTicketComments(props.ticketId).then((response) => {
-      commentList.value = response.data || [];
-      commentLoaded.value = true;
-    });
   }
 
   /**
@@ -261,9 +526,6 @@
    * 切换详情页标签时补充加载当前标签需要的数据。
    */
   function handleTabChange(tabName) {
-    if (tabName === 'comments') {
-      loadComments();
-    }
     if (tabName === 'history') {
       loadTimeline();
     }
@@ -279,9 +541,28 @@
     return '未填写';
   }
 
+  function confirmSimilarCase(item) {
+    const ticketId = item?.ticketId || item?.ticket_id;
+    if (!ticketId) return;
+    proxy.$modal.confirm('确认将该工单沉淀为可复用处理案例吗？').then(() => {
+      return updateTicketSimilarityCaseStatus(ticketId, {
+        status: 'verified',
+        remark: '详情页人工确认案例可复用',
+      });
+    }).then(() => {
+      proxy.$modal.msgSuccess('案例已确认');
+      loadDetail();
+    }).catch(() => {});
+  }
+
   function formatPercent(value) {
     const numeric = Number(value || 0);
     return `${(numeric * 100).toFixed(1)}%`;
+  }
+
+  function formatCaseStatus(value) {
+    const labels = { draft: '案例草稿', verified: '已验证案例', rejected: '已驳回' };
+    return labels[String(value || '')] || String(value || '');
   }
 
   function formatDateTime(value) {
@@ -321,14 +602,15 @@
       activeTab.value = 'overview';
       descriptionExpanded.value = true;
       translationExpanded.value = true;
-      commentList.value = [];
-      commentLoaded.value = false;
       timeline.value = {};
       timelineLoaded.value = false;
       loadDetail();
     },
     { immediate: true }
   );
+
+  // 加载工作流状态配置，保证顶部状态显示状态名称而不是状态 code
+  loadWorkflowConfig();
 </script>
 
 <style scoped>
@@ -342,6 +624,14 @@
     justify-content: space-between;
     gap: 16px;
     margin-bottom: 16px;
+  }
+
+  .detail-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0;
+    white-space: nowrap;
   }
 
   .detail-title {

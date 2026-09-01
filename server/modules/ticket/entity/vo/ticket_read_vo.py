@@ -71,6 +71,14 @@ class TicketSimilarItemModel(BaseModel):
     root_cause: str | None = None
     solution: str | None = None
     score: float = 0.0
+    semantic_score: float = 0.0
+    keyword_score: float = 0.0
+    exact_signal_score: float = 0.0
+    context_score: float = 0.0
+    match_type: str = "symptom"
+    case_status: str = "none"
+    match_reasons: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
 
 
 class TicketSimilarResponseModel(BaseModel):
@@ -81,6 +89,8 @@ class TicketSimilarResponseModel(BaseModel):
     status: str
     message: str = ""
     items: list[TicketSimilarItemModel] = Field(default_factory=list)
+    symptom_tickets: list[TicketSimilarItemModel] = Field(default_factory=list)
+    case_tickets: list[TicketSimilarItemModel] = Field(default_factory=list)
 
 
 class TicketMessagePageItemModel(BaseModel):

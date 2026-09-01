@@ -285,7 +285,11 @@
             <el-table :data="detail.tickets || []" row-key="ticketId" empty-text="暂无绑定工单">
               <el-table-column label="工单编号" prop="ticketNo" width="180" show-overflow-tooltip />
               <el-table-column label="标题" prop="title" min-width="220" show-overflow-tooltip />
-              <el-table-column label="状态" prop="status" width="120" />
+              <el-table-column label="状态" prop="status" width="120">
+                <template #default="scope">
+                  <el-tag :type="getTicketStatusTagType(scope.row.status)">{{ formatTicketStatus(scope.row.status) }}</el-tag>
+                </template>
+              </el-table-column>
               <el-table-column label="发生版本" prop="affectedVersion" width="130" show-overflow-tooltip />
               <el-table-column label="计划修复版本" prop="plannedFixVersion" width="130" show-overflow-tooltip />
               <el-table-column label="实际修复版本" prop="fixedVersion" width="130" show-overflow-tooltip />
@@ -534,6 +538,7 @@ import {
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
 import { saveAs } from 'file-saver'
 import { severityOptions } from '../constants'
+import { useWorkflow } from '../hooks/useWorkflow'
 import { useRoute, useRouter } from 'vue-router'
 
 const { proxy } = getCurrentInstance()
@@ -595,6 +600,10 @@ const defaultIssueColumnKeys = issueColumnOptions.map((item) => item.key)
 const requiredIssueColumnKeys = issueColumnOptions.filter((item) => item.required).map((item) => item.key)
 
 const detail = ref({})
+
+// 工单状态选项：合并自定义工作流状态节点，用于把绑定工单的状态 code 转成状态名称
+// useWorkflow 的流转规则依赖“当前工单状态”，本页面不使用流转，仅取状态选项，传空 ref 即可
+const { ticketStatusOptions, loadWorkflowConfig } = useWorkflow(ref(''))
 
 const issueStatusOptions = [
   { label: '未开始', value: 'open', type: 'info' },
@@ -740,6 +749,23 @@ function getIssueStatusTagType(value) {
 function formatIssueStatus(value) {
   const item = issueStatusOptions.find((row) => row.value === String(value || '').trim())
   return item?.label || value || '-'
+}
+
+/**
+ * 将绑定工单的状态 code 转成状态名称。
+ * 优先匹配自定义工作流状态节点名称，未匹配到时回退默认枚举，仍无结果则原样展示。
+ */
+function formatTicketStatus(value) {
+  const statusValue = String(value || '').trim()
+  return ticketStatusOptions.value.find((row) => row.value === statusValue)?.label || statusValue || '-'
+}
+
+/**
+ * 获取绑定工单状态标签的颜色类型，与工单列表页保持一致。
+ */
+function getTicketStatusTagType(value) {
+  const statusValue = String(value || '').trim()
+  return ticketStatusOptions.value.find((row) => row.value === statusValue)?.type || 'info'
 }
 
 function formatRelationType(value) {
@@ -1219,6 +1245,8 @@ watch(
 )
 
 onMounted(() => {
+  // 加载工作流状态配置，保证绑定工单列表能显示状态名称而不是状态 code
+  loadWorkflowConfig()
   loadBaseOptions()
   getList()
 })

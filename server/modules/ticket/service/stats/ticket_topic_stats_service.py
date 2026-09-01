@@ -262,6 +262,9 @@ class TicketTopicStatsService:
             f"end_date={resolved_end_date.isoformat()} source_count={len(normalized_sources)} "
             f"send={bool(send)} keyword={keyword or '-'} category_mode={resolved_category_mode}"
         )
+        # 批次级 Token 用量累计与调用统计，供批次完成后写入汇总审计记录。
+        batch_token_usage: dict[str, Any] = {}
+        batch_token_stats: dict[str, int] = {"ai_call_count": 0, "ai_success_count": 0, "ai_failed_count": 0}
         records = cls.collect_topic_records(
             start_date=resolved_start_date,
             end_date=resolved_end_date,
@@ -280,11 +283,26 @@ class TicketTopicStatsService:
             closed_keywords=closed_keywords,
             conclusion_keywords=conclusion_keywords,
             page_size=page_size,
+            batch_token_usage=batch_token_usage,
+            batch_stats=batch_token_stats,
         )
         result = cls.build_result(
             start_date=resolved_start_date,
             end_date=resolved_end_date,
             records=records,
+        )
+        # AI 分类批次完成后写入汇总审计记录；关键词模式或全部调用失败时用量为空，
+        # 仍会落一条审计记录以保留批次执行痕迹（skipped 状态）。
+        cls._write_batch_execution_record(
+            db,
+            start_date=resolved_start_date,
+            end_date=resolved_end_date,
+            category_mode=resolved_category_mode,
+            ai_provider_code=resolved_ai_provider_code,
+            ai_prompt_code=resolved_ai_prompt_code,
+            batch_token_usage=batch_token_usage,
+            batch_stats=batch_token_stats,
+            summary=result["summary"],
         )
         if send:
             card = cls.build_feishu_card(result=result, records=records, keyword=keyword)
@@ -453,21 +471,40 @@ class TicketTopicStatsService:
         :param temperature: 采样温度。
         :return: 模型返回文本。
         """
+        content, _token_usage = cls._call_model_api_with_usage(
+            provider=provider, system_prompt=system_prompt, user_prompt=user_prompt, temperature=temperature
+        )
+        return content
+
+    @classmethod
+    def _call_model_api_with_usage(
+        cls, *, provider, system_prompt: str, user_prompt: str, temperature: float = 0.2
+    ) -> tuple[str, dict[str, Any] | None]:
+        """
+        调用具备工单轻量AI能力的Provider文本生成接口，并透出 Token 用量。
+
+        :param provider: Provider 数据库对象。
+        :param system_prompt: 系统提示词。
+        :param user_prompt: 用户提示词。
+        :param temperature: 采样温度。
+        :return: (模型返回文本, Token用量字典)，上游未返回用量时为 None。
+        """
         AiProviderCapabilityService.require_provider_eligibility(
             provider,
             usage="ticket_light_text",
             executor="direct_http",
         )
-        content = AiProviderProtocolService.generate_text(
+        generation_result = AiProviderProtocolService.generate_text_with_usage(
             provider=provider,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
             timeout_sec=60,
         )
+        content = generation_result.text
         if not str(content or "").strip():
             raise ValueError("AI接口未返回可解析的内容")
-        return str(content).strip()
+        return str(content).strip(), generation_result.token_usage
 
     @classmethod
     def _build_ai_category_system_prompt(cls, prompt_content: str | None) -> str:
@@ -524,6 +561,7 @@ class TicketTopicStatsService:
         provider_code: str | None = None,
         prompt_code: str | None = None,
         prompt_content: str | None = None,
+        token_usage_out: dict[str, Any] | None = None,
     ) -> tuple[str, str, str]:
         """
         使用 AI 解析专题分类和状态。
@@ -537,6 +575,8 @@ class TicketTopicStatsService:
         :param provider_code: Provider 编码。
         :param prompt_code: 提示词编码。
         :param prompt_content: 提示词正文。
+        :param token_usage_out: 可选输出容器；调用方传入可变 dict，
+            AI 调用成功后会把本次 Token 用量写入该 dict，用于外部审计统计。
         :return: (category, status, topic)。
         """
         resolved_provider_code = str(provider_code or "").strip()
@@ -555,7 +595,11 @@ class TicketTopicStatsService:
             priority=priority,
             topic=topic,
         )
-        response_text = cls._call_model_api(provider=provider, system_prompt=system_prompt, user_prompt=user_prompt)
+        response_text, token_usage = cls._call_model_api_with_usage(
+            provider=provider, system_prompt=system_prompt, user_prompt=user_prompt
+        )
+        if isinstance(token_usage_out, dict) and token_usage:
+            token_usage_out.update(token_usage)
         try:
             response_data = json.loads(response_text)
         except Exception:
@@ -1093,6 +1137,157 @@ class TicketTopicStatsService:
         return messages
 
     @classmethod
+    def _accumulate_token_usage(cls, target: dict[str, Any] | None, usage: dict[str, Any]) -> None:
+        """
+        把单次 AI 调用的 Token 用量累加进批次容器。
+
+        :param target: 批次累计容器（可变 dict），为 None 时忽略。
+        :param usage: 单次调用的 Token 用量（prompt_tokens/completion_tokens/total_tokens 或
+            input_tokens/output_tokens）。
+        :return: 无
+        """
+        if not isinstance(target, dict) or not isinstance(usage, dict):
+            return
+        prompt_keys = ("prompt_tokens", "input_tokens")
+        completion_keys = ("completion_tokens", "output_tokens")
+        total_keys = ("total_tokens",)
+        for group in (prompt_keys, completion_keys, total_keys):
+            for key in group:
+                value = usage.get(key)
+                if value is None:
+                    continue
+                try:
+                    target[key] = int(target.get(key) or 0) + int(value)
+                except (TypeError, ValueError):
+                    continue
+                break
+
+    @classmethod
+    def _track_ai_call_start(cls, batch_stats: dict[str, int] | None) -> None:
+        """
+        记录一次 AI 分类调用开始（计数 +1）。
+        :param batch_stats: 批次统计容器（可变 dict），为 None 时忽略。
+        :return: 无
+        """
+        if isinstance(batch_stats, dict):
+            batch_stats["ai_call_count"] = int(batch_stats.get("ai_call_count") or 0) + 1
+
+    @classmethod
+    def _track_ai_call_end(cls, batch_stats: dict[str, int] | None, *, success: bool) -> None:
+        """
+        记录一次 AI 分类调用结束，按成败分别计数。
+        :param batch_stats: 批次统计容器（可变 dict），为 None 时忽略。
+        :param success: 本次调用是否成功。
+        :return: 无
+        """
+        if not isinstance(batch_stats, dict):
+            return
+        key = "ai_success_count" if success else "ai_failed_count"
+        batch_stats[key] = int(batch_stats.get(key) or 0) + 1
+
+    @classmethod
+    def _write_batch_execution_record(
+        cls,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+        category_mode: str,
+        ai_provider_code: str | None,
+        ai_prompt_code: str | None,
+        batch_token_usage: dict[str, Any],
+        batch_stats: dict[str, int],
+        summary: dict[str, Any],
+    ) -> None:
+        """
+        将本次批次（一次 run_topic_stats 执行）的 AI 分类汇总信息写入审计执行记录。
+
+        仅在批次内真实发生了 AI 分类调用时落库（task_type=ticket_topic_classify）：
+        token_usage 为批次内所有调用用量的累加值，全部失败落 failed、部分或全部
+        成功落 success。关键词模式等零调用场景不落库——审计表的语义是 AI 调用审计，
+        没有调用就没有审计数据，批次执行痕迹由任务日志承载。写入失败只告警，
+        不影响统计主流程。
+
+        :param db: 数据库会话（预留，当前模型名称改由审计会话自行读取，不依赖调用方会话状态）。
+        :param start_date: 统计起始日期。
+        :param end_date: 统计结束日期。
+        :param category_mode: 分类模式（keywords/ai）。
+        :param ai_provider_code: AI 分类 Provider 编码。
+        :param ai_prompt_code: AI 分类提示词编码。
+        :param batch_token_usage: 批次内累加的 Token 用量。
+        :param batch_stats: 批次内调用统计（ai_call_count 等）。
+        :param summary: 批次统计汇总（status/category/total）。
+        :return: 无
+        """
+        audit_execution_id = None
+        try:
+            from config.database import SessionLocal
+            from module_admin.service.ai_task_execution_service import AiTaskExecutionService
+
+            ai_call_count = int(batch_stats.get("ai_call_count") or 0)
+            ai_success_count = int(batch_stats.get("ai_success_count") or 0)
+            ai_failed_count = int(batch_stats.get("ai_failed_count") or 0)
+            if ai_call_count <= 0:
+                # 零调用（关键词模式或日期范围内无命中消息）：不产生 AI 调用就不写审计。
+                logger.info(
+                    f"专题工单AI分类批次零调用，跳过审计落库 | category_mode={category_mode} "
+                    f"date_range={start_date.isoformat()}~{end_date.isoformat()}"
+                )
+                return
+            if ai_success_count <= 0:
+                status = "failed"
+                error_message = "批次内所有AI分类调用均失败"
+            else:
+                status = "success"
+                error_message = None
+
+            # 读取实际使用的模型名称（与 Provider 配置一致），仅用于审计展示；
+            # 使用独立审计会话，避免依赖调用方 db 的生命周期与事务状态。
+            model_name = None
+            if ai_provider_code:
+                with SessionLocal() as provider_db:
+                    provider = AiProviderDao.get_ai_provider_by_code(provider_db, ai_provider_code)
+                    model_name = str(getattr(provider, "default_model", "") or "").strip() or None
+
+            execution_data = {
+                "task_type": "ticket_topic_classify",
+                "task_name": "专题工单AI分类批次",
+                "source_type": "feishu_topic",
+                "source_ref": f"{start_date.isoformat()}~{end_date.isoformat()}",
+                "provider_code": ai_provider_code or None,
+                "prompt_code": ai_prompt_code or None,
+                "model_name": model_name,
+                "status": status,
+                "request_payload": {
+                    "categoryMode": category_mode,
+                    "dateRange": {"start": start_date.isoformat(), "end": end_date.isoformat()},
+                    "aiCallCount": ai_call_count,
+                },
+                "response_payload": {
+                    "aiCallCount": ai_call_count,
+                    "aiSuccessCount": ai_success_count,
+                    "aiFailedCount": ai_failed_count,
+                    "summary": summary,
+                },
+                "token_usage": batch_token_usage or None,
+                "error_message": error_message,
+                "created_by_name": "system",
+            }
+            with SessionLocal() as audit_db:
+                result = AiTaskExecutionService.add_ai_task_execution_services(audit_db, execution_data)
+                if not result.is_success:
+                    logger.warning(f"专题工单AI分类批次审计写入失败: {result.message}")
+                    return
+                audit_execution_id = getattr(result.result, "execution_id", None)
+            logger.info(
+                f"专题工单AI分类批次审计已写入 | execution_id={audit_execution_id} status={status} "
+                f"ai_call_count={ai_call_count} ai_success_count={ai_success_count} "
+                f"ai_failed_count={ai_failed_count} token_usage={batch_token_usage or '-'}"
+            )
+        except Exception as exc:
+            logger.warning(f"专题工单AI分类批次审计写入异常: {exc}")
+
+    @classmethod
     def collect_topic_records(
         cls,
         *,
@@ -1113,6 +1308,8 @@ class TicketTopicStatsService:
         closed_keywords: list[str] | str | None = None,
         conclusion_keywords: list[str] | str | None = None,
         page_size: int = 50,
+        batch_token_usage: dict[str, Any] | None = None,
+        batch_stats: dict[str, int] | None = None,
     ) -> list[TopicTicketRecord]:
         """
         采集并过滤专题工单记录。
@@ -1133,12 +1330,15 @@ class TicketTopicStatsService:
         :param closed_keywords: “有结论”中的关闭类补充关键词。
         :param conclusion_keywords: “有结论”中的结论类补充关键词。
         :param page_size: 单页拉取消息数量。
+        :param batch_token_usage: 可选累计容器；调用方传入可变 dict，
+            AI 分类逐条调用的 Token 用量会在此累加，用于批次级审计统计。
+        :param batch_stats: 可选统计容器（可变 dict）；AI 分类调用次数在此累计，
+            键为 ai_call_count / ai_success_count / ai_failed_count。
         :return: 已去重、分类和状态判断的工单记录。
         """
         records: list[TopicTicketRecord] = []
         seen_ticket_keys: set[str] = set()
         tenant_access_token = cls.get_tenant_access_token(app_id, app_secret)
-
         for source in sources:
             logger.info(
                 f"开始处理专题工单来源 | group_name={source.name} chat_id={source.chat_id} priority={source.priority}"
@@ -1181,17 +1381,27 @@ class TicketTopicStatsService:
 
                 topic = cls.extract_topic(content)
                 if category_mode == cls.TASK_MODE_AI:
-                    category, status, topic = cls.classify_category_with_ai(
-                        db,
-                        content=content,
-                        ticket_key=ticket_key,
-                        group_name=source.name,
-                        priority=source.priority,
-                        topic=topic,
-                        provider_code=ai_provider_code,
-                        prompt_code=ai_prompt_code,
-                        prompt_content=ai_prompt_content,
-                    )
+                    ai_call_token_usage: dict[str, Any] = {}
+                    cls._track_ai_call_start(batch_stats)
+                    try:
+                        category, status, topic = cls.classify_category_with_ai(
+                            db,
+                            content=content,
+                            ticket_key=ticket_key,
+                            group_name=source.name,
+                            priority=source.priority,
+                            topic=topic,
+                            provider_code=ai_provider_code,
+                            prompt_code=ai_prompt_code,
+                            prompt_content=ai_prompt_content,
+                            token_usage_out=ai_call_token_usage,
+                        )
+                    except Exception:
+                        cls._track_ai_call_end(batch_stats, success=False)
+                        raise
+                    cls._track_ai_call_end(batch_stats, success=True)
+                    if ai_call_token_usage:
+                        cls._accumulate_token_usage(batch_token_usage, ai_call_token_usage)
                 else:
                     category = cls.get_category_bucket(
                         topic,

@@ -138,18 +138,23 @@ async def get_ticket_log_pull_storage_config(request: Request, query_db: Session
 async def get_ticket_log_pull_vendor_store_options(
     request: Request,
     vender_no: str | None = None,
+    environment: str | None = None,
     query_db: Session = Depends(get_db),
 ):
     """
     获取日志拉取页面商家/门店联动选项接口。
     :param request: 请求对象
     :param vender_no: 可选商户编号，传入后只返回该商户对应的门店列表
+    :param environment: 可选环境分组 key，传入后门店只返回该环境的配置
     :param query_db: 数据库会话
     :return: 脱敏后的商家与门店选项
     """
     try:
         result = await run_in_threadpool(
-            TicketLogPullService.get_vendor_store_options_services, query_db, vender_no=vender_no
+            TicketLogPullService.get_vendor_store_options_services,
+            query_db,
+            vender_no=vender_no,
+            environment=environment,
         )
         return ResponseUtil.success(data=result.model_dump(by_alias=True))
     except Exception as e:
@@ -686,6 +691,7 @@ async def import_ticket_log_pull_store_configs(
     request: Request,
     file: UploadFile = File(...),
     import_mode: str = Form(default="incremental"),
+    environment: str = Form(default=""),
     query_db: Session = Depends(get_db),
     current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
@@ -694,6 +700,7 @@ async def import_ticket_log_pull_store_configs(
     :param request: 请求对象
     :param file: 门店配置 Excel 文件
     :param import_mode: 导入方式，incremental 为增量，overwrite 为覆盖
+    :param environment: 环境分组 key，本次导入的门店归属该环境
     :param query_db: 数据库会话
     :param current_user: 当前登录用户
     :return: 导入汇总结果
@@ -707,6 +714,7 @@ async def import_ticket_log_pull_store_configs(
             file.file.read(),
             import_mode,
             current_user,
+            environment,
         )
         return (
             ResponseUtil.success(data=result.result, msg=result.message)

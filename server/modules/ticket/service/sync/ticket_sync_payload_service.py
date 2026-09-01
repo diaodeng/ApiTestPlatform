@@ -153,6 +153,64 @@ class TicketSyncPayloadService:
         return ""
 
     @classmethod
+    def refresh_log_pull_hints(
+        cls,
+        *,
+        extra_data: dict[str, Any],
+        sync_object: TicketExternalSyncUpsertModel,
+        detected: dict[str, Any] | None,
+        incoming_project_value: bool,
+    ) -> dict[str, Any]:
+        """
+        基于当前识别结果和同步对象刷新日志拉取提示快照。
+
+        该快照（extra_data.log_pull_hints）是工单详情页手动拉日志弹窗的回填数据源之一，
+        也可供自动化链路复用。主入库路径和延后后处理路径（AI 提取回填完成后）都应调用，
+        保证 AI 提取出的门店、POS/SCO 和日期也能回填到弹窗。
+        :param extra_data: 工单扩展字段（调用方负责持久化）。
+        :param sync_object: 外部同步模型。
+        :param detected: 字段识别结果。
+        :param incoming_project_value: 入参是否携带项目信息，用于决定是否清理 vendorId。
+        :return: 刷新后的提示快照（可能为空字典，调用方仅在非空时写回）。
+        """
+        log_pull_hints = (
+            dict(extra_data.get("log_pull_hints") or {})
+            if isinstance(extra_data.get("log_pull_hints"), dict)
+            else {}
+        )
+        vendor_id_hint = SyncUtil.safe_int((detected or {}).get("vendorId"))
+        source_store_code_hint = TicketStoreResolutionUtil.resolve_source_store_code(
+            raw_payload=sync_object.raw_payload,
+            extra_data=extra_data,
+            log_pull_config=sync_object.log_pull_config,
+        )
+        store_id_hint = str((detected or {}).get("storeId") or "").strip()
+        pos_no_hint = (
+            SyncUtil.safe_int((detected or {}).get("posNo"))
+            or SyncUtil.safe_int((detected or {}).get("scoNo"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("posNo"))
+            or SyncUtil.safe_int((sync_object.log_pull_config or {}).get("scoNo"))
+        )
+        modify_time_hint = cls.resolve_auto_log_pull_modify_time(
+            sync_object=sync_object,
+            log_pull_payload=sync_object.log_pull_config,
+        )
+        if vendor_id_hint:
+            log_pull_hints["vendorId"] = vendor_id_hint
+        elif incoming_project_value:
+            log_pull_hints.pop("vendorId", None)
+            log_pull_hints.pop("vendor_id", None)
+        if source_store_code_hint:
+            log_pull_hints["sourceStoreCode"] = source_store_code_hint
+        if store_id_hint:
+            log_pull_hints["storeId"] = store_id_hint
+        if pos_no_hint:
+            log_pull_hints["posNo"] = pos_no_hint
+        if modify_time_hint:
+            log_pull_hints["modifyTime"] = modify_time_hint
+        return log_pull_hints
+
+    @classmethod
     def build_upsert_payload(
         cls,
         db: Session,
@@ -464,38 +522,12 @@ class TicketSyncPayloadService:
         ):
             payload["processed_at"] = now
 
-        log_pull_hints = (
-            dict(extra_data.get("log_pull_hints") or {})
-            if isinstance(extra_data.get("log_pull_hints"), dict)
-            else {}
-        )
-        vendor_id_hint = SyncUtil.safe_int((detected or {}).get("vendorId"))
-        source_store_code_hint = TicketStoreResolutionUtil.resolve_source_store_code(
-            raw_payload=sync_object.raw_payload,
+        log_pull_hints = cls.refresh_log_pull_hints(
             extra_data=extra_data,
-            log_pull_config=sync_object.log_pull_config,
-        )
-        store_id_hint = str((detected or {}).get("storeId") or "").strip()
-        pos_no_hint = SyncUtil.safe_int((detected or {}).get("posNo")) or SyncUtil.safe_int(
-            (detected or {}).get("scoNo")
-        )
-        modify_time_hint = cls.resolve_auto_log_pull_modify_time(
             sync_object=sync_object,
-            log_pull_payload=sync_object.log_pull_config,
+            detected=detected,
+            incoming_project_value=incoming_project_value,
         )
-        if vendor_id_hint:
-            log_pull_hints["vendorId"] = vendor_id_hint
-        elif incoming_project_value:
-            log_pull_hints.pop("vendorId", None)
-            log_pull_hints.pop("vendor_id", None)
-        if source_store_code_hint:
-            log_pull_hints["sourceStoreCode"] = source_store_code_hint
-        if store_id_hint:
-            log_pull_hints["storeId"] = store_id_hint
-        if pos_no_hint:
-            log_pull_hints["posNo"] = pos_no_hint
-        if modify_time_hint:
-            log_pull_hints["modifyTime"] = modify_time_hint
         if log_pull_hints:
             extra_data["log_pull_hints"] = log_pull_hints
 

@@ -109,6 +109,8 @@
   const detail = ref({});
   const detailLoading = ref(false);
   const similarTickets = ref([]);
+  const symptomTickets = ref([]);
+  const caseTickets = ref([]);
   const similarLoading = ref(false);
   const similarError = ref('');
   const similarStatus = ref('idle');
@@ -391,6 +393,8 @@
     detail.value = {};
     detailLoading.value = false;
     similarTickets.value = [];
+    symptomTickets.value = [];
+    caseTickets.value = [];
     similarLoading.value = false;
     similarError.value = '';
     similarStatus.value = 'idle';
@@ -405,12 +409,16 @@
         if (!isCurrentDetailRequest(ticketId, generation)) return;
         const payload = response?.data || {};
         similarTickets.value = payload.items || [];
+        symptomTickets.value = payload.symptomTickets || payload.items?.filter((item) => item.matchType !== 'case') || [];
+        caseTickets.value = payload.caseTickets || payload.items?.filter((item) => item.matchType === 'case') || [];
         similarStatus.value = payload.status || 'ready';
         similarError.value = payload.message || '';
       })
       .catch((error) => {
         if (!isCurrentDetailRequest(ticketId, generation)) return;
         similarTickets.value = [];
+    symptomTickets.value = [];
+    caseTickets.value = [];
         similarStatus.value = 'failed';
         similarError.value = error?.message || '相似工单加载失败';
       })
@@ -1171,6 +1179,8 @@
     detail.value = {};
     detailLoading.value = false;
     similarTickets.value = [];
+    symptomTickets.value = [];
+    caseTickets.value = [];
     similarLoading.value = false;
     similarError.value = '';
     similarStatus.value = 'idle';
@@ -1317,6 +1327,44 @@
           <el-descriptions-item label="内部优先级">{{
             detail.internalPriority || '-'
           }}</el-descriptions-item>
+          <el-descriptions-item label="问题实例操作" :span="3">
+            <el-button
+              v-if="!detail.issueId"
+              link
+              type="primary"
+              @click="openIssueCreateBindDialog"
+              v-hasPermi="['ticket:issue:add']"
+            >
+              新建问题实例并绑定
+            </el-button>
+            <el-button
+              v-if="!detail.issueId"
+              link
+              type="primary"
+              @click="openIssueBindExistingDialog"
+              v-hasPermi="['ticket:issue:bind']"
+            >
+              关联已有问题
+            </el-button>
+            <el-button
+              v-if="detail.issueId"
+              link
+              type="warning"
+              @click="openIssueBindExistingDialog"
+              v-hasPermi="['ticket:issue:bind']"
+            >
+              更换问题
+            </el-button>
+            <el-button
+              v-if="detail.issueId"
+              link
+              type="danger"
+              @click="handleUnbindIssue"
+              v-hasPermi="['ticket:issue:remove']"
+            >
+              解除归因
+            </el-button>
+          </el-descriptions-item>
           <template v-if="detailMoreInfoExpanded">
             <el-descriptions-item label="1线人员">{{
               detail.firstLineAssigneeName || '-'
@@ -1392,44 +1440,6 @@
             <el-descriptions-item label="解决方案" :span="3">{{
               detail.solution || '-'
             }}</el-descriptions-item>
-            <el-descriptions-item label="问题实例操作" :span="3">
-              <el-button
-                v-if="!detail.issueId"
-                link
-                type="primary"
-                @click="openIssueCreateBindDialog"
-                v-hasPermi="['ticket:issue:add']"
-              >
-                新建问题实例并绑定
-              </el-button>
-              <el-button
-                v-if="!detail.issueId"
-                link
-                type="primary"
-                @click="openIssueBindExistingDialog"
-                v-hasPermi="['ticket:issue:bind']"
-              >
-                关联已有问题
-              </el-button>
-              <el-button
-                v-if="detail.issueId"
-                link
-                type="warning"
-                @click="openIssueBindExistingDialog"
-                v-hasPermi="['ticket:issue:bind']"
-              >
-                更换问题
-              </el-button>
-              <el-button
-                v-if="detail.issueId"
-                link
-                type="danger"
-                @click="handleUnbindIssue"
-                v-hasPermi="['ticket:issue:remove']"
-              >
-                解除归因
-              </el-button>
-            </el-descriptions-item>
           </template>
         </el-descriptions>
         <div class="ticket-detail-description">
@@ -1483,6 +1493,8 @@
               :active="detailMainTab === 'overview'"
               :detail="detail"
               :similar-tickets="similarTickets"
+              :symptom-tickets="symptomTickets"
+              :case-tickets="caseTickets"
               :similar-loading="similarLoading"
               :similar-error="similarError"
               :similar-status="similarStatus"
@@ -1505,14 +1517,12 @@
             />
           </el-tab-pane>
 
-          <el-tab-pane label="协同/AI" name="collab" lazy>
+          <el-tab-pane label="AI分析" name="collab" lazy>
             <TicketDetailCollabTab
               :ticket-id="currentTicketId"
               :active="detailMainTab === 'collab'"
               :detail="detail"
-              :similar-tickets="similarTickets"
               @changed="refreshDetailAndNotify"
-              @run-ai="openAiAnalysisDialog"
               @open-ai-history="openAiTaskHistory"
             />
           </el-tab-pane>

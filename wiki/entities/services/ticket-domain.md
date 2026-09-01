@@ -144,7 +144,7 @@ graph TD
 - 2026-07-11 工单统计第一、二阶段落地：新增系统参数 `ticket.statistics.time.config` 和接口 `GET /ticket/statistics/time-config`，统计页首次进入和重置都会恢复后端返回的默认范围。默认配置按周四 18:00 的当前业务周计算，`rolling_days` 模式文案显示“最近 N 天”，不再称为“最近一周”。
 - `GET /ticket/statistics/trend` 新增 `weekBucketMode=calendar_week/business_week`。实时口径周粒度可按业务周起点分桶，旧整体趋势、问题性质趋势、Top 模块、Top 细分问题和新增处理趋势共享同一分桶。快照口径在 `granularity=week&weekBucketMode=business_week` 时读取 `ticket_statistics_period_snapshot`，按周四 18:00 等业务周边界精确统计，不再返回自然日快照限制提示。
 - 工单统计页新增用户配置 `ticket/ticket_statistics_detail_columns` 控制趋势明细列，`bucket` 为必选列；统计块和趋势块继续使用 `ticket_statistics_blocks`。
-- 工单详情相似推荐优先复用当前工单已保存向量：`TicketSimilarityQueryService.search_similar_tickets_by_ticket` 读取 `embedding_record` 并校验 `content_hash/model/version/dimension`，`provider=embedding` 用缓存向量与库内向量计算，`provider=qdrant` 用缓存向量查询 Qdrant；`TicketService.get_messages_services` 只调用该子服务并组装详情响应。向量缺失或过期时，详情链路会按当前 Provider 配置同步调用 `vectorize_ticket` 刷新向量，刷新成功后返回 `similarEmbeddingStatus=ready` 和相似工单，刷新失败才返回 `similarEmbeddingStatus=error`。
+- 工单详情相似推荐优先复用当前工单已保存 `symptom` 向量；`TicketHybridSimilarityService` 在 MySQL 中合并精确信号候选、分批向量扫描和可解释重排，并返回匹配原因、冲突和案例状态。AI/RCA 形成结论后创建 `draft` 案例，人工确认后生成 `case_verified` 向量；生产链路不依赖 Qdrant。
 - `#/ticket/detail/:ticketId` 已切到独立详情页 `web/src/views/ticket/detail/index.vue`，页面复用 `TicketDetailView` 并只请求详情、评论和时间线等详情接口，不加载 `useTicketList`，不请求 `/ticket/list`。2026-07-12 起该路由直接挂在顶层，不再进入 `Layout`，因此相似工单“系统详情”打开后不会显示左侧菜单、顶部导航或标签栏。
 - 2026-07-17 起，工单管理页内的详情全屏弹窗由 `TicketDetailWithList.vue` 自闭环承接，父页只传 `ticketId/open` 并监听 `changed/closed`；详情组件内部自行加载详情、描述翻译、AI 任务、仓库映射、商家映射和问题绑定。下方 tabs 已拆为概览、日志拉取、协同、评论、历史 5 个子组件，父页不再持有 `ticketDetailContext` 或详情弹窗状态；tab 组件也不再接收详情上下文对象。概览、日志拉取、协同支持 `ticketId/detail/active` 双入口以复用父详情已加载的详情数据，未传详情时按 `ticketId` 自行拉取；评论和历史继续只按 `ticketId` 调用独立接口。
 - 2026-07-08 第一阶段已落地：`Ticket.submit_time` 作为统计主时间，`Ticket.processed_at` 作为“首次形成有效排查结论时间”；`first_response_at` 继续表示首次响应/接手，不能替代 `processed_at`。`status` 继续只表达流程位置，前端 `processStatus` 文案已改为“日志/AI进度”，业务处理结论通过 `processingConclusionStatus/processedAt` 展示。方案文档见 [工单处理口径、统计与相似问题治理实施方案](../../../../web/public/docs/2026-07-07-ticket-status-statistics-and-issue-plan.md)，实现记录见 [工单提交时间、处理结论和版本治理第一阶段实现记录](../../../../web/public/docs/2026-07-08-ticket-submit-processed-stats-implementation.md)。
@@ -245,7 +245,7 @@ graph TD
 - 自动化关注范围由 `TicketAutomationScopeService` 统一判定，支持模块 ID、模块 Code 和模块名称关键字；启用但未配置任何条件时不限制范围。统计查询会同时使用已解析模块 ID与原始模块名称关键字，兼容历史工单 `module_id` 为空的情况；范围判定审计写入 `ticket.extra_data.automation_scope`。
 - 专题工单会话状态统计任务 `module_task.scheduler_maintenance.ticket_topic_stats_report` 按根消息中的“主题”文本归类促销、券、会员和印花；`主题:` 与 `主题：` 都可识别，英文专题关键词按词边界匹配，详情、回复和飞书富文本元数据不再参与专题分类，避免非券类工单被隐藏字段、人员 ID 或单词内部片段误判。
 - 该任务支持通过定时任务参数补充分类和状态关键词：`couponKeywords/stampKeywords/memberKeywords/promoKeywords/closedKeywords/conclusionKeywords`，传入后会与代码内置默认关键词合并，不传则继续使用默认关键词口径。
-- 工单详情页协同/AI 区域已去掉右侧“最新AI建议”，仅保留顶部的“发起AI分析”和“任务历史”；详情弹窗改为固定标题、内容区域独立滚动，避免超高弹窗整体滚动。
+- 工单详情页 AI分析 Tab 承载 AI 分析相关消息和用户追问：用户追问固定以 `role=user/message_type=question/run_ai=true` 提交，页面不再暴露角色、类型和发起AI开关；版本、Agent、Provider、模型和分析上下文 JSON 仍可在紧凑配置区查看和编辑。普通人工沟通统一进入评论 Tab，评论保留独立接口、内部评论、时间线和外部同步语义，不触发 AI 分析；列表详情弹窗与独立详情页均使用统一的 AI分析和评论展示组件，任务历史在具备父级任务弹窗的详情入口打开。
 - 工单详情弹窗顶部基础信息表格不再直接承载“描述”，描述改为表格下方独立整行并自动展示全部内容；顶部表格灰色标签列禁止换行，避免长描述或标签换行撑高基础信息行。
 - 工单描述翻译使用 `ticket.sync.automation.translateConfig` 的总开关、场景开关、Provider 和提示词：详情页优先用 `extra_data.origin_description` 展示原文，用 `extra_data.ai_translation` 在描述下方单独展示译文；手动翻译入口会在缺少翻译总开关、Provider 或提示词时直接提示，不写入空译文。
 - 自动群推送条件中的 `status` 是工作流状态编码，`status_name` 是按编码查询到的工作流状态显示名。中文状态表达式必须使用 `status_name`；状态配置不存在时该字段为空字符串。
@@ -289,6 +289,7 @@ graph TD
 - 2026-07-04 对照备份分支 `master_params_ticket_new` 完成拆分后逻辑审计：主动拉取 `autoAppendTimeFilter=true` 时仍忽略显式 `createdAfter/createdBefore` 并动态使用最近 1 小时窗口；多维表格时间 filter 保持备份分支的 `and` 连接和“只追加外层、不递归补值”语义；拆分 controller 路由集合为 86 个且无重复注册。
 - AI 协同追问的输出契约需要满足 Codex structured output 约束，`evidence`、`risk_items`、`next_steps` 也必须出现在 `required` 中；`symptom`、`similar_cases`、`sop_suggestion`、`monitoring_suggestion` 等增强字段允许为空或缺省，由服务端归一化补默认值，避免模型未产出扩展字段时任务失败。
 - 2026-08-28：工单深度 AI 分析结果 Schema 同时兼容 BIGINT 字符串序列化和实际 Agent 的文本型 `confidence`，并声明所有可选增强字段；客户端与服务端使用一致的结构校验，已有结果文件可直接复用。
+- 2026-08-28：`similar_cases` 输出类型从仅 `array` 放宽为 `array/string`（与其他增强字段一致），修复 INC00001894981 分析因模型输出叙述字符串被判 `AI_WORKER_RESULT_INVALID` 的问题；服务端归一化会把字符串增强字段包装为单元素数组再写回。服务端新增 `_collect_schema_violations`、客户端新增 `_collect_json_schema_violations`（同规则），校验失败时按字段路径输出违规明细并随失败信息入库/上报，`diagnostics` 不再为空。
 - AI 分析下发给 Agent 的日志正文会做中间截断，默认最多保留首尾约 80 万字符，并记录 `textTruncatedForAi` 与原始字符数，避免追问请求因超大上下文触发 Codex/OpenAI `bad_response_status_code`。
 - 工单关闭时会尝试从工单、RCA、事件和消息流自动生成知识库案例，知识文章关联原工单并刷新工单向量，供下一次相似工单检索复用。
 - 工单相似度检索已抽象为 `TicketEmbeddingService` 配置化 Provider：系统参数 `ticket.similarity.config` 控制 `local_hash`、`embedding` 或 `qdrant`。2026-07-05 起采用严格 Provider：配置 hash 就只用 hash，配置 embedding 就只用外部 Embedding + 数据库向量，配置 qdrant 就只用外部 Embedding + Qdrant；失败直接报错或记录日志，不再自动兜底。
@@ -299,6 +300,7 @@ graph TD
 - 2026-07-05 起，工单向量生成支持幂等复用：同一工单的 `embedding.model/version/dimension`、向量化字段列表和最终文本未变化时，`vectorize_ticket` 会复用已有 `embedding_record`，不再调用外部 Embedding；手动重建默认按幂等跳过，`forceRebuild=true` 才强制重建。
 - 幂等命中且当前 `provider=qdrant` 时，服务会用本地已保存向量写入 Qdrant，并在结果中累计 `idempotentSkipped/qdrantSyncedFromCache`。`provider=local_hash` 和 `provider=embedding` 的向量都保存在数据库 `embedding_record.embedding` JSON 字段，不写本地文件；`provider=qdrant` 查询和入库使用 Qdrant，配置页可刷新 collection 列表并显示维度，维度不一致时会提示。
 - 严格 Provider 模式下，相似查询结果只来自当前向量 Provider，不再混入关键词命中分数，避免“包含同一字段文案”导致相似工单统计失真。
+- 2026-08-31 修复：`vectorize_ticket` 构造 `EmbeddingRecord` 时必须显式赋值 `quality_status`（非空列）。原因：`TicketDao.upsert_embedding_record` 更新分支直接用新对象属性覆盖旧行，ORM 的 Python 侧 default 只对 INSERT 生效；漏赋值时所有“已有向量记录刷新”场景（详情页相似查询自动刷新、消息面板、案例索引、场景触发刷新、手动重建）都会以 UPDATE 写入 NULL 触发 MySQL 1048。回归用例：`tests/test_ticket_embedding_service.py::test_vectorize_ticket_builds_record_with_quality_status`。
 - 相似工单配置已新增独立菜单 `ticket.similarity.config`，页面组件为 `ticket/similarityConfig/index`；页面可保存 Provider、Embedding、Qdrant、参与字段、阈值和 `sceneTriggers`，也可手动触发全部或指定工单号向量重建。配置页按检索 Provider 联动显示：`local_hash` 隐藏外部接口和 Qdrant 配置，`embedding` 只展示外部 Embedding 配置，`qdrant` 才展示 Qdrant 配置；隐藏项只是不显示不清空，手动重建 Provider 选项跟随当前配置收敛。2026-07-06 起外部 Embedding 配置新增 `requestParams` JSON 自定义请求参数。
 - `sceneTriggers` 当前支持 `externalSync`、`bitablePull`、`remotePull`、`manualCreate`、`manualUpdate`、`import`、`closeKnowledge` 七类场景；外部同步延后后处理、多维主动拉取入库、远端拉取、手动新增/编辑、Excel 导入和关闭工单知识沉淀都会先检查开关，再调用 `vectorize_ticket_for_scene` 或 `vectorize_tickets_for_scene`。多维主动拉取入库使用独立 `bitablePull`，不再被 `externalSync` 隐式控制；旧配置缺少 `bitablePull` 时继承 `externalSync`，避免升级后重新打开已关闭链路。
 - 仓库映射已单独拆分为独立菜单页面，便于维护同项目下的多分支、多版本映射记录。
@@ -346,6 +348,7 @@ graph TD
   - `TicketAiDao.list_recoverable_tasks` 增加 prompt/raw_output/analysis_context 的 defer；`_serialize_task_summary` 显式剔除 `promptText/rawOutput/analysisContext`，防止摘要序列化时延迟列逐行回表。
   - `_update_execution_record` 对审计写入集中裁剪：响应文本按 `EXECUTION_TEXT_MAX_CHARS`（20000 字符）截断；`request_payload/response_payload/token_usage` 经 `_compact_execution_payload` 把超过 20000 字符的字符串字段替换为占位文本、超 200 项的列表截断。AI 分析请求载荷中的 80 万字节日志正文不再整包写入内存和审计长文本列。
   - 成功任务的 `raw_output` 写库前截断到 5000 字符，完整内容以工作区 result 文件与分析结果结构化字段为准。
+- 2026-08-30 修复 `_serialize_task_summary` 结论字段键名不匹配：`analysis_result` 入库键为 snake_case（`analysis_summary/root_cause/fix_suggestion`），摘要提取曾用驼峰键导致概览 `latestAiAnalysis` 三个结论字段恒为空；现以 snake_case 优先、驼峰兼容读取。`TicketReadService.get_summary` 的 `latestAiAnalysis` 与工单列表 `get_list_services` 摘要同源受益。注意轻量概览不返回 `latestSnapshot`，概览快照字段展示依赖独立快照接口或完整详情链路。
 
 ## 参见
 

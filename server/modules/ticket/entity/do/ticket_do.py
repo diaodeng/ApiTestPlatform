@@ -541,12 +541,8 @@ class TicketAiAnalysisTask(Base):
     input_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输入Token数")
     output_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="输出Token数")
     total_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="总Token数")
-    request_fingerprint: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="分析请求指纹"
-    )
-    success_fingerprint: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="成功结果唯一指纹"
-    )
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="分析请求指纹")
+    success_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="成功结果唯一指纹")
     source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
     source_log_view_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="stored", comment="日志来源模式"
@@ -596,13 +592,28 @@ class EmbeddingRecord(Base):
     __tablename__ = "embedding_record"
     __table_args__ = (
         UniqueConstraint(
-            "object_type", "object_id", "embedding_model", "embedding_version", name="uk_embedding_object_model_version"
+            "object_type",
+            "object_id",
+            "embedding_scope",
+            "embedding_model",
+            "embedding_version",
+            name="uk_embedding_object_scope_model_version",
+        ),
+        Index(
+            "idx_embedding_ticket_scope_model",
+            "object_type",
+            "embedding_scope",
+            "embedding_model",
+            "embedding_version",
         ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="Embedding ID")
     object_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="对象类型")
     object_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="对象ID")
+    embedding_scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="symptom", comment="向量用途：symptom/case_draft/case_verified"
+    )
     embedding_model: Mapped[str] = mapped_column(String(100), nullable=False, comment="Embedding模型")
     embedding_version: Mapped[str] = mapped_column(String(50), nullable=False, default="v1", comment="Embedding版本")
     embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False, comment="向量维度")
@@ -610,7 +621,95 @@ class EmbeddingRecord(Base):
         JSON, nullable=True, comment="向量数据，前期JSON数组，后续可迁移向量库"
     )
     content_hash: Mapped[str] = mapped_column(String(128), nullable=True, default="", comment="内容哈希")
+    metadata_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="生成向量时的检索信号快照")
+    quality_status: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", comment="索引质量状态")
+    source_revision: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="来源内容版本")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="案例确认时间")
+    verified_by: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="案例确认人")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+
+class TicketSimilarityProfile(Base):
+    """工单相似检索画像，只保存主表没有且需要治理的检索信号。"""
+
+    __tablename__ = "ticket_similarity_profile"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", name="uk_ticket_similarity_profile_ticket"),
+        Index("idx_ticket_similarity_profile_environment", "environment", "ticket_id"),
+    )
+
+    profile_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="画像ID")
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="工单ID")
+    environment: Mapped[str | None] = mapped_column(String(64), nullable=True, default="", comment="运行环境")
+    normalized_version_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, default="", comment="归一化版本"
+    )
+    extraction_source: Mapped[str] = mapped_column(String(32), nullable=False, default="rule", comment="提取来源")
+    extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True, comment="提取置信度")
+    profile_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="画像版本")
+    content_hash: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="画像内容哈希")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketSimilaritySignal(Base):
+    """工单精确信号索引，支持错误码、Trace ID 等普通索引查询。"""
+
+    __tablename__ = "ticket_similarity_signal"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "signal_type", "signal_value", name="uk_ticket_similarity_signal_value"),
+        Index("idx_ticket_similarity_signal_lookup", "signal_type", "signal_value", "ticket_id"),
+        Index("idx_ticket_similarity_signal_ticket_type", "ticket_id", "signal_type"),
+    )
+
+    signal_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="信号ID")
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="工单ID")
+    signal_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="信号类型")
+    signal_value: Mapped[str] = mapped_column(String(512), nullable=False, comment="归一化信号值")
+    raw_value: Mapped[str | None] = mapped_column(String(512), nullable=True, default="", comment="原始信号值")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="rule", comment="信号来源")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True, comment="信号置信度")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
+
+
+class TicketSimilarityCase(Base):
+    """工单处理经验案例及其人工确认生命周期。"""
+
+    __tablename__ = "ticket_similarity_case"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", name="uk_ticket_similarity_case_ticket"),
+        Index("idx_ticket_similarity_case_status", "case_status", "reusable", "ticket_id"),
+    )
+
+    case_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="案例ID")
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="工单ID")
+    case_status: Mapped[str] = mapped_column(String(20), nullable=False, default="none", comment="案例状态")
+    case_source: Mapped[str] = mapped_column(String(32), nullable=False, default="", comment="案例来源")
+    case_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="案例版本")
+    content_hash: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="案例文本哈希")
+    root_cause_summary: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="根因摘要")
+    solution_summary: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="解决方案摘要")
+    evidence_summary: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="证据摘要")
+    investigation_summary: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="排查摘要")
+    verify_summary: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="验证摘要")
+    reusable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否可复用")
+    verified_by: Mapped[str | None] = mapped_column(String(100), nullable=True, default="", comment="确认人")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="确认时间")
+    rejected_by: Mapped[str | None] = mapped_column(String(100), nullable=True, default="", comment="驳回人")
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="驳回时间")
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="驳回原因")
+    last_index_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", comment="索引状态")
+    last_index_error: Mapped[str | None] = mapped_column(Text, nullable=True, comment="最近索引错误")
+    last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="最近索引时间")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+    )
 
 
 class WorkflowStatus(Base):
@@ -778,8 +877,15 @@ class TicketStatisticsMetricSnapshot(Base):
     __tablename__ = "ticket_statistics_metric_snapshot"
     __table_args__ = (
         UniqueConstraint(
-            "snapshot_type", "snapshot_key", "snapshot_scope", "project_id", "module_id",
-            "issue_type_id", "metric_code", "group_code", name="uk_ticket_metric_snapshot_scope"
+            "snapshot_type",
+            "snapshot_key",
+            "snapshot_scope",
+            "project_id",
+            "module_id",
+            "issue_type_id",
+            "metric_code",
+            "group_code",
+            name="uk_ticket_metric_snapshot_scope",
         ),
         Index("idx_ticket_metric_snapshot_time", "snapshot_type", "snapshot_key"),
         Index("idx_ticket_metric_snapshot_metric", "metric_code", "snapshot_type", "snapshot_key"),

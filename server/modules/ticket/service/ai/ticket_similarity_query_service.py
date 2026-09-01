@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_hybrid_similarity_service import TicketHybridSimilarityService
 
 
 class TicketSimilarityQueryService:
@@ -33,6 +34,8 @@ class TicketSimilarityQueryService:
                 "similarEmbeddingMessage": "工单不存在，无法查询相似工单。",
             }
         similar_tickets = []
+        symptom_tickets = []
+        case_tickets = []
         similar_status = "disabled"
         similar_message = ""
         try:
@@ -58,19 +61,55 @@ class TicketSimilarityQueryService:
                 similar_status = "ready"
                 similar_message = embedding_context["message"]
             if similar_status == "ready":
-                similar_tickets = TicketEmbeddingService.search_tickets_by_vector(
-                    query_db,
-                    embedding_context.get("vector") or [],
-                    limit,
-                    config,
-                    exclude_ticket_id=ticket_id,
-                )
+                if getattr(ticket, "ticket_id", None) and hasattr(query_db, "query"):
+                    symptom_tickets = TicketHybridSimilarityService.search_by_vector(
+                        query_db,
+                        ticket,
+                        embedding_context.get("vector") or [],
+                        limit,
+                        config,
+                        embedding_scopes=(TicketEmbeddingService.SCOPE_SYMPTOM,),
+                        match_type="symptom",
+                    )
+                    case = TicketDao.get_ticket_similarity_case(query_db, ticket_id)
+                    if case and case.case_status in {"draft", "verified"}:
+                        case_scopes = (
+                            (TicketEmbeddingService.SCOPE_CASE_VERIFIED,)
+                            if case.case_status == "verified"
+                            else (TicketEmbeddingService.SCOPE_CASE_DRAFT,)
+                        )
+                        case_context = TicketEmbeddingService.get_ticket_embedding_context(
+                            query_db, ticket, config, embedding_scope=case_scopes[0]
+                        )
+                        if case_context.get("status") == "ready":
+                            case_tickets = TicketHybridSimilarityService.search_by_vector(
+                                query_db,
+                                ticket,
+                                case_context.get("vector") or [],
+                                limit,
+                                config,
+                                embedding_scopes=case_scopes,
+                                match_type="case",
+                                include_exact_signal_candidates=False,
+                            )
+                    similar_tickets = (symptom_tickets + case_tickets)[:limit]
+                else:
+                    similar_tickets = TicketEmbeddingService.search_tickets_by_vector(
+                        query_db,
+                        embedding_context.get("vector") or [],
+                        limit,
+                        config,
+                        exclude_ticket_id=ticket_id,
+                    )
+
         except Exception as exc:
             query_db.rollback()
             similar_status = "error"
             similar_message = f"相似工单查询失败：{exc}"
         return {
             "similarTickets": similar_tickets[:limit],
+            "symptomTickets": symptom_tickets[:limit],
+            "caseTickets": case_tickets[:limit],
             "similarEmbeddingStatus": similar_status,
             "similarEmbeddingMessage": similar_message,
         }

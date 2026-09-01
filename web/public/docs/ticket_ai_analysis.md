@@ -13,6 +13,22 @@
 - Worker 的 `stderr` 可能包含正常进度、模型输出和诊断信息。`stderr` 非空本身不会使 Codex 分析失败。
 - Worker 失败时，任务会记录结构化的“错误码”和真实“错误信息”；失败响应不包含工单正文或分析结果。`workerExitCode` 仅用于辅助诊断，不能替代业务错误码。
 - Schema 兼容接口中按字符串传输的 BIGINT ID，并包含 `symptom`、`similar_cases`、`sop_suggestion`、`owner_suggestion`、`monitoring_suggestion` 等可选增强字段；字段缺省时由服务端补默认值。
+- 增强字段（含 `similar_cases`）接受数组或叙述字符串两种输出：模型写成叙述文字时不会导致校验失败，服务端归一化会自动把字符串包装为单元素数组再写回结果。
+- 分析结果未通过 JSON Schema 校验时，任务失败信息会包含具体违规字段明细（如 `$.similar_cases: 期望 array，实际 string`），无需人工比对结果文件定位。
+- 模型输出 JSON 时字符串值内部可能带未转义的英文双引号（如中文叙述里引用术语），会导致 JSON 解析失败。系统会自动尝试修复此类引号并重新解析；修复失败时以 `AI_WORKER_RESULT_UNPARSEABLE` 诊断项上报原始文本特征。提示词也已要求模型使用中文引号或转义双引号，从源头减少该问题。
+
+## Token 用量统计
+
+- Token 用量在 Agent 客户端本地统计完成后，仅把最终汇总值随结果回传服务端；过程事件流数据不会上传。
+- Codex 以 `--json` 事件流模式运行：每回合结束上报一次用量，客户端把所有回合累加得到整个任务的总量，而不是某一次回合的值。
+- Claude Code 从结果 JSON 的 `modelUsage` 按实际使用的模型逐个累加（含辅助小模型的消耗），比顶层 `usage`（仅主模型最后一次调用）更准确。
+- 任务记录中的 Token 字段：
+  - `inputTokenCount`：输入 Token 累计（含缓存命中）。
+  - `outputTokenCount`：输出 Token 累计。
+  - `totalTokenCount`：输入 + 输出总量。
+- 审计执行记录额外保存缓存命中明细（Codex 的 `cachedInputTokens` / Claude 的缓存读写），缓存部分不重复计入总量。
+- Token 用量解析失败不影响分析结果：此时任务照常成功，Token 字段为空。
+- 历史任务（修复前执行）没有用量数据，显示为 0 属正常现象。
 
 ## 请求幂等
 

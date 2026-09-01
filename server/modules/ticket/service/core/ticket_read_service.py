@@ -156,6 +156,14 @@ class TicketReadService:
             "root_cause": item.get("rootCause") or item.get("root_cause"),
             "solution": item.get("solution"),
             "score": float(item.get("score") or 0),
+            "semantic_score": float(item.get("semanticScore") or item.get("semantic_score") or 0),
+            "keyword_score": float(item.get("keywordScore") or item.get("keyword_score") or 0),
+            "exact_signal_score": float(item.get("exactSignalScore") or item.get("exact_signal_score") or 0),
+            "context_score": float(item.get("contextScore") or item.get("context_score") or 0),
+            "match_type": item.get("matchType") or item.get("match_type") or "symptom",
+            "case_status": item.get("caseStatus") or item.get("case_status") or "none",
+            "match_reasons": item.get("matchReasons") or item.get("match_reasons") or [],
+            "conflicts": item.get("conflicts") or [],
         }
         return TicketSimilarItemModel.model_validate(allowed)
 
@@ -167,14 +175,17 @@ class TicketReadService:
             return None
         result = TicketSimilarityQueryService.search_similar_tickets_by_ticket(db, ticket_id, limit=limit)
         items = [cls._project_similar_item(item) for item in result.get("similarTickets") or []]
+        symptom_items = [cls._project_similar_item(item) for item in result.get("symptomTickets") or []]
+        case_items = [cls._project_similar_item(item) for item in result.get("caseTickets") or []]
         response = TicketSimilarResponseModel(
             status=str(result.get("similarEmbeddingStatus") or "disabled"),
             message=str(result.get("similarEmbeddingMessage") or ""),
             items=items,
+            symptom_tickets=symptom_items,
+            case_tickets=case_items,
         )
         logger.info(
-            f"相似工单查询完成 | ticket_id={ticket_id} limit={limit} "
-            f"status={response.status} count={len(items)}"
+            f"相似工单查询完成 | ticket_id={ticket_id} limit={limit} status={response.status} count={len(items)}"
         )
         return response
 
@@ -187,8 +198,7 @@ class TicketReadService:
         has_more = len(rows) > limit
         items = rows[-limit:] if has_more else rows
         logger.info(
-            f"工单消息按需查询完成 | ticket_id={ticket_id} limit={limit} "
-            f"count={len(items)} has_more={has_more}"
+            f"工单消息按需查询完成 | ticket_id={ticket_id} limit={limit} count={len(items)} has_more={has_more}"
         )
         return TicketMessagesPageResponseModel(
             items=[TicketMessagePageItemModel.model_validate(row) for row in items],
@@ -205,8 +215,7 @@ class TicketReadService:
         has_more = len(rows) > limit
         items = rows[:limit]
         logger.info(
-            f"工单快照按需查询完成 | ticket_id={ticket_id} limit={limit} "
-            f"count={len(items)} has_more={has_more}"
+            f"工单快照按需查询完成 | ticket_id={ticket_id} limit={limit} count={len(items)} has_more={has_more}"
         )
         return TicketSnapshotsPageResponseModel(
             items=[TicketSnapshotPageItemModel.model_validate(row) for row in items],

@@ -82,8 +82,33 @@ export function delTicket(ticketId) {
   });
 }
 
-// 新增知识库
-export function addKnowledge(data) {
+// 查询工单轻量详情
+export function getTicketSummary(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/summary`,
+    method: 'get',
+  });
+}
+
+// 查询工单相似工单
+export function getTicketSimilarTickets(ticketId, params = {}) {
+  return request({
+    url: `/ticket/${ticketId}/similar-tickets`,
+    method: 'get',
+    params,
+  });
+}
+
+// 更新相似处理案例状态
+export function updateTicketSimilarityCaseStatus(ticketId, data) {
+  return request({
+    url: `/ticket/${ticketId}/similarity-case/status`,
+    method: 'post',
+    data,
+  });
+}
+
+
   return request({
     url: '/ticket/knowledge',
     method: 'post',

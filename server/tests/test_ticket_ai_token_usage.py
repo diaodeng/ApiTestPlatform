@@ -109,3 +109,85 @@ def test_ai_task_execution_service_can_sum_input_and_output():
     result = AiTaskExecutionService.build_ai_task_execution_model(execution)
 
     assert result.total_token_count == 100
+
+
+def test_agent_response_webui_preserves_token_usage_from_client():
+    """客户端回传的 token_usage 应被 AgentResponseWebUI 保留，不再被 Pydantic 静默丢弃。"""
+    from module_qtr.service.agent_service import AgentResponseWebUI
+
+    client_response = {
+        "request_type": 6,
+        "status": "success",
+        "success": True,
+        "message": "AI 分析完成",
+        "token_usage": {
+            "input_tokens": 13273,
+            "output_tokens": 25,
+            "cached_input_tokens": 2048,
+            "total_tokens": 13298,
+        },
+        "result": {
+            "analysis_result": {"ticket_id": "1"},
+        },
+    }
+
+    response = AgentResponseWebUI(**client_response)
+
+    assert response.token_usage is not None
+    assert response.token_usage["input_tokens"] == 13273
+    assert response.token_usage["total_tokens"] == 13298
+
+
+def test_transport_payload_json_roundtrip_keeps_token_usage():
+    """Redis/HTTP 传输序列化往返（camelCase 别名）后 token_usage 仍应保留。"""
+    import json
+
+    from module_qtr.service.agent_service import AgentResponseWebUI, HandleResponse
+
+    payload = json.dumps(
+        {
+            "statusCode": 200,
+            "response": {
+                "requestType": 6,
+                "status": "success",
+                "success": True,
+                "message": "AI 分析完成",
+                "tokenUsage": {
+                    "inputTokens": 13273,
+                    "outputTokens": 25,
+                    "cachedInputTokens": 2048,
+                    "totalTokens": 13298,
+                },
+                "result": {"analysis_result": {"ticket_id": "1"}},
+            },
+            "message": "操作成功",
+        },
+        ensure_ascii=False,
+    )
+
+    response = HandleResponse.validate_transport_payload(payload)
+
+    assert isinstance(response.response, AgentResponseWebUI)
+    assert response.response.token_usage is not None
+    assert response.response.token_usage["inputTokens"] == 13273
+
+
+def test_server_extract_and_normalize_token_usage_from_result():
+    """服务端应能从 result.token_usage 递归提取并归一化为入库字段。"""
+    result_payload = {
+        "analysis_result": {"ticket_id": "1"},
+        "token_usage": {
+            "input_tokens": 13273,
+            "output_tokens": 25,
+            "cached_input_tokens": 2048,
+            "total_tokens": 13298,
+        },
+    }
+
+    extracted = TicketAiAnalysisService._extract_token_usage_payload(result_payload)
+    normalized = TicketAiAnalysisService._normalize_token_usage(extracted)
+
+    assert normalized is not None
+    assert normalized["input_token_count"] == 13273
+    assert normalized["output_token_count"] == 25
+    assert normalized["total_token_count"] == 13298

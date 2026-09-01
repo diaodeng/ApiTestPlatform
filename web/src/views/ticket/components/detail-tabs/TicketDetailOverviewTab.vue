@@ -20,6 +20,14 @@
       type: Array,
       default: () => [],
     },
+    symptomTickets: {
+      type: Array,
+      default: () => [],
+    },
+    caseTickets: {
+      type: Array,
+      default: () => [],
+    },
     similarLoading: {
       type: Boolean,
       default: false,
@@ -69,7 +77,13 @@
     risk: latestSnapshot.value?.risk || '',
     owner: latestSnapshot.value?.owner || '',
   }));
-  const latestSimilarTickets = computed(() => (props.similarTickets || []).slice(0, 3));
+  const latestSimilarTickets = computed(() => (props.similarTickets || []).slice(0, 5));
+  const symptomSimilarTickets = computed(() =>
+    (props.symptomTickets?.length ? props.symptomTickets : latestSimilarTickets.value.filter((item) => item.matchType !== 'case')).slice(0, 5)
+  );
+  const caseSimilarTickets = computed(() =>
+    (props.caseTickets?.length ? props.caseTickets : latestSimilarTickets.value.filter((item) => item.matchType === 'case')).slice(0, 5)
+  );
 
   /**
    * 加载概览 tab 需要的工单快照、AI 任务和相似工单数据。
@@ -301,7 +315,7 @@
             </el-button-group>
           </div>
         </template>
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="3" border>
           <el-descriptions-item label="最新执行状态">
             <el-tag
               v-if="latestAiAnalysisTask?.status"
@@ -335,22 +349,22 @@
           <el-descriptions-item label="总 Token">
             {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.totalTokenCount) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="摘要" :span="2">{{
-            latestConclusion.summary || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="根因" :span="2">{{
-            latestConclusion.rootCause || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="解决方案" :span="2">{{
-            latestConclusion.solution || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="预防建议" :span="2">{{
-            latestConclusion.prevention || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="风险说明" :span="2">{{
-            latestConclusion.risk || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="负责人" :span="2">{{
+          <el-descriptions-item label="摘要" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.summary || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="根因" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.rootCause || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="解决方案" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.solution || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="预防建议" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.prevention || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="风险说明" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.risk || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="负责人" :span="3">{{
             latestConclusion.owner || '-'
           }}</el-descriptions-item>
         </el-descriptions>
@@ -364,34 +378,31 @@
       </el-card>
     </el-col>
     <el-col :span="8">
-        <el-card shadow="never" v-loading="similarLoading">
-          <template #header>相似工单</template>
-          <el-alert
-            v-if="similarError"
-            type="error"
-            :closable="false"
-            :title="similarError"
-            class="mb12"
-          />
-          <el-empty
-            v-else-if="similarStatus === 'ready' && !latestSimilarTickets.length"
-            description="暂无相似工单"
-          />
-          <el-empty
-            v-else-if="similarStatus === 'pending'"
-            description="相似工单正在生成，请稍后刷新"
-          />
-          <div v-for="item in latestSimilarTickets" :key="item.ticketId" class="similar-item">
-
+      <el-card shadow="never" v-loading="similarLoading">
+        <template #header>工单内容相似</template>
+        <el-alert
+          v-if="similarError"
+          type="error"
+          :closable="false"
+          :title="similarError"
+          class="mb12"
+        />
+        <el-empty
+          v-else-if="similarStatus === 'ready' && !symptomSimilarTickets.length"
+          description="暂无内容相似工单"
+        />
+        <el-empty
+          v-else-if="similarStatus === 'pending'"
+          description="相似工单正在生成，请稍后刷新"
+        />
+        <div v-for="item in symptomSimilarTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
           <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
           <div class="similar-meta">
             <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
-            <span>{{ item.rootCause || '-' }}</span>
+            <span>{{ item.moduleName || '-' }}</span>
           </div>
           <div class="similar-actions">
-            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)"
-              >系统详情</el-link
-            >
+            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)">系统详情</el-link>
             <el-link
               v-if="resolveTicketDetailUrl(item)"
               type="info"
@@ -412,11 +423,33 @@
           </div>
         </div>
       </el-card>
+      <el-card shadow="never" class="mt16">
+        <template #header>处理案例相似</template>
+        <el-empty v-if="!caseSimilarTickets.length" description="暂无可复用处理案例" />
+        <div v-for="item in caseSimilarTickets" :key="`case-${item.ticketId}`" class="similar-item">
+          <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
+          <div class="similar-meta">
+            <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
+            <span>{{ item.caseStatus === 'verified' ? '已验证案例' : '案例草稿' }}</span>
+          </div>
+          <div class="similar-meta">根因：{{ item.rootCause || '-' }}</div>
+          <div class="similar-actions">
+            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)">系统详情</el-link>
+          </div>
+        </div>
+      </el-card>
     </el-col>
   </el-row>
 </template>
 
 <style scoped>
+  /* AI 结论类文本保留换行与空格，避免多段文案挤成一行 */
+  .pre-wrap-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.65;
+  }
+
   .similar-item {
     padding: 10px 0;
     border-bottom: 1px solid #ebeef5;

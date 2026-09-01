@@ -50,6 +50,9 @@ class TicketAiAnalysisService:
             "output_mode": "file",             # 结果从文件读取
             "output_schema_flag": "--output-schema",
             "output_file_flag": "--output-last-message",
+            # stdout 输出 JSONL 事件流，其中 turn.completed 事件携带 Token 用量；
+            # 结果本体仍从 --output-last-message 文件读取，不受事件流影响。
+            "json_output_flag": "--json",
             "resume_flag": "--resume",
             "model_flag": "-m",
             "skip_git_check_flag": "--skip-git-repo-check",
@@ -842,6 +845,12 @@ class TicketAiAnalysisService:
         if output_flag and result_file:
             command.extend([str(output_flag), str(result_file)])
 
+        # JSONL 事件流输出（仅 codex）：stdout 会输出事件流，
+        # turn.completed 事件携带每次回合的 Token 用量，用于统计累计消耗。
+        json_output_flag = worker_config.get("json_output_flag")
+        if json_output_flag:
+            command.append(str(json_output_flag))
+
         # 输出格式（仅 claude：--output-format json）
         output_format_flag = worker_config.get("output_format_flag")
         output_format = worker_config.get("output_format")
@@ -874,6 +883,34 @@ class TicketAiAnalysisService:
         return command
 
     @classmethod
+    def _resolve_worker_result_text(
+        cls,
+        *,
+        provider_type: str,
+        worker_config: dict[str, Any],
+        result_file: Path | None,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> str:
+        """
+        按 Provider 输出模式解析出待解析的原始结果文本。
+        :param provider_type: Provider 类型
+        :param worker_config: Worker 运行时配置
+        :param result_file: Codex 结果文件
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :return: 原始结果文本，可能为空字符串
+        """
+        result_text = ""
+        if worker_config.get("output_mode") == "file" and result_file and result_file.exists():
+            result_text = result_file.read_text(encoding="utf-8")
+        elif raw_stdout.strip():
+            result_text = raw_stdout.strip()
+        elif raw_stderr.strip():
+            result_text = raw_stderr.strip()
+        return result_text
+
+    @classmethod
     def _parse_worker_output(
         cls,
         *,
@@ -894,13 +931,13 @@ class TicketAiAnalysisService:
         :param schema_payload: 本次任务要求的 JSON Schema
         :return: 解析后的结果字典，解析失败返回 None
         """
-        result_text = ""
-        if worker_config.get("output_mode") == "file" and result_file and result_file.exists():
-            result_text = result_file.read_text(encoding="utf-8")
-        elif raw_stdout.strip():
-            result_text = raw_stdout.strip()
-        elif raw_stderr.strip():
-            result_text = raw_stderr.strip()
+        result_text = cls._resolve_worker_result_text(
+            provider_type=provider_type,
+            worker_config=worker_config,
+            result_file=result_file,
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+        )
 
         if not result_text.strip():
             return None
@@ -963,41 +1000,93 @@ class TicketAiAnalysisService:
         :param schema: JSON Schema
         :return: 是否通过校验
         """
+        return not cls._collect_json_schema_violations(payload, schema)
+
+    @classmethod
+    def _collect_json_schema_violations(cls, payload: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+        """
+        收集 Worker 结果相对任务下发 JSON Schema 的违规路径，用于失败诊断上报。
+        判定规则与 _validate_json_schema 完全一致，但以
+        `字段路径: 期望类型/实际类型` 形式返回，便于随 ai_analysis_error 事件
+        直接写入服务端日志、任务记录和前端失败提示。
+        :param payload: 待校验结果
+        :param schema: JSON Schema
+        :param path: 当前校验的 JSON 路径
+        :return: 违规描述列表，空列表表示通过校验
+        """
         expected_type = schema.get("type")
+
+        def _type_name(value: Any) -> str:
+            if value is None:
+                return "null"
+            if isinstance(value, bool):
+                return "boolean"
+            if isinstance(value, (int, float)):
+                return "number"
+            if isinstance(value, str):
+                return "string"
+            if isinstance(value, list):
+                return "array"
+            if isinstance(value, dict):
+                return "object"
+            return type(value).__name__
+
         if isinstance(expected_type, list):
-            if not any(cls._validate_json_schema(payload, {**schema, "type": item}) for item in expected_type):
-                return False
-        elif expected_type == "object":
+            # 联合类型：任一分支通过即通过，全部分支失败才报告违规。
+            branch_violations = [
+                cls._collect_json_schema_violations(payload, {**schema, "type": item}, path)
+                for item in expected_type
+            ]
+            if all(branch_violations):
+                expected_desc = "/".join(expected_type)
+                return [f"{path}: 期望 {expected_desc}，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "object":
             if not isinstance(payload, dict):
-                return False
+                return [f"{path}: 期望 object，实际 {_type_name(payload)}"]
+            violations: list[str] = []
             required = schema.get("required") or []
-            if any(field not in payload for field in required):
-                return False
             properties = schema.get("properties") or {}
-            if schema.get("additionalProperties") is False and any(key not in properties for key in payload):
-                return False
-            if any(
-                key in payload and not cls._validate_json_schema(payload[key], child_schema)
-                for key, child_schema in properties.items()
-            ):
-                return False
-        elif expected_type == "array":
+            for field in required:
+                if field not in payload:
+                    violations.append(f"{path}.{field}: required 字段缺失")
+            if schema.get("additionalProperties") is False:
+                for key in payload:
+                    if key not in properties:
+                        violations.append(f"{path}.{key}: additionalProperties 不允许的额外字段")
+            for key, child_schema in properties.items():
+                if key in payload:
+                    violations.extend(cls._collect_json_schema_violations(payload[key], child_schema, f"{path}.{key}"))
+            return violations
+        if expected_type == "array":
             if not isinstance(payload, list):
-                return False
-            item_schema = schema.get("items")
-            if item_schema and any(not cls._validate_json_schema(item, item_schema) for item in payload):
-                return False
-        elif expected_type == "string":
-            return isinstance(payload, str)
-        elif expected_type == "number":
-            return isinstance(payload, (int, float)) and not isinstance(payload, bool)
-        elif expected_type == "integer":
-            return isinstance(payload, int) and not isinstance(payload, bool)
-        elif expected_type == "null":
-            return payload is None
-        elif expected_type == "boolean":
-            return isinstance(payload, bool)
-        return True
+                return [f"{path}: 期望 array，实际 {_type_name(payload)}"]
+            violations = []
+            items_schema = schema.get("items") or {}
+            for index, item in enumerate(payload):
+                violations.extend(cls._collect_json_schema_violations(item, items_schema, f"{path}[{index}]"))
+            return violations
+        if expected_type == "string":
+            if not isinstance(payload, str):
+                return [f"{path}: 期望 string，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "number":
+            if not (isinstance(payload, (int, float)) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 number，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "integer":
+            if not (isinstance(payload, int) and not isinstance(payload, bool)):
+                return [f"{path}: 期望 integer，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "null":
+            if payload is not None:
+                return [f"{path}: 期望 null，实际 {_type_name(payload)}"]
+            return []
+        if expected_type == "boolean":
+            if not isinstance(payload, bool):
+                return [f"{path}: 期望 boolean，实际 {_type_name(payload)}"]
+            return []
+        return []
 
     @classmethod
     def _find_token_usage_payload(cls, candidate: Any) -> dict[str, Any] | None:
@@ -1048,6 +1137,227 @@ class TicketAiAnalysisService:
                 return payload
         return None
 
+    @staticmethod
+    def _to_optional_int(value: Any) -> int | None:
+        """
+        将 Token 计数字段安全转换为整数。
+        :param value: 原始值
+        :return: 整数值，无法转换时返回 None
+        """
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        try:
+            text_value = str(value).strip().replace(",", "")
+        except Exception:
+            return None
+        if not text_value:
+            return None
+        try:
+            return int(text_value)
+        except Exception:
+            try:
+                return int(float(text_value))
+            except Exception:
+                return None
+
+    @classmethod
+    def _parse_codex_jsonl_token_usage(cls, raw_stdout: str | None) -> dict[str, Any] | None:
+        """
+        从 Codex --json 的 JSONL 事件流中解析并累加 Token 用量。
+
+        Codex 以 --json 运行时，stdout 每行输出一个 JSON 事件，回合结束事件
+        turn.completed 携带 usage 字段（input_tokens / cached_input_tokens /
+        output_tokens 等）。一次执行可能包含多个 turn（如 resume、多阶段执行），
+        这里逐行累加所有事件的用量，得到整个过程的总消耗，而不是只取最后一次。
+
+        注意：必须限定为多行事件流结构（type + usage 双特征）才解析，
+        避免 Claude 单行 JSON 输出（顶层 usage 语义为最后一次 API 调用）被误判。
+        :param raw_stdout: Worker 标准输出（JSONL 事件流文本）
+        :return: 累加后的 Token 用量字典，无有效事件时返回 None
+        """
+        if not raw_stdout or not raw_stdout.strip():
+            return None
+        total_input = 0
+        total_output = 0
+        total_cached = 0
+        total_all = 0
+        found = False
+        for line in raw_stdout.splitlines():
+            line_text = line.strip()
+            if not line_text:
+                continue
+            try:
+                event = json.loads(line_text)
+            except Exception:
+                # 事件流中混入非 JSON 行时跳过，不中断整体解析。
+                continue
+            if not isinstance(event, dict):
+                continue
+            usage = event.get("usage")
+            # 仅识别 codex 事件流形态：回合结束事件（turn.completed，兼容后续版本
+            # 可能的 thread.completed 等变体）中的 usage 为该轮增量累计。
+            # Claude 输出 type 固定为 result 且无 turn/thread 事件，不会进入此分支。
+            event_type = event.get("type")
+            if not isinstance(usage, dict) or not isinstance(event_type, str):
+                continue
+            if event_type not in ("turn.completed", "thread.completed"):
+                continue
+            input_count = cls._to_optional_int(usage.get("input_tokens")) or 0
+            output_count = cls._to_optional_int(usage.get("output_tokens")) or 0
+            cached_count = cls._to_optional_int(usage.get("cached_input_tokens")) or 0
+            found = True
+            total_input += input_count
+            total_output += output_count
+            total_cached += cached_count
+            # input_tokens 为包含缓存命中的总输入；若某版本仅输出不含缓存的口径，
+            # cached_input_tokens 大于 input 时按两者之和兜底，避免总量小于分量。
+            turn_total = input_count + output_count
+            if cached_count > input_count:
+                turn_total = cached_count + output_count
+            total_all += turn_total
+        if not found:
+            return None
+        return {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cached_input_tokens": total_cached if total_cached else None,
+            "total_tokens": total_all,
+        }
+
+    @classmethod
+    def _parse_claude_token_usage(cls, raw_stdout: str | None) -> dict[str, Any] | None:
+        """
+        从 Claude Code --output-format json 的单行 JSON 输出中解析 Token 用量。
+
+        Claude 顶层 usage 是主模型最后一次 API 调用的值（非整个任务累计）；
+        modelUsage 按模型给出本次执行的累计用量（inputTokens / outputTokens /
+        cacheReadInputTokens / cacheCreationInputTokens），这里按模型累加得到总量。
+        :param raw_stdout: Worker 标准输出（单行 JSON）
+        :return: 累加后的 Token 用量字典，无有效数据时返回 None
+        """
+        if not raw_stdout or not raw_stdout.strip():
+            return None
+        try:
+            payload = json.loads(raw_stdout.strip().splitlines()[-1])
+        except Exception:
+            return None
+        # 仅识别 Claude result 报文：type=result 且顶层有 result/num_turns 等特征；
+        # Codex 事件流最后一行是 turn.completed，不会被误解析。
+        if not isinstance(payload, dict) or payload.get("type") != "result" or payload.get("is_error"):
+            return None
+        model_usage = payload.get("modelUsage")
+        total_input = 0
+        total_output = 0
+        total_cached = 0
+        found = False
+        if isinstance(model_usage, dict) and model_usage:
+            # modelUsage 覆盖任务中实际使用的全部模型（含轻量分类等辅助模型），
+            # 逐模型累加得到整个任务的消耗。
+            for model_stat in model_usage.values():
+                if not isinstance(model_stat, dict):
+                    continue
+                input_count = cls._to_optional_int(model_stat.get("inputTokens")) or 0
+                output_count = cls._to_optional_int(model_stat.get("outputTokens")) or 0
+                cached_count = (
+                    cls._to_optional_int(model_stat.get("cacheReadInputTokens")) or 0
+                ) + (cls._to_optional_int(model_stat.get("cacheCreationInputTokens")) or 0)
+                if not input_count and not output_count and not cached_count:
+                    continue
+                found = True
+                total_input += input_count
+                total_output += output_count
+                total_cached += cached_count
+        if not found:
+            # 旧版本无 modelUsage 时回退顶层 usage：虽只是主模型最后一次调用的近似值，
+            # 也好于完全无数据；total 按 input + output 计算，避免缓存重复计入。
+            usage = payload.get("usage")
+            if not isinstance(usage, dict):
+                return None
+            input_count = cls._to_optional_int(usage.get("input_tokens")) or 0
+            output_count = cls._to_optional_int(usage.get("output_tokens")) or 0
+            if not input_count and not output_count:
+                return None
+            return {
+                "input_tokens": input_count,
+                "output_tokens": output_count,
+                "cached_input_tokens": None,
+                "total_tokens": input_count + output_count,
+            }
+        return {
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cached_input_tokens": total_cached if total_cached else None,
+            "total_tokens": total_input + total_output,
+        }
+
+    @staticmethod
+    def _repair_unescaped_quotes(text: str) -> str | None:
+        """
+        尝试修复 JSON 字符串值内部未转义的英文双引号。
+
+        部分模型（如 deepseek-v4-flash）即使通过 --output-schema 约束，
+        仍可能在字符串值中输出未转义双引号（例如：停留在"恢复中"（Pending）状态），
+        导致 JSON 本身非法。这里做一次结构化扫描：
+        - 在字符串内部遇到未转义引号时，按"引号后紧跟 , } ] : 或文本结束"判断
+          它是否为键/值的真实结束符；不是则补反斜杠转义为值内部字符。
+        - 修复结果必须能通过 json.loads 且为 dict，否则放弃修复返回 None，
+          保持与修复前一致的行为（解析失败）。
+        :param text: 原始文本（应已剥离 Markdown 代码块围栏）
+        :return: 修复后的 JSON 文本；无法修复时返回 None
+        """
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        candidate = text[start : end + 1]
+
+        in_string = False
+        repaired_chars: list[str] = []
+        index = 0
+        length = len(candidate)
+        while index < length:
+            ch = candidate[index]
+            if not in_string:
+                # 字符串外：引号视为字符串开始，其余字符原样保留
+                if ch == '"':
+                    in_string = True
+                repaired_chars.append(ch)
+                index += 1
+                continue
+            if ch == "\\" and index + 1 < length:
+                # 已转义序列原样保留（如 \" \\ \n）
+                repaired_chars.append(candidate[index : index + 2])
+                index += 2
+                continue
+            if ch == '"':
+                # 字符串内的引号：后紧跟结构符（, } ] :)或文本结束时视为真实结束符，
+                # 否则视为值内部未转义引号，转义后继续
+                after = candidate[index + 1 :].lstrip()
+                if after.startswith((",", "}", "]", ":")) or after == "":
+                    in_string = False
+                    repaired_chars.append(ch)
+                else:
+                    repaired_chars.append('\\"')
+                index += 1
+                continue
+            repaired_chars.append(ch)
+            index += 1
+
+        repaired = "".join(repaired_chars)
+        try:
+            payload = json.loads(repaired)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return repaired
+
     @classmethod
     def _extract_json_from_text(cls, text: str) -> dict[str, Any] | None:
         """
@@ -1072,6 +1382,22 @@ class TicketAiAnalysisService:
                 return json.loads(text[start:end + 1])
             except Exception:
                 pass
+        # 常规解析失败后，兜底修复字符串值内部未转义的双引号
+        # （例如 deepseek-v4-flash 输出：停留在"恢复中"（Pending）状态）。
+        for source in (
+            json_block_match.group(1) if json_block_match else None,
+            text[start:end + 1] if start >= 0 and end > start else None,
+        ):
+            if not source:
+                continue
+            repaired = cls._repair_unescaped_quotes(source)
+            if repaired is not None:
+                try:
+                    payload = json.loads(repaired)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    return payload
         return None
 
     @classmethod
@@ -2371,6 +2697,8 @@ class TicketAiAnalysisService:
 5. 输出严格 JSON，不要输出多余说明文本。不要调用 shell、python 或 PowerShell
    去创建、写入、拼接任何结果文件；尤其不要使用 heredoc（如 `<<EOF`、`@'...'@`）
    写 JSON。直接把最终 JSON 作为最后一条回复输出，系统会自动保存结果文件。
+   注意：JSON 字符串值内部的英文双引号必须写成 \\" 转义；描述中引用中文术语请使用
+   中文引号（“”），不要直接输出未转义的英文双引号，否则结果无法通过解析校验。
 6. 结果必须包含以下字段；如果某些扩展字段暂时无法确定，请用空字符串、空数组或 false 占位，不要省略：
    - ticket_id
    - project_id
@@ -2933,11 +3261,52 @@ class TicketAiAnalysisService:
                     }
 
                 if parsed_result is None:
+                    # Worker 正常退出但结果不可用时，尽量给出具体违规原因：
+                    # 优先按 schema 校验收集违规字段；连 JSON 都解析不出时报告原始文本特征。
+                    result_text = cls._resolve_worker_result_text(
+                        provider_type=provider_type,
+                        worker_config=worker_config,
+                        result_file=result_file,
+                        raw_stdout=raw_stdout,
+                        raw_stderr=raw_stderr,
+                    )
+                    failure_diagnostics: list[dict[str, Any]] = []
+                    invalid_result_message = "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验"
+                    if result_text.strip() and schema_payload:
+                        candidate_payload: Any = None
+                        try:
+                            candidate_payload = json.loads(result_text)
+                        except Exception:
+                            candidate_payload = cls._extract_json_from_text(result_text)
+                        if isinstance(candidate_payload, dict):
+                            schema_violations = cls._collect_json_schema_violations(candidate_payload, schema_payload)
+                            if schema_violations:
+                                violation_summary = "; ".join(schema_violations[:10])
+                                invalid_result_message = (
+                                    f"AI Worker 结果未通过 JSON Schema 校验: {violation_summary}"
+                                )
+                                failure_diagnostics.append(
+                                    {
+                                        "code": "AI_WORKER_SCHEMA_VIOLATION",
+                                        "severity": "error",
+                                        "message": violation_summary,
+                                    }
+                                )
+                    if not failure_diagnostics and result_text.strip():
+                        # JSON 解析失败或非对象结构：给出原始文本头部，便于判断是否为模型自由文本。
+                        text_preview = re.sub(r"\s+", " ", result_text.strip())[:200]
+                        failure_diagnostics.append(
+                            {
+                                "code": "AI_WORKER_RESULT_UNPARSEABLE",
+                                "severity": "error",
+                                "message": text_preview,
+                            }
+                        )
                     failure_payload = {
                         "error_code": "AI_WORKER_RESULT_INVALID",
-                        "error_message": "AI Worker 已正常退出，但结果无法解析或未通过 JSON Schema 校验",
+                        "error_message": invalid_result_message,
                         "worker_exit_code": process.returncode,
-                        "diagnostics": [],
+                        "diagnostics": failure_diagnostics,
                     }
                     if (
                         provider_type == "codex"
@@ -2986,12 +3355,21 @@ class TicketAiAnalysisService:
                     }
 
                 normalized_result = parsed_result
-                token_usage_payload = cls._extract_token_usage_payload(
-                    normalized_result,
-                    parsed_result,
-                    cls._extract_json_from_text(raw_stdout) if raw_stdout.strip() else None,
-                    cls._extract_json_from_text(raw_stderr) if raw_stderr.strip() else None,
-                )
+                # Token 用量解析：Codex 从 --json 事件流累加；Claude 从单行 JSON 的
+                # modelUsage 按模型累加；都没有时回退通用候选提取（结果文件内嵌 usage 等）。
+                if provider_type == "codex":
+                    token_usage_payload = cls._parse_codex_jsonl_token_usage(raw_stdout)
+                elif provider_type == "claude":
+                    token_usage_payload = cls._parse_claude_token_usage(raw_stdout)
+                else:
+                    token_usage_payload = None
+                if token_usage_payload is None:
+                    token_usage_payload = cls._extract_token_usage_payload(
+                        normalized_result,
+                        parsed_result,
+                        cls._extract_json_from_text(raw_stdout) if raw_stdout.strip() else None,
+                        cls._extract_json_from_text(raw_stderr) if raw_stderr.strip() else None,
+                    )
                 await cls._emit_event(
                     event_sender,
                     "ai_analysis_finished",
@@ -3014,6 +3392,7 @@ class TicketAiAnalysisService:
                         "command_line": " ".join(command),
                         "stdout_path": str(workspace_dir / "worker.stdout.txt"),
                         "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                        "token_usage": token_usage_payload,
                     },
                 }
             finally:
