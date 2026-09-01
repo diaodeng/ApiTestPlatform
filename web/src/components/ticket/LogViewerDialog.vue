@@ -10,7 +10,16 @@
     class="ticket-log-viewer-dialog"
     @closed="handleClosed"
   >
-    <div v-loading="searching" class="log-viewer-content">
+    <div
+      ref="viewerContentRef"
+      v-loading="searching"
+      class="log-viewer-content"
+      :class="{
+        'log-viewer-split-h': memoryPanelVisible && !isSplitVertical,
+        'log-viewer-split-v': memoryPanelVisible && isSplitVertical,
+      }"
+      :style="splitCssStyle"
+    >
       <!-- 搜索工具栏 -->
       <div class="panel-header mb16 log-view-controls">
         <el-input
@@ -55,18 +64,16 @@
       </div>
 
       <!-- 内存分析面板：展示日志中 Process cpu/mem/threads 监控曲线 -->
-      <div v-if="memoryPanelVisible" class="log-view-panel mb16">
+      <div v-if="memoryPanelVisible" class="log-view-panel log-memory-panel mb16">
         <div class="panel-header mb8 log-view-panel-header">
           <span>内存分析（Process 资源监控）</span>
           <div class="panel-inline">
             <el-button link type="primary" :loading="memoryLoading" @click="loadMemoryMetrics">刷新</el-button>
-            <el-button link type="primary" @click="memoryPanelMinimized = !memoryPanelMinimized">
-              {{ memoryPanelMinimized ? '展开' : '最小化' }}
-            </el-button>
+            <el-button link type="primary" @click="memoryPanelVisible = false">收起图表</el-button>
             <el-button link type="primary" @click="memoryPanelVisible = false">关闭</el-button>
           </div>
         </div>
-        <div v-show="!memoryPanelMinimized">
+        <div class="log-memory-panel-body">
           <!-- 解析中：实时展示扫描进度、当前文件、已提取点数、耗时与预计剩余时间 -->
           <div v-if="memoryLoading || memorySuccessVisible" class="log-memory-progress">
             <el-progress
@@ -112,13 +119,21 @@
         </div>
       </div>
 
+      <!-- 分栏拖拽分隔条：横向模式拖宽度、纵向模式拖高度 -->
+      <div
+        v-if="memoryPanelVisible"
+        class="log-split-divider"
+        :class="{ 'log-split-divider-vertical': isSplitVertical }"
+        @mousedown.prevent="startSplitDrag"
+      />
+
       <!-- 异常摘要 -->
       <el-alert
         v-if="errorSummary"
         type="warning"
         show-icon
         :closable="false"
-        class="mb16"
+        class="mb16 log-split-alert"
         :title="`异常命中 ${errorSummary.total || 0} 条`"
       />
 
@@ -127,6 +142,7 @@
         v-if="hits.length"
         :class="[
           'log-view-panel',
+          'log-results-panel',
           'mb16',
           {
             'log-view-panel-fullscreen': resultViewMode === 'fullscreen',
@@ -375,9 +391,20 @@ const wrapEnabled = ref(false)
 const availableFiles = ref([])
 // ── 内存分析状态 ──
 const memoryPanelVisible = ref(false)
-// 内存面板最小化开关：点击日志行时自动最小化，避免曲线遮挡日志详情
-const memoryPanelMinimized = ref(false)
 const memoryChartPanelRef = ref(null)
+// ── 图表-日志分栏状态 ──
+// 内容根节点 ref，用于拖拽时计算比例
+const viewerContentRef = ref(null)
+// 窄视口（<1280px）用上下分栏，否则左右分栏
+const isSplitVertical = computed(() => windowWidth.value < 1280)
+// 图表区占比（会话内记忆，默认 0.4 即 40:60）
+const splitRatio = ref(0.4)
+const splitCssStyle = computed(() => ({ '--split-ratio': String(splitRatio.value) }))
+// 内容区实测宽度：分栏模式下结果表格宽度必须按右栏实际宽度计算，否则表格会溢出被裁切
+const contentWidth = ref(0)
+let contentResizeObserver = null
+// 拖拽进行中的标记（非响应式即可）
+let splitDragging = false
 const memoryLoading = ref(false)
 const memoryMetrics = ref(null)
 const memoryError = ref('')
@@ -672,7 +699,18 @@ function isCopySuccess(item) {
  * 搜索结果区改为虚拟表格，避免大结果集在普通表格下卡顿。
  * 宽高继续沿用原先布局逻辑，只是改成虚拟表格可直接使用的数值。
  */
-const resultTableWidth = computed(() => Math.max((windowWidth.value || 0) - 64, 720))
+const resultTableWidth = computed(() => {
+  // 左右分栏：右栏宽度 = 内容区宽度 - 分隔条 - 图表列，再扣除面板内边距
+  if (memoryPanelVisible.value && !isSplitVertical.value && contentWidth.value > 0) {
+    const mainWidth = (contentWidth.value - 6) * (1 - splitRatio.value)
+    return Math.max(mainWidth - 40, 480)
+  }
+  // 上下分栏：宽度即内容区宽度，扣除面板内边距
+  if (memoryPanelVisible.value && isSplitVertical.value && contentWidth.value > 0) {
+    return Math.max(contentWidth.value - 40, 480)
+  }
+  return Math.max((windowWidth.value || 0) - 64, 720)
+})
 
 const resultTableHeight = computed(() =>
   resultViewMode.value === 'fullscreen'
@@ -929,6 +967,8 @@ watch(
     preparing.value = true
     prepareProgress.value = 0
     startPrepareProgressPolling(ticketId, recordId)
+    // 弹窗内容此刻才渲染完成，补挂内容区尺寸监听
+    nextTick(() => attachContentObserver())
     prepareWithDownloadProgress(ticketId, recordId, () => prepareTicketLogs(ticketId, recordId))
       .then(() => {
         if (!visible.value || props.record?.id !== recordId) return
@@ -966,7 +1006,6 @@ function resetViewerState() {
   expandedModeMap.value = {}
   copySuccessMap.value = {}
   memoryPanelVisible.value = false
-  memoryPanelMinimized.value = false
   memoryLoading.value = false
   memoryMetrics.value = null
   memoryError.value = ''
@@ -1010,8 +1049,8 @@ function loadFileOptions(ticketId, recordId) {
 function toggleMemoryPanel() {
   memoryPanelVisible.value = !memoryPanelVisible.value
   if (memoryPanelVisible.value) {
-    // 重新展开面板时恢复为展开态，避免沿用上次的最小化状态
-    memoryPanelMinimized.value = false
+    // 重新展开图表时保持上次拖拽的栏比，图表容器尺寸变化后需重绘
+    nextTick(() => memoryChartPanelRef.value?.resizeCharts())
     if (!memoryMetrics.value) {
       loadMemoryMetrics()
     }
@@ -1266,17 +1305,15 @@ function setHits(rows = []) {
 function selectHit(row) {
   if (!row) return
   ensureSearchKeywordsHighlighted()
-  // 选中日志行时自动最小化内存面板，保证日志详情完整可见
-  memoryPanelMinimized.value = true
   loadContext(row.file, row.line)
-  // 反向联动：内存面板展开时在曲线上按时间就近画标记线（logTimeValue 为毫秒 epoch）
-  if (memoryPanelVisible.value && !memoryPanelMinimized.value) {
+  // 反向联动：分栏图表可见时在曲线上按时间就近画标记线（logTimeValue 为毫秒 epoch）
+  if (memoryPanelVisible.value) {
     memoryChartPanelRef.value?.highlightTime(row.logTimeValue)
   }
 }
 
 /**
- * 曲线点点击联动：跳转到数据点对应的日志行上下文，并最小化内存面板。
+ * 曲线点点击联动：跳转到数据点对应的日志行上下文（分栏模式下图表保持可见）。
  * @param {{ file: string, line: number }} payload 曲线点携带的文件与行号
  * @returns {void} 无返回值
  */
@@ -1284,8 +1321,49 @@ function handleMemoryPointClick(payload) {
   const file = String(payload?.file || '')
   const line = Number(payload?.line) || 0
   if (!file || !line) return
-  memoryPanelMinimized.value = true
   loadContext(file, line)
+}
+
+/**
+ * 分栏拖拽：按下分隔条后跟随鼠标更新图表区占比。
+ * 横向模式按 X 计算宽度占比，纵向模式按 Y 计算高度占比（扣除工具栏高度）。
+ * @param {MouseEvent} event mousedown 事件
+ * @returns {void} 无返回值
+ */
+function startSplitDrag(event) {
+  const contentEl = viewerContentRef.value
+  if (!contentEl) return
+  splitDragging = true
+  document.body.style.cursor = isSplitVertical.value ? 'row-resize' : 'col-resize'
+  document.body.style.userSelect = 'none'
+  const move = (e) => {
+    if (!splitDragging) return
+    const rect = contentEl.getBoundingClientRect()
+    if (isSplitVertical.value) {
+      const controlsEl = contentEl.querySelector('.log-view-controls')
+      const controlsHeight = controlsEl ? controlsEl.offsetHeight : 0
+      const usable = rect.height - controlsHeight - 6
+      if (usable > 100) {
+        splitRatio.value = Math.min(0.7, Math.max(0.15, (e.clientY - rect.top - controlsHeight) / usable))
+      }
+    } else {
+      const usable = rect.width - 6
+      if (usable > 100) {
+        splitRatio.value = Math.min(0.7, Math.max(0.2, (e.clientX - rect.left) / usable))
+      }
+    }
+  }
+  const stop = () => {
+    splitDragging = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', stop)
+    // 拖拽结束后重绘曲线，适配容器尺寸变化
+    memoryChartPanelRef.value?.resizeCharts()
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', stop)
 }
 
 function loadContext(file, line) {
@@ -1627,12 +1705,36 @@ watch(
   { deep: true }
 )
 
+/**
+ * 挂载内容区尺寸监听（幂等）。
+ * destroy-on-close 下弹窗内容首次打开才渲染，需要在弹窗打开后再挂载监听。
+ * @returns {void} 无返回值
+ */
+function attachContentObserver() {
+  if (!viewerContentRef.value || typeof ResizeObserver === 'undefined') return
+  if (contentResizeObserver) {
+    contentWidth.value = viewerContentRef.value.clientWidth || 0
+    return
+  }
+  contentResizeObserver = new ResizeObserver((entries) => {
+    const entry = entries[0]
+    if (entry) {
+      contentWidth.value = entry.contentRect.width
+    }
+  })
+  contentResizeObserver.observe(viewerContentRef.value)
+  contentWidth.value = viewerContentRef.value.clientWidth || 0
+}
+
 onMounted(() => {
   document.addEventListener('selectionchange', handleDocumentSelectionChange)
   document.addEventListener('keydown', handleEscapeKey, true)
+  attachContentObserver()
 })
 
 onBeforeUnmount(() => {
+  contentResizeObserver?.disconnect()
+  contentResizeObserver = null
   document.removeEventListener('selectionchange', handleDocumentSelectionChange)
   document.removeEventListener('keydown', handleEscapeKey, true)
   clearNativeHighlights()
@@ -1646,7 +1748,6 @@ defineExpose({
     const targetFile = String(file || '')
     const targetLine = Number(line) || 0
     if (!targetFile || !targetLine) return
-    memoryPanelMinimized.value = true
     loadContext(targetFile, targetLine)
   },
 })
@@ -1680,13 +1781,111 @@ defineExpose({
   background: var(--el-bg-color, #ffffff);
 }
 
+/* 内容区默认（图表收起）为纵向滚动单栏 */
 .log-viewer-content {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  /* 内容区允许纵向滚动：内存分析展开时日志结果/详情不再被顶出可视区 */
   overflow-y: auto;
+}
+
+/* ── 图表-日志分栏布局 ──
+   左右分栏（>=1280px）：图表列占 --split-ratio，右侧为结果+日志明细；
+   网格行：工具栏 / 异常摘要 / 结果（自适应）/ 明细（占满剩余） */
+.log-viewer-split-h {
+  display: grid;
+  grid-template-columns:
+    minmax(300px, calc((100% - 6px) * var(--split-ratio, 0.4)))
+    6px
+    minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-areas:
+    'controls controls controls'
+    'chart divider alert'
+    'chart divider results'
+    'chart divider context';
+  overflow: hidden;
+}
+
+.log-viewer-split-h .log-view-controls { grid-area: controls; }
+.log-viewer-split-h .log-memory-panel {
+  grid-area: chart;
+  min-height: 0;
+  overflow-y: auto;
+}
+.log-viewer-split-h .log-split-divider { grid-area: divider; }
+.log-viewer-split-h .log-split-alert { grid-area: alert; }
+.log-viewer-split-h .log-results-panel { grid-area: results; }
+.log-viewer-split-h .log-context-panel {
+  grid-area: context;
+  min-height: 0;
+}
+
+/* 上下分栏（<1280px）：图表行占 --split-ratio 高度，下方结果+明细 */
+.log-viewer-split-v {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows:
+    auto
+    minmax(160px, calc((100% - 6px) * var(--split-ratio, 0.4)))
+    6px
+    auto
+    auto
+    minmax(0, 1fr);
+  grid-template-areas:
+    'controls'
+    'chart'
+    'divider'
+    'alert'
+    'results'
+    'context';
+  overflow: hidden;
+}
+
+.log-viewer-split-v .log-view-controls { grid-area: controls; }
+.log-viewer-split-v .log-memory-panel {
+  grid-area: chart;
+  min-height: 0;
+  overflow-y: auto;
+}
+.log-viewer-split-v .log-split-divider { grid-area: divider; }
+.log-viewer-split-v .log-split-alert { grid-area: alert; }
+.log-viewer-split-v .log-results-panel { grid-area: results; }
+.log-viewer-split-v .log-context-panel {
+  grid-area: context;
+  min-height: 0;
+}
+
+/* 拖拽分隔条：横向为竖条（列光标），纵向为横条（行光标） */
+.log-split-divider {
+  background: transparent;
+  border-left: 1px dashed #dcdfe6;
+  cursor: col-resize;
+  transition: background 0.15s;
+}
+
+.log-split-divider:hover {
+  background: rgb(64 158 255 / 12%);
+  border-left-color: #409eff;
+}
+
+.log-split-divider-vertical {
+  border-left: none;
+  border-top: 1px dashed #dcdfe6;
+  cursor: row-resize;
+}
+
+.log-split-divider-vertical:hover {
+  background: rgb(64 158 255 / 12%);
+  border-top-color: #409eff;
+}
+
+/* 分栏下明细内容块用满网格剩余高度 */
+.log-viewer-split-h .log-context-panel .log-content-block,
+.log-viewer-split-v .log-context-panel .log-content-block {
+  max-height: none;
+  height: 100%;
 }
 
 .log-keyword-input {
