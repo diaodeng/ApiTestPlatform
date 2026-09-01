@@ -5,6 +5,13 @@
 - 边界：不改变任何操作函数逻辑与权限指令；归档/原始下载仍通过对应列链接下载。
 - 文档：更新 `web/public/docs/ticket_log_viewer.md` 1.3 操作按钮章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-detail-log-pull-action-column.md`。
 
+## [2026-09-01] FIX | 日志查看器内存分析完成态图标与扫描性能优化
+
+- 触发：内存分析进度条到 100% 后不展示成功图标（完成瞬间进度区直接隐藏）；用户询问是否应改用 rg/grep 外部进程过滤日志。
+- 实现：前端 `LogViewerDialog.vue` 新增完成态——onResult 后进度条定格 100%、`el-progress` 切 `success` 状态显示对勾图标，并提示总耗时与提取点数，1.5 秒后自动切换图表；进行中仍封顶 99% 避免中间文件提前出图标。后端 `TicketLogMemoryMetricsUtil.iter_parse_file` 新增 `Process cpu` ASCII 字节锚点预过滤，无关行跳过解码与正则匹配，解析语义不变。
+- 决策：未引入 rg/grep 子进程过滤。当前瓶颈是逐行解码+正则，锚点预过滤已消除主要开销；外部进程会引入二进制部署依赖、丢失行内进度粒度，且违背 util 无副作用边界（若未来引入只允许在 service 层做并带降级）。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md` 2.5 节进度描述，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-viewer-memory-progress-and-scan-perf.md`。
+
 ## [2026-09-01] UI | 日志拉取记录管理页操作列主次分离
 
 - 触发：操作列 6 个彩色圆形按钮平铺（270px 宽）视觉散乱，不符合中后台主流的主次分离规范。

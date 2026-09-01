@@ -23,6 +23,10 @@ MEMORY_LOG_PATTERN = re.compile(
     r"threads:(?P<threads_active>\d+)/(?P<threads_max>\d+)"
 )
 
+# 监控行固定包含的 ASCII 字节锚点（"Process cpu"），用于正则匹配前快速过滤无关行；
+# 监控格式与正则强相关，若正则调整必须同步更新此锚点，否则会导致漏解析
+_MEMORY_LOG_ANCHOR = b"Process cpu"
+
 
 @dataclass(frozen=True)
 class TicketLogMemoryMetricPoint:
@@ -77,11 +81,16 @@ class TicketLogMemoryMetricsUtil:
         with file_path.open("rb") as source:
             for raw_line in source:
                 line_no += 1
-                try:
-                    line = raw_line.decode("utf-8", errors="ignore")
-                except Exception:
-                    continue
-                match = MEMORY_LOG_PATTERN.search(line)
+                # 快速预过滤：只有包含 ASCII 锚点的行才可能命中监控正则，
+                # 其余行直接跳过解码与正则匹配，大幅降低大文件逐行扫描的 CPU 开销
+                if _MEMORY_LOG_ANCHOR not in raw_line:
+                    match = None
+                else:
+                    try:
+                        line = raw_line.decode("utf-8", errors="ignore")
+                    except Exception:
+                        continue
+                    match = MEMORY_LOG_PATTERN.search(line)
                 if match:
                     try:
                         log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S,%f")

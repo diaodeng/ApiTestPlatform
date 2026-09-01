@@ -65,22 +65,29 @@
         </div>
         <div>
           <!-- 解析中：实时展示扫描进度、当前文件、已提取点数、耗时与预计剩余时间 -->
-          <div v-if="memoryLoading" class="log-memory-progress">
+          <div v-if="memoryLoading || memorySuccessVisible" class="log-memory-progress">
             <el-progress
               :percentage="memoryProgressPercent"
               :stroke-width="14"
-              striped
-              striped-flow
+              :status="memorySuccessVisible ? 'success' : undefined"
+              :striped="!memorySuccessVisible"
+              :striped-flow="!memorySuccessVisible"
             />
             <div class="log-memory-progress-text">
-              <span v-if="memoryFallbackNotice">{{ memoryFallbackNotice }}</span>
-              <span v-else-if="memoryProgress.fileCount">
-                正在解析日志 {{ memoryProgress.fileIndex }}/{{ memoryProgress.fileCount }}：{{ memoryProgress.file }}
-              </span>
-              <span v-else>正在准备内存分析任务…</span>
-              <span>已提取 {{ memoryProgress.points }} 条监控数据</span>
-              <span>已耗时 {{ memoryElapsedText }}</span>
-              <span v-if="memoryEtaText" class="log-memory-eta">{{ memoryEtaText }}</span>
+              <template v-if="memorySuccessVisible">
+                <span>内存分析完成，共提取 {{ memoryProgress.points }} 条监控数据</span>
+                <span>总耗时 {{ memoryElapsedText }}</span>
+              </template>
+              <template v-else>
+                <span v-if="memoryFallbackNotice">{{ memoryFallbackNotice }}</span>
+                <span v-else-if="memoryProgress.fileCount">
+                  正在解析日志 {{ memoryProgress.fileIndex }}/{{ memoryProgress.fileCount }}：{{ memoryProgress.file }}
+                </span>
+                <span v-else>正在准备内存分析任务…</span>
+                <span>已提取 {{ memoryProgress.points }} 条监控数据</span>
+                <span>已耗时 {{ memoryElapsedText }}</span>
+                <span v-if="memoryEtaText" class="log-memory-eta">{{ memoryEtaText }}</span>
+              </template>
             </div>
           </div>
           <template v-else>
@@ -372,9 +379,16 @@ const memoryElapsedSeconds = ref(0)
 const memoryElapsedTimer = ref(null)
 const memoryAbortController = ref(null)
 const memoryFallbackNotice = ref('')
-const memoryProgressPercent = computed(() =>
-  Math.min(99, Math.max(1, Math.round(Number(memoryProgress.value.percent) || 0)))
-)
+// 解析完成后的短暂成功展示状态：进度条到 100% 并显示成功图标，停留片刻后切换为图表
+const memorySuccessVisible = ref(false)
+const memorySuccessTimer = ref(null)
+const memoryProgressPercent = computed(() => {
+  const percent = Math.round(Number(memoryProgress.value.percent) || 0)
+  // 完成态固定展示 100%，成功图标由 el-progress 的 success 状态渲染
+  if (memorySuccessVisible.value) return 100
+  // 进行中最多展示 99%，避免中间文件解析到 100% 时过早出现成功图标
+  return Math.min(99, Math.max(1, percent))
+})
 const memoryElapsedText = computed(() => formatMemoryDuration(memoryElapsedSeconds.value))
 const memoryEtaText = computed(() => {
   const percent = Number(memoryProgress.value.percent) || 0
@@ -409,12 +423,39 @@ function stopMemoryElapsedTimer() {
   }
 }
 
+/**
+ * 展示内存分析完成状态：进度条定格 100% 并显示成功图标，短暂停留后自动切换为图表。
+ * @returns {void} 无返回值
+ */
+function showMemorySuccess() {
+  memoryProgress.value = { ...memoryProgress.value, percent: 100 }
+  memoryLoading.value = false
+  memorySuccessVisible.value = true
+  if (memorySuccessTimer.value) {
+    window.clearTimeout(memorySuccessTimer.value)
+  }
+  memorySuccessTimer.value = window.setTimeout(() => {
+    memorySuccessVisible.value = false
+    memorySuccessTimer.value = null
+  }, 1500)
+}
+
+/** 隐藏内存分析完成状态并清理定时器。 */
+function hideMemorySuccess() {
+  if (memorySuccessTimer.value) {
+    window.clearTimeout(memorySuccessTimer.value)
+    memorySuccessTimer.value = null
+  }
+  memorySuccessVisible.value = false
+}
+
 /** 中止进行中的内存分析请求并清理计时器。 */
 function abortMemoryAnalysis() {
   memoryAbortController.value?.abort()
   memoryAbortController.value = null
   stopMemoryElapsedTimer()
 }
+  hideMemorySuccess()
 const hasFullscreenPanel = computed(
   () => resultViewMode.value === 'fullscreen' || contextViewMode.value === 'fullscreen'
     || hasExpandedFullscreen.value
@@ -992,6 +1033,7 @@ function loadMemoryMetrics() {
     }
     stopMemoryElapsedTimer()
     memoryLoading.value = false
+    hideMemorySuccess()
   }
   streamTicketLogMemoryMetrics(
     { ticketId, recordId, maxPoints: 2000 },
@@ -1014,7 +1056,8 @@ function loadMemoryMetrics() {
       },
       onResult: (data) => {
         memoryMetrics.value = data
-        finishLoading()
+        // 结果已就绪：进度条定格 100% 并显示成功图标，短暂停留后切换图表
+        showMemorySuccess()
       },
     }
   )
@@ -1028,6 +1071,7 @@ function loadMemoryMetrics() {
         try {
           const response = await getTicketLogMemoryMetrics({ ticketId, recordId, maxPoints: 2000 })
           memoryMetrics.value = response?.data || null
+          showMemorySuccess()
         } catch (fallbackError) {
           memoryError.value = String(
             fallbackError?.message || fallbackError || '内存分析数据加载失败'
