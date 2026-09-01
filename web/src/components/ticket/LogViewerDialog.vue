@@ -63,19 +63,39 @@
             <el-button link type="primary" @click="memoryPanelVisible = false">关闭</el-button>
           </div>
         </div>
-        <div v-loading="memoryLoading">
-          <el-alert
-            v-if="memoryError"
-            type="error"
-            show-icon
-            :closable="false"
-            :title="memoryError"
-          />
-          <LogMemoryChartPanel
-            v-else
-            :metrics="memoryMetrics"
-            :empty-text="memoryMetrics?.message || '当前日志中未找到 Process 资源监控数据'"
-          />
+        <div>
+          <!-- 解析中：实时展示扫描进度、当前文件、已提取点数、耗时与预计剩余时间 -->
+          <div v-if="memoryLoading" class="log-memory-progress">
+            <el-progress
+              :percentage="memoryProgressPercent"
+              :stroke-width="14"
+              striped
+              striped-flow
+            />
+            <div class="log-memory-progress-text">
+              <span v-if="memoryProgress.fileCount">
+                正在解析日志 {{ memoryProgress.fileIndex }}/{{ memoryProgress.fileCount }}：{{ memoryProgress.file }}
+              </span>
+              <span v-else>正在准备内存分析任务…</span>
+              <span>已提取 {{ memoryProgress.points }} 条监控数据</span>
+              <span>已耗时 {{ memoryElapsedText }}</span>
+              <span v-if="memoryEtaText" class="log-memory-eta">{{ memoryEtaText }}</span>
+            </div>
+          </div>
+          <template v-else>
+            <el-alert
+              v-if="memoryError"
+              type="error"
+              show-icon
+              :closable="false"
+              :title="memoryError"
+            />
+            <LogMemoryChartPanel
+              v-else
+              :metrics="memoryMetrics"
+              :empty-text="memoryMetrics?.message || '当前日志中未找到 Process 资源监控数据'"
+            />
+          </template>
         </div>
       </div>
 
@@ -293,7 +313,7 @@ import {
   getTicketLogContext,
   getTicketLogErrors,
   getTicketLogLineContent,
-  getTicketLogMemoryMetrics,
+  streamTicketLogMemoryMetrics,
 } from '@/api/ticket/ticket'
 import { useLogPrepareProgress } from '@/views/ticket/hooks/useLogPrepareProgress'
 import LogMemoryChartPanel from './LogMemoryChartPanel.vue'
@@ -344,6 +364,54 @@ const memoryPanelVisible = ref(false)
 const memoryLoading = ref(false)
 const memoryMetrics = ref(null)
 const memoryError = ref('')
+// ── 内存分析进度状态 ──
+const memoryProgress = ref({ percent: 0, file: '', fileIndex: 0, fileCount: 0, points: 0 })
+const memoryElapsedSeconds = ref(0)
+const memoryElapsedTimer = ref(null)
+const memoryAbortController = ref(null)
+const memoryProgressPercent = computed(() =>
+  Math.min(99, Math.max(1, Math.round(Number(memoryProgress.value.percent) || 0)))
+)
+const memoryElapsedText = computed(() => formatMemoryDuration(memoryElapsedSeconds.value))
+const memoryEtaText = computed(() => {
+  const percent = Number(memoryProgress.value.percent) || 0
+  if (percent < 3) return ''
+  const etaSeconds = (memoryElapsedSeconds.value / percent) * (100 - percent)
+  if (!Number.isFinite(etaSeconds) || etaSeconds <= 0) return ''
+  return `预计剩余 ${formatMemoryDuration(etaSeconds)}`
+})
+
+/** 将秒数格式化为“x 秒 / x 分 y 秒”的可读文案。 */
+function formatMemoryDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds) || 0))
+  if (value < 60) return `${value} 秒`
+  return `${Math.floor(value / 60)} 分 ${value % 60} 秒`
+}
+
+/** 启动内存分析耗时计时器。 */
+function startMemoryElapsedTimer() {
+  stopMemoryElapsedTimer()
+  const startedAt = Date.now()
+  memoryElapsedSeconds.value = 0
+  memoryElapsedTimer.value = window.setInterval(() => {
+    memoryElapsedSeconds.value = (Date.now() - startedAt) / 1000
+  }, 500)
+}
+
+/** 停止内存分析耗时计时器。 */
+function stopMemoryElapsedTimer() {
+  if (memoryElapsedTimer.value) {
+    window.clearInterval(memoryElapsedTimer.value)
+    memoryElapsedTimer.value = null
+  }
+}
+
+/** 中止进行中的内存分析请求并清理计时器。 */
+function abortMemoryAnalysis() {
+  memoryAbortController.value?.abort()
+  memoryAbortController.value = null
+  stopMemoryElapsedTimer()
+}
 const hasFullscreenPanel = computed(
   () => resultViewMode.value === 'fullscreen' || contextViewMode.value === 'fullscreen'
     || hasExpandedFullscreen.value
@@ -849,6 +917,7 @@ function resetViewerState() {
   memoryLoading.value = false
   memoryMetrics.value = null
   memoryError.value = ''
+  abortMemoryAnalysis()
 }
 
 /**
@@ -886,8 +955,12 @@ function loadFileOptions(ticketId, recordId) {
  */
 function toggleMemoryPanel() {
   memoryPanelVisible.value = !memoryPanelVisible.value
-  if (memoryPanelVisible.value && !memoryMetrics.value) {
-    loadMemoryMetrics()
+  if (memoryPanelVisible.value) {
+    if (!memoryMetrics.value) {
+      loadMemoryMetrics()
+    }
+  } else {
+    abortMemoryAnalysis()
   }
 }
 
@@ -899,18 +972,58 @@ function loadMemoryMetrics() {
   const ticketId = props.record?.ticketId || 0
   const recordId = props.record?.id
   if (!recordId) return
+  // 中止上一次未完成的分析，避免旧事件写入新一轮进度
+  abortMemoryAnalysis()
+  const controller = new AbortController()
+  memoryAbortController.value = controller
   memoryLoading.value = true
   memoryError.value = ''
-  getTicketLogMemoryMetrics({ ticketId, recordId })
-    .then((response) => {
-      memoryMetrics.value = response?.data || null
-    })
+  memoryMetrics.value = null
+  memoryProgress.value = { percent: 0, file: '', fileIndex: 0, fileCount: 0, points: 0 }
+  startMemoryElapsedTimer()
+  const finishLoading = () => {
+    if (memoryAbortController.value === controller) {
+      memoryAbortController.value = null
+    }
+    stopMemoryElapsedTimer()
+    memoryLoading.value = false
+  }
+  streamTicketLogMemoryMetrics(
+    { ticketId, recordId, maxPoints: 2000 },
+    {
+      signal: controller.signal,
+      onStart: (event) => {
+        memoryProgress.value = {
+          ...memoryProgress.value,
+          fileCount: Number(event?.fileCount) || 0,
+        }
+      },
+      onProgress: (event) => {
+        memoryProgress.value = {
+          percent: Number(event?.percent) || 0,
+          file: String(event?.file || ''),
+          fileIndex: Number(event?.fileIndex) || 0,
+          fileCount: Number(event?.fileCount) || memoryProgress.value.fileCount,
+          points: Number(event?.points) || 0,
+        }
+      },
+      onResult: (data) => {
+        memoryMetrics.value = data
+        finishLoading()
+      },
+    }
+  )
     .catch((error) => {
+      // 用户主动中止（关闭面板/刷新）不算错误
+      if (error?.name === 'AbortError') return
       memoryError.value = String(error?.message || error || '内存分析数据加载失败')
       memoryMetrics.value = null
+      finishLoading()
     })
     .finally(() => {
-      memoryLoading.value = false
+      if (memoryLoading.value) {
+        finishLoading()
+      }
     })
 }
 
@@ -1964,5 +2077,26 @@ body.log-viewer-column-resizing * {
   position: relative;
   height: calc(100vh - 56px);
   overflow: hidden;
+}
+
+/* 内存分析面板：实时进度区 */
+.ticket-log-viewer-dialog .log-memory-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.ticket-log-viewer-dialog .log-memory-progress-text {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #606266;
+  font-size: 13px;
+}
+
+.ticket-log-viewer-dialog .log-memory-eta {
+  color: #409eff;
 }
 </style>

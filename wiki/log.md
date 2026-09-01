@@ -1,8 +1,23 @@
+## [2026-09-01] UI | 工单详情日志拉取 Tab 操作列主次分离
+
+- 触发：管理页操作列已收敛为主次分离布局，工单详情日志拉取 Tab 仍是 6 个圆形按钮平铺，两处体验不一致。
+- 实现：`TicketDetailLogPullTab.vue` 操作列与管理页同构改造——查看常显（下载中显示进度环）、重试悬浮显、其余操作收纳「更多」下拉，删除红字置底；保留该 Tab 原有禁用态语义（执行中不可复制/重试/删除），操作函数复用 Tab 解构出的 composable 方法，新增 `handleRowCommand` 分发；列宽 170px 并 fixed right。
+- 边界：不改变任何操作函数逻辑与权限指令；归档/原始下载仍通过对应列链接下载。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md` 1.3 操作按钮章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-detail-log-pull-action-column.md`。
+
+## [2026-09-01] UI | 日志拉取记录管理页操作列主次分离
+
+- 触发：操作列 6 个彩色圆形按钮平铺（270px 宽）视觉散乱，不符合中后台主流的主次分离规范。
+- 实现：`logPullRecord/index.vue` 操作列改为「查看常显 + 重新拉取悬浮显 + 更多下拉常显收纳（复制/停止/重新拉取/重新下载/删除）」，删除在下拉内红字置底并用分隔线隔离；保留禁用态语义与下载进度环替换逻辑；列宽收敛 170px 并 fixed right。原单行操作函数全部复用，新增 `handleRowCommand` 统一分发。
+- 边界：仅改动日志拉取记录管理页；工单详情日志拉取 Tab 的操作列本次未动，后续可按同样模式收敛。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md` 管理页操作说明与准备进度章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-pull-action-column.md`。
+
 ## [2026-09-01] FEAT | 日志查看器内置内存分析图表
 
 - 触发：排查工单内存问题时需要先拉取日志，再在本地用 plot_memory.py 脚本生成内存曲线图片，链路割裂且结果不便留存。
 - 实现：后端新增 `POST /ticket/logs/memory-metrics`（权限 `ticket:logpull:query`），由新子服务 `TicketLogMemoryMetricsService` 定位解压目录、筛选日志文件并调用新工具 `TicketLogMemoryMetricsUtil` 解析 `Process cpu/mem/threads` 监控行，返回数据点与汇总；前端在 `LogViewerDialog` 工具栏新增"内存分析"按钮，展开新组件 `LogMemoryChartPanel` 用 ECharts 绘制内存（Mb/%）、CPU、线程三张曲线，支持降采样（默认上限 2000 点）与汇总展示。
 - 边界：不改变既有日志准备/搜索链路；文件数量超过 `maxSearchFileCount` 保护阈值时要求指定文件范围；无监控行时返回明确提示而不是兜底伪造数据。
+- 追加流式进度（同日）：新增 `GET /ticket/logs/memory-metrics/stream` NDJSON 事件流（start/progress/result/error），解析工具改为生成器逐块产出数据点与进度，前端展示进度条、当前文件、已提取点数、已耗时与 ETA 线性估算；关闭面板/刷新中止请求；POST 接口保留并复用同一套解析逻辑。
 - 文档：更新 `web/public/docs/ticket_log_viewer.md`（新增 2.5 内存分析、FAQ），新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-viewer-memory-chart.md`。
 - 验证：后端 `ruff check` 通过，解析/合并/降采样/文件筛选冒烟测试通过，控制器路由注册检查通过；前端 `npm run build:prod` 构建通过。
 

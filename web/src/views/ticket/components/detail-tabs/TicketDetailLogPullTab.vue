@@ -232,6 +232,34 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
   }
 
   /**
+   * 处理操作列「更多」下拉的命令分发，统一调用既有的单行操作函数。
+   * @param {string} command 下拉命令标识
+   * @param {object} row 当前日志拉取记录行数据
+   * @returns {void}
+   */
+  function handleRowCommand(command, row) {
+    switch (command) {
+      case 'copy':
+        handleCopyLogPull(row)
+        break
+      case 'stop':
+        stopLogPull(row)
+        break
+      case 'retry':
+        retryLogPull(row)
+        break
+      case 'redownload':
+        redownloadLogPull(row)
+        break
+      case 'delete':
+        deleteLogPull(row)
+        break
+      default:
+        break
+    }
+  }
+
+  /**
    * 打开云端搜索日志查看器。
    * @param {object} row 日志拉取记录行数据。
    * @returns {void}
@@ -587,9 +615,10 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         <span>{{ scope.row.errorMessage || scope.row.contentSummary || '-' }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="操作" width="270" align="center">
+    <el-table-column label="操作" width="170" align="center" fixed="right">
       <template #default="scope">
-        <el-button-group>
+        <div class="log-pull-row-actions">
+          <!-- 下载中显示进度环，替代查看入口 -->
           <el-tooltip
             v-if="getLogViewerDownloadProgress(scope.row)"
             :content="getLogViewerDownloadProgress(scope.row).message"
@@ -603,70 +632,76 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
               :stroke-width="3"
             />
           </el-tooltip>
+          <!-- 高频主操作：查看日志，保持常显 -->
           <el-button
             v-else
-            circle
+            link
             type="primary"
-            @click="handleOpenLogViewer(scope.row)"
+            icon="View"
             title="查看日志"
             aria-label="查看日志"
-            icon="View"
             :disabled="logPullActionLoading"
-          >
-          </el-button>
+            @click="handleOpenLogViewer(scope.row)"
+          >查看</el-button>
+          <!-- 高频主操作：重新拉取，行悬浮时才显示 -->
           <el-button
-            circle
-            type="primary"
-            icon="CopyDocument"
-            title="复制"
-            aria-label="复制"
-            @click="handleCopyLogPull(scope.row)"
-            :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
             v-hasPermi="['ticket:logpull:add']"
-          />
-          <el-button
-            circle
+            class="hover-only-action"
+            link
             type="warning"
             icon="Refresh"
             title="重新拉取"
             aria-label="重新拉取"
+            :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
             @click="retryLogPull(scope.row)"
-            :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
-            v-hasPermi="['ticket:logpull:add']"
-          />
-          <el-button
-            circle
-            type="success"
-            icon="Download"
-            title="重新下载"
-            aria-label="重新下载"
-            @click="redownloadLogPull(scope.row)"
-            :disabled="
-              logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)
-            "
-            v-hasPermi="['ticket:logpull:add']"
-          />
-          <el-button
-            circle
-            type="danger"
-            icon="VideoPause"
-            title="停止"
-            aria-label="停止"
-            @click="stopLogPull(scope.row)"
-            :disabled="logPullActionLoading || !activeLogPullStatuses.includes(scope.row.status)"
-            v-hasPermi="['ticket:logpull:remove']"
-          />
-          <el-button
-            circle
-            type="danger"
-            icon="Delete"
-            title="删除"
-            aria-label="删除"
-            @click="deleteLogPull(scope.row)"
-            :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
-            v-hasPermi="['ticket:logpull:remove']"
-          />
-        </el-button-group>
+          >重试</el-button>
+          <!-- 其余低频操作统一收纳到「更多」下拉，常显保证可达性 -->
+          <el-dropdown trigger="click" @command="(command) => handleRowCommand(command, scope.row)">
+            <el-button link type="primary" icon="MoreFilled" title="更多操作" aria-label="更多操作" />
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  command="copy"
+                  :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+                  v-hasPermi="['ticket:logpull:add']"
+                >
+                  <el-icon><CopyDocument /></el-icon>复制新建
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="stop"
+                  :disabled="logPullActionLoading || !activeLogPullStatuses.includes(scope.row.status)"
+                  v-hasPermi="['ticket:logpull:remove']"
+                >
+                  <el-icon><VideoPause /></el-icon>停止任务
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="retry"
+                  :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+                  v-hasPermi="['ticket:logpull:add']"
+                >
+                  <el-icon><Refresh /></el-icon>重新拉取
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="redownload"
+                  :disabled="logPullActionLoading || (!scope.row.commandResultUrl && !scope.row.storagePath)"
+                  v-hasPermi="['ticket:logpull:add']"
+                >
+                  <el-icon><Download /></el-icon>重新下载
+                </el-dropdown-item>
+                <!-- 危险操作隔离：分隔线 + 标红置底 -->
+                <el-dropdown-item
+                  command="delete"
+                  divided
+                  class="danger-dropdown-item"
+                  :disabled="logPullActionLoading || activeLogPullStatuses.includes(scope.row.status)"
+                  v-hasPermi="['ticket:logpull:remove']"
+                >
+                  <el-icon><Delete /></el-icon>删除
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </template>
     </el-table-column>
   </el-table>
@@ -768,5 +803,34 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
 
   .log-view-download-progress :deep(.el-progress__text) {
     font-size: 8px !important;
+  }
+
+  /* 操作列：主次分离布局，避免按钮平铺撑宽列 */
+  .log-pull-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  /* 次要操作默认隐藏，行悬浮时显现，降低视觉噪音；「更多」下拉保持常显兜底 */
+  .log-pull-row-actions .hover-only-action {
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+
+  .log-pull-record-table :deep(.el-table__row:hover) .hover-only-action,
+  .log-pull-row-actions .hover-only-action:focus-visible {
+    opacity: 1;
+  }
+
+  /* 下拉菜单内危险操作：标红警示 */
+  .log-pull-record-table :deep(.el-dropdown-menu__item.danger-dropdown-item) {
+    color: var(--el-color-danger);
+  }
+
+  .log-pull-record-table :deep(.el-dropdown-menu__item.danger-dropdown-item:not(.is-disabled):hover) {
+    color: var(--el-color-danger);
+    background-color: var(--el-color-danger-light-9);
   }
 </style>

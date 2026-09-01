@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -52,48 +53,78 @@ class TicketLogMemoryMetricsUtil:
     """
 
     @classmethod
-    def parse_file(cls, file_path: Path, relative_name: str) -> list[TicketLogMemoryMetricPoint]:
+    def iter_parse_file(
+        cls, file_path: Path, relative_name: str, progress_interval_lines: int = 2000
+    ) -> Iterator[tuple[str, object]]:
         """
-        解析单个日志文件中的全部资源监控数据点。
+        以生成器方式解析单个日志文件，支持流式产出数据点与进度信号。
 
         实现过程：
         1. 以二进制方式逐行读取，避免日志中混入非法字节导致解码失败；
         2. 用固定正则匹配 ``Process cpu/mem/threads`` 监控行；
-        3. 时间解析失败的行直接跳过，不影响其他数据。
+        3. 每 progress_interval_lines 行对外产出一次 ``("progress", 已处理比例)`` 进度信号，
+            并把攒下的数据点按 ``("points", 批次列表)`` 先行产出，
+            让上层服务可以在大文件解析过程中持续向外推送进度。
+
+        :param file_path: 日志文件绝对路径
+        :param relative_name: 展示用的相对日志路径
+        :param progress_interval_lines: 进度信号间隔行数
+        :return: 迭代器，元素为 ("points", 批次数据点列表) 或 ("progress", 0~1 的处理比例)
+        """
+        file_size = file_path.stat().st_size
+        batch: list[TicketLogMemoryMetricPoint] = []
+        line_no = 0
+        with file_path.open("rb") as source:
+            for raw_line in source:
+                line_no += 1
+                try:
+                    line = raw_line.decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                match = MEMORY_LOG_PATTERN.search(line)
+                if match:
+                    try:
+                        log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S,%f")
+                    except ValueError:
+                        log_time = None
+                    if log_time is not None:
+                        batch.append(
+                            TicketLogMemoryMetricPoint(
+                                time=log_time,
+                                cpu_percent=float(match.group("cpu")),
+                                mem_percent=float(match.group("mem_pct")),
+                                mem_mb=float(match.group("mem_mb")),
+                                threads_active=int(match.group("threads_active")),
+                                threads_max=int(match.group("threads_max")),
+                                source_file=relative_name,
+                            )
+                        )
+                if progress_interval_lines > 0 and line_no % progress_interval_lines == 0:
+                    if batch:
+                        yield "points", batch
+                        batch = []
+                    ratio = min(1.0, source.tell() / file_size) if file_size else 1.0
+                    yield "progress", ratio
+        if batch:
+            yield "points", batch
+        yield "progress", 1.0
+
+    @classmethod
+    def parse_file(cls, file_path: Path, relative_name: str) -> list[TicketLogMemoryMetricPoint]:
+        """
+        解析单个日志文件中的全部资源监控数据点。
+
+        复用 :meth:`iter_parse_file` 的解析逻辑，一次性收集全部数据点，
+        供非流式调用方使用。
 
         :param file_path: 日志文件绝对路径
         :param relative_name: 展示用的相对日志路径
         :return: 当前文件解析出的数据点列表（未排序）
         """
         points: list[TicketLogMemoryMetricPoint] = []
-        try:
-            with file_path.open("rb") as source:
-                for raw_line in source:
-                    try:
-                        line = raw_line.decode("utf-8", errors="ignore")
-                    except Exception:
-                        continue
-                    match = MEMORY_LOG_PATTERN.search(line)
-                    if not match:
-                        continue
-                    try:
-                        log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S,%f")
-                    except ValueError:
-                        continue
-                    points.append(
-                        TicketLogMemoryMetricPoint(
-                            time=log_time,
-                            cpu_percent=float(match.group("cpu")),
-                            mem_percent=float(match.group("mem_pct")),
-                            mem_mb=float(match.group("mem_mb")),
-                            threads_active=int(match.group("threads_active")),
-                            threads_max=int(match.group("threads_max")),
-                            source_file=relative_name,
-                        )
-                    )
-        except OSError:
-            # 读取失败直接抛给上层服务，由服务统一记录日志并决定是否跳过
-            raise
+        for kind, payload in cls.iter_parse_file(file_path, relative_name):
+            if kind == "points":
+                points.extend(payload)  # type: ignore[arg-type]
         return points
 
     @classmethod
