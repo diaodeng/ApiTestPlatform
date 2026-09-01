@@ -2075,6 +2075,8 @@ class TicketService:
                             aiModelName=message_object.ai_model_name,
                             forceRefresh=True,
                             extraInstruction=content,
+                            # 本条消息本身已作为 question 写入消息流，任务创建时不再重复写追问消息
+                            skipQuestionMessage=True,
                         )
                         ai_result = TicketAiAnalysisService.create_analysis_task_services(
                             query_db,

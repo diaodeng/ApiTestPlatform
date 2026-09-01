@@ -349,21 +349,21 @@
           <el-descriptions-item label="总 Token">
             {{ aiTokenSummary ? formatTokenCount(aiTokenSummary.totalTokenCount) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="摘要" :span="3">{{
-            latestConclusion.summary || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="根因" :span="3">{{
-            latestConclusion.rootCause || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="解决方案" :span="3">{{
-            latestConclusion.solution || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="预防建议" :span="3">{{
-            latestConclusion.prevention || '-'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="风险说明" :span="3">{{
-            latestConclusion.risk || '-'
-          }}</el-descriptions-item>
+          <el-descriptions-item label="摘要" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.summary || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="根因" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.rootCause || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="解决方案" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.solution || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="预防建议" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.prevention || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="风险说明" :span="3">
+            <div class="pre-wrap-text">{{ latestConclusion.risk || '-' }}</div>
+          </el-descriptions-item>
           <el-descriptions-item label="负责人" :span="3">{{
             latestConclusion.owner || '-'
           }}</el-descriptions-item>
@@ -443,6 +443,13 @@
 </template>
 
 <style scoped>
+  /* AI 结论类文本保留换行与空格，避免多段文案挤成一行 */
+  .pre-wrap-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.65;
+  }
+
   .similar-item {
     padding: 10px 0;
     border-bottom: 1px solid #ebeef5;

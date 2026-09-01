@@ -2940,6 +2940,25 @@ class TicketAiAnalysisService:
         try:
             cls._mark_repo_default_if_needed(db, mapping)
             TicketAiDao.add_task(db, task)
+            # 实际创建新任务时，把用户本次分析的重点说明（追问内容）写入消息流，
+            # 供 AI 分析记录区完整展示“我的追问 → AI分析”链路。
+            # 协同消息链路已提前写入 question 消息（skip_question_message=True），此处不再重复。
+            extra_instruction_text = str(request.extra_instruction or "").strip()
+            if not request.skip_question_message and extra_instruction_text:
+                TicketDao.add_message(
+                    db,
+                    TicketMessage(
+                        ticket_id=ticket.ticket_id,
+                        role="user",
+                        message_type="question",
+                        content=extra_instruction_text,
+                        reference_type="ai_analysis",
+                        reference_id=task.task_id,
+                        created_by_id=cls._user_id(current_user),
+                        created_by_name=cls._user_name(current_user) or "system",
+                        create_time=now,
+                    ),
+                )
             TicketDao.add_event(
                 db,
                 TicketEvent(

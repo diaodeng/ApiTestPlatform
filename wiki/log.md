@@ -1,3 +1,13 @@
+## [2026-09-01] FIX | 工单概览AI结论换行保留与AI分析追问记录补全
+- 触发：用户反馈工单详情页概览tab的摘要/根因/解决方案/预防建议/风险说明挤成一行；AI分析tab记录只显示AI结果看不到用户追问（如prod工单INC00001904725，任务2045329100889088的 analysis_context.extraInstruction 中明确有追问文本，但 ticket_message 无对应 question 记录）。
+- 架构层：工单域 / 工单详情前端 + AI分析任务创建服务。
+- 根因1（格式）：`TicketDetailOverviewTab.vue` 五个结论字段直接 `{{ }}` 插值渲染，HTML 折叠换行；AI分析tab的 `.record-content` 有 `white-space: pre-wrap` 所以正常。
+- 根因2（追问丢失）：两条链路行为不一致——AI分析tab追问框先写 question 消息再触发分析（ticket_service.add_message），而“发起AI分析”弹窗走 `create_analysis_task_services` 只把 extraInstruction 放进提示词和 analysis_context，从不写 question 消息。
+- 实现：概览tab五个字段改用 `.pre-wrap-text`（pre-wrap + break-word + line-height 1.65）容器；`create_analysis_task_services` 在 `TicketAiDao.add_task` 同一事务内补写 `role=user, message_type=question` 消息（content=extraInstruction，reference_type=ai_analysis，reference_id=task_id）；请求模型新增 `skipQuestionMessage` 字段，协同消息链路（已提前写 question）传 True 防重复；幂等命中/执行中分支在写消息前 return、重试只更新状态、日志拉取自动分析无 extraInstruction，均不产生重复或空消息。
+- 验证：ruff 通过；`test_ticket_ai_token_usage.py` + `test_ticket_log_pull_retry_guard.py` 21 用例通过；`vite build --mode production` 构建成功；prod 库确认 INC00001904725 的 extraInstruction 完整保留在任务上下文。
+- 文档：更新 `web/public/docs/ticket_detail.md`（主概览格式说明、AI分析记录追问说明），新增 `web/public/docs/updates/2026-09-01-ticket-overview-prewrap-and-ai-question-message.md`。
+- 后续：存量任务的追问仍只在任务详情 analysis_context 中，不补写消息；需重启后端并发布前端生效。
+
 ## [2026-09-01] FIX | AI执行审计类型中文显示与详情按钮权限
 - 触发：AI执行审计页面任务类型下拉只有两个中文选项、列表显示英文编码；来源类型同样显示英文（如 `external_sync_sync_extract`）；操作列看不到任何按钮。
 - 架构层：系统管理域 / AI执行审计 / 前端页面 + 权限注册。
