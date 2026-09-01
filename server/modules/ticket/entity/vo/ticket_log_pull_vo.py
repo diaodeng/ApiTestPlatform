@@ -766,6 +766,7 @@ class TicketLogMemoryMetricsModel(TicketLogPullBaseModel):
     skipped_file_count: int = Field(default=0, description="读取失败被跳过的文件数量")
     truncated: bool = Field(default=False, description="数据点是否因超过上限被降采样")
     message: str | None = Field(default=None, description="无数据或异常情况下的提示信息")
+    elapsed_ms: int | None = Field(default=None, description="本次分析耗时（毫秒）")
     start_time: datetime | None = Field(default=None, description="数据起始时间")
     end_time: datetime | None = Field(default=None, description="数据结束时间")
     mem_mb_min: float | None = Field(default=None, description="内存占用量最小值（Mb）")
@@ -778,3 +779,15 @@ class TicketLogMemoryMetricsModel(TicketLogPullBaseModel):
     threads_active_max: int | None = Field(default=None, description="活跃线程数最大值")
     threads_max_max: int | None = Field(default=None, description="线程数上限最大值")
     points: list[TicketLogMemoryMetricPointModel] = Field(default_factory=list, description="资源监控数据点列表")
+
+
+@as_query
+class TicketLogMemoryMetricsQueryModel(TicketLogPullBaseModel):
+    """
+    工单日志内存分析流式接口查询参数模型。
+    """
+
+    ticket_id: int = Field(default=0, description="工单ID，0 表示无关联工单仅凭记录ID定位")
+    record_id: int | None = Field(default=None, description="指定日志拉取记录ID")
+    max_points: int = Field(default=2000, ge=100, le=20000, description="返回数据点上限，超过后自动等距降采样")
+    files: str = Field(default="", description="参与分析的相对日志文件路径，多个用英文逗号分隔，空表示全部日志文件")

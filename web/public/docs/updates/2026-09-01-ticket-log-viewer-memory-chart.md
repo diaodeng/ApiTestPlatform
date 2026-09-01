@@ -18,6 +18,7 @@
 - 新增纯解析工具 `server/modules/ticket/util/ticket_log_memory_metrics_util.py`，负责监控行正则提取、合并去重、等距降采样与汇总计算。
 - 新增子服务 `server/modules/ticket/service/log_pull/ticket_log_memory_metrics_service.py`，负责解压目录定位、文件筛选（含数量保护）与业务编排，目录规则与日志查看器一致。
 - 前端新增图表组件 `web/src/components/ticket/LogMemoryChartPanel.vue`，并在 `web/src/components/ticket/LogViewerDialog.vue` 工具栏与面板区域接入。
+- 追加流式进度能力：新增 `GET /ticket/logs/memory-metrics/stream`（NDJSON 事件流 start/progress/result/error），解析工具改为生成器逐块产出数据点与进度信号，前端实时展示进度条、当前文件、已提取点数、已耗时与预计剩余时间（ETA 线性估算）；关闭面板或刷新会中止进行中的分析请求。原 POST 接口保留，复用同一套解析逻辑。
 
 ## 涉及文件
 

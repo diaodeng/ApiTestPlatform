@@ -835,6 +835,50 @@ export async function streamTicketLogPullContent(recordId, query, handlers = {})
   }
 }
 
+// 流式提取工单日志内存分析数据，按 NDJSON 事件回调解析进度与结果
+export async function streamTicketLogMemoryMetrics(query, handlers = {}) {
+  const baseURL = window.__APP_CONFIG__?.BASE_API || import.meta.env.VITE_APP_BASE_API || '';
+  const queryText = tansParams(sanitizeQueryParams(query || {})).replace(/&$/, '');
+  const url = `${baseURL}/ticket/logs/memory-metrics/stream${queryText ? `?${queryText}` : ''}`;
+  const headers = {};
+  if (getToken()) {
+    headers.Authorization = `Bearer ${getToken()}`;
+  }
+  const response = await fetch(url, { method: 'GET', headers, signal: handlers.signal });
+  if (!response.ok || !response.body) {
+    throw new Error(`内存分析流式读取失败: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  const handleLine = rawLine => {
+    const line = String(rawLine || '').trim();
+    if (!line) return;
+    const event = JSON.parse(line);
+    if (event.type === 'start') {
+      handlers.onStart?.(event);
+    } else if (event.type === 'progress') {
+      handlers.onProgress?.(event);
+    } else if (event.type === 'result') {
+      handlers.onResult?.(event.data || null);
+    } else if (event.type === 'error') {
+      throw new Error(event.message || '内存分析失败');
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    lines.forEach(handleLine);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    handleLine(buffer);
+  }
+}
+
 // 准备工单日志查看目录
 export function prepareTicketLogs(ticketId, recordId) {
   return request({

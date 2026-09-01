@@ -15,6 +15,7 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogErrorsRequestModel,
+    TicketLogMemoryMetricsQueryModel,
     TicketLogMemoryMetricsRequestModel,
     TicketLogPrepareRequestModel,
     TicketLogPullContentQueryModel,
@@ -628,6 +629,38 @@ async def get_ticket_log_memory_metrics(
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))
+
+
+@ticketLogPullController.get(
+    "/logs/memory-metrics/stream",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:logpull:query"))],
+)
+async def stream_ticket_log_memory_metrics(
+    request: Request,
+    query: TicketLogMemoryMetricsQueryModel = Depends(TicketLogMemoryMetricsQueryModel.as_query),
+    query_db: Session = Depends(get_db),
+):
+    """
+    流式提取工单日志进程资源监控数据接口。
+
+    以 NDJSON 事件流边扫描边推送进度（start/progress/result/error），
+    供日志查看器的内存分析面板实时展示解析进度与预计剩余时间。
+    :param request: 请求对象
+    :param query: 内存分析查询参数
+    :param query_db: 数据库会话，用于读取日志搜索资源保护配置
+    :return: NDJSON 事件流
+    """
+    del request
+    metrics_object = TicketLogMemoryMetricsRequestModel(
+        ticket_id=query.ticket_id,
+        record_id=query.record_id,
+        max_points=query.max_points,
+        files=[item.strip() for item in str(query.files or "").replace("，", ",").split(",") if item.strip()],
+    )
+    return StreamingResponse(
+        TicketLogMemoryMetricsService.iter_collect_metrics_events(metrics_object, query_db),
+        media_type="application/x-ndjson; charset=utf-8",
+    )
 
 
 @ticketLogPullController.get(
