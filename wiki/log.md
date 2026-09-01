@@ -5,6 +5,13 @@
 - 边界：不改变任何操作函数逻辑与权限指令；归档/原始下载仍通过对应列链接下载。
 - 文档：更新 `web/public/docs/ticket_log_viewer.md` 1.3 操作按钮章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-detail-log-pull-action-column.md`。
 
+## [2026-09-01] FIX | 内存分析图表空白修复（成功态引入的挂载时序问题）
+
+- 触发：完成态改动上线后，分析完成只显示汇总标签、三张曲线图空白。
+- 根因：onResult 设置 metrics 时图表组件因成功态停留尚未挂载，watch 触发时 refs 为空渲染被跳过；1.5 秒后组件挂载不再触发 watch。
+- 修复：`LogMemoryChartPanel` 增加 `onMounted` 时数据已就绪则主动 `renderCharts()`，覆盖"数据先到、组件后挂载"场景。
+- 验证：`npm run build:prod` 构建通过。
+
 ## [2026-09-01] FIX | 日志查看器内存分析完成态图标与扫描性能优化
 
 - 触发：内存分析进度条到 100% 后不展示成功图标（完成瞬间进度区直接隐藏）；用户询问是否应改用 rg/grep 外部进程过滤日志。

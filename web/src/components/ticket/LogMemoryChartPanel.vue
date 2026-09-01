@@ -30,7 +30,7 @@
  * 使用 ECharts 渲染日志中 Process cpu/mem/threads 资源监控数据的
  * 内存曲线、CPU 曲线和线程曲线，数据由日志查看器弹窗负责加载。
  */
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 
 const props = defineProps({
@@ -187,6 +187,15 @@ watch(
   },
   { deep: false }
 )
+
+// 挂载时如果数据已就绪也主动渲染一次：
+// 数据先到、组件后挂载（如弹窗内成功态停留结束后才显示图表）的场景下，
+// watch 不会再次触发，必须在挂载完成后补一次渲染，否则画布空白
+onMounted(() => {
+  if (props.metrics && props.metrics.total) {
+    renderCharts()
+  }
+})
 
 onBeforeUnmount(disposeCharts)
 </script>
