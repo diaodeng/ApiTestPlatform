@@ -442,6 +442,13 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     F("admin.system.config.remove", "参数删除", "admin.system.config", "system:config:remove", 4),
     F("admin.system.config.export", "参数导出", "admin.system.config", "system:config:export", 5),
     F("admin.system.aiprompt.query", "AI提示词查询", "admin.system.aiprompt", "system:aiprompt:query", 1),
+    F(
+        "admin.system.aitaskexecution.query",
+        "AI执行审计详情",
+        "admin.system.aitaskexecution",
+        "system:aitaskexecution:query",
+        1,
+    ),
     F("admin.system.aiprompt.add", "AI提示词新增", "admin.system.aiprompt", "system:aiprompt:add", 2),
     F("admin.system.aiprompt.edit", "AI提示词修改", "admin.system.aiprompt", "system:aiprompt:edit", 3),
     F("admin.system.aiprompt.remove", "AI提示词删除", "admin.system.aiprompt", "system:aiprompt:remove", 4),

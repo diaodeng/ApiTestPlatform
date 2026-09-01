@@ -128,16 +128,52 @@ import { getAiTaskExecution, listAiTaskExecution } from '@/api/system/aitaskexec
 
 const { proxy } = getCurrentInstance()
 
+// 任务类型枚举：与后端审计写入点保持一致（ticket_light_ai_service / ticket_ai_analysis_service /
+// ticket_embedding_service / ticket_topic_stats_service / 自动分类链路），未知类型由 formatTaskType 兜底显示原值。
 const taskTypeOptions = [
-  { label: '工单翻译', value: 'ticket_translate' },
+  { label: '同步统一提取', value: 'ticket_sync_extract' },
+  { label: '翻译', value: 'ticket_translate' },
+  { label: '分类统计', value: 'ticket_stat_classify' },
+  { label: '自动分类', value: 'ticket_category_classify' },
   { label: '知识提炼', value: 'ticket_knowledge_extract' },
+  { label: '标题总结', value: 'ticket_title_summary' },
+  { label: '专题分类批次', value: 'ticket_topic_classify' },
+  { label: '工单AI分析', value: 'ticket_ai_analysis' },
+  { label: '向量化Embedding', value: 'ticket_embedding' },
 ]
 
+// 来源类型静态枚举：来源类型多由“同步场景 + 动作”拼接生成（如 external_sync_sync_extract），
+// 动态部分由 SOURCE_SCENE_LABELS / SOURCE_ACTION_LABELS 规则解析。
 const sourceTypeOptions = [
   { label: '工单', value: 'ticket' },
-  { label: '日志拉取', value: 'log_pull' },
-  { label: '消息', value: 'message' },
-  { label: '其他', value: 'other' },
+  { label: 'AI测试', value: 'ai_test' },
+  { label: 'AI分析', value: 'ai_analysis' },
+  { label: '飞书专题', value: 'feishu_topic' },
+  { label: '批量重分类', value: 'ticket_batch_reclassify' },
+  { label: '手动翻译', value: 'ticket_manual_translate' },
+  { label: '外部同步-统一提取', value: 'external_sync_sync_extract' },
+  { label: '外部同步-自动分类', value: 'external_sync_auto_category' },
+  { label: '外部同步-状态变更自动分类', value: 'external_sync_status_change_auto_category' },
+  { label: '多维表格同步-统一提取', value: 'bitable_pull_sync_extract' },
+  { label: '多维表格同步-自动分类', value: 'bitable_pull_auto_category' },
+  { label: '多维表格同步-状态变更自动分类', value: 'bitable_pull_status_change_auto_category' },
+  { label: '远程同步-统一提取', value: 'remote_pull_sync_extract' },
+  { label: '远程同步-自动分类', value: 'remote_pull_auto_category' },
+  { label: '远程同步-状态变更自动分类', value: 'remote_pull_status_change_auto_category' },
+]
+
+// 来源类型中同步场景前缀的中文标签。
+const SOURCE_SCENE_LABELS = {
+  external_sync: '外部同步',
+  bitable_pull: '多维表格同步',
+  remote_pull: '远程同步',
+}
+
+// 来源类型中动作后缀的中文标签，长后缀必须放在前面优先匹配。
+const SOURCE_ACTION_LABELS = [
+  { suffix: 'status_change_auto_category', label: '状态变更自动分类' },
+  { suffix: 'auto_category', label: '自动分类' },
+  { suffix: 'sync_extract', label: '统一提取' },
 ]
 
 const statusOptions = [
@@ -175,8 +211,19 @@ function formatTaskType(taskType) {
 }
 
 function formatSourceType(sourceType) {
+  if (!sourceType) return '-'
   const item = sourceTypeOptions.find(row => row.value === sourceType)
-  return item ? item.label : sourceType || '-'
+  if (item) return item.label
+  // 规则兜底：{场景}_{动作} 拼接的来源类型解析为“场景-动作”中文，避免新增场景后再显示英文原值
+  for (const [scene, sceneLabel] of Object.entries(SOURCE_SCENE_LABELS)) {
+    if (!sourceType.startsWith(`${scene}_`)) continue
+    for (const action of SOURCE_ACTION_LABELS) {
+      if (sourceType === `${scene}_${action.suffix}`) {
+        return `${sceneLabel}-${action.label}`
+      }
+    }
+  }
+  return sourceType
 }
 
 function formatStatus(status) {

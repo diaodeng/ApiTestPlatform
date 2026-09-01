@@ -208,7 +208,7 @@ Provider 未启用时，提交任务会直接拒绝。Provider 和 Agent 都为�
 
 | 字段 | 内容 |
 |------|------|
-| 任务类型 | `ticket_translate`、`ticket_knowledge_extract` 等 |
+| 任务类型 | `ticket_translate`、`ticket_knowledge_extract` 等（见下方任务类型说明） |
 | 来源信息 | 来源类型、来源 ID |
 | 调用配置 | Provider、提示词、模型、Base URL |
 | 请求内容 | 发送给 AI 的完整请求 |
@@ -217,7 +217,31 @@ Provider 未启用时，提交任务会直接拒绝。Provider 和 Agent 都为�
 | 状态 | `pending` / `running` / `success` / `failed` / `skipped` |
 | 错误信息 | 失败原因 |
 
-### 7.2 Token 用量统计口径
+### 7.2 任务类型与来源类型说明
+
+页面上的任务类型、来源类型下拉和列表均显示中文，无法识别的类型会显示原始英文值。
+
+**任务类型**（列表页显示的中文名称）：
+
+| 编码 | 页面显示 | 说明 |
+|------|---------|------|
+| `ticket_sync_extract` | 同步统一提取 | 工单同步时从标题、描述和原始入参提取分类、门店、POS/SCO 等字段 |
+| `ticket_translate` | 翻译 | 工单标题和描述翻译为中文 |
+| `ticket_stat_classify` | 分类统计 | 输出问题性质、工单类型、细分问题等结构化分类字段 |
+| `ticket_category_classify` | 自动分类 | 工单同步后自动分类链路 |
+| `ticket_knowledge_extract` | 知识提炼 | 基于工单上下文提炼知识库案例 |
+| `ticket_title_summary` | 标题总结 | 根据工单描述生成简洁标题 |
+| `ticket_topic_classify` | 专题分类批次 | 飞书专题工单 AI 分类批次汇总 |
+| `ticket_ai_analysis` | 工单AI分析 | 工单 AI 分析（Agent/模型分析任务） |
+| `ticket_embedding` | 向量化Embedding | 工单向量化调用 |
+| `*_test`（如 `ticket_translate_test`） | 原编码显示 | 轻量 AI 测试工作台产生的测试记录，带 `_test` 后缀 |
+
+**来源类型**分为两类：
+
+- 固定来源：`ticket`（工单）、`ai_test`（AI测试）、`ai_analysis`（AI分析）、`feishu_topic`（飞书专题）、`ticket_batch_reclassify`（批量重分类）、`ticket_manual_translate`（手动翻译）。
+- 同步场景拼接来源：格式为 `{同步场景}_{动作}`，页面显示为“场景-动作”中文，例如 `external_sync_sync_extract` 显示为“外部同步-统一提取”。同步场景有：`external_sync`（外部同步）、`bitable_pull`（多维表格同步）、`remote_pull`（远程同步）；动作有：`sync_extract`（统一提取）、`auto_category`（自动分类）、`status_change_auto_category`（状态变更自动分类）。
+
+### 7.3 Token 用量统计口径
 
 - 轻量 AI 每次成功调用（翻译、知识提炼、分类统计、同步提取、标题总结）都会把上游返回的 Token 用量记录到审计记录的 `token_usage` 字段：OpenAI Chat 协议为 `prompt_tokens/completion_tokens/total_tokens`，Responses 协议为 `input_tokens/output_tokens/total_tokens`，Anthropic 协议为 `input_tokens/output_tokens`。
 - 上游未返回用量时 `token_usage` 为空，不影响调用本身。
@@ -225,11 +249,12 @@ Provider 未启用时，提交任务会直接拒绝。Provider 和 Agent 都为�
 - 外部向量化（Embedding）调用同样进入审计，任务类型为 `ticket_embedding`，用量记录上游返回的 `prompt_tokens`；本地哈希向量化不调外部接口，不产生审计记录。
 - 专题工单 AI 分类（独立于工单分类统计的飞书群链路）新增批次审计：每个批次（一次统计任务执行）真实发生 AI 调用时写入一条汇总审计记录，任务类型 `ticket_topic_classify`，`token_usage` 为批次内所有 AI 分类调用用量的累加值；批次内全部调用失败落 `failed` 记录；关键词模式等零调用场景不落库（批次执行情况见任务日志）。
 
-### 7.2 页面功能
+### 7.4 页面功能与权限
 
 - 按任务类型、来源类型、Provider、状态和关键字分页查询
 - 查看单条审计详情（请求/响应/Token/错误）
 - 只读页面，不提供编辑和删除
+- 权限：列表使用 `system:aitaskexecution:list`，详情按钮和详情接口使用 `system:aitaskexecution:query`（菜单“AI执行审计详情”按钮权限）。若角色未授予该按钮权限，列表操作列不会显示“详情”按钮；需要由管理员在角色管理中勾选授权。
 
 ---
 

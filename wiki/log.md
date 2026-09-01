@@ -1,3 +1,14 @@
+## [2026-09-01] FIX | AI执行审计类型中文显示与详情按钮权限
+- 触发：AI执行审计页面任务类型下拉只有两个中文选项、列表显示英文编码；来源类型同样显示英文（如 `external_sync_sync_extract`）；操作列看不到任何按钮。
+- 架构层：系统管理域 / AI执行审计 / 前端页面 + 权限注册。
+- 根因1（英文编码）：前端 `aitaskexecution/index.vue` 枚举写死且过时——任务类型只有 `ticket_translate`/`ticket_knowledge_extract` 两项，来源类型 4 项与实际写入值完全对不上；`formatTaskType`/`formatSourceType` 匹配不到时回显英文原值。数据库实际分布：task_type 有 `ticket_sync_extract`(1688)/`ticket_translate`(603)/`ticket_stat_classify`(366)/`ticket_category_classify`(16)/`ticket_embedding`(2)；source_type 以 `{同步场景}_{动作}` 拼接为主（external_sync_sync_extract、bitable_pull_sync_extract、*_auto_category 等）。
+- 根因2（无按钮）：详情按钮绑定 `system:aitaskexecution:query`，但 `perms.py` 只注册了 `...:list`，query 权限字符不存在；`v-hasPermi` 对无权限用户直接移除按钮节点。后端详情接口本就校验 query 权限，故正确修法是补权限定义而非改权限字符。
+- 实现：前端补全 9 种任务类型 + 固定/拼接两类来源类型枚举，并新增 `{场景}_{动作}` 规则翻译（SOURCE_SCENE_LABELS/SOURCE_ACTION_LABELS，场景含 external_sync/bitable_pull/remote_pull，动作含 sync_extract/auto_category/status_change_auto_category）；后端 `perms.py` 新增 `admin.system.aitaskexecution.query` F 按钮定义（挂在 aitaskexecution 菜单下，order=1），启动时 sync_registered_menus 自动落库。
+- 数据操作：已通过最小 app 执行 sync_registered_menus 落库新按钮（menu_id=295，parent=245）；参照 `system:aiprompt:query` 授权惯例，将 menu_id=295 INSERT 授权给管理员角色（role_id=3）；超管角色（role_id=1）走 `*:*:*` 通配无需授权。
+- 验证：`uv run ruff check module_admin/perms.py` 通过；MENU_DEFS 无重复 key；`vite build --mode production` 构建成功；数据库确认按钮菜单与角色授权生效。
+- 文档：更新 `web/public/docs/ai_ticket_light_ai.md` 第七章（新增 7.2 任务类型与来源类型说明表、7.4 权限说明），新增 `web/public/docs/updates/2026-09-01-aitask-execution-type-labels-and-detail-permission.md`。
+- 后续：普通角色如需看详情按钮，需在角色管理勾选“AI执行审计详情”；后续新增任务类型/来源类型时前端枚举需同步维护，拼接来源可依赖规则翻译兜底。
+
 ## [2026-08-31] FIX | 工单AI分析结果未转义引号修复
 - 触发：工单 INC00001904725 第二次分析失败（task_2045268316707840，prod，Provider=openai_com/deepseek-v4-flash，与 08-28 失败的 shuidi 不同）：Worker 正常退出且 result.json 内容完整，但报 `AI_WORKER_RESULT_UNPARSEABLE`，文本预览以 ```json 开头。
 - 架构层：工单域 / 深度AI分析 / Agent 端结果解析。
