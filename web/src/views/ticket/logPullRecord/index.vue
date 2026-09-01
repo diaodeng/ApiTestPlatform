@@ -217,6 +217,17 @@
               @click="openLogViewer(scope.row)"
               v-hasPermi="['ticket:logpull:query']"
             >查看</el-button>
+            <!-- 中频操作：资源曲线，行悬浮时显示，点击打开全局资源监控曲线 -->
+            <el-button
+              v-hasPermi="['ticket:logpull:query']"
+              class="hover-only-action"
+              link
+              type="success"
+              icon="TrendCharts"
+              title="资源曲线"
+              aria-label="资源曲线"
+              @click="openResourceCurve(scope.row)"
+            >曲线</el-button>
             <!-- 高频主操作：重新拉取，行悬浮时才显示 -->
             <el-button
               v-hasPermi="['ticket:logpull:add']"
@@ -364,6 +375,7 @@
     </el-dialog>
 
     <LogViewerDialog v-model="viewerVisible" :record="viewerRecord" />
+    <LogResourceCurveDialog v-model="curveVisible" :record="curveRecord" />
 
     <el-dialog
       v-model="storeConfigOpen"
@@ -518,6 +530,7 @@ import { saveAs } from 'file-saver'
 import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue'
+import LogResourceCurveDialog from '@/components/ticket/LogResourceCurveDialog.vue'
 import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
 import {
   applyLogPullRecordToForm,
@@ -548,6 +561,9 @@ const actionLoading = ref(false)
 const createOpen = ref(false)
 const viewerVisible = ref(false)
 const viewerRecord = ref(null)
+// 资源曲线弹窗状态
+const curveVisible = ref(false)
+const curveRecord = ref(null)
 const showSearch = ref(true)
 const recordList = ref([])
 const total = ref(0)
@@ -640,6 +656,16 @@ function createDefaultForm() {
 function openLogViewer(row) {
   viewerRecord.value = row
   viewerVisible.value = true
+}
+
+/**
+ * 打开日志拉取记录的资源曲线弹窗。
+ * @param {object} row 日志拉取记录行数据
+ * @returns {void} 无返回值
+ */
+function openResourceCurve(row) {
+  curveRecord.value = row
+  curveVisible.value = true
 }
 
 // 打开关联工单详情：优先通过命名路由生成站内地址，兼容打包后路径不一致的场景

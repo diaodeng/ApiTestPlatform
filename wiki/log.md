@@ -12,6 +12,14 @@
 - 修复：`LogMemoryChartPanel` 增加 `onMounted` 时数据已就绪则主动 `renderCharts()`，覆盖"数据先到、组件后挂载"场景。
 - 验证：`npm run build:prod` 构建通过。
 
+## [2026-09-01] FEAT | 日志内存分析搜索管道引擎升级与图表日志双向联动
+
+- 触发：内存分析展开后日志详情被顶出可视区看不到；用户要求曲线点与日志联动跳转，并确认按"完全版"实施（复用 rg 搜索管道 + 双向联动 + 列表页独立入口）。
+- 后端：`TicketLogMemoryMetricsService` 扫描层切换为逐文件调用 `LogService.search`（关键字 `Process cpu:`、with_context=False、rg 优先/Python 降级、并发与字节保护复用）；Util 数据点新增 line/epoch 与 `parse_hit_line`；VO 新增 total_hits/parsed_count/skipped_line_count；解析失败跳过计数，2 万点硬上限截断；NDJSON 流式进度保留（文件粒度）。
+- 前端：弹窗内容区可滚动 + 工具栏吸顶；内存面板最小化/展开、点日志行自动最小化；`LogMemoryChartPanel` 曲线点 click 回抛 file/line、暴露 highlightTime 画 markLine、lttb 采样；点曲线跳日志上下文、点日志行画标记线；内存分析透传当前文件范围过滤；新增 `LogResourceCurveDialog.vue`（曲线+数据点分页列表，点击打开完整日志查看器 jumpToContext 跳行）；列表页操作列新增"曲线"入口。
+- 验证：后端 ruff 通过 + 打桩冒烟（多文件命中、解析失败跳过、统计与行号正确）；前端 `npm run build:prod` 通过。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md`，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-resource-curve-linkage.md`。
+
 ## [2026-09-01] FIX | 日志查看器内存分析完成态图标与扫描性能优化
 
 - 触发：内存分析进度条到 100% 后不展示成功图标（完成瞬间进度区直接隐藏）；用户询问是否应改用 rg/grep 外部进程过滤日志。

@@ -752,6 +752,8 @@ class TicketLogMemoryMetricPointModel(TicketLogPullBaseModel):
     threads_active: int = Field(description="当前活跃线程数")
     threads_max: int = Field(description="线程数上限")
     source_file: str | None = Field(default=None, description="数据来源的相对日志文件路径")
+    line: int = Field(default=0, description="命中行号（1 开始），用于前端点击曲线点跳转日志上下文")
+    epoch: float = Field(default=0.0, description="日志时间的 epoch 秒（naive 本地时间，随服务器时区）")
 
 
 class TicketLogMemoryMetricsModel(TicketLogPullBaseModel):
@@ -765,6 +767,9 @@ class TicketLogMemoryMetricsModel(TicketLogPullBaseModel):
     scan_file_count: int = Field(default=0, description="本次扫描的日志文件数量")
     skipped_file_count: int = Field(default=0, description="读取失败被跳过的文件数量")
     truncated: bool = Field(default=False, description="数据点是否因超过上限被降采样")
+    total_hits: int = Field(default=0, description="搜索管道命中的监控行总数")
+    parsed_count: int = Field(default=0, description="解析成功的数据点总数（降采样前）")
+    skipped_line_count: int = Field(default=0, description="命中但解析失败被跳过的行数")
     message: str | None = Field(default=None, description="无数据或异常情况下的提示信息")
     elapsed_ms: int | None = Field(default=None, description="本次分析耗时（毫秒）")
     start_time: datetime | None = Field(default=None, description="数据起始时间")

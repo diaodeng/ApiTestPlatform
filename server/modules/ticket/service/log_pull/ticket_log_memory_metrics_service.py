@@ -2,7 +2,8 @@
 工单日志内存分析子服务。
 
 负责从已准备完成的日志解压目录中提取 ``Process cpu/mem/threads`` 资源监控数据，
-供日志查看器的内存分析图表使用。文件解析逻辑下沉到
+供日志查看器的内存分析图表使用。扫描层复用日志搜索管道（:class:`LogService.search`，
+rg 流式优先、缺失 rg 自动降级 Python），行解析逻辑下沉到
 :mod:`modules.ticket.util.ticket_log_memory_metrics_util`，本服务只做目录定位、
 文件筛选与业务编排。
 """
@@ -25,6 +26,7 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import (
     TicketLogMemoryMetricsRequestModel,
 )
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.log_pull.ticket_log_service import LogService
 from modules.ticket.util.ticket_log_memory_metrics_util import (
     TicketLogMemoryMetricPoint,
     TicketLogMemoryMetricsUtil,
@@ -39,6 +41,13 @@ _SKIP_SUFFIXES = {".zip", ".gz", ".tgz", ".tar", ".7z", ".rar", ".lineidx", ".pn
 
 # 内存分析默认最多解析的日志文件数量，防止误开超大目录导致扫描过久
 _DEFAULT_MAX_FILE_COUNT = 200
+
+# 原始数据点硬上限：解析成功点数达到该值即停止扫描并标记 truncated，
+# 防止秒级监控 + 多天日志把响应体和前端内存撑爆
+_MAX_RAW_POINT_COUNT = 20000
+
+# 内存分析固定搜索关键字：与监控行格式强相关，Util 正则调整时必须同步
+_MEMORY_SEARCH_KEYWORD = "Process cpu:"
 
 
 class TicketLogMemoryMetricsService:
@@ -178,12 +187,21 @@ class TicketLogMemoryMetricsService:
         point_lists: list[list[TicketLogMemoryMetricPoint]] = []
         skipped_files = 0
         processed_bytes = 0
+        # 搜索/解析统计：命中行总数、解析成功点数、解析失败跳过行数
+        total_hits = 0
+        parsed_count = 0
+        skipped_line_count = 0
+        # 是否因达到原始点数硬上限提前停止扫描
+        reach_cap = False
 
         def build_progress_event(
             file_index: int, file_name: str, file_percent: float
         ) -> dict[str, Any]:
             """
             构建进度事件，换算整体百分比并汇总已提取的数据点数量。
+
+            扫描引擎切换为日志搜索管道后，file_percent 只有文件级粒度
+            （搜索完成后一次性 100），不再提供单文件内行级百分比。
 
             :param file_index: 当前文件序号（从 1 开始）
             :param file_name: 当前文件相对路径
@@ -198,22 +216,48 @@ class TicketLogMemoryMetricsService:
                 "fileCount": len(log_files),
                 "percent": percent,
                 "filePercent": file_percent,
-                "points": sum(len(item) for item in point_lists),
+                "points": parsed_count,
                 "skippedFileCount": skipped_files,
+                "skippedLineCount": skipped_line_count,
+                "totalHits": total_hits,
             }
 
         for index, (absolute_path, relative_name) in enumerate(log_files):
+            if reach_cap:
+                break
             file_size = absolute_path.stat().st_size
             file_points: list[TicketLogMemoryMetricPoint] = []
             try:
-                for kind, payload in TicketLogMemoryMetricsUtil.iter_parse_file(absolute_path, relative_name):
-                    if kind == "points":
-                        file_points.extend(payload)  # type: ignore[arg-type]
-                    else:
-                        ratio = min(1.0, max(0.0, float(payload)))
-                        yield build_progress_event(
-                            index + 1, relative_name, round(ratio * 100, 1)
-                        )
+                # 复用日志搜索管道（rg 流式优先，缺失 rg 自动降级 Python）：
+                # 固定关键字过滤监控行、不取上下文，把内存与传输体积降到最低；
+                # 逐文件调用以保留文件级进度与硬上限提前终止能力
+                remaining = _MAX_RAW_POINT_COUNT - parsed_count
+                hits = LogService.search(
+                    ticket_id,
+                    _MEMORY_SEARCH_KEYWORD,
+                    context_before=0,
+                    context_after=0,
+                    limit=max(remaining, 0),
+                    with_context=False,
+                    record_id=record_id,
+                    file_paths=[relative_name],
+                    db=db,
+                )
+                total_hits += len(hits)
+                for hit in hits:
+                    point = TicketLogMemoryMetricsUtil.parse_hit_line(
+                        hit.content, relative_name, hit.line
+                    )
+                    if point is None:
+                        # 命中但解析失败：跳过并计数，绝不中断整体流程
+                        skipped_line_count += 1
+                        continue
+                    file_points.append(point)
+                    parsed_count += 1
+                    if parsed_count >= _MAX_RAW_POINT_COUNT:
+                        # 达到硬上限：停止扫描，剩余数据放弃并标记 truncated
+                        reach_cap = True
+                        break
             except OSError as exc:
                 skipped_files += 1
                 logger.warning(f"内存分析跳过不可读日志文件，file={relative_name}，错误：{exc}")
@@ -224,13 +268,14 @@ class TicketLogMemoryMetricsService:
 
         merged_points = TicketLogMemoryMetricsUtil.merge_points(point_lists, max_points)
         summary = TicketLogMemoryMetricsUtil.build_summary(merged_points)
-        total_points = sum(len(item) for item in point_lists)
+        total_points = parsed_count
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         logger.info(
             f"工单日志内存分析完成，ticket_id={ticket_id}，record_id={record_id}，"
             f"scan_file_count={len(log_files)}，skipped_file_count={skipped_files}，"
-            f"total_points={total_points}，returned_points={len(merged_points)}，"
-            f"truncated={total_points != len(merged_points)}，elapsed_ms={elapsed_ms}"
+            f"total_hits={total_hits}，parsed_count={parsed_count}，"
+            f"skipped_line_count={skipped_line_count}，reach_cap={reach_cap}，"
+            f"returned_points={len(merged_points)}，elapsed_ms={elapsed_ms}"
         )
         if not merged_points:
             yield {
@@ -249,7 +294,10 @@ class TicketLogMemoryMetricsService:
                 total=len(merged_points),
                 scan_file_count=len(log_files),
                 skipped_file_count=skipped_files,
-                truncated=total_points != len(merged_points),
+                truncated=total_points != len(merged_points) or reach_cap,
+                total_hits=total_hits,
+                parsed_count=parsed_count,
+                skipped_line_count=skipped_line_count,
                 message=None,
                 elapsed_ms=elapsed_ms,
                 start_time=summary.get("start_time"),  # type: ignore[arg-type]
@@ -272,6 +320,8 @@ class TicketLogMemoryMetricsService:
                         threads_active=point.threads_active,
                         threads_max=point.threads_max,
                         source_file=point.source_file,
+                        line=point.line,
+                        epoch=point.epoch,
                     )
                     for point in merged_points
                 ],

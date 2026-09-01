@@ -60,10 +60,13 @@
           <span>内存分析（Process 资源监控）</span>
           <div class="panel-inline">
             <el-button link type="primary" :loading="memoryLoading" @click="loadMemoryMetrics">刷新</el-button>
+            <el-button link type="primary" @click="memoryPanelMinimized = !memoryPanelMinimized">
+              {{ memoryPanelMinimized ? '展开' : '最小化' }}
+            </el-button>
             <el-button link type="primary" @click="memoryPanelVisible = false">关闭</el-button>
           </div>
         </div>
-        <div>
+        <div v-show="!memoryPanelMinimized">
           <!-- 解析中：实时展示扫描进度、当前文件、已提取点数、耗时与预计剩余时间 -->
           <div v-if="memoryLoading || memorySuccessVisible" class="log-memory-progress">
             <el-progress
@@ -99,9 +102,11 @@
               :title="memoryError"
             />
             <LogMemoryChartPanel
+              ref="memoryChartPanelRef"
               v-else
               :metrics="memoryMetrics"
               :empty-text="memoryMetrics?.message || '当前日志中未找到 Process 资源监控数据'"
+              @point-click="handleMemoryPointClick"
             />
           </template>
         </div>
@@ -370,6 +375,9 @@ const wrapEnabled = ref(false)
 const availableFiles = ref([])
 // ── 内存分析状态 ──
 const memoryPanelVisible = ref(false)
+// 内存面板最小化开关：点击日志行时自动最小化，避免曲线遮挡日志详情
+const memoryPanelMinimized = ref(false)
+const memoryChartPanelRef = ref(null)
 const memoryLoading = ref(false)
 const memoryMetrics = ref(null)
 const memoryError = ref('')
@@ -958,6 +966,7 @@ function resetViewerState() {
   expandedModeMap.value = {}
   copySuccessMap.value = {}
   memoryPanelVisible.value = false
+  memoryPanelMinimized.value = false
   memoryLoading.value = false
   memoryMetrics.value = null
   memoryError.value = ''
@@ -1001,6 +1010,8 @@ function loadFileOptions(ticketId, recordId) {
 function toggleMemoryPanel() {
   memoryPanelVisible.value = !memoryPanelVisible.value
   if (memoryPanelVisible.value) {
+    // 重新展开面板时恢复为展开态，避免沿用上次的最小化状态
+    memoryPanelMinimized.value = false
     if (!memoryMetrics.value) {
       loadMemoryMetrics()
     }
@@ -1036,7 +1047,7 @@ function loadMemoryMetrics() {
     hideMemorySuccess()
   }
   streamTicketLogMemoryMetrics(
-    { ticketId, recordId, maxPoints: 2000 },
+    { ticketId, recordId, maxPoints: 2000, files: (form.files || []).join(',') },
     {
       signal: controller.signal,
       onStart: (event) => {
@@ -1069,7 +1080,7 @@ function loadMemoryMetrics() {
       if (Number(error?.status) === 404 || Number(error?.status) === 613 || !Number(error?.status)) {
         memoryFallbackNotice.value = '实时进度通道不可用（网关不支持流式转发），正在一次性分析（稍等片刻出图）…'
         try {
-          const response = await getTicketLogMemoryMetrics({ ticketId, recordId, maxPoints: 2000 })
+          const response = await getTicketLogMemoryMetrics({ ticketId, recordId, maxPoints: 2000, files: [...(form.files || [])] })
           memoryMetrics.value = response?.data || null
           showMemorySuccess()
         } catch (fallbackError) {
@@ -1255,7 +1266,26 @@ function setHits(rows = []) {
 function selectHit(row) {
   if (!row) return
   ensureSearchKeywordsHighlighted()
+  // 选中日志行时自动最小化内存面板，保证日志详情完整可见
+  memoryPanelMinimized.value = true
   loadContext(row.file, row.line)
+  // 反向联动：内存面板展开时在曲线上按时间就近画标记线（logTimeValue 为毫秒 epoch）
+  if (memoryPanelVisible.value && !memoryPanelMinimized.value) {
+    memoryChartPanelRef.value?.highlightTime(row.logTimeValue)
+  }
+}
+
+/**
+ * 曲线点点击联动：跳转到数据点对应的日志行上下文，并最小化内存面板。
+ * @param {{ file: string, line: number }} payload 曲线点携带的文件与行号
+ * @returns {void} 无返回值
+ */
+function handleMemoryPointClick(payload) {
+  const file = String(payload?.file || '')
+  const line = Number(payload?.line) || 0
+  if (!file || !line) return
+  memoryPanelMinimized.value = true
+  loadContext(file, line)
 }
 
 function loadContext(file, line) {
@@ -1609,6 +1639,17 @@ onBeforeUnmount(() => {
   stopResultColumnResize()
   stopPrepareProgressPolling()
 })
+
+// 供外部（如资源曲线弹窗）直接跳转到指定日志行上下文
+defineExpose({
+  jumpToContext(file, line) {
+    const targetFile = String(file || '')
+    const targetLine = Number(line) || 0
+    if (!targetFile || !targetLine) return
+    memoryPanelMinimized.value = true
+    loadContext(targetFile, targetLine)
+  },
+})
 </script>
 
 <style scoped>
@@ -1631,6 +1672,12 @@ onBeforeUnmount(() => {
 .log-view-controls {
   flex-wrap: wrap;
   align-items: center;
+  /* 内容区滚动时工具栏吸顶，保证搜索入口始终可用 */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 4px 0;
+  background: var(--el-bg-color, #ffffff);
 }
 
 .log-viewer-content {
@@ -1638,6 +1685,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* 内容区允许纵向滚动：内存分析展开时日志结果/详情不再被顶出可视区 */
+  overflow-y: auto;
 }
 
 .log-keyword-input {

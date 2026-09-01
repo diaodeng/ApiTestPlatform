@@ -49,6 +49,10 @@ class TicketLogMemoryMetricPoint:
     threads_active: int
     threads_max: int
     source_file: str
+    # 命中行号（1 开始），用于前端曲线点点击后直接跳转日志上下文
+    line: int = 0
+    # naive 本地时间的 epoch 秒（日志无时区信息，随服务器时区），供前端时间轴与联动匹配
+    epoch: float = 0.0
 
 
 class TicketLogMemoryMetricsUtil:
@@ -106,6 +110,8 @@ class TicketLogMemoryMetricsUtil:
                                 threads_active=int(match.group("threads_active")),
                                 threads_max=int(match.group("threads_max")),
                                 source_file=relative_name,
+                                line=line_no,
+                                epoch=log_time.timestamp(),
                             )
                         )
                 if progress_interval_lines > 0 and line_no % progress_interval_lines == 0:
@@ -117,6 +123,43 @@ class TicketLogMemoryMetricsUtil:
         if batch:
             yield "points", batch
         yield "progress", 1.0
+
+    @classmethod
+    def parse_hit_line(
+        cls, content: str, relative_name: str, line_no: int = 0
+    ) -> TicketLogMemoryMetricPoint | None:
+        """
+        解析单条搜索命中行，提取资源监控数据点。
+
+        供基于日志搜索管道（rg/Python 降级）的链路复用：
+        命中行已由搜索层过滤出包含监控关键字的行，这里再做结构化解析。
+
+        解析策略：正则不匹配或时间戳非法时返回 None（由调用方计入 skipped），
+        绝不抛异常中断整体分析流程。
+
+        :param content: 命中行文本内容
+        :param relative_name: 展示用的相对日志文件路径
+        :param line_no: 命中行号（1 开始），用于前端曲线点点击跳转日志上下文
+        :return: 解析成功返回数据点，失败返回 None
+        """
+        match = MEMORY_LOG_PATTERN.search(str(content or ""))
+        if not match:
+            return None
+        try:
+            log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S,%f")
+        except ValueError:
+            return None
+        return TicketLogMemoryMetricPoint(
+            time=log_time,
+            cpu_percent=float(match.group("cpu")),
+            mem_percent=float(match.group("mem_pct")),
+            mem_mb=float(match.group("mem_mb")),
+            threads_active=int(match.group("threads_active")),
+            threads_max=int(match.group("threads_max")),
+            source_file=relative_name,
+            line=int(line_no or 0),
+            epoch=log_time.timestamp(),
+        )
 
     @classmethod
     def parse_file(cls, file_path: Path, relative_name: str) -> list[TicketLogMemoryMetricPoint]:
