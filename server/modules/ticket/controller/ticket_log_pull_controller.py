@@ -658,7 +658,7 @@ async def stream_ticket_log_memory_metrics(
         files=[item.strip() for item in str(query.files or "").replace("，", ",").split(",") if item.strip()],
     )
     return StreamingResponse(
-        TicketLogMemoryMetricsService.iter_collect_metrics_events(metrics_object, query_db),
+        TicketLogMemoryMetricsService.iter_collect_metrics_stream(metrics_object, query_db),
         media_type="application/x-ndjson; charset=utf-8",
     )
 
