@@ -4709,6 +4709,10 @@ class TicketAiAnalysisService:
             )
             db.commit()
             # 失败任务同样上报（带错误信息），便于在可观测平台统计失败率与错误分布
+            failure_token_usage = locals().get("normalized_token_usage")
+            if not failure_token_usage and locals().get("token_usage_payload") is not None:
+                # 早期失败路径（如网关传输失败）已提取原始 token 但未归一化，此处兜底
+                failure_token_usage = cls._normalize_token_usage(locals().get("token_usage_payload"))
             cls._report_observability_task_span(
                 observability_config=locals().get("observability_config"),
                 task_id=task_id,
@@ -4716,7 +4720,7 @@ class TicketAiAnalysisService:
                 model_name=locals().get("worker_model_override") or None,
                 prompt_text=locals().get("prompt_template"),
                 result_text=None,
-                normalized_token_usage=locals().get("normalized_token_usage"),
+                normalized_token_usage=failure_token_usage,
                 started_at=locals().get("started_at"),
                 success=False,
                 error_code=failure_code,

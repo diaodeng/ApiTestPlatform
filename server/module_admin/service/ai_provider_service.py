@@ -70,19 +70,21 @@ class AiProviderService:
         :raise ValueError: 配置不完整时抛出
         """
         enabled = bool(getattr(page_object, "observability_enabled", False))
-        if not enabled:
-            return {
-                "observability_enabled": False,
-                "observability_endpoint": None,
-                "observability_auth_type": "bearer",
-                "observability_service_name": None,
-                "observability_cli_enabled": False,
-            }
         endpoint = str(getattr(page_object, "observability_endpoint", "") or "").strip()
         auth_type = str(getattr(page_object, "observability_auth_type", "") or "bearer").strip().lower()
         service_name = str(getattr(page_object, "observability_service_name", "") or "").strip()
-        cli_enabled = bool(getattr(page_object, "observability_cli_enabled", False))
         api_key = str(getattr(page_object, "observability_api_key", "") or "").strip()
+        if not enabled:
+            # 关闭总开关时保留端点等配置不清空（隐藏字段不清空规范），仅停用开关；
+            # 密钥始终由 _build_observability_secret_data 决定是否更新，关闭时不主动清除。
+            return {
+                "observability_enabled": False,
+                "observability_endpoint": endpoint or None,
+                "observability_auth_type": auth_type,
+                "observability_service_name": service_name or None,
+                "observability_cli_enabled": False,
+            }
+        cli_enabled = bool(getattr(page_object, "observability_cli_enabled", False))
         if not endpoint:
             raise ValueError("启用可观测上报时必须填写OTLP端点")
         if auth_type not in ("bearer", "basic"):
