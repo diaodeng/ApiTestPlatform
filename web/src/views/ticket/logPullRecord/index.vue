@@ -189,7 +189,7 @@
       <el-table-column label="创建时间" width="170">
         <template #default="scope">{{ parseTime(scope.row.createTime) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="170" align="center" fixed="right">
+      <el-table-column label="操作" width="270" align="center" fixed="right">
         <template #default="scope">
           <div class="log-pull-row-actions">
             <!-- 下载中显示进度环，替代查看入口 -->
@@ -217,10 +217,9 @@
               @click="openLogViewer(scope.row)"
               v-hasPermi="['ticket:logpull:query']"
             >查看</el-button>
-            <!-- 中频操作：资源曲线，行悬浮时显示，点击打开全局资源监控曲线 -->
+            <!-- 中频操作：资源曲线，保持常显，点击打开全局资源监控曲线 -->
             <el-button
               v-hasPermi="['ticket:logpull:query']"
-              class="hover-only-action"
               link
               type="success"
               icon="TrendCharts"
@@ -228,10 +227,9 @@
               aria-label="资源曲线"
               @click="openResourceCurve(scope.row)"
             >曲线</el-button>
-            <!-- 高频主操作：重新拉取，行悬浮时才显示 -->
+            <!-- 高频主操作：重新拉取，保持常显 -->
             <el-button
               v-hasPermi="['ticket:logpull:add']"
-              class="hover-only-action"
               link
               type="warning"
               icon="Refresh"
@@ -1506,23 +1504,12 @@ onMounted(() => {
   min-width: 48px;
 }
 
-/* 操作列：主次分离布局，避免按钮平铺撑宽列 */
+/* 操作列：按钮保持常显并固定单行布局 */
 .log-pull-row-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
-}
-
-/* 次要操作默认隐藏，行悬浮时显现，降低视觉噪音；「更多」下拉保持常显兜底 */
-.log-pull-row-actions .hover-only-action {
-  opacity: 0;
-  transition: opacity 0.16s ease;
-}
-
-.log-pull-record-table :deep(.el-table__row:hover) .hover-only-action,
-.log-pull-row-actions .hover-only-action:focus-visible {
-  opacity: 1;
 }
 
 /* 下拉菜单内危险操作：标红警示 */

@@ -9,12 +9,12 @@
 - 验证：ruff 通过；parse_hit_line 六组用例（逗号/点号毫秒、无小数、无时间戳、非法日期、非法数值）全部通过；`npm run build:prod` 通过。
 - 文档：更新 `web/public/docs/ticket_log_viewer.md` 图表交互与注意事项，更新记录追加至 `2026-09-01-ticket-log-resource-curve-linkage.md`。
 
-## [2026-09-01] UI | 工单详情日志拉取 Tab 操作列主次分离
+## [2026-09-01] UI | 日志拉取列表操作按钮常显与操作列溢出修复
 
-- 触发：管理页操作列已收敛为主次分离布局，工单详情日志拉取 Tab 仍是 6 个圆形按钮平铺，两处体验不一致。
-- 实现：`TicketDetailLogPullTab.vue` 操作列与管理页同构改造——查看常显（下载中显示进度环）、重试悬浮显、其余操作收纳「更多」下拉，删除红字置底；保留该 Tab 原有禁用态语义（执行中不可复制/重试/删除），操作函数复用 Tab 解构出的 composable 方法，新增 `handleRowCommand` 分发；列宽 170px 并 fixed right。
-- 边界：不改变任何操作函数逻辑与权限指令；归档/原始下载仍通过对应列链接下载。
-- 文档：更新 `web/public/docs/ticket_log_viewer.md` 1.3 操作按钮章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-detail-log-pull-action-column.md`。
+- 触发：工单详情页日志拉取列表的重新拉取按钮依赖行悬浮；日志拉取管理列表的资源曲线、重新拉取按钮也依赖悬浮，且固定右侧操作列宽度不足导致按钮显示不全、部分按钮跑出页面。
+- 实现：移除两处 `.hover-only-action` 的显隐样式和模板类名，详情页重新拉取、管理页资源曲线与重新拉取均常显；管理页操作列宽度从 170px 调整为 270px，详情页调整为 220px，保留 fixed right 与原有权限、禁用态和操作逻辑。
+- 文档：同步更新 `web/public/docs/ticket_log_viewer.md`、两份操作列更新记录及更新历史。
+
 
 ## [2026-09-01] FIX | 内存分析图表空白修复（成功态引入的挂载时序问题）
 
@@ -47,9 +47,10 @@
 ## [2026-09-01] UI | 日志拉取记录管理页操作列主次分离
 
 - 触发：操作列 6 个彩色圆形按钮平铺（270px 宽）视觉散乱，不符合中后台主流的主次分离规范。
-- 实现：`logPullRecord/index.vue` 操作列改为「查看常显 + 重新拉取悬浮显 + 更多下拉常显收纳（复制/停止/重新拉取/重新下载/删除）」，删除在下拉内红字置底并用分隔线隔离；保留禁用态语义与下载进度环替换逻辑；列宽收敛 170px 并 fixed right。原单行操作函数全部复用，新增 `handleRowCommand` 统一分发。
-- 边界：仅改动日志拉取记录管理页；工单详情日志拉取 Tab 的操作列本次未动，后续可按同样模式收敛。
-- 文档：更新 `web/public/docs/ticket_log_viewer.md` 管理页操作说明与准备进度章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-pull-action-column.md`。
+- 实现：`logPullRecord/index.vue` 操作列改为「查看、资源曲线、重新拉取常显 + 更多下拉常显收纳（复制/停止/重新拉取/重新下载/删除）」；删除在下拉内红字置底并用分隔线隔离；保留禁用态语义与下载进度环替换逻辑；列宽固定 270px 并 fixed right。原单行操作函数全部复用，新增 `handleRowCommand` 统一分发。
+- 边界：仅改动日志拉取记录管理页；工单详情日志拉取 Tab 的重新拉取按钮同步改为常显，列宽固定 220px。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md` 管理页操作说明与准备进度章节，新增更新记录 `2026-09-01-ticket-log-pull-action-column.md`。
+
 
 ## [2026-09-01] FEAT | 日志查看器内置内存分析图表
 
