@@ -186,6 +186,40 @@ async def retry_ticket_ai_analysis_task(
 
 
 @ticketAiController.post(
+    "/{ticket_id:int}/ai-analysis/tasks/{task_id}/cancel",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
+)
+@log_decorator(title="工单AI分析取消", business_type=1)
+async def cancel_ticket_ai_analysis_task(
+    request: Request,
+    ticket_id: int,
+    task_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    协作式取消指定 AI 分析任务接口。
+
+    服务端先将任务置为已取消并写审计与事件，再向 Agent 发送取消通知；
+    Agent 在 Worker 检查点感知后停止执行，迟到结果不会覆盖取消态。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param task_id: AI 分析任务ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 取消结果
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketAiAnalysisService.cancel_analysis_task_services, query_db, ticket_id, task_id, current_user
+        )
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketAiController.post(
     "/{ticket_id:int}/ai-analysis",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
 )

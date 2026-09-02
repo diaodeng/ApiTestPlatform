@@ -2738,6 +2738,34 @@ class TicketAiAnalysisService:
         return normalized
 
     @staticmethod
+    async def _check_task_canceled(event_sender: EventSender | None, task_id: int) -> bool:
+        """
+        取消检查点：查询 Agent 消息层的取消标记表。
+
+        标记存在时发送状态事件、清理标记并返回 True；查询失败按未取消处理，
+        保证取消机制异常不影响正常执行链路。
+        :param event_sender: 事件发送器
+        :param task_id: 任务ID
+        :return: 是否已取消
+        """
+        try:
+            from server.agent_server import WebSocketClient
+
+            if not await WebSocketClient.is_task_canceled(task_id):
+                return False
+        except Exception as exc:
+            logger.warning(f"查询任务取消标记失败，按未取消处理: task_id={task_id}, error={exc}")
+            return False
+        await TicketAiAnalysisService._emit_event(event_sender, "ai_analysis_status", task_id, "任务已被取消")
+        try:
+            from server.agent_server import WebSocketClient
+
+            await WebSocketClient.clear_task_cancel_flag(task_id)
+        except Exception:
+            pass
+        return True
+
+    @staticmethod
     async def _emit_event(event_sender: EventSender | None, event_type: str, task_id: int, message: str, **extra: Any) -> None:
         """
         向服务端发送执行阶段事件。
@@ -3056,6 +3084,8 @@ class TicketAiAnalysisService:
             lock_payload = cls._read_json_file(task_lock_file)
             if task_lock_file.exists() and not cls._is_stale_lock(lock_payload, timeout_sec):
                 failure_message = "当前任务正在分析中，请稍后重试"
+                # 携带锁持有者任务ID：服务端可据此定位并接管/取消原任务，而不是只能盲等。
+                lock_holder_task_id = (lock_payload or {}).get("taskId")
                 await cls._emit_event(event_sender, "ai_analysis_status", task_id, failure_message)
                 return {
                     "request_type": req_data.get("requestType"),
@@ -3065,6 +3095,8 @@ class TicketAiAnalysisService:
                     "message": failure_message,
                     "error_code": "AI_TASK_ALREADY_RUNNING",
                     "error_message": failure_message,
+                    "running_task_id": int(lock_holder_task_id) if lock_holder_task_id else task_id,
+                    "running_ticket_id": ticket_id,
                 }
             cls._release_task_lock(task_lock_file)
             if not cls._acquire_task_lock(
@@ -3089,6 +3121,8 @@ class TicketAiAnalysisService:
                     "message": failure_message,
                     "error_code": "AI_TASK_ALREADY_RUNNING",
                     "error_message": failure_message,
+                    "running_task_id": task_id,
+                    "running_ticket_id": ticket_id,
                 }
             # 锁心跳续租：Worker 执行期间周期刷新 lastHeartbeatAt，证明 Worker 存活；
             # 心跳停止（Worker 崩溃/被杀）后短窗口即可被安全接管，避免长任务锁假死。
@@ -3342,12 +3376,46 @@ class TicketAiAnalysisService:
                     provider_code=request_provider_code or "<none>",
                     worker_model=selected_worker_model or "<default>",
                 )
+                # 执行前取消检查点：服务端已取消的任务直接放弃执行，避免白耗模型调用。
+                if await cls._check_task_canceled(event_sender, task_id):
+                    return {
+                        "request_type": req_data.get("requestType"),
+                        "command": req_data.get("command"),
+                        "success": False,
+                        "status": "canceled",
+                        "message": "任务已被取消，未执行分析",
+                        "error_code": "AI_TASK_CANCELED",
+                        "error_message": "任务已被取消，未执行分析",
+                    }
                 worker_started_at = time.monotonic()
                 process = await cls._run_worker_process(command, resolved_prompt, workspace_dir, env_values, timeout_sec)
                 worker_elapsed = round(time.monotonic() - worker_started_at, 3)
                 raw_stdout = process.stdout or ""
                 raw_stderr = process.stderr or ""
                 cls._persist_worker_streams(workspace_dir, raw_stdout, raw_stderr)
+                # 执行后取消检查点：Worker 执行期间收到取消通知时，结果不回传
+                # （服务端已置取消态，迟到回传会被丢弃），尽力提取已消耗 token 供审计。
+                if await cls._check_task_canceled(event_sender, task_id):
+                    canceled_token_usage = cls._parse_failure_token_usage(
+                        provider_type=provider_type,
+                        raw_stdout=raw_stdout,
+                        raw_stderr=raw_stderr,
+                        result_file=result_file,
+                    )
+                    logger.info(
+                        f"AI分析Agent任务[{task_id}] 执行期间被取消，丢弃结果并保留已消耗token: "
+                        f"token_usage={canceled_token_usage}"
+                    )
+                    return {
+                        "request_type": req_data.get("requestType"),
+                        "command": req_data.get("command"),
+                        "success": False,
+                        "status": "canceled",
+                        "message": "任务在执行期间被取消，结果已放弃",
+                        "error_code": "AI_TASK_CANCELED",
+                        "error_message": "任务在执行期间被取消，结果已放弃",
+                        "token_usage": canceled_token_usage,
+                    }
                 worker_auth_diagnostic, worker_api_key = cls._build_worker_auth_diagnostic(
                     provider_type=provider_type,
                     provider_code=request_provider_code,
@@ -3566,6 +3634,13 @@ class TicketAiAnalysisService:
                 except asyncio.CancelledError:
                     pass
                 cls._release_task_lock(task_lock_file)
+                # 任务已结束，清理取消标记避免标记表残留（迟到取消无意义）。
+                try:
+                    from server.agent_server import WebSocketClient
+
+                    await WebSocketClient.clear_task_cancel_flag(task_id)
+                except Exception:
+                    pass
         except subprocess.TimeoutExpired as exc:
             failure_message = f"AI Worker 执行超时：{exc}"
             # 超时分支拿不到进程内 stdout，从工作区已落盘的流文件尽力提取已消耗 token。

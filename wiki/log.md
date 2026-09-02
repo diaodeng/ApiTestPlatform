@@ -1,3 +1,14 @@
+## [2026-09-02] FEAT | AI分析任务协作式取消、outcome 提交类型与锁冲突标识（第三阶段）
+
+- 触发：按确认方案完成第三阶段——取消端点、attached 等待语义（outcome 标识）、锁冲突携带任务标识。
+- 取消链路：新增 `POST /ticket/{ticketId}/ai-analysis/tasks/{taskId}/cancel`（权限同 retry）→ `cancel_analysis_task_services`：仅 created/running 可取消（终态幂等返回），先 `_mark_task_status(canceled)`（活跃锁随终态自动释放）+ 审计 canceled + 工单事件 + commit，再 `_notify_agent_task_canceled` fire-and-forget（直发 `cancel_task` request_chunk 分片、`cancel-{task_id}` 作为 request_id、不建 Future 等待；Agent 离线仅告警）。
+- Agent 端：`AI_TASK_CANCEL_FLAGS` 取消标记表（asyncio.Lock 保护）；`handle_message_chunk` 攒齐请求后识别 `requestType=cancel_task` 注册标记并 return（不进 forward_by_rules，避免未知类型误入业务链路）；`TicketAiAnalysisService` Worker 执行前/后双检查点 `_check_task_canceled`（执行前取消→结构化 canceled 返回零消耗；执行后取消→丢弃结果不回传、`_parse_failure_token_usage` 提取已耗 token 随 canceled 返回）；handle_request finally 清理标记；`AI_TASK_ALREADY_RUNNING` 返回携带 `running_task_id`/`running_ticket_id`（锁 payload 中的 taskId）。
+- 服务端回传后重读状态：`_process_task` 拿到 Agent 响应后重新 `get_task_by_id`，status=canceled 时 rollback 后仅把迟到结果中的 token 补进审计（不覆盖取消态、不写回工单）、走 canceled 同步收尾后 return。
+- outcome：`CrudResponseModel` 加可选 `outcome` 字段；创建/retry 的 created、retried、attached（含 IntegrityError 并发分支）、reused（含重试自身已成功分支）全部标注；前端 `showOutcomeMessage` 按 outcome 提示（"已为您关联原任务"/"已返回历史结果"等），任务历史新增"取消"按钮（created/running 可见，二次确认，取消后刷新）。
+- 验证：服务端新增 `test_ticket_ai_task_cancel_service.py` 4 用例（不存在/终态幂等/running 取消带通知/created 取消无通知）+ 相关 47 测试全通过、ruff 通过；客户端新增 `test_ticket_ai_task_cancel.py` 3 用例（注册查询清除/无效taskId/清除缺失标记）+ 全量 39 测试通过；`npm run build:prod` 通过。取消通知的 WebSocket 实际投递与 Worker 中断为协作式设计，需部署环境联调验证。
+- 边界：旧版 Agent 不识别 cancel_task（服务端取消仍生效，Worker 跑完由回传后重读状态丢弃）；检查点之间无法立即打断（协作式）；两端需同版本部署才完整。
+- 文档：新增 `web/public/docs/updates/2026-09-02-ticket-ai-cancel-and-outcome.md`，history.md 同步。
+
 ## [2026-09-02] FEAT | AI分析并发防重、重试独立审计与Agent锁心跳续租（第二阶段）
 
 - 触发：第一阶段完成后按确认方案继续第二阶段——并发竞态防重、审计尝试拆分、心跳锁。

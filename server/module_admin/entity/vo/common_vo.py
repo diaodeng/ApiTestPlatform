@@ -12,6 +12,9 @@ class CrudResponseModel(BaseModel):
     is_success: bool
     message: str
     result: Optional[Any] = None
+    # 操作结果类型（可选）：created=新建任务 / retried=重试原任务 /
+    # attached=接管已有执行中任务 / reused=复用历史成功结果；供前端区分提示。
+    outcome: Optional[str] = None
 
 
 class UploadResponseModel(BaseModel):

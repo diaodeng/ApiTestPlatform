@@ -29,6 +29,12 @@ HEARTBEAT_INTERVAL = 30
 
 request_all_chunk = defaultdict(str)
 
+# AI 分析任务取消标记表：服务端发送 cancel_task 消息后按 taskId 注册，
+# Worker 执行前后检查点感知到标记即放弃继续执行。任务结束后移除标记。
+AI_TASK_CANCEL_FLAGS: set[int] = set()
+# 取消标记表的线程锁（handle_message_chunk 与 cancel 消息处理在不同协程）。
+_ai_task_cancel_flags_lock = asyncio.Lock()
+
 # 断连待补交清单文件：与 agent_config.json 同目录（storage/data），进程重启后仍可补交。
 # 结构：{"<request_id>": {"payload": "<压缩后完整响应>", "queuedAt": "<ISO时间>", "retryCount": 0}}
 PENDING_RESPONSE_FILE = Path("storage/data/pending_response_deliveries.json")
@@ -413,6 +419,10 @@ class WebSocketClient:
         if not message_dict["finished"]:
             return
         request_data = decompress_str_to_dict(request_all_chunk.pop(request_id))
+        # 取消通知不是业务请求：注册取消标记后直接确认，不进入转发链路。
+        if request_data.get("requestType") == "cancel_task":
+            await self._handle_cancel_task(request_data)
+            return
         if self.before_request_call:
             self._safe_invoke(self.before_request_call, request_data)
         response, _ = await RequestByInput.forward_by_rules(request_data, http_client, self.send_event_message)
@@ -425,6 +435,45 @@ class WebSocketClient:
                 response,
                 request_id=request_id,
             )
+
+    @staticmethod
+    async def _handle_cancel_task(request_data: dict) -> None:
+        """
+        处理服务端的任务取消通知：按 taskId 注册取消标记，等待中的 Worker
+        在执行前/后检查点感知后停止；无需回传响应（服务端不等待）。
+        :param request_data: 取消消息体（含 taskId）
+        :return: 无
+        """
+        try:
+            task_id = int(request_data.get("taskId") or 0)
+        except (TypeError, ValueError):
+            task_id = 0
+        if not task_id:
+            logger.warning(f"收到无效的任务取消通知，已忽略: {request_data.get('taskId')}")
+            return
+        async with _ai_task_cancel_flags_lock:
+            AI_TASK_CANCEL_FLAGS.add(task_id)
+        logger.info(f"已注册 AI 分析任务取消标记: task_id={task_id}")
+
+    @staticmethod
+    async def is_task_canceled(task_id: int) -> bool:
+        """
+        查询指定任务是否已被取消（Worker 执行前后检查点调用）。
+        :param task_id: 任务ID
+        :return: 是否已取消
+        """
+        async with _ai_task_cancel_flags_lock:
+            return task_id in AI_TASK_CANCEL_FLAGS
+
+    @staticmethod
+    async def clear_task_cancel_flag(task_id: int) -> None:
+        """
+        清除任务取消标记（任务终态后调用，避免标记表无限增长）。
+        :param task_id: 任务ID
+        :return: 无
+        """
+        async with _ai_task_cancel_flags_lock:
+            AI_TASK_CANCEL_FLAGS.discard(task_id)
 
     async def _send_response_with_recovery(self, payload: str, *, request_id: str) -> bool:
         """
