@@ -203,6 +203,10 @@ class AgentConfigModel(BaseModel):
     retry_times: int = 0
     retry_interval: float = 5
     retry: bool = False
+    # 窗口内重试次数用尽后是否继续低频重连：True 表示永远重试直到手动停止，
+    # 重连间隔降级为 retry_forever_interval 秒，保证服务端发布重启时间过长时仍能自愈。
+    retry_forever: bool = False
+    retry_forever_interval: float = 300
     config_sync_url: str = ""
     config_sync_initialized: bool = False
     config_sync_last_sync_at: str = ""

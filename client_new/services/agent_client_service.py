@@ -126,6 +126,8 @@ class AgentClientService(QObject):
             client.retry = config.retry
             client.max_retry_num = config.retry_times
             client.interval_time = config.retry_interval
+            client.retry_forever = config.retry_forever
+            client.retry_forever_interval = config.retry_forever_interval
 
     def shutdown(self, timeout: float = 5.0) -> tuple[bool, str]:
         ok, message = self.stop()
@@ -167,6 +169,8 @@ class AgentClientService(QObject):
                     retry=config.retry,
                     retry_num=config.retry_times,
                     interval_time=config.retry_interval,
+                    retry_forever=config.retry_forever,
+                    retry_forever_interval=config.retry_forever_interval,
                 )
             )
         except Exception as e:

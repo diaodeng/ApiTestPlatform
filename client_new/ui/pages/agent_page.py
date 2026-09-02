@@ -179,6 +179,15 @@ class AgentPage(QWidget):
         self.retry_interval_input.setSuffix(" s")
         self.retry_interval_input.setFixedWidth(100)
 
+        # 断线低频永续重连：高频窗口次数用尽后按低频间隔继续重连，直到手动停止。
+        self.retry_forever_checkbox = QCheckBox("断线重连")
+        self.retry_forever_interval_input = QDoubleSpinBox()
+        self.retry_forever_interval_input.setRange(1.0, 86400.0)
+        self.retry_forever_interval_input.setDecimals(0)
+        self.retry_forever_interval_input.setSingleStep(30.0)
+        self.retry_forever_interval_input.setSuffix(" s")
+        self.retry_forever_interval_input.setFixedWidth(100)
+
         self.ai_workspace_root_input = QLineEdit()
         self.ai_workspace_root_input.setPlaceholderText("AI 工作区根目录，留空则使用默认值")
         self.ai_workspace_root_input.setMinimumWidth(260)
@@ -204,6 +213,9 @@ class AgentPage(QWidget):
         config_layout.addWidget(self.retry_times_input)
         config_layout.addWidget(QLabel("重试间隔"))
         config_layout.addWidget(self.retry_interval_input)
+        config_layout.addWidget(self.retry_forever_checkbox)
+        config_layout.addWidget(QLabel("低频间隔"))
+        config_layout.addWidget(self.retry_forever_interval_input)
         config_layout.addStretch()
 
         ai_config_layout = QHBoxLayout()
@@ -269,6 +281,8 @@ class AgentPage(QWidget):
         self.retry_checkbox.toggled.connect(self._save_quick_settings)
         self.retry_times_input.valueChanged.connect(self._save_quick_settings)
         self.retry_interval_input.valueChanged.connect(self._save_quick_settings)
+        self.retry_forever_checkbox.toggled.connect(self._save_quick_settings)
+        self.retry_forever_interval_input.valueChanged.connect(self._save_quick_settings)
         self.ai_workspace_root_input.editingFinished.connect(self._save_quick_settings)
         self.ai_local_repo_path_input.editingFinished.connect(self._save_quick_settings)
 
@@ -372,6 +386,8 @@ class AgentPage(QWidget):
             "retry_times": int(self.retry_times_input.value()),
             "retry_interval": float(self.retry_interval_input.value()),
             "retry": self.retry_checkbox.isChecked(),
+            "retry_forever": self.retry_forever_checkbox.isChecked(),
+            "retry_forever_interval": float(self.retry_forever_interval_input.value()),
             "config_sync_url": self._config_sync_url,
             "config_sync_initialized": self._config_sync_initialized,
             "config_sync_last_sync_at": self._config_sync_last_sync_at,
@@ -408,6 +424,8 @@ class AgentPage(QWidget):
         self.retry_checkbox.setChecked(config.retry)
         self.retry_times_input.setValue(config.retry_times)
         self.retry_interval_input.setValue(float(config.retry_interval))
+        self.retry_forever_checkbox.setChecked(bool(getattr(config, "retry_forever", False)))
+        self.retry_forever_interval_input.setValue(float(getattr(config, "retry_forever_interval", 300) or 300))
         self.ai_workspace_root_input.setText(str(getattr(config, "ticket_ai_workspace_root", "") or ""))
         self.ai_local_repo_path_input.setText(str(getattr(config, "ticket_ai_local_repo_path", "") or ""))
         self.mac_value_label.setText(local_mac or "-")

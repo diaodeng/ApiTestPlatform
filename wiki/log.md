@@ -1,3 +1,24 @@
+## [2026-09-02] FEAT | AI分析并发防重、重试独立审计与Agent锁心跳续租（第二阶段）
+
+- 触发：第一阶段完成后按确认方案继续第二阶段——并发竞态防重、审计尝试拆分、心跳锁。
+- 活跃锁：`ticket_ai_analysis_task` 新增 `active_lock`（VARCHAR 64，created/running 时等于请求指纹，终态置 NULL）+ 唯一索引 `uk_ticket_ai_task_active_lock`（NULL 可重复实现"活跃指纹唯一"）；`_mark_task_status` 增加 `active_lock_fingerprint` 参数统一维护；创建任务直接占锁，`IntegrityError` 翻译为幂等返回原活跃任务；启动迁移 `_ensure_ticket_ai_analysis_active_lock` 补列+清存量+建索引（MySQL information_schema / sqlite PRAGMA 双后端）。force_refresh 指纹混入 task_id，天然不命中活跃锁，强制刷新行为不变。
+- 执行白名单：`_process_task` 从"仅跳过 SUCCESS"改为仅允许 created/running 进入执行，堵住 canceled 败者任务被误 queue 后重复消耗模型调用的通道。
+- 重试独立审计：`retry_analysis_task_services` 为 failed/canceled 任务新建审计记录（payload 带 `attempt_of_task_id`/`attempt_no`/`attempt_source=retry`/`prior_audit_execution_id`），任务切换到新 audit_execution_id，原审计终态不可变；新增 `_resolve_task_attempt_no`（按审计链回溯序号）/`_resolve_task_provider_code`/`_resolve_task_model_name`；重试入口补 ticket 查询（复用事件需要 ticket_no）。
+- 复用事件：`_record_reuse_event` 独立事务写 `status=reused`、`usage_state=not_called` 审计（创建幂等命中、重试成功指纹命中、重试任务自身已成功三处接入），失败仅告警；token 聚合 DAO 按 SUM 天然忽略 reused 行（其 token 列为 NULL/0），不重复计费。
+- 心跳锁：Agent 端 `_acquire_task_lock` 锁内容增加 `lastHeartbeatAt`；新增 `_run_lock_heartbeat`（asyncio 后台任务 15s 间隔 `asyncio.to_thread` 刷新）；`_is_stale_lock` 心跳优先（停止 >60s 过期）旧锁回退时间窗兼容；Worker 执行段 try/finally 启动并取消心跳任务（先停心跳再释放锁）。
+- 前端：AI 执行审计页 statusOptions 补 `canceled`（已取消（重复请求））/`reused`（复用历史结果），statusTagType 同步。
+- 验证：服务端新增 `test_ticket_ai_active_lock.py` 3 用例（终态释放/占锁/无指纹释放）+ 相关 43 测试全部通过；ruff 通过；客户端新增 `test_ticket_ai_lock_heartbeat.py` 4 用例（心跳判活/停止过期/旧锁回退/心跳刷新）+ 全量 36 测试通过；`npm run build:prod` 通过。未做真实并发双请求联调（唯一索引冲突路径为代码推演+IntegrityError 兜底）。
+- 文档：新增 `web/public/docs/updates/2026-09-02-ticket-ai-concurrency-guard-and-audit-attempts.md`，history.md 同步。
+
+## [2026-09-02] FEAT | AI分析断链恢复链路与失败路径Token真实消耗
+
+- 触发：用户确认方案——失败但已发生的模型调用必须记录真实 token；服务重启不应导致 Agent 已完成的执行结果丢失；Agent 重连配置增加永续重连开关。
+- Agent 端（client_new）：`WebSocketClient` 新增 `retry_forever`/`retry_forever_interval` 永续重连（窗口高频用尽后降级低频重连直到手动停止，config/UI/agent_client_service 全链路接线，默认关闭不改变现网行为）；新增断连待补交清单 `storage/data/pending_response_deliveries.json`——响应回传失败自动入清单（按 request_id 去重、上限 200 条），连接建立成功后自动补交（单批 10 条），`handle_message_chunk` 的回传改走 `_send_response_with_recovery`；token 补齐：新增 `_parse_failure_token_usage`（失败路径统一提取，Claude 解析新增 `accept_error_result` 参数仅失败路径接受 is_error 报文）、`_recover_token_usage_from_workspace`（超时/异常分支从工作区落盘 stdout/stderr/result.json 恢复），缓存命中路径恢复 token（此前固定 None）。
+- 服务端：`agent_controller` 孤儿响应分片不再丢弃——新注册表 `orphan_response_chunks` 内存攒齐后经 `HandleResponse.validate_transport_payload` 校验写入 Redis 结果缓存（key 与调度侧 `_result_key` 一致、TTL 同为 24h），等待方存在时路径不变；`resume_pending_tasks` 启动恢复前按审计 payload 中的 requestId `_peek_agent_result_cache` 检测迟到结果，命中任务重新排队（不再标 AI_TASK_INTERRUPTED），`_process_task` 开头 `_load_recovered_agent_response` 读缓存、`_process_recovered_success` 走成功写回（任务描述"恢复服务重启前的执行结果"，command_line=agent:recovered）；业务失败/结果不可解析路径补 token 提取计入审计；request_id 写入审计 request_payload；`_persist_success_result` 改传 `_submission_user_placeholder(task)`（SimpleNamespace 占位），成功消息/RCA/快照创建者归属提交人。
+- 边界：只有传输成功且业务成功的迟到响应才恢复写回；存量任务（审计无 requestId）无法自动恢复仍按中断；缓存命中/失败提取均为"尽力而为"，无凭据返回 None（语义为未知，非 0）；attempt 拆分审计、心跳锁、任务接管等待为后续阶段，本次未做。
+- 验证：服务端相关 40 测试（token/dispatch/chunk_registry/transport/task_status）全部通过，ruff 通过；客户端 32 测试（含新增 `test_ticket_ai_failure_token_usage.py` 失败提取/工作区恢复/缓存提取 7 组）全部通过；全部存量失败项经 git stash 对照确认为与本改动无关的既有问题。两端均未做真实 WebSocket 链路联调（需部署环境）。
+- 文档：新增更新记录 `web/public/docs/updates/2026-09-02-ticket-ai-reconnect-recovery-and-token-usage.md`，history.md 同步。
+
 ## [2026-09-01] FIX | 内存分析图表联动与闪烁修复（时间轴/zr 点击/contextLoading）
 
 - 触发：用户反馈两个问题——图表只有点到极小的数据点符号才跳日志（`showSymbol:false`+lttb 下几乎点不到，点时间轴/空白无效）；点击搜索结果行时页面闪烁（分栏布局后全局 v-loading 遮罩 + 结果面板高度类 `log-view-panel-fill` 依赖 context 是否存在，加载期间来回切换 + 虚拟表格高度级联重算）。

@@ -1167,6 +1167,74 @@ class TicketAiAnalysisService:
                 return None
 
     @classmethod
+    def _recover_token_usage_from_workspace(
+        cls,
+        workspace_dir: Path | None,
+        *,
+        provider_type: str,
+    ) -> dict[str, Any] | None:
+        """
+        从工作区已落盘的文件中恢复 Token 用量（用于超时/异常等拿不到进程输出的分支）。
+        :param workspace_dir: 任务工作区，可能尚未创建
+        :param provider_type: Provider 类型
+        :return: Token 用量字典，无法恢复时返回 None
+        """
+        if not workspace_dir:
+            return None
+        try:
+            return cls._parse_failure_token_usage(
+                provider_type=provider_type,
+                raw_stdout=(workspace_dir / "worker.stdout.txt").read_text(encoding="utf-8")
+                if (workspace_dir / "worker.stdout.txt").exists()
+                else None,
+                raw_stderr=(workspace_dir / "worker.stderr.txt").read_text(encoding="utf-8")
+                if (workspace_dir / "worker.stderr.txt").exists()
+                else None,
+                result_file=workspace_dir / "result.json",
+            )
+        except Exception as exc:
+            logger.warning(f"从工作区恢复 Token 用量失败: {exc}")
+            return None
+
+    @classmethod
+    def _parse_failure_token_usage(
+        cls,
+        *,
+        provider_type: str,
+        raw_stdout: str | None,
+        raw_stderr: str | None,
+        result_file: Path | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        从失败/超时执行路径中尽力提取已消耗的 Token 用量。
+
+        Worker 失败、结果无效或超时时，模型调用可能已经发生并产生真实消耗：
+        Codex 事件流中已完成的 turn、Claude modelUsage、结果文件内嵌 usage 都可能存在。
+        失败不影响已产生 token 的真实性，失败路径同样解析，供服务端如实入审计。
+        :param provider_type: Provider 类型（codex/claude）
+        :param raw_stdout: Worker 标准输出
+        :param raw_stderr: Worker 标准错误
+        :param result_file: 结果文件路径（可能残留部分结果）
+        :return: 已消耗的 Token 用量字典，无法提取时返回 None
+        """
+        token_usage_payload: dict[str, Any] | None = None
+        if provider_type == "codex":
+            token_usage_payload = cls._parse_codex_jsonl_token_usage(raw_stdout)
+        elif provider_type == "claude":
+            token_usage_payload = cls._parse_claude_token_usage(raw_stdout, accept_error_result=True)
+        if token_usage_payload is None:
+            # 回退通用候选提取：结果文件内容、stdout/stderr 中可能内嵌 usage。
+            file_payload = cls._read_json_file(result_file) if result_file else None
+            token_usage_payload = cls._extract_token_usage_payload(
+                file_payload,
+                cls._extract_json_from_text(raw_stdout) if (raw_stdout or "").strip() else None,
+                cls._extract_json_from_text(raw_stderr) if (raw_stderr or "").strip() else None,
+            )
+        if token_usage_payload is not None:
+            logger.info(f"失败路径提取到已消耗 Token 用量: {token_usage_payload}")
+        return token_usage_payload
+
+    @classmethod
     def _parse_codex_jsonl_token_usage(cls, raw_stdout: str | None) -> dict[str, Any] | None:
         """
         从 Codex --json 的 JSONL 事件流中解析并累加 Token 用量。
@@ -1231,7 +1299,11 @@ class TicketAiAnalysisService:
         }
 
     @classmethod
-    def _parse_claude_token_usage(cls, raw_stdout: str | None) -> dict[str, Any] | None:
+    def _parse_claude_token_usage(
+        cls,
+        raw_stdout: str | None,
+        accept_error_result: bool = False,
+    ) -> dict[str, Any] | None:
         """
         从 Claude Code --output-format json 的单行 JSON 输出中解析 Token 用量。
 
@@ -1239,6 +1311,8 @@ class TicketAiAnalysisService:
         modelUsage 按模型给出本次执行的累计用量（inputTokens / outputTokens /
         cacheReadInputTokens / cacheCreationInputTokens），这里按模型累加得到总量。
         :param raw_stdout: Worker 标准输出（单行 JSON）
+        :param accept_error_result: 是否接受 is_error=True 的失败结果报文；
+            失败提取路径传 True，模型调用可能已发生且消耗真实
         :return: 累加后的 Token 用量字典，无有效数据时返回 None
         """
         if not raw_stdout or not raw_stdout.strip():
@@ -1249,7 +1323,11 @@ class TicketAiAnalysisService:
             return None
         # 仅识别 Claude result 报文：type=result 且顶层有 result/num_turns 等特征；
         # Codex 事件流最后一行是 turn.completed，不会被误解析。
-        if not isinstance(payload, dict) or payload.get("type") != "result" or payload.get("is_error"):
+        if not isinstance(payload, dict) or payload.get("type") != "result":
+            return None
+        if not accept_error_result and payload.get("is_error"):
+            # 成功路径拒绝错误报文（历史语义，避免误读半截输出）；
+            # 失败提取（accept_error_result=True）接受：调用可能已发生且消耗真实。
             return None
         model_usage = payload.get("modelUsage")
         total_input = 0
@@ -1900,6 +1978,40 @@ class TicketAiAnalysisService:
             return False
 
     @staticmethod
+    def _refresh_task_lock_heartbeat(lock_file: Path) -> None:
+        """
+        刷新任务锁心跳时间戳（Worker 存活证明，纯本地文件写）。
+        :param lock_file: 锁文件路径
+        :return: 无
+        """
+        try:
+            if not lock_file.exists():
+                return
+            payload = json.loads(lock_file.read_text(encoding="utf-8") or "{}")
+            if not isinstance(payload, dict):
+                return
+            payload["lastHeartbeatAt"] = datetime.now().isoformat()
+            lock_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning(f"刷新 AI 分析任务锁心跳失败: {exc}")
+
+    @classmethod
+    async def _run_lock_heartbeat(cls, lock_file: Path, interval_sec: float = 15.0) -> None:
+        """
+        Worker 执行期间周期刷新锁心跳，直到被取消（finally 中随执行结束取消）。
+        :param lock_file: 锁文件路径
+        :param interval_sec: 心跳间隔秒数
+        :return: 无
+        """
+        try:
+            while True:
+                await asyncio.sleep(interval_sec)
+                await asyncio.to_thread(cls._refresh_task_lock_heartbeat, lock_file)
+        except asyncio.CancelledError:
+            # 正常取消：Worker 已结束，锁即将释放。
+            raise
+
+    @staticmethod
     def _release_task_lock(lock_file: Path) -> None:
         """
         释放任务运行锁。
@@ -1931,13 +2043,23 @@ class TicketAiAnalysisService:
     @classmethod
     def _is_stale_lock(cls, lock_payload: dict[str, Any] | None, timeout_sec: int) -> bool:
         """
-        判断锁文件是否已经过期。
+        判断锁文件是否已经过期（可被安全接管）。
+
+        心跳续租优先：锁内有 lastHeartbeatAt 时按心跳判活——Worker 存活期间持续刷新，
+        心跳停止超过 max(间隔×4, 60) 秒视为 Worker 已死，锁过期可接管。
+        无心跳字段的旧版本锁回退到"启动时间 + 超时×2"的时间窗判定，保持兼容。
         :param lock_payload: 锁文件内容
         :param timeout_sec: 当前任务超时时间
         :return: 是否过期
         """
         if not isinstance(lock_payload, dict):
             return True
+        # 新版心跳锁：以最近心跳时间为存活依据。
+        heartbeat_at = cls._parse_iso_datetime(lock_payload.get("lastHeartbeatAt"))
+        if heartbeat_at:
+            # 心跳间隔 15 秒，4 倍窗口容忍单次刷新抖动；下限 60 秒防止过激接管。
+            stale_after = max(60.0, 15.0 * 4)
+            return (datetime.now() - heartbeat_at).total_seconds() > stale_after
         started_at = cls._parse_iso_datetime(lock_payload.get("startedAt") or lock_payload.get("started_at"))
         if not started_at:
             return True
@@ -2893,12 +3015,33 @@ class TicketAiAnalysisService:
                     workspace_path=str(workspace_dir),
                 )
                 result_text = cls._dumps(cached_result)
+                # 缓存命中也要尽力恢复 token：结果来自历史 Worker 执行，token 消耗真实存在。
+                # 优先读取结果文件内嵌的 usage；否则按 Provider 从落盘的 stdout 事件流解析。
+                cached_token_usage = cls._extract_token_usage_payload(cached_result)
+                if cached_token_usage is None:
+                    cached_stdout = ""
+                    stdout_file = workspace_dir / "worker.stdout.txt"
+                    if stdout_file.exists():
+                        try:
+                            cached_stdout = stdout_file.read_text(encoding="utf-8")
+                        except Exception:
+                            cached_stdout = ""
+                    cached_token_usage = cls._parse_failure_token_usage(
+                        provider_type=cls._resolve_provider_type(context_payload),
+                        raw_stdout=cached_stdout,
+                        raw_stderr=None,
+                        result_file=result_file,
+                    )
+                if cached_token_usage is not None:
+                    token_usage_payload = cached_token_usage
+                    logger.info(f"缓存命中恢复 Token 用量: {token_usage_payload}")
                 return {
                     "request_type": req_data.get("requestType"),
                     "command": req_data.get("command"),
                     "success": True,
                     "status": "success",
                     "message": "AI 分析已完成，直接返回缓存结果",
+                    "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": cached_result,
                         "raw_output": result_text,
@@ -2931,6 +3074,7 @@ class TicketAiAnalysisService:
                     "ticketId": ticket_id,
                     "status": "running",
                     "startedAt": datetime.now().isoformat(),
+                    "lastHeartbeatAt": datetime.now().isoformat(),
                     "requestType": req_data.get("requestType"),
                     "command": req_data.get("command"),
                 },
@@ -2946,6 +3090,9 @@ class TicketAiAnalysisService:
                     "error_code": "AI_TASK_ALREADY_RUNNING",
                     "error_message": failure_message,
                 }
+            # 锁心跳续租：Worker 执行期间周期刷新 lastHeartbeatAt，证明 Worker 存活；
+            # 心跳停止（Worker 崩溃/被杀）后短窗口即可被安全接管，避免长任务锁假死。
+            lock_heartbeat_task = asyncio.create_task(cls._run_lock_heartbeat(task_lock_file))
             try:
                 ticket_file.write_text(cls._dumps(ticket), encoding="utf-8")
                 timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
@@ -3239,6 +3386,13 @@ class TicketAiAnalysisService:
                         raw_stderr, raw_stdout, process.returncode
                     )
                     failure_message = str(failure_payload["error_message"])
+                    # 失败也要尽力提取已消耗 token：模型调用可能已发生，消耗真实存在。
+                    failure_token_usage = cls._parse_failure_token_usage(
+                        provider_type=provider_type,
+                        raw_stdout=raw_stdout,
+                        raw_stderr=raw_stderr,
+                        result_file=result_file,
+                    )
                     await cls._emit_event(
                         event_sender,
                         "ai_analysis_error",
@@ -3258,6 +3412,7 @@ class TicketAiAnalysisService:
                         "error_message": failure_message,
                         "worker_exit_code": failure_payload["worker_exit_code"],
                         "diagnostics": failure_payload["diagnostics"],
+                        "token_usage": failure_token_usage,
                     }
 
                 if parsed_result is None:
@@ -3342,6 +3497,13 @@ class TicketAiAnalysisService:
                         diagnostics=failure_payload["diagnostics"],
                         auth_diagnostic=worker_auth_diagnostic,
                     )
+                    # 结果无效同样可能已产生模型消耗（如结果不符合 schema），尽力提取 token。
+                    invalid_result_token_usage = cls._parse_failure_token_usage(
+                        provider_type=provider_type,
+                        raw_stdout=raw_stdout,
+                        raw_stderr=raw_stderr,
+                        result_file=result_file,
+                    )
                     return {
                         "request_type": req_data.get("requestType"),
                         "command": req_data.get("command"),
@@ -3352,6 +3514,7 @@ class TicketAiAnalysisService:
                         "error_message": failure_payload["error_message"],
                         "worker_exit_code": failure_payload["worker_exit_code"],
                         "diagnostics": failure_payload["diagnostics"],
+                        "token_usage": invalid_result_token_usage,
                     }
 
                 normalized_result = parsed_result
@@ -3396,9 +3559,20 @@ class TicketAiAnalysisService:
                     },
                 }
             finally:
+                # 先停心跳再释放锁：锁文件删除后心跳刷新会自动跳过（文件不存在）。
+                lock_heartbeat_task.cancel()
+                try:
+                    await lock_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
                 cls._release_task_lock(task_lock_file)
         except subprocess.TimeoutExpired as exc:
             failure_message = f"AI Worker 执行超时：{exc}"
+            # 超时分支拿不到进程内 stdout，从工作区已落盘的流文件尽力提取已消耗 token。
+            timeout_token_usage = cls._recover_token_usage_from_workspace(
+                workspace_dir,
+                provider_type=cls._resolve_provider_type(context_payload),
+            )
             await cls._emit_event(
                 event_sender,
                 "ai_analysis_error",
@@ -3414,10 +3588,16 @@ class TicketAiAnalysisService:
                 "message": failure_message,
                 "error_code": "AI_WORKER_TIMEOUT",
                 "error_message": failure_message,
+                "token_usage": timeout_token_usage,
             }
         except Exception as exc:
             logger.exception(f"AI分析Agent任务[{task_id}] 执行失败: {exc}")
             failure_message = str(exc)
+            # 异常分支同样尽力从工作区落盘文件恢复已消耗 token（可能为空目录则返回 None）。
+            exception_token_usage = cls._recover_token_usage_from_workspace(
+                workspace_dir if "workspace_dir" in locals() else None,
+                provider_type=cls._resolve_provider_type(context_payload),
+            )
             await cls._emit_event(
                 event_sender,
                 "ai_analysis_error",
@@ -3434,4 +3614,5 @@ class TicketAiAnalysisService:
                 "message": failure_message,
                 "error_code": "AI_WORKER_EXECUTION_ERROR",
                 "error_message": failure_message,
+                "token_usage": exception_token_usage,
             }

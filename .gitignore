@@ -25,6 +25,7 @@ server/caches
 server/case_data
 logs
 .codebase-memory
+sync-subrepos.ps1
 
 .gitnexus
 .claude
