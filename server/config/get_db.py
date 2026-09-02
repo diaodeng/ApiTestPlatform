@@ -72,6 +72,7 @@ async def init_create_table():
     _ensure_ticket_role_columns()
     _ensure_ticket_classification_columns()
     _ensure_ai_provider_preferred_executor_column()
+    _ensure_ai_provider_observability_columns()
     _ensure_ticket_ai_analysis_token_columns()
     _ensure_ai_analysis_error_code_columns()
     _ensure_ticket_ai_analysis_fingerprint_columns()
@@ -555,6 +556,71 @@ def _ensure_ai_provider_preferred_executor_column():
     except Exception as exc:
         logger.warning(f"检查或升级 sys_ai_provider.preferred_executor 字段失败: {exc}")
 
+
+def _ensure_ai_provider_observability_columns():
+    """
+    为 sys_ai_provider 补齐可观测上报字段，兼容旧库。
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    column_specs = [
+        ("observability_enabled", "TINYINT(1) NOT NULL DEFAULT 0", "是否启用可观测上报", "AFTER worker_env"),
+        ("observability_endpoint", "VARCHAR(500)", "OTLP上报端点基础地址", "AFTER observability_enabled"),
+        ("observability_auth_type", "VARCHAR(32)", "可观测鉴权类型：bearer/basic", "AFTER observability_endpoint"),
+        ("observability_api_key_prefix", "VARCHAR(128)", "可观测密钥掩码前缀", "AFTER observability_auth_type"),
+        ("observability_api_key_cipher_text", "TEXT", "可观测鉴权密钥密文", "AFTER observability_api_key_prefix"),
+        ("observability_service_name", "VARCHAR(128)", "OTLP service.name", "AFTER observability_api_key_cipher_text"),
+        (
+            "observability_cli_enabled",
+            "TINYINT(1) NOT NULL DEFAULT 0",
+            "是否向本地AI CLI注入原生遥测配置",
+            "AFTER observability_service_name",
+        ),
+    ]
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                rows = (
+                    connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'sys_ai_provider'
+                            """
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                existing_columns = {str(row.get("COLUMN_NAME") or "") for row in rows}
+                for column_name, column_type, column_comment, column_position in column_specs:
+                    if column_name in existing_columns:
+                        continue
+                    logger.info(f"检测到 sys_ai_provider 缺少 {column_name} 列，自动补齐")
+                    connection.execute(
+                        text(
+                            f"""
+                            ALTER TABLE sys_ai_provider
+                            ADD COLUMN {column_name} {column_type} NULL COMMENT '{column_comment}' {column_position}
+                            """
+                        )
+                    )
+                    existing_columns.add(column_name)
+                return
+
+            rows = connection.execute(text("PRAGMA table_info(sys_ai_provider)")).mappings().all()
+            existing_columns = {str(row.get("name") or "") for row in rows}
+            for column_name, column_type, _column_comment, _column_position in column_specs:
+                if column_name in existing_columns:
+                    continue
+                logger.info(f"检测到 sqlite sys_ai_provider.{column_name} 缺少，自动补齐")
+                connection.execute(text(f"ALTER TABLE sys_ai_provider ADD COLUMN {column_name} {column_type}"))
+    except Exception as exc:
+        logger.warning(f"检查或升级 sys_ai_provider 可观测字段失败: {exc}")
 
 def _ensure_ticket_ai_analysis_token_columns():
     """

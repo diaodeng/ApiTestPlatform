@@ -359,6 +359,9 @@ class TicketAiAnalysisService:
         cls._trust_codex_workspace(codex_home, workspace_dir)
         if has_provider_keys:
             cls._patch_codex_config_for_provider(codex_home, overrides)
+        # 可观测 CLI 原生遥测：由服务端 providerEnv 显式下发开关后写入任务级 [otel] 段
+        if str(overrides.get("CODEX_OTEL_ENABLED") or "").strip() == "1":
+            TicketAiCodexConfigService.apply_otel_config(codex_home, overrides)
         return codex_home
 
     @staticmethod
@@ -728,6 +731,23 @@ class TicketAiAnalysisService:
             env_lines.append(f"ANTHROPIC_API_KEY={api_key}")
         if base_url:
             env_lines.append(f"ANTHROPIC_BASE_URL={base_url}")
+        # 可观测遥测变量：透传 OTEL/CLAUDE_CODE 开关与 TRACEPARENT，供 Claude Code 原生上报
+        for otel_key in (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_SERVICE_NAME",
+            "OTEL_TRACES_EXPORTER",
+            "OTEL_METRICS_EXPORTER",
+            "OTEL_LOGS_EXPORTER",
+            "OTEL_SESSION_ID",
+            "CLAUDE_CODE_ENABLE_TELEMETRY",
+            "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+            "TRACEPARENT",
+        ):
+            otel_value = str(overrides.get(otel_key) or "").strip()
+            if otel_value:
+                env_lines.append(f"{otel_key}={otel_value}")
         if env_lines:
             env_file = workspace_dir / ".env"
             try:
@@ -763,16 +783,23 @@ class TicketAiAnalysisService:
         cls,
         ai_home: Path | None,
         provider_type: str,
+        provider_env_overrides: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """
         加载 Worker 执行环境变量。
         :param ai_home: 配置目录（codex），claude 时为 None
         :param provider_type: Provider 类型
+        :param provider_env_overrides: Provider 环境变量覆盖项（claude 时需并入进程环境）
         :return: 环境变量字典
         """
         if provider_type == "claude":
-            # Claude Code: 直接使用进程环境变量
-            return dict(os.environ)
+            # Claude Code: 进程环境变量 + 服务端下发的 Provider 覆盖项
+            # （OTEL 遥测开关、TRACEPARENT 等必须进入真实进程环境才能生效）
+            env_values = dict(os.environ)
+            for key, value in (provider_env_overrides or {}).items():
+                if key and value not in (None, ""):
+                    env_values[str(key)] = str(value)
+            return env_values
         # Codex: 读取隔离配置目录
         env_values = cls._load_codex_env(ai_home) if ai_home else {}
         if ai_home:
@@ -3359,7 +3386,7 @@ class TicketAiAnalysisService:
                     command.extend(resume_flags)
 
                 ai_home = cls._prepare_ai_home(workspace_dir, provider_type, provider_env_overrides)
-                env_values = cls._load_worker_env(ai_home, provider_type)
+                env_values = cls._load_worker_env(ai_home, provider_type, provider_env_overrides)
                 env_values = cls._apply_env_overrides(env_values, provider_env_overrides)
 
                 await cls._emit_event(

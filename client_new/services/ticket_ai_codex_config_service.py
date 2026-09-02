@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -88,3 +89,93 @@ class TicketAiCodexConfigService:
         if not source_file.is_file():
             raise FileNotFoundError(f"Codex model_catalog_json 文件不存在: {source_file}")
         cls.copy_file_if_absent(source_file, target_file)
+
+    # 任务级 [otel] 托管块的起止标记；刷新时先移除旧块再追加新块，避免残留旧地址/密钥
+    OTEL_BLOCK_BEGIN = "# --- ticket-ai otel begin (managed) ---"
+    OTEL_BLOCK_END = "# --- ticket-ai otel end (managed) ---"
+
+    @classmethod
+    def apply_otel_config(cls, codex_home: Path, provider_env_overrides: dict[str, str]) -> None:
+        """
+        在任务级 config.toml 中写入/刷新托管 [otel] 段，启用 Codex 原生 OTLP 上报。
+
+        Codex 不读取 OTEL_* 环境变量，必须通过 CODEX_HOME 下 config.toml 的 [otel]
+        段配置；且项目级 .codex/config.toml 会忽略 otel 键，因此必须写在任务级
+        CODEX_HOME（用户层级）。写入后用 tomllib 校验合法性，失败则还原旧内容。
+        :param codex_home: 任务级 Codex 配置目录
+        :param provider_env_overrides: 服务端下发的 Provider 环境变量（含 OTEL_*）
+        """
+        endpoint = str(provider_env_overrides.get("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip().rstrip("/")
+        if not endpoint:
+            logger.debug("未下发 OTEL 端点，跳过 Codex [otel] 配置写入")
+            return
+        # OTEL_EXPORTER_OTLP_HEADERS 格式为 key=value；这里只取 Authorization 头的值
+        auth_value = ""
+        for pair in str(provider_env_overrides.get("OTEL_EXPORTER_OTLP_HEADERS") or "").split(","):
+            name, separator, value = pair.strip().partition("=")
+            if separator and name.strip().lower() == "authorization":
+                auth_value = value.strip()
+                break
+        if not auth_value:
+            logger.warning("OTEL_HEADERS 中缺少 Authorization，跳过 Codex [otel] 配置写入")
+            return
+        service_name = str(provider_env_overrides.get("OTEL_SERVICE_NAME") or "ticket-ai-analysis").strip()
+        session_id = str(provider_env_overrides.get("OTEL_SESSION_ID") or "").strip()
+
+        def toml_string(raw_value: str) -> str:
+            # JSON 字符串语法与 TOML basic string 兼容，统一走 json.dumps 转义
+            return json.dumps(raw_value, ensure_ascii=False)
+
+        config_file = codex_home / "config.toml"
+        original_text = config_file.read_text(encoding="utf-8") if config_file.exists() else ""
+        # 移除旧托管块（含块标记行本身），保证重试/换 Provider 时地址与密钥被整体刷新
+        lines = original_text.splitlines()
+        cleaned_lines: list[str] = []
+        inside_managed_block = False
+        for line in lines:
+            if line.strip() == cls.OTEL_BLOCK_BEGIN:
+                inside_managed_block = True
+                continue
+            if line.strip() == cls.OTEL_BLOCK_END:
+                inside_managed_block = False
+                continue
+            if not inside_managed_block:
+                cleaned_lines.append(line)
+        base_text = "\n".join(cleaned_lines).rstrip("\n")
+        otel_lines = [
+            "",
+            cls.OTEL_BLOCK_BEGIN,
+            "[otel]",
+            f"environment = {toml_string(service_name)}",
+            "log_user_prompt = false",
+            "exporter = { otlp-http = { endpoint = "
+            + toml_string(f"{endpoint}/v1/logs")
+            + ', protocol = "binary", headers = { Authorization = '
+            + toml_string(auth_value)
+            + " } } }",
+            "metrics_exporter = { otlp-http = { endpoint = "
+            + toml_string(f"{endpoint}/v1/metrics")
+            + ', protocol = "binary", headers = { Authorization = '
+            + toml_string(auth_value)
+            + " } } }",
+            "trace_exporter = { otlp-http = { endpoint = "
+            + toml_string(f"{endpoint}/v1/traces")
+            + ', protocol = "binary", headers = { Authorization = '
+            + toml_string(auth_value)
+            + " } } }",
+        ]
+        if session_id:
+            otel_lines.append("")
+            otel_lines.append("[otel.span_attributes]")
+            otel_lines.append(f'"session.id" = {toml_string(session_id)}')
+        otel_lines.append(cls.OTEL_BLOCK_END)
+        new_text = f"{base_text}\n{chr(10).join(otel_lines)}\n" if base_text else f"{chr(10).join(otel_lines)}\n"
+        try:
+            tomllib.loads(new_text)
+        except Exception as exc:
+            logger.error(f"Codex [otel] 配置生成后 TOML 校验失败，保留原配置: {exc}")
+            return
+        if new_text != original_text:
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(new_text, encoding="utf-8")
+            logger.info(f"已写入 Codex 任务级 [otel] 配置: endpoint={endpoint}, session_id={session_id or '<none>'}")

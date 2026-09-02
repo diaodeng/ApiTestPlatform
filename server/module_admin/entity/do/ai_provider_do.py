@@ -40,6 +40,23 @@ class SysAiProvider(Base):
     enabled = Column(Boolean, nullable=False, default=True, comment="是否启用")
     connection_config = Column(JSON, nullable=True, comment="协议连接扩展配置")
     worker_env = Column(JSON, nullable=True, comment="Worker环境变量覆盖配置")
+    observability_enabled = Column(Boolean, nullable=False, default=False, comment="是否启用可观测上报")
+    observability_endpoint = Column(
+        String(500, collation="utf8_general_ci"), nullable=True, default="", comment="OTLP上报端点基础地址"
+    )
+    observability_auth_type = Column(
+        String(32, collation="utf8_general_ci"), nullable=True, default="bearer", comment="可观测鉴权类型：bearer/basic"
+    )
+    observability_api_key_prefix = Column(
+        String(128, collation="utf8_general_ci"), nullable=True, default="", comment="可观测密钥掩码前缀"
+    )
+    observability_api_key_cipher_text = Column(Text, nullable=True, comment="可观测鉴权密钥密文")
+    observability_service_name = Column(
+        String(128, collation="utf8_general_ci"), nullable=True, default="", comment="OTLP service.name"
+    )
+    observability_cli_enabled = Column(
+        Boolean, nullable=False, default=False, comment="是否向本地AI CLI注入原生遥测配置"
+    )
     create_by = Column(String(64, collation="utf8_general_ci"), default="", comment="创建者")
     create_time = Column(DateTime, comment="创建时间", default=datetime.now)
     update_by = Column(String(64, collation="utf8_general_ci"), default="", comment="更新者")

@@ -36,6 +36,14 @@ class AiProviderBaseModel(BaseModel):
     enabled: bool | None = Field(default=True, description="是否启用")
     connection_config: dict[str, Any] | None = Field(default=None, description="协议连接扩展配置")
     worker_env: dict[str, Any] | None = Field(default=None, description="Worker环境变量覆盖配置")
+    observability_enabled: bool = Field(default=False, description="是否启用可观测上报")
+    observability_endpoint: str | None = Field(default=None, description="OTLP上报端点基础地址")
+    observability_auth_type: str | None = Field(default="bearer", description="可观测鉴权类型：bearer/basic")
+    observability_api_key: str | None = Field(default=None, description="可观测鉴权密钥明文，仅创建或更新时提交")
+    observability_api_key_prefix: str | None = Field(default=None, description="可观测密钥掩码前缀")
+    observability_service_name: str | None = Field(default=None, description="OTLP service.name，留空使用默认值")
+    observability_cli_enabled: bool = Field(default=False, description="是否向本地AI CLI注入原生遥测配置")
+    has_observability_secret: bool | None = Field(default=False, description="是否已配置可观测密钥")
     remark: str | None = Field(default=None, description="备注")
     has_secret: bool | None = Field(default=False, description="是否已配置密钥")
     create_by: str | None = None
@@ -64,6 +72,15 @@ class AiProviderBaseModel(BaseModel):
         self.remark = str(self.remark or "").strip() or None
         self.enabled = bool(self.enabled)
         self.provider_level = int(self.provider_level or 0)
+        self.observability_enabled = bool(self.observability_enabled)
+        self.observability_endpoint = str(self.observability_endpoint or "").strip() or None
+        self.observability_auth_type = str(self.observability_auth_type or "bearer").strip().lower()
+        if self.observability_auth_type not in ("bearer", "basic"):
+            raise ValueError("可观测鉴权类型仅支持 bearer/basic")
+        self.observability_api_key = str(self.observability_api_key or "").strip() or None
+        self.observability_api_key_prefix = str(self.observability_api_key_prefix or "").strip() or None
+        self.observability_service_name = str(self.observability_service_name or "").strip() or None
+        self.observability_cli_enabled = bool(self.observability_cli_enabled)
         return self
 
 

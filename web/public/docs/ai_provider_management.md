@@ -28,6 +28,12 @@
 - `connectionConfig`：协议连接扩展配置（JSON）。
 - `workerEnv`：扩展环境变量，服务端会在 Worker 执行时一并注入。
 - `enabled`：是否启用。
+- `observabilityEnabled`：是否启用可观测上报，默认关闭。开启后工单 AI 分析会把任务级调用上报到可观测平台。
+- `observabilityEndpoint`：OTLP 上报端点基础地址，例如 `https://agents.dmall.com/observe`。
+- `observabilityAuthType`：鉴权类型，`bearer`（Agent API Key）或 `basic`（Langfuse `publicKey:secretKey`）。
+- `observabilityApiKey`：鉴权密钥明文，服务端加密存储，编辑时留空表示保持不变。
+- `observabilityServiceName`：上报的 `service.name`，留空默认 `ticket-ai-analysis`。
+- `observabilityCliEnabled`：是否向本机 Codex / Claude Code CLI 注入原生遥测配置，默认关闭。
 
 ## 可用模型管理
 
@@ -87,8 +93,59 @@
 - 如果复制的本机 Codex 配置中残留 `experimental_bearer_token = “PROXY_MANAGED”` 或旧令牌，而 Provider 的 `baseUrl` 已切换到远端地址，Worker 可能返回 `401 Unauthorized: Invalid token`，即使同一 API Key 直接访问 Provider 的 `/models` 是正常的。Agent 会在启动 Worker 时覆盖该字段。
 - 排查时查看 Agent 任务工作区的 `worker.stderr.txt` 和系统日志中的脱敏 `auth_diagnostic`：`/models` 探测返回 200 表示 API Key/基础地址可用，应继续排查 Responses 接口、模型或 CLI 配置；返回 401 才优先检查 Provider 密钥和权限。日志不会记录 API Key 明文。
 
+## 可观测上报（OTLP）
+
+### 功能说明
+
+在 Provider 上开启"可观测上报"后，该 Provider 的每次工单 AI 分析都会生成一条任务级调用记录，上报到可观测平台（如水滴引擎 `https://agents.dmall.com/observe`）。平台上可以看到：
+
+- **输入（INPUT）**：本次分析发送给 AI 的完整提示词。
+- **输出（OUTPUT）**：AI 返回的分析结果 JSON。
+- **Token 用量与成本**：按平台配置的模型定价自动计算。
+- **会话（Sessions）**：按 `ticket-ai-task-{任务ID}` 聚合，一次分析一个会话。
+- **错误与耗时**：失败任务带错误码/错误信息与执行耗时。
+
+### 入口与配置
+
+入口在"系统管理 → AI Provider 管理"的新增/编辑弹窗中，"可观测上报"开关默认关闭。
+
+| 配置项 | 含义 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| 可观测上报 | 总开关 | 关闭 | 关闭时以下配置项隐藏但不会清空，重新开启后恢复显示 |
+| OTLP端点 | 上报地址 | 无 | 填平台给出的基础地址（如 `https://agents.dmall.com/observe`），系统自动拼接 `/v1/traces`、`/v1/logs` 等子路径 |
+| 鉴权类型 | 上报鉴权方式 | `bearer` | `bearer` 填平台生成的 Agent API Key；`basic` 填 Langfuse 集成页的 `publicKey:secretKey`（冒号拼接） |
+| 鉴权密钥 | 上报凭据 | 无 | 加密存储，界面脱敏显示；编辑时留空表示保持不变 |
+| Service名称 | 平台内的服务名 | `ticket-ai-analysis` | 建议留空使用默认值，便于统一筛选 |
+| CLI原生遥测 | 本机 CLI 上报开关 | 关闭 | 开启后，本机 Codex / Claude Code 的执行细节（工具调用、模型请求耗时、CLI 事件日志）也会上报 |
+
+### 上报内容说明
+
+- 任务级上报始终包含：提示词全文、分析结果全文、Token 用量、耗时、模型名、任务/工单 ID、成功或失败状态。
+- 失败任务同样会上报，便于在平台统计失败率与错误分布。
+- 开启"CLI 原生遥测"后，CLI 自身的 span（工具调用、模型请求）会通过 W3C Trace 上下文挂接到任务链路（Claude Code 支持；Codex 通过相同 `session.id` 关联）。
+- 上报失败（如平台不可达）只记录服务端日志，**不会影响 AI 分析任务本身**。
+
+### 示例
+
+以水滴引擎为例：
+
+1. 在平台"集成页"创建集成，得到 Agent API Key。
+2. Provider 编辑弹窗中开启"可观测上报"。
+3. OTLP端点填 `https://agents.dmall.com/observe`。
+4. 鉴权类型选 `Bearer（Agent API Key）`，密钥填平台生成的 Key。
+5. 保存后发起一次工单 AI 分析，到平台 Traces 页按 `service.name = ticket-ai-analysis` 筛选即可看到调用记录。
+
+### 注意事项与常见问题
+
+- **网络可达性**：上报由服务端发起；开启"CLI 原生遥测"后，执行 Agent 的那台机器也必须能访问 OTLP 端点。
+- **隐私**：提示词与结果全文会上报，如内容敏感请确认平台访问权限。CLI 原生遥测默认不包含提示词原文（CLI 侧保持脱敏默认值）。
+- **看不到 CLI 执行细节**：确认"CLI 原生遥测"已开启，且 Agent 已重启加载新配置。
+- **平台上 Sessions 页没有任务会话**：会话按 `ticket-ai-task-{任务ID}` 聚合，确认筛选时间范围覆盖任务执行时间。
+- **Token 消耗图表为 0 但 span 有 Token**：平台的按分钟聚合图表依赖平台侧映射，任务级 Token 数值以任务详情为准。
+
 ## 变更说明
 - 该能力已经接入工单 AI 分析、消息发起 AI、日志拉取自动 AI 三条链路。
 - 后续如果新增流程节点，需要复用同一套 Provider 选择和下发逻辑。
 - AI Provider 的角色权限现在已补齐目录和按钮级权限，启动时会自动同步到系统菜单表，角色权限设置页面可以直接勾选对应权限码。
 - 支持一个 Provider 配置多个可用模型，使用方可按场景选择不同模型，实现”同一 API Key 不同模型”的灵活配置。
+- 新增 Provider 级可观测上报配置（OTLP）：工单 AI 分析任务级调用（输入/输出/Token/耗时）上报可观测平台，可选开启本机 CLI 原生遥测。详见"可观测上报（OTLP）"章节。

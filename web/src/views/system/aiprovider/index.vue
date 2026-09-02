@@ -213,6 +213,53 @@
             </el-form-item>
           </el-col>
           <el-col :span="24">
+            <el-form-item label="可观测上报" prop="observabilityEnabled">
+              <div class="observability-switch-line">
+                <el-switch v-model="form.observabilityEnabled" inline-prompt active-text="开启" inactive-text="关闭" />
+                <span class="observability-tip">开启后，工单 AI 分析任务会把任务级调用（输入/输出/Token/耗时）上报到可观测平台</span>
+              </div>
+            </el-form-item>
+          </el-col>
+          <template v-if="form.observabilityEnabled">
+            <el-col :span="12">
+              <el-form-item label="OTLP端点" prop="observabilityEndpoint">
+                <el-input v-model="form.observabilityEndpoint" placeholder="如 https://agents.dmall.com/observe" clearable />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="鉴权类型" prop="observabilityAuthType">
+                <el-select v-model="form.observabilityAuthType">
+                  <el-option label="Bearer（Agent API Key）" value="bearer" />
+                  <el-option label="Basic（Langfuse publicKey:secretKey）" value="basic" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="鉴权密钥" prop="observabilityApiKey">
+                <el-input
+                  v-model="form.observabilityApiKey"
+                  type="password"
+                  show-password
+                  :placeholder="observabilityKeyPlaceholder"
+                  clearable
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="Service名称" prop="observabilityServiceName">
+                <el-input v-model="form.observabilityServiceName" placeholder="留空使用 ticket-ai-analysis" clearable />
+              </el-form-item>
+            </el-col>
+            <el-col :span="24">
+              <el-form-item label="CLI原生遥测" prop="observabilityCliEnabled">
+                <div class="observability-switch-line">
+                  <el-switch v-model="form.observabilityCliEnabled" inline-prompt active-text="开启" inactive-text="关闭" />
+                  <span class="observability-tip">开启后，本机 Codex/Claude CLI 的执行细节（工具调用、模型请求）也会上报；关闭时仅上报任务级数据</span>
+                </div>
+              </el-form-item>
+            </el-col>
+          </template>
+          <el-col :span="24">
             <el-form-item label="Provider密钥" prop="apiKey">
               <el-input
                 v-model="form.apiKey"
@@ -418,6 +465,13 @@ function resetForm() {
     baseUrl: '',
     apiKey: '',
     enabled: true,
+    observabilityEnabled: false,
+    observabilityEndpoint: '',
+    observabilityAuthType: 'bearer',
+    observabilityApiKey: '',
+    observabilityServiceName: '',
+    observabilityCliEnabled: false,
+    hasObservabilitySecret: false,
     remark: ''
   }
   modelOptions.value = []
@@ -457,7 +511,8 @@ function handleUpdate(row) {
     form.value = {
       ...form.value,
       ...(response.data || {}),
-      apiKey: ''
+      apiKey: '',
+      observabilityApiKey: ''
     }
     connectionConfigText.value = form.value.connectionConfig ? JSON.stringify(form.value.connectionConfig, null, 2) : ''
     workerEnvText.value = form.value.workerEnv ? JSON.stringify(form.value.workerEnv, null, 2) : ''
@@ -483,6 +538,16 @@ function submitForm() {
     if (!payload.providerId && !String(payload.apiKey || '').trim()) {
       proxy.$modal.msgWarning('新增 Provider 时请填写密钥')
       return
+    }
+    if (payload.observabilityEnabled) {
+      if (!String(payload.observabilityEndpoint || '').trim()) {
+        proxy.$modal.msgWarning('启用可观测上报时请填写OTLP端点')
+        return
+      }
+      if (!payload.hasObservabilitySecret && !String(payload.observabilityApiKey || '').trim()) {
+        proxy.$modal.msgWarning('启用可观测上报时请填写鉴权密钥')
+        return
+      }
     }
     if (!payload.providerId && !String(payload.providerCode || '').trim()) {
       proxy.$modal.msgWarning('Provider编码不能为空')

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -62,6 +63,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketAiRepoMappingUpdateModel,
 )
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus, TicketEventType
+from modules.ticket.service.ai.ticket_ai_observability_service import TicketAiObservabilityService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
 from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
@@ -898,6 +900,65 @@ class TicketAiAnalysisService:
             return HandleResponse.validate_transport_payload(response.text)
 
     @classmethod
+    def _report_observability_task_span(
+        cls,
+        *,
+        observability_config: dict[str, Any] | None,
+        task_id: int,
+        ticket_id: int | None,
+        model_name: str | None,
+        prompt_text: str | None,
+        result_text: str | None,
+        normalized_token_usage: dict[str, Any] | None,
+        started_at: datetime | None,
+        success: bool,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        observability_trace: dict[str, str] | None = None,
+    ) -> None:
+        """
+        组装并上报任务级 LLM span 到可观测平台。
+        :param observability_config: 可观测上报配置，None 表示未启用
+        :param task_id: AI 分析任务ID
+        :param ticket_id: 工单ID
+        :param model_name: 模型名称
+        :param prompt_text: 提示词模板文本
+        :param result_text: 分析结果文本
+        :param normalized_token_usage: 归一化后的 Token 用量
+        :param started_at: 任务开始时间
+        :param success: 任务是否成功
+        :param error_code: 失败错误码
+        :param error_message: 失败错误信息
+        :param observability_trace: 任务级trace上下文（trace_id/span_id），CLI原生span挂接同一trace
+        """
+        if not observability_config:
+            return
+        input_tokens = (normalized_token_usage or {}).get("input_token_count")
+        output_tokens = (normalized_token_usage or {}).get("output_token_count")
+        total_tokens = (normalized_token_usage or {}).get("total_token_count")
+        latency_ms = None
+        if started_at:
+            latency_ms = (datetime.now() - started_at).total_seconds() * 1000
+        TicketAiObservabilityService.report_task_span(
+            observability_config,
+            task_id=task_id,
+            ticket_id=ticket_id,
+            model_name=model_name,
+            prompt_text=prompt_text,
+            result_text=result_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            success=success,
+            error_code=error_code,
+            error_message=error_message,
+            started_at=started_at,
+            trace_id=(observability_trace or {}).get("trace_id"),
+            span_id=(observability_trace or {}).get("span_id"),
+        )
+
+    @classmethod
     def _normalize_log_analysis_mode(cls, mode: str | None) -> str:
         """
         归一化日志分析模式。
@@ -1049,12 +1110,21 @@ class TicketAiAnalysisService:
         return env_overrides
 
     @classmethod
-    def _build_provider_env_overrides(cls, provider) -> dict[str, str]:
+    def _build_provider_env_overrides(
+        cls,
+        provider,
+        observability_config: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        traceparent: str | None = None,
+    ) -> dict[str, str]:
         """
         根据 Provider 配置构建 Worker 环境变量覆盖项。
         Codex 使用 OPENAI_API_KEY，Claude Code 使用 ANTHROPIC_API_KEY，
         同时保留对方 key 的兼容性。
         :param provider: Provider数据库对象
+        :param observability_config: 可观测上报配置，非空且Provider开启CLI遥测时注入OTEL变量
+        :param session_id: 可观测会话ID，用于Codex span_attributes和平台Sessions聚合
+        :param traceparent: W3C trace上下文，Claude Code -p 模式会读取并挂接到任务trace
         :return: 环境变量覆盖项
         """
         if not provider:
@@ -1088,6 +1158,34 @@ class TicketAiAnalysisService:
         provider_name = str(getattr(provider, "provider_name", "") or "").strip()
         if provider_code:
             env_overrides["AI_PROVIDER_CODE"] = provider_code
+        # 可观测 CLI 原生遥测注入：仅当 Provider 开启 observability_cli_enabled 且解析出上报配置时下发。
+        # Codex 走 config.toml [otel]（客户端按 CODEX_OTEL_ENABLED 写入），Claude 走环境变量。
+        if (
+            observability_config
+            and provider is not None
+            and bool(getattr(provider, "observability_cli_enabled", False))
+        ):
+            otel_endpoint = str(observability_config.get("endpoint") or "").strip()
+            otel_auth = str(observability_config.get("auth_header") or "").strip()
+            if otel_endpoint and otel_auth:
+                env_overrides.update(
+                    {
+                        "OTEL_EXPORTER_OTLP_ENDPOINT": otel_endpoint,
+                        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+                        "OTEL_EXPORTER_OTLP_HEADERS": f"Authorization={otel_auth}",
+                        "OTEL_SERVICE_NAME": str(observability_config.get("service_name") or "ticket-ai-analysis"),
+                        "OTEL_TRACES_EXPORTER": "otlp",
+                        "OTEL_METRICS_EXPORTER": "otlp",
+                        "OTEL_LOGS_EXPORTER": "otlp",
+                        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+                        "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+                        "CODEX_OTEL_ENABLED": "1",
+                    }
+                )
+                if session_id:
+                    env_overrides["OTEL_SESSION_ID"] = session_id
+                if traceparent:
+                    env_overrides["TRACEPARENT"] = traceparent
         if provider_name:
             env_overrides["AI_PROVIDER_NAME"] = provider_name
         platform_code = str(getattr(provider, "platform_code", "") or "").strip()
@@ -4154,7 +4252,36 @@ class TicketAiAnalysisService:
                 usage="ticket_analysis_worker",
                 executor=selected_executor,
             )
-        provider_env_overrides = cls._build_provider_env_overrides(selected_provider) if selected_provider else {}
+        # 可观测上报为旁路能力：配置解析失败只记日志，绝不阻断分析任务执行。
+        try:
+            observability_config = TicketAiObservabilityService.build_provider_config(selected_provider)
+        except Exception as obs_exc:
+            logger.warning(f"AI分析任务[{task_id}] 可观测配置解析失败，跳过上报: {obs_exc}")
+            observability_config = None
+        # 可观测链路上下文：任务级 traceId/spanId 同时用于服务端任务span与CLI的TRACEPARENT，
+        # 使 Claude Code 的原生span挂接到同一trace；Codex 不支持traceparent，靠session.id关联。
+        observability_trace: dict[str, str] | None = None
+        observability_session_id: str | None = None
+        if observability_config:
+            observability_session_id = f"ticket-ai-task-{task_id}"
+            if selected_provider is not None and bool(getattr(selected_provider, "observability_cli_enabled", False)):
+                observability_trace = {
+                    "trace_id": secrets.token_hex(16),
+                    "span_id": secrets.token_hex(8),
+                }
+        if selected_provider:
+            provider_env_overrides = cls._build_provider_env_overrides(
+                selected_provider,
+                observability_config=observability_config,
+                session_id=observability_session_id,
+                traceparent=(
+                    f'00-{observability_trace["trace_id"]}-{observability_trace["span_id"]}-01'
+                    if observability_trace
+                    else None
+                ),
+            )
+        else:
+            provider_env_overrides = {}
         requested_agent_code = str((context_payload or {}).get("selectedAgentCode") or "").strip()
         if not requested_agent_code and selected_provider and str(selected_provider.preferred_agent_code or "").strip():
             requested_agent_code = str(selected_provider.preferred_agent_code).strip()
@@ -4498,6 +4625,19 @@ class TicketAiAnalysisService:
                 notify_config=notify_config,
                 stage="ai_analysis",
             )
+            # 任务级 LLM span 上报：INPUT/OUTPUT/Token/耗时进入可观测平台
+            cls._report_observability_task_span(
+                observability_config=observability_config,
+                task_id=task_id,
+                ticket_id=ticket.ticket_id,
+                model_name=worker_model_override or None,
+                prompt_text=prompt_template,
+                result_text=result_text or raw_stdout,
+                normalized_token_usage=normalized_token_usage,
+                started_at=started_at,
+                success=True,
+                observability_trace=observability_trace,
+            )
             cls._log_task_step(task_id, "DONE", "AI 分析任务完成")
             return
         except Exception as exc:
@@ -4542,6 +4682,21 @@ class TicketAiAnalysisService:
                 error_message=failure_message,
             )
             db.commit()
+            # 失败任务同样上报（带错误信息），便于在可观测平台统计失败率与错误分布
+            cls._report_observability_task_span(
+                observability_config=locals().get("observability_config"),
+                task_id=task_id,
+                ticket_id=ticket.ticket_id if "ticket" in locals() and ticket else None,
+                model_name=locals().get("worker_model_override") or None,
+                prompt_text=locals().get("prompt_template"),
+                result_text=None,
+                normalized_token_usage=locals().get("normalized_token_usage"),
+                started_at=locals().get("started_at"),
+                success=False,
+                error_code=failure_code,
+                error_message=failure_message,
+                observability_trace=locals().get("observability_trace"),
+            )
             if "ticket" in locals() and ticket:
                 cls._finalize_sync_publish_after_ai(
                     db,

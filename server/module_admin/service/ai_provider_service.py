@@ -57,7 +57,60 @@ class AiProviderService:
         """
         model = AiProviderDetailModel.model_validate(ai_provider_info)
         model.has_secret = bool(getattr(ai_provider_info, "api_key_cipher_text", ""))
+        model.has_observability_secret = bool(getattr(ai_provider_info, "observability_api_key_cipher_text", ""))
         return model
+
+    @classmethod
+    def _validate_observability(cls, page_object, *, has_stored_secret: bool) -> dict[str, Any]:
+        """
+        校验并归一化可观测上报配置。
+        :param page_object: Provider请求模型
+        :param has_stored_secret: 数据库中是否已保存可观测密钥
+        :return: 可观测字段的持久化字典（不含密钥）
+        :raise ValueError: 配置不完整时抛出
+        """
+        enabled = bool(getattr(page_object, "observability_enabled", False))
+        if not enabled:
+            return {
+                "observability_enabled": False,
+                "observability_endpoint": None,
+                "observability_auth_type": "bearer",
+                "observability_service_name": None,
+                "observability_cli_enabled": False,
+            }
+        endpoint = str(getattr(page_object, "observability_endpoint", "") or "").strip()
+        auth_type = str(getattr(page_object, "observability_auth_type", "") or "bearer").strip().lower()
+        service_name = str(getattr(page_object, "observability_service_name", "") or "").strip()
+        cli_enabled = bool(getattr(page_object, "observability_cli_enabled", False))
+        api_key = str(getattr(page_object, "observability_api_key", "") or "").strip()
+        if not endpoint:
+            raise ValueError("启用可观测上报时必须填写OTLP端点")
+        if auth_type not in ("bearer", "basic"):
+            raise ValueError("可观测鉴权类型仅支持 bearer/basic")
+        if not api_key and not has_stored_secret:
+            raise ValueError("启用可观测上报时必须填写鉴权密钥")
+        return {
+            "observability_enabled": True,
+            "observability_endpoint": endpoint,
+            "observability_auth_type": auth_type,
+            "observability_service_name": service_name or None,
+            "observability_cli_enabled": cli_enabled,
+        }
+
+    @classmethod
+    def _build_observability_secret_data(cls, page_object) -> dict[str, Any]:
+        """
+        根据提交的明文密钥生成可观测密钥持久化字段。
+        :param page_object: Provider请求模型
+        :return: 密钥前缀与密文字段字典；未提交密钥时返回空字典表示保持原值
+        """
+        api_key = str(getattr(page_object, "observability_api_key", "") or "").strip()
+        if not api_key:
+            return {}
+        return {
+            "observability_api_key_prefix": ApiKeyUtil.mask_api_key(api_key),
+            "observability_api_key_cipher_text": ApiKeyUtil.encrypt_api_key(api_key),
+        }
 
     @classmethod
     def get_ai_provider_list_services(
@@ -169,6 +222,10 @@ class AiProviderService:
             return CrudResponseModel(is_success=False, message=str(exc))
         if AiProviderDao.get_ai_provider_by_code(query_db, provider_code):
             return CrudResponseModel(is_success=False, message="Provider编码已存在")
+        try:
+            observability_data = cls._validate_observability(page_object, has_stored_secret=False)
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
         now = datetime.now()
         try:
             db_ai_provider = AiProviderDao.add_ai_provider_dao(
@@ -190,6 +247,8 @@ class AiProviderService:
                     "enabled": bool(page_object.enabled),
                     "connection_config": cls._normalize_dict_config(page_object.connection_config, "connectionConfig"),
                     "worker_env": cls._normalize_dict_config(page_object.worker_env, "workerEnv"),
+                    **observability_data,
+                    **cls._build_observability_secret_data(page_object),
                     "create_by": current_user_name,
                     "create_time": now,
                     "update_by": current_user_name,
@@ -244,6 +303,13 @@ class AiProviderService:
             )
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
+        try:
+            observability_data = cls._validate_observability(
+                page_object,
+                has_stored_secret=bool(provider_info.observability_api_key_cipher_text),
+            )
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
 
         update_data: dict[str, Any] = {
             "provider_name": provider_name,
@@ -259,6 +325,8 @@ class AiProviderService:
             "enabled": bool(page_object.enabled),
             "connection_config": cls._normalize_dict_config(page_object.connection_config, "connectionConfig"),
             "worker_env": cls._normalize_dict_config(page_object.worker_env, "workerEnv"),
+            **observability_data,
+            **cls._build_observability_secret_data(page_object),
             "update_by": current_user_name,
             "update_time": datetime.now(),
             "remark": page_object.remark,
