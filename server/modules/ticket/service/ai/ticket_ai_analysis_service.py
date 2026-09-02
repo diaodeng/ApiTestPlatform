@@ -4078,6 +4078,32 @@ class TicketAiAnalysisService:
             token_usage=token_usage_payload,
         )
         db.commit()
+        # 迟到结果恢复路径同样上报任务级 span（该路径不经过 _process_task 的成功上报，
+        # 且恢复场景下 provider 信息只能从任务上下文回溯）
+        try:
+            recovered_provider_code = str(
+                (getattr(task, "analysis_context", None) or {}).get("selectedAiProviderCode") or ""
+            ).strip()
+            recovered_provider = (
+                AiProviderDao.get_ai_provider_by_code(db, recovered_provider_code) if recovered_provider_code else None
+            )
+            recovered_obs_config = TicketAiObservabilityService.build_provider_config(recovered_provider)
+        except Exception as obs_exc:
+            logger.warning(f"AI分析任务[{task_id}] 恢复路径可观测配置解析失败，跳过上报: {obs_exc}")
+            recovered_obs_config = None
+        cls._report_observability_task_span(
+            observability_config=recovered_obs_config,
+            task_id=task_id,
+            ticket_id=ticket.ticket_id,
+            model_name=str(
+                (getattr(task, "analysis_context", None) or {}).get("selectedWorkerModel") or ""
+            ).strip() or None,
+            prompt_text=getattr(task, "prompt_text", None),
+            result_text=result_text,
+            normalized_token_usage=normalized_token_usage,
+            started_at=None,
+            success=True,
+        )
         cls._log_task_step(task_id, "DONE", "迟到结果恢复写回完成")
         TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)
 
