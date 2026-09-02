@@ -59,6 +59,7 @@ class TicketAiObservabilityService:
             "session_id": str(overrides.get("OTEL_SESSION_ID") or "").strip(),
             "trace_id": str(overrides.get("OTEL_TRACE_ID") or "").strip(),
             "span_id": str(overrides.get("OTEL_SPAN_ID") or "").strip(),
+            "user_id": str(overrides.get("OTEL_USER_ID") or "").strip(),
         }
         return config
 
@@ -78,6 +79,8 @@ class TicketAiObservabilityService:
         success: bool = True,
         error_code: str | None = None,
         error_message: str | None = None,
+        user_id: str | None = None,
+        start_ns: int | None = None,
     ) -> None:
         """
         上报任务级 LLM span（best-effort，失败只记日志，不影响分析任务）。
@@ -93,6 +96,8 @@ class TicketAiObservabilityService:
         :param success: 任务是否成功
         :param error_code: 失败错误码
         :param error_message: 失败错误信息
+        :param user_id: 任务提交人（映射平台 user.id）
+        :param start_ns: 任务开始的 epoch 纳秒时间戳（span 真实开始时间）
         """
         config = cls.build_config_from_env(provider_env_overrides)
         if not config:
@@ -111,6 +116,8 @@ class TicketAiObservabilityService:
                 success=success,
                 error_code=error_code,
                 error_message=error_message,
+                user_id=user_id,
+                start_ns=start_ns,
             )
         except Exception as exc:
             # 可观测上报绝不能影响分析任务主流程
@@ -132,6 +139,8 @@ class TicketAiObservabilityService:
         success: bool,
         error_code: str | None,
         error_message: str | None,
+        user_id: str | None,
+        start_ns: int | None,
     ) -> None:
         """
         执行 OTLP/HTTP(JSON) 上报。
@@ -167,6 +176,10 @@ class TicketAiObservabilityService:
         if total_tokens is not None:
             attributes.append(cls._int_attribute("gen_ai.usage.total_tokens", total_tokens))
         attributes.append(cls._string_attribute("session.id", session_id))
+        if config.get("user_id"):
+            attributes.append(cls._string_attribute("user.id", str(config.get("user_id"))))
+        elif user_id:
+            attributes.append(cls._string_attribute("user.id", user_id))
         if ticket_id is not None:
             attributes.append(cls._int_attribute("ticket.id", ticket_id))
         attributes.append(cls._int_attribute("ticket_ai.task_id", task_id))
@@ -177,13 +190,14 @@ class TicketAiObservabilityService:
             attributes.append(cls._string_attribute("error.message", error_message or ""))
 
         now_ns = time.time_ns()
+        # start_ns 由调用方传入时，span 时长为任务真实执行时长（"从根开始采集"）
         span: dict[str, Any] = {
             "traceId": config.get("trace_id") or secrets.token_hex(16),
             "spanId": config.get("span_id") or secrets.token_hex(8),
             "name": cls.SPAN_NAME,
             "kind": 1,
-            "startTimeUnixNano": str(now_ns - 1_000_000),
-            "endTimeUnixNano": str(now_ns),
+            "startTimeUnixNano": str(start_ns) if start_ns else str(now_ns - 1_000_000),
+            "endTimeUnixNano": str(max(now_ns, (start_ns or 0) + 1)),
             "attributes": attributes,
         }
         if not success:

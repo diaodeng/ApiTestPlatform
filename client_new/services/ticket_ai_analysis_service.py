@@ -3003,6 +3003,9 @@ class TicketAiAnalysisService:
             timeout_sec = cls.DEFAULT_TIMEOUT_SEC
         # 缓存命中时也要返回统一的 token_usage 字段，避免引用尚未进入 Worker 分支的局部变量。
         token_usage_payload: dict[str, Any] | None = None
+        # 可观测 span 的真实开始时间与提交人（"从根开始采集"，映射平台 user.id）
+        task_started_ns = time.time_ns()
+        submitted_by_name = str(req_data.get("submittedByName") or "").strip() or None
         if not task_id or not ticket_id:
             return {
                 "request_type": req_data.get("requestType"),
@@ -3099,6 +3102,8 @@ class TicketAiAnalysisService:
                     model_name=selected_worker_model or None,
                     system_name=cls._resolve_provider_type(context_payload),
                     prompt_text=None,
+                    user_id=submitted_by_name,
+                    start_ns=task_started_ns,
                     result_text=result_text,
                     token_usage=token_usage_payload,
                     success=True,
@@ -3520,6 +3525,8 @@ class TicketAiAnalysisService:
                         prompt_text=resolved_prompt,
                         result_text=None,
                         token_usage=failure_token_usage,
+                        user_id=submitted_by_name,
+                        start_ns=task_started_ns,
                         latency_ms=worker_elapsed * 1000,
                         success=False,
                         error_code=failure_payload["error_code"],
@@ -3630,6 +3637,8 @@ class TicketAiAnalysisService:
                         prompt_text=resolved_prompt,
                         result_text=result_text,
                         token_usage=invalid_result_token_usage,
+                        user_id=submitted_by_name,
+                        start_ns=task_started_ns,
                         latency_ms=worker_elapsed * 1000,
                         success=False,
                         error_code=failure_payload["error_code"],
@@ -3687,6 +3696,8 @@ class TicketAiAnalysisService:
                     system_name=provider_type,
                     prompt_text=resolved_prompt,
                     result_text=cls._dumps(normalized_result),
+                    user_id=submitted_by_name,
+                    start_ns=task_started_ns,
                     token_usage=token_usage_payload,
                     latency_ms=worker_elapsed * 1000,
                     success=True,
@@ -3747,6 +3758,8 @@ class TicketAiAnalysisService:
                 prompt_text=locals().get("resolved_prompt"),
                 result_text=None,
                 token_usage=timeout_token_usage,
+                user_id=submitted_by_name,
+                start_ns=task_started_ns,
                 success=False,
                 error_code="AI_WORKER_TIMEOUT",
                 error_message=failure_message,
@@ -3786,6 +3799,8 @@ class TicketAiAnalysisService:
                 prompt_text=locals().get("resolved_prompt"),
                 result_text=None,
                 token_usage=exception_token_usage,
+                user_id=submitted_by_name,
+                start_ns=task_started_ns,
                 success=False,
                 error_code="AI_WORKER_EXECUTION_ERROR",
                 error_message=failure_message,

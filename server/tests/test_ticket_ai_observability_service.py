@@ -82,6 +82,7 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
             build_provider(observability_cli_enabled=False),
             observability_config=build_obs_config(),
             session_id="ticket-ai-task-1001",
+            user_id="jiqing.shi",
             observability_trace={"trace_id": "a" * 32, "span_id": "b" * 16},
         )
         self.assertEqual(result["OTEL_EXPORTER_OTLP_ENDPOINT"], "https://observe.example/observe")
@@ -89,6 +90,7 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(result["OTEL_SESSION_ID"], "ticket-ai-task-1001")
         self.assertEqual(result["OTEL_TRACE_ID"], "a" * 32)
         self.assertEqual(result["OTEL_SPAN_ID"], "b" * 16)
+        self.assertEqual(result["OTEL_USER_ID"], "jiqing.shi")
         # CLI 关闭时不下发 CLI 专属开关与 TRACEPARENT
         self.assertNotIn("CLAUDE_CODE_ENABLE_TELEMETRY", result)
         self.assertNotIn("CODEX_OTEL_ENABLED", result)

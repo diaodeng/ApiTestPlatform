@@ -11,6 +11,7 @@ ENV_OVERRIDES = {
     "OTEL_SESSION_ID": "ticket-ai-task-1001",
     "OTEL_TRACE_ID": "a" * 32,
     "OTEL_SPAN_ID": "b" * 16,
+    "OTEL_USER_ID": "jiqing.shi",
 }
 
 
@@ -26,6 +27,7 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(config["session_id"], "ticket-ai-task-1001")
         self.assertEqual(config["trace_id"], "a" * 32)
         self.assertEqual(config["span_id"], "b" * 16)
+        self.assertEqual(config["user_id"], "jiqing.shi")
 
     def test_build_config_from_env_missing_parts(self) -> None:
         """缺少端点或鉴权头时应返回 None。"""
@@ -67,6 +69,8 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
                 token_usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
                 latency_ms=120.5,
                 success=True,
+                user_id="jiqing.shi",
+                start_ns=1700000000000000000,
             )
         self.assertEqual(captured["url"], "https://observe.example/observe/v1/traces")
         self.assertEqual(captured["headers"]["Authorization"], "Bearer obs-key-123")
@@ -81,6 +85,8 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(attrs["gen_ai.usage.output_tokens"]["intValue"], 5)
         self.assertEqual(attrs["gen_ai.request.model"]["stringValue"], "test-model")
         self.assertEqual(attrs["session.id"]["stringValue"], "ticket-ai-task-1001")
+        self.assertEqual(attrs["user.id"]["stringValue"], "jiqing.shi")
+        self.assertEqual(span["startTimeUnixNano"], "1700000000000000000")
 
     def test_report_task_span_failure_marks_error_status(self) -> None:
         """失败任务应携带 error 属性与 OTLP ERROR 状态。"""

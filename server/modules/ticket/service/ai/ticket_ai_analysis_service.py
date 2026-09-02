@@ -1059,6 +1059,7 @@ class TicketAiAnalysisService:
         session_id: str | None = None,
         traceparent: str | None = None,
         observability_trace: dict[str, str] | None = None,
+        user_id: str | None = None,
     ) -> dict[str, str]:
         """
         根据 Provider 配置构建 Worker 环境变量覆盖项。
@@ -1123,6 +1124,8 @@ class TicketAiAnalysisService:
                 )
                 if session_id:
                     env_overrides["OTEL_SESSION_ID"] = session_id
+                if user_id:
+                    env_overrides["OTEL_USER_ID"] = user_id
                 if observability_trace:
                     env_overrides["OTEL_TRACE_ID"] = str(observability_trace.get("trace_id") or "")
                     env_overrides["OTEL_SPAN_ID"] = str(observability_trace.get("span_id") or "")
@@ -1164,6 +1167,8 @@ class TicketAiAnalysisService:
         timeout_sec: int,
         resume: bool = False,
         resume_from_workspace_path: str | None = None,
+        submitted_by_name: str | None = None,
+        submitted_by_id: int | None = None,
     ) -> dict[str, Any]:
         """
         构建发送给 Agent 的 AI 分析请求体。
@@ -1197,6 +1202,11 @@ class TicketAiAnalysisService:
             "timeoutSec": timeout_sec,
             "providerEnv": TicketAiAnalysisService._json_safe_value(provider_env_overrides or {}),
         }
+        # 提交人信息随 payload 下发：Agent 上报可观测 span 时映射为 user.id（平台 Users 页签）
+        if submitted_by_name:
+            payload["submittedByName"] = submitted_by_name
+        if submitted_by_id:
+            payload["submittedById"] = submitted_by_id
         if resume:
             payload["resume"] = True
         if resume_from_workspace_path:
@@ -4235,6 +4245,7 @@ class TicketAiAnalysisService:
                     else None
                 ),
                 observability_trace=observability_trace,
+                user_id=str(getattr(task, "submitted_by_name", None) or "") or None,
             )
         else:
             provider_env_overrides = {}
@@ -4333,6 +4344,8 @@ class TicketAiAnalysisService:
                 schema_payload=schema_payload,
                 result_path=result_file,
                 timeout_sec=timeout_sec,
+                submitted_by_name=getattr(task, "submitted_by_name", None),
+                submitted_by_id=getattr(task, "submitted_by_id", None),
             )
             request_id = cls._build_agent_request_id(task_id)
             # request_id 是本次真实 Agent 调用的唯一标识，写入审计 payload 后

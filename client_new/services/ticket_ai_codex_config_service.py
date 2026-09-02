@@ -121,6 +121,7 @@ class TicketAiCodexConfigService:
             return
         service_name = str(provider_env_overrides.get("OTEL_SERVICE_NAME") or "ticket-ai-analysis").strip()
         session_id = str(provider_env_overrides.get("OTEL_SESSION_ID") or "").strip()
+        user_id = str(provider_env_overrides.get("OTEL_USER_ID") or "").strip()
 
         def toml_string(raw_value: str) -> str:
             # JSON 字符串语法与 TOML basic string 兼容，统一走 json.dumps 转义
@@ -164,10 +165,13 @@ class TicketAiCodexConfigService:
             + toml_string(auth_value)
             + " } } }",
         ]
-        if session_id:
+        if session_id or user_id:
             otel_lines.append("")
             otel_lines.append("[otel.span_attributes]")
-            otel_lines.append(f'"session.id" = {toml_string(session_id)}')
+            if session_id:
+                otel_lines.append(f'"session.id" = {toml_string(session_id)}')
+            if user_id:
+                otel_lines.append(f'"user.id" = {toml_string(user_id)}')
         otel_lines.append(cls.OTEL_BLOCK_END)
         new_text = f"{base_text}\n{chr(10).join(otel_lines)}\n" if base_text else f"{chr(10).join(otel_lines)}\n"
         try:
