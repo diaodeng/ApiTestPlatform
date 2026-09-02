@@ -19,7 +19,7 @@
         >
           {{ detail.issueId ? '更换问题实例' : '关联问题实例' }}
         </el-button>
-        <el-button icon="Refresh" @click="loadDetail">刷新</el-button>
+        <el-button icon="Refresh" @click="refreshDetailData">刷新</el-button>
       </div>
     </div>
 
@@ -90,55 +90,60 @@
       </el-tab-pane>
 
       <el-tab-pane label="相似工单" name="similar">
-        <el-alert
-          v-if="detail.similarEmbeddingStatus && detail.similarEmbeddingStatus !== 'ready'"
-          type="warning"
-          show-icon
-          :closable="false"
-          class="mb12"
-          :title="detail.similarEmbeddingMessage || '当前相似工单向量不可用'"
-        />
-        <section class="similar-group">
-          <h4>工单内容相似</h4>
-          <el-empty v-if="!symptomTickets.length" description="暂无内容相似工单" />
-          <div v-for="item in symptomTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
-            <div>
-              <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
-              <div class="detail-meta">
-                <span>相似度 {{ formatPercent(item.score) }}</span>
-                <span>{{ item.moduleName || '-' }}</span>
-                <span>{{ item.status || '-' }}</span>
+        <div v-loading="similarLoading" class="similar-loading-wrap">
+          <el-alert
+            v-if="similarError && !similarLoading"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="mb12"
+            :title="similarError"
+          />
+          <!-- 有状态提示时仍渲染结果区：向量 stale/missing 等提示不应隐藏已召回的候选 -->
+          <template v-if="!similarLoading">
+            <section class="similar-group">
+              <h4>工单内容相似</h4>
+              <el-empty v-if="!symptomTickets.length" description="暂无内容相似工单" />
+              <div v-for="item in symptomTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
+                <div>
+                  <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
+                  <div class="detail-meta">
+                    <span>相似度 {{ formatPercent(item.score) }}</span>
+                    <span>{{ item.moduleName || '-' }}</span>
+                    <span>{{ item.status || '-' }}</span>
+                  </div>
+                  <div v-if="item.matchReasons?.length || item.conflicts?.length" class="detail-meta">
+                    <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
+                    <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
+                  </div>
+                </div>
+                <div class="similar-actions">
+                  <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+                  <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
+                    飞书详情
+                  </el-button>
+                </div>
               </div>
-              <div v-if="item.matchReasons?.length || item.conflicts?.length" class="detail-meta">
-                <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
-                <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
+            </section>
+            <section class="similar-group similar-group--case">
+              <h4>处理案例相似</h4>
+              <el-empty v-if="!caseTickets.length" description="暂无处理案例" />
+              <div v-for="item in caseTickets" :key="`case-${item.ticketId}`" class="similar-item">
+                <div>
+                  <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
+                  <div class="detail-meta">
+                    <span>相似度 {{ formatPercent(item.score) }}</span>
+                    <span>{{ formatCaseStatus(item.caseStatus) }}</span>
+                  </div>
+                  <div class="detail-meta">根因：{{ item.rootCause || '-' }}</div>
+                </div>
+                <div class="similar-actions">
+                  <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+                </div>
               </div>
-            </div>
-            <div class="similar-actions">
-              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
-              <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
-                飞书详情
-              </el-button>
-            </div>
-          </div>
-        </section>
-        <section class="similar-group similar-group--case">
-          <h4>处理案例相似</h4>
-          <el-empty v-if="!caseTickets.length" description="暂无处理案例" />
-          <div v-for="item in caseTickets" :key="`case-${item.ticketId}`" class="similar-item">
-            <div>
-              <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
-              <div class="detail-meta">
-                <span>相似度 {{ formatPercent(item.score) }}</span>
-                <span>{{ formatCaseStatus(item.caseStatus) }}</span>
-              </div>
-              <div class="detail-meta">根因：{{ item.rootCause || '-' }}</div>
-            </div>
-            <div class="similar-actions">
-              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
-            </div>
-          </div>
-        </section>
+            </section>
+          </template>
+        </div>
       </el-tab-pane>
 
       <el-tab-pane label="AI分析" name="collab">
@@ -147,7 +152,7 @@
           :active="activeTab === 'collab'"
           :detail="detail"
           :show-ai-history="false"
-          @changed="loadDetail"
+          @changed="refreshDetailData"
         />
       </el-tab-pane>
 
@@ -254,7 +259,8 @@
   import { useRouter } from 'vue-router';
   import {
     bindTicketIssue,
-    getTicket,
+    getTicketSummary,
+    getTicketSimilarTickets,
     getTicketTimeline,
     listTicketIssues,
     updateTicketSimilarityCaseStatus,
@@ -282,6 +288,15 @@
   const detail = ref({});
   const timeline = ref({});
   const timelineLoaded = ref(false);
+  // 相似工单独立加载状态：与主详情解耦，慢查询不阻塞首屏
+  const similarLoading = ref(false);
+  const similarError = ref('');
+  const similarStatus = ref('idle');
+  const similarTickets = ref([]);
+  // 相似工单是否已按当前工单加载完成，用于相似标签懒加载
+  const similarLoadedTicketId = ref(0);
+  // 请求代次保护：工单切换或刷新后丢弃旧响应，避免旧数据覆盖当前工单
+  let requestGeneration = 0;
   // 问题实例关联弹窗状态
   const issueBindOpen = ref(false);
   const issueBindSubmitting = ref(false);
@@ -446,22 +461,13 @@
   });
   const latestSummary = computed(
     () =>
-      detail.value.latestSnapshot?.summary ||
       detail.value.latestAiAnalysis?.analysisSummary ||
       detail.value.latestAiAnalysis?.summary ||
       ''
   );
-  const similarTickets = computed(() => (Array.isArray(detail.value.similarTickets) ? detail.value.similarTickets : []));
-  const symptomTickets = computed(() =>
-    Array.isArray(detail.value.symptomTickets)
-      ? detail.value.symptomTickets
-      : similarTickets.value.filter((item) => item.matchType !== 'case')
-  );
-  const caseTickets = computed(() =>
-    Array.isArray(detail.value.caseTickets)
-      ? detail.value.caseTickets
-      : similarTickets.value.filter((item) => item.matchType === 'case')
-  );
+  // 相似工单数据来源：独立相似接口结果，主概览不再携带相似数据
+  const symptomTickets = ref([]);
+  const caseTickets = ref([]);
   const timelineRows = computed(() => {
     const source = timeline.value || {};
     const rows = [
@@ -490,23 +496,103 @@
   }
 
   /**
-   * 加载纯净详情页所需的工单主详情。
+   * 加载独立详情页主概览。
+   * 使用轻量 summary 接口，不读取消息、快照和相似工单，保证首屏快速展示。
    */
   function loadDetail() {
     const currentTicketId = Number(props.ticketId || 0);
     if (!currentTicketId) {
       return Promise.resolve();
     }
+    const generation = requestGeneration;
     loading.value = true;
-    return getTicket(currentTicketId)
+    return getTicketSummary(currentTicketId)
       .then((response) => {
+        if (!isCurrentRequest(currentTicketId, generation)) return;
         detail.value = response.data || {};
         // 同步当前状态供工作流转规则计算使用
         currentTicketStatus.value = detail.value.status || '';
       })
       .finally(() => {
-        loading.value = false;
+        if (isCurrentRequest(currentTicketId, generation)) {
+          loading.value = false;
+        }
       });
+  }
+
+  /**
+   * 统一刷新入口：重新加载主概览，并强制重查相似工单。
+   */
+  function refreshDetailData() {
+    const currentTicketId = Number(props.ticketId || 0);
+    if (!currentTicketId) {
+      return Promise.resolve();
+    }
+    requestGeneration += 1;
+    similarLoadedTicketId.value = 0;
+    return Promise.all([loadDetail(), loadSimilarTickets(currentTicketId)]);
+  }
+
+  /**
+   * 判断响应是否仍属于当前工单和当前请求代次。
+   * @param {number} ticketId 发起请求时的工单ID
+   * @param {number} generation 发起请求时的代次
+   * @returns {boolean} 是否为当前有效响应
+   */
+  function isCurrentRequest(ticketId, generation) {
+    return Number(props.ticketId || 0) === ticketId && requestGeneration === generation;
+  }
+
+  /**
+   * 按需加载相似工单。
+   * 相似查询可能触发向量生成与扫描，独立于主概览请求，避免阻塞首屏。
+   * @param {number} ticketId 当前工单ID
+   * @returns {Promise<void>} 加载完成 Promise
+   */
+  function loadSimilarTickets(ticketId) {
+    if (!ticketId) {
+      return Promise.resolve();
+    }
+    const generation = requestGeneration;
+    similarLoading.value = true;
+    similarError.value = '';
+    similarStatus.value = 'loading';
+    return getTicketSimilarTickets(ticketId, { limit: 5 })
+      .then((response) => {
+        if (!isCurrentRequest(ticketId, generation)) return;
+        const payload = response?.data || {};
+        similarTickets.value = payload.items || [];
+        symptomTickets.value = payload.symptomTickets || payload.items?.filter((item) => item.matchType !== 'case') || [];
+        caseTickets.value = payload.caseTickets || payload.items?.filter((item) => item.matchType === 'case') || [];
+        similarStatus.value = payload.status || 'ready';
+        similarError.value = payload.message || '';
+        similarLoadedTicketId.value = ticketId;
+      })
+      .catch((error) => {
+        if (!isCurrentRequest(ticketId, generation)) return;
+        similarTickets.value = [];
+        symptomTickets.value = [];
+        caseTickets.value = [];
+        similarStatus.value = 'failed';
+        similarError.value = error?.message || '相似工单加载失败';
+        similarLoadedTicketId.value = ticketId;
+      })
+      .finally(() => {
+        if (isCurrentRequest(ticketId, generation)) {
+          similarLoading.value = false;
+        }
+      });
+  }
+
+  /**
+   * 切换到相似工单标签时懒加载相似结果。
+   * 首次进入或刷新后未重新加载时才发起请求，重复切换不重复查询。
+   */
+  function ensureSimilarLoaded() {
+    const currentTicketId = Number(props.ticketId || 0);
+    if (!currentTicketId) return;
+    if (similarLoadedTicketId.value === currentTicketId || similarLoading.value) return;
+    loadSimilarTickets(currentTicketId);
   }
 
   /**
@@ -528,6 +614,9 @@
   function handleTabChange(tabName) {
     if (tabName === 'history') {
       loadTimeline();
+    }
+    if (tabName === 'similar') {
+      ensureSimilarLoaded();
     }
   }
 
@@ -551,7 +640,7 @@
       });
     }).then(() => {
       proxy.$modal.msgSuccess('案例已确认');
-      loadDetail();
+      refreshDetailData();
     }).catch(() => {});
   }
 
@@ -599,11 +688,20 @@
   watch(
     () => props.ticketId,
     () => {
+      requestGeneration += 1;
       activeTab.value = 'overview';
       descriptionExpanded.value = true;
       translationExpanded.value = true;
       timeline.value = {};
       timelineLoaded.value = false;
+      // 切换工单时清空相似工单状态，避免展示上一张工单的相似结果
+      similarTickets.value = [];
+      symptomTickets.value = [];
+      caseTickets.value = [];
+      similarLoading.value = false;
+      similarError.value = '';
+      similarStatus.value = 'idle';
+      similarLoadedTicketId.value = 0;
       loadDetail();
     },
     { immediate: true }
@@ -685,6 +783,10 @@
 
   .detail-tabs {
     margin-top: 16px;
+  }
+
+  .similar-loading-wrap {
+    min-height: 160px;
   }
 
   .kv-row {

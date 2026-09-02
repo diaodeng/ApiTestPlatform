@@ -1,3 +1,12 @@
+## [2026-09-02] PERF | 独立工单详情页改用轻量读取链路，相似工单懒加载
+
+- 触发：用户反馈独立工单详情页 `/ticket/detail/{ticketId}` 打开慢，怀疑被相似工单查询拖住；经分析确认主因是独立页仍调用旧完整详情接口 `GET /ticket/{id}`（`TicketService.get_ticket_detail_services` 串行组装主单+消息+全部快照+相似+提示词层，消息/快照 DAO 无 limit），相似查询（可能触发同步向量生成、外部 Embedding、MySQL 分批扫描与重排）也被串在其中。列表弹窗此前已走 `summary + similar-tickets` 并行轻量链路。
+- 前端 `TicketDetailView.vue`：`loadDetail` 从 `getTicket` 切换为 `getTicketSummary`（首屏只含基础信息/描述/翻译/版本/Issue/最新AI摘要/提示词层）；相似工单拆为独立 `loadSimilarTickets`（`GET /ticket/{id}/similar-tickets`），首次切换"相似工单"标签时懒加载（`ensureSimilarLoaded` + `similarLoadedTicketId` 去重），重复切换不重查；新增 `requestGeneration` 代次校验 + `isCurrentRequest`，快速切单/刷新丢弃旧响应，切单时清空相似状态；顶部"刷新"改为 `refreshDetailData`（summary+similar 并行强制重查），CollabTab changed 事件同样联动；概览"最新AI结论"取值去掉 `latestSnapshot.summary` 兜底（summary 契约不含快照），保留 `latestAiAnalysis.analysisSummary/summary`；相似区域 alert/列表按 `similarError/similarLoading` 独立展示，样式新增 `.similar-loading-wrap` 最小高度。
+- 后端无改动；轻量接口（summary/similar-tickets/messages/page/snapshots/page）与 Pydantic 契约此前已存在（`server/docs/ticket_read_api.md`），权限不变（summary/similar 均 `ticket:ticket:query`）。
+- 验证：`npm run build:prod` 构建通过（36.98s）。未做浏览器端实际打开耗时对比（需运行环境），剩余风险：概览卡片不再展示最新快照摘要（以最新 AI 分析结论为准，快照仍在 AI 标签按需加载）。
+- 遗留（后续单独处理）：完整详情接口 `/ticket/{id}` 仍被其他调用方使用、契约保持不变；`TicketHybridSimilarityService.search_by_vector` 精确信号循环缩进疑似缺陷（只消费最后一种信号命中，影响召回质量非首屏耗时）；相似服务与 controller/read service 重复查询源工单；相似 missing/stale 向量后台化（第二阶段）未启动。
+- 文档：更新 `web/public/docs/ticket_detail.md`（独立详情页加载规则、FAQ），新增 `web/public/docs/updates/2026-09-02-ticket-standalone-detail-light-load.md`，history.md 同步。
+
 ## [2026-09-02] FEAT | 问题实例绑定工单操作列新增外部地址按钮
 
 - 触发：用户要求问题实例详情中已绑定工单列表右侧操作按钮增加外部地址按钮，点击打开外部链接。
