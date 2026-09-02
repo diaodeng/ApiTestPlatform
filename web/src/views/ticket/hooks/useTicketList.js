@@ -79,6 +79,14 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   const requiredTicketColumnKeys = ticketColumnOptions.filter(item => item.required).map(item => item.key)
   const visibleTicketColumnKeys = ref([...defaultTicketColumnKeys])
 
+  // 工单导出列配置：在显示列基础上插入 URL 导出项（URL 仅用于导出，不在表格列设置中展示）
+  const ticketExportColumnOptions = ticketColumnOptions.map(item => ({ ...item }))
+  ticketExportColumnOptions.splice(
+    ticketExportColumnOptions.findIndex(item => item.key === 'title') + 1,
+    0,
+    { key: 'ticketUrl', label: 'URL' }
+  )
+
   // === 列配置方法 ===
   function normalizeTicketColumnKeys(value) {
     const rawKeys = Array.isArray(value?.visibleColumns) ? value.visibleColumns : value
@@ -312,6 +320,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
     // column config
     columnConfigOpen, ticketColumnOptions, defaultTicketColumnKeys,
     requiredTicketColumnKeys, visibleTicketColumnKeys,
+    ticketExportColumnOptions,
     normalizeTicketColumnKeys, loadTicketColumnConfig, saveTicketColumnConfig,
     resetTicketColumnConfig, isTicketColumnVisible,
     // query

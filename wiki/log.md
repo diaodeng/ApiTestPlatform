@@ -1,4 +1,11 @@
-## [2026-09-02] FEAT | AI分析任务协作式取消、outcome 提交类型与锁冲突标识（第三阶段）
+## [2026-09-02] FEAT | 工单导出与问题实例导出新增 URL 列（ticket_url）
+
+- 触发：用户要求问题实例管理和工单列表的导出列增加 URL 选项，用于导出 ticket_url。
+- 后端 `ticket_export_service.py`：`TICKET_EXPORT_COLUMNS` 与 `ISSUE_TICKET_EXPORT_COLUMNS` 在"标题"后新增 `ExportColumn(key="ticketUrl", label="URL")`；`_format_ticket_field` 新增 ticketUrl 分支（camelCase `ticketUrl` → snake_case `ticket_url` 兜底 → 空值输出空字符串，避免落入通用兜底产生 "None"）。数据无需额外查询：两条导出路径均已调用 `TicketService._decorate_ticket_item`，行内已有装饰后的 ticketUrl（含 extraData 同步摘要 ticketUrl/sourceRecordUrl 兜底，与详情页展示一致）。
+- 前端：`useTicketList.js` 新增 `ticketExportColumnOptions`（复制显示列配置后在 title 后插入 URL 项），与表格显示列 `ticketColumnOptions` 拆分——此前工单导出对话框直接复用 `ticketColumnOptions`，若直接加 URL 会混入表格"列设置"；`index.vue` 导出对话框复选框改用导出列配置并从 hook 解构（修复了原先未被模板使用的死代码 computed）；`issue/index.vue` 的 `issueTicketExportColumnOptions` 插入 URL 项。
+- 测试：`test_ticket_export_service.py` 新增 2 用例（两处列定义含 ticketUrl/URL；格式化 camelCase/snake_case/空值分支），3 用例全部通过；ruff 通过。
+- 文档：新增 `web/public/docs/updates/2026-09-02-ticket-export-url-column.md`，更新 `web/public/docs/ticket/ticket-list-export.md`、`issue-ticket-export.md` 导出列说明表，history.md 同步。
+
 
 - 触发：按确认方案完成第三阶段——取消端点、attached 等待语义（outcome 标识）、锁冲突携带任务标识。
 - 取消链路：新增 `POST /ticket/{ticketId}/ai-analysis/tasks/{taskId}/cancel`（权限同 retry）→ `cancel_analysis_task_services`：仅 created/running 可取消（终态幂等返回），先 `_mark_task_status(canceled)`（活跃锁随终态自动释放）+ 审计 canceled + 工单事件 + commit，再 `_notify_agent_task_canceled` fire-and-forget（直发 `cancel_task` request_chunk 分片、`cancel-{task_id}` 作为 request_id、不建 Future 等待；Agent 离线仅告警）。

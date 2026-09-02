@@ -860,6 +860,7 @@ const issueTicketExportColumnOptions = [
   { key: 'issueTitle', label: '问题名', required: true },
   { key: 'ticketNo', label: '工单编号' },
   { key: 'title', label: '标题' },
+  { key: 'ticketUrl', label: 'URL' },
   { key: 'status', label: '状态' },
   { key: 'project', label: '项目' },
   { key: 'moduleName', label: '模块' },

@@ -36,6 +36,7 @@ TICKET_EXPORT_COLUMNS: list[ExportColumn] = [
     ExportColumn(key="index", label="序号"),
     ExportColumn(key="ticketNo", label="工单编号"),
     ExportColumn(key="title", label="标题"),
+    ExportColumn(key="ticketUrl", label="URL"),
     ExportColumn(key="similarityScore", label="相似度"),
     ExportColumn(key="issueNo", label="问题编号"),
     ExportColumn(key="issueConfirmed", label="归因确认"),
@@ -76,6 +77,7 @@ ISSUE_TICKET_EXPORT_COLUMNS: list[ExportColumn] = [
     ExportColumn(key="issueTitle", label="问题名", required=True),
     ExportColumn(key="ticketNo", label="工单编号"),
     ExportColumn(key="title", label="标题"),
+    ExportColumn(key="ticketUrl", label="URL"),
     ExportColumn(key="status", label="状态"),
     ExportColumn(key="project", label="项目"),
     ExportColumn(key="moduleName", label="模块"),
@@ -454,6 +456,9 @@ class TicketExportService:
             return str(row.get("ticketNo") or row.get("ticket_no") or "")
         if key == "title":
             return str(row.get("title") or "")
+        if key == "ticketUrl":
+            # ticketUrl 由 _decorate_ticket_item 装饰（含 extraData 同步摘要兜底），空值输出空字符串
+            return str(row.get("ticketUrl") or row.get("ticket_url") or "")
         if key == "similarityScore":
             score = row.get("similarityScore")
             return f"{float(score):.2f}" if score is not None else "-"
