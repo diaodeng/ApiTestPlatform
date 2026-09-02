@@ -1,3 +1,10 @@
+## [2026-09-02] FEAT | 问题实例绑定工单操作列新增外部地址按钮
+
+- 触发：用户要求问题实例详情中已绑定工单列表右侧操作按钮增加外部地址按钮，点击打开外部链接。
+- 后端 `ticket_issue_service.get_issue_detail_services`：绑定工单行查询后逐行调用 `TicketService._decorate_ticket_item` 补同步摘要装饰——此前该列表未装饰，`ticketUrl` 为空的工单无法按 extraData 同步摘要兜底出链接（已验证 `ticket_service.py` 不反向依赖 issue 服务，无循环导入）。
+- 前端：链接解析函数 `resolveTicketDetailUrl` 从 `useTicketList.js` 下沉到 `views/ticket/constants.js` 共享（useTicketList 改为导入并原样返回，对外契约不变；`TicketDetailView.vue`/`TicketDetailWithList.vue` 内部另有同逻辑实现，本次不动以控制改动范围）；`issue/index.vue` 绑定工单操作列新增"外部地址"按钮（v-if 有链接才显示，与工单列表"跳转"交互一致）+ `openExternalTicketLink` 处理函数，操作列宽 200→260。
+- 文档：更新 `web/public/docs/ticket_issue.md`（操作列说明），新增 `web/public/docs/updates/2026-09-02-issue-bound-ticket-external-link.md`，history.md 同步。
+
 ## [2026-09-02] FEAT | 工单导出与问题实例导出新增 URL 列（ticket_url）
 
 - 触发：用户要求问题实例管理和工单列表的导出列增加 URL 选项，用于导出 ticket_url。
@@ -6,6 +13,7 @@
 - 测试：`test_ticket_export_service.py` 新增 2 用例（两处列定义含 ticketUrl/URL；格式化 camelCase/snake_case/空值分支），3 用例全部通过；ruff 通过。
 - 文档：新增 `web/public/docs/updates/2026-09-02-ticket-export-url-column.md`，更新 `web/public/docs/ticket/ticket-list-export.md`、`issue-ticket-export.md` 导出列说明表，history.md 同步。
 
+## [2026-09-02] FEAT | AI分析任务协作式取消、outcome 提交类型与锁冲突标识（第三阶段）
 
 - 触发：按确认方案完成第三阶段——取消端点、attached 等待语义（outcome 标识）、锁冲突携带任务标识。
 - 取消链路：新增 `POST /ticket/{ticketId}/ai-analysis/tasks/{taskId}/cancel`（权限同 retry）→ `cancel_analysis_task_services`：仅 created/running 可取消（终态幂等返回），先 `_mark_task_status(canceled)`（活跃锁随终态自动释放）+ 审计 canceled + 工单事件 + commit，再 `_notify_agent_task_canceled` fire-and-forget（直发 `cancel_task` request_chunk 分片、`cancel-{task_id}` 作为 request_id、不建 Future 等待；Agent 离线仅告警）。

@@ -21,6 +21,7 @@ from modules.ticket.entity.vo.ticket_issue_vo import (
     TicketIssueUpdateModel,
     dump_model,
 )
+from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.util.ticket_common_util import user_id, user_name
 from utils.common_util import CamelCaseUtil
@@ -104,6 +105,10 @@ class TicketIssueService:
         result["firstTicketNo"] = first_ticket.ticket_no if first_ticket else ""
         tickets = TicketIssueDao.list_tickets_by_issue_id(query_db, issue_id)
         ticket_rows = CamelCaseUtil.transform_result(tickets)
+        # 复用工单装饰逻辑：为绑定工单补充 ticketUrl 同步摘要兜底等字段，保证前端外部链接与详情页展示一致。
+        for ticket_row in ticket_rows:
+            if isinstance(ticket_row, dict):
+                TicketService._decorate_ticket_item(ticket_row)
         TicketVersionService.attach_ticket_version_labels(query_db, ticket_rows)
         result["tickets"] = ticket_rows
 

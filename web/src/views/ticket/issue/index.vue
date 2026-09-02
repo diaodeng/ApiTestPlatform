@@ -298,10 +298,19 @@
               <el-table-column label="提交时间" prop="submitTime" width="170">
                 <template #default="scope">{{ parseTime(scope.row.submitTime) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
+              <el-table-column label="操作" width="260" fixed="right">
                 <template #default="scope">
                   <el-button link type="primary" icon="View" @click="openTicketDetail(scope.row.ticketId)">
                     打开工单
+                  </el-button>
+                  <el-button
+                    v-if="resolveTicketDetailUrl(scope.row)"
+                    link
+                    type="primary"
+                    icon="Link"
+                    @click="openExternalTicketLink(scope.row)"
+                  >
+                    外部地址
                   </el-button>
                   <el-button
                     link
@@ -537,7 +546,7 @@ import {
 } from '@/api/ticket/ticket'
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
 import { saveAs } from 'file-saver'
-import { severityOptions } from '../constants'
+import { resolveTicketDetailUrl, severityOptions } from '../constants'
 import { useWorkflow } from '../hooks/useWorkflow'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -1220,6 +1229,20 @@ function openTicketDetail(ticketId) {
     params: { ticketId: resolvedTicketId },
   })
   window.open(resolved.href, '_blank', 'noopener')
+}
+
+/**
+ * 打开绑定工单的外部详情链接（新标签页）。
+ * 链接解析复用 constants.js 的 resolveTicketDetailUrl 多级兜底逻辑。
+ * @param {object} ticketRow 绑定工单行数据
+ */
+function openExternalTicketLink(ticketRow) {
+  const url = resolveTicketDetailUrl(ticketRow)
+  if (!url) {
+    proxy.$modal.msgWarning('当前工单未配置外部详情链接')
+    return
+  }
+  window.open(url, '_blank', 'noopener')
 }
 
 function openIssueManagement() {

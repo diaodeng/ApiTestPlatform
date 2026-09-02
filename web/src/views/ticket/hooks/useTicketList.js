@@ -10,6 +10,7 @@
 import { ref } from 'vue'
 import { listTicket, searchTicketNaturalLanguage } from '@/api/ticket/ticket'
 import { getCurrentUserConfig, saveCurrentUserConfig } from '@/api/system/userConfig'
+import { resolveTicketDetailUrl } from '../constants'
 
 export function useTicketList(proxy, standaloneDetailMode, router) {
   // === 列表状态 ===
@@ -210,29 +211,7 @@ export function useTicketList(proxy, standaloneDetailMode, router) {
   }
 
   // === 外部链接 ===
-  function resolveTicketDetailUrl(ticketRow) {
-    const row = ticketRow || {}
-    const syncSummary = row.syncSummary || row.sync_summary || {}
-    const extraData = row.extraData || row.extra_data || {}
-    const externalSync = extraData.externalSync || extraData.external_sync || {}
-    const source = externalSync.source || {}
-    const value = String(
-      row.ticketUrl
-        || row.ticket_url
-        || row.url
-        || syncSummary.ticketUrl
-        || syncSummary.ticket_url
-        || syncSummary.sourceRecordUrl
-        || syncSummary.source_record_url
-        || source.ticketUrl
-        || source.ticket_url
-        || source.recordUrl
-        || source.record_url
-        || ''
-    ).trim()
-    return value || ''
-  }
-
+  // 链接解析逻辑已下沉到 ../constants.js 的 resolveTicketDetailUrl，供工单列表与问题实例页共用。
   function openTicketLink(ticketRow) {
     const url = resolveTicketDetailUrl(ticketRow)
     if (!url) { proxy.$modal.msgWarning('当前工单未配置详情链接'); return }

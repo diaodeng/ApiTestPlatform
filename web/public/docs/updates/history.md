@@ -6,6 +6,7 @@ title: 更新历史
 
 
 ## 2026-09-02
+- 问题实例绑定工单操作列新增外部地址按钮：点击在新标签页打开工单的外部系统详情链接（有链接才显示），链接解析与工单列表/详情页一致；绑定工单列表后端补同步摘要装饰支持链接兜底。详见：[问题实例绑定工单外部地址按钮](2026-09-02-issue-bound-ticket-external-link.md)。
 - 工单导出新增 URL 列：工单列表导出和问题实例关联工单导出的导出列勾选新增"URL"选项，导出工单详情链接（取工单链接字段并按同步摘要兜底，无链接为空）；URL 仅用于导出，不在表格列设置中展示。详见：[工单导出新增 URL 列](2026-09-02-ticket-export-url-column.md)。
 - 可观测上报迁移至 Agent 侧：实测测试服务端与生产可观测平台网络隔离导致服务端上报超时，任务级 span 改由执行 Agent 直连平台上报（六个终态出口全覆盖，INPUT 为最终渲染提示词）；服务端只下发配置不再出站；OTEL 环境注入分层（主开关=基础配置，CLI 开关=CLI 专属+TRACEPARENT）。详见：[可观测上报迁移至 Agent 侧](2026-09-02-ai-provider-observability-agent-reporting.md)。
 - AI Provider 可观测上报（OTLP）：Provider 新增可观测配置（端点/鉴权/密钥加密存储），工单 AI 分析任务级调用（完整输入/输出/Token/耗时/错误）上报可观测平台；可选开启本机 Codex / Claude Code CLI 原生遥测，Claude 经 TRACEPARENT 挂接任务链路，Codex 经 session.id 关联；上报为旁路能力不影响任务执行。详见：[AI Provider 可观测上报](2026-09-02-ai-provider-observability.md)。
