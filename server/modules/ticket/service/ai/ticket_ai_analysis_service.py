@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -2976,6 +2977,7 @@ class TicketAiAnalysisService:
                     is_success=True,
                     message="AI分析请求已命中，直接返回历史成功结果",
                     result=CamelCaseUtil.transform_result(successful_task),
+                    outcome="reused",
                 )
             active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
             if active_task:
@@ -2987,6 +2989,7 @@ class TicketAiAnalysisService:
                     is_success=True,
                     message="相同AI分析请求已在执行中，直接返回原任务",
                     result=CamelCaseUtil.transform_result(active_task),
+                    outcome="attached",
                 )
 
         # 幂等命中不需要 Agent 在线；只有确实要创建新任务时才校验连接状态。
@@ -3108,7 +3111,7 @@ class TicketAiAnalysisService:
             db.commit()
             cls.queue_task(task.task_id)
             result = CamelCaseUtil.transform_result(task)
-            return CrudResponseModel(is_success=True, message="AI分析任务已提交", result=result)
+            return CrudResponseModel(is_success=True, message="AI分析任务已提交", result=result, outcome="created")
         except IntegrityError:
             # 并发提交同一指纹：活跃锁唯一索引冲突。回滚后按幂等语义返回原活跃任务。
             db.rollback()
@@ -3122,6 +3125,7 @@ class TicketAiAnalysisService:
                     is_success=True,
                     message="相同AI分析请求已在执行中，直接返回原任务",
                     result=CamelCaseUtil.transform_result(active_task),
+                    outcome="attached",
                 )
             raise
         except Exception:
@@ -3162,6 +3166,7 @@ class TicketAiAnalysisService:
                 is_success=True,
                 message="AI分析任务已完成，直接返回历史结果",
                 result=CamelCaseUtil.transform_result(task),
+                outcome="reused",
             )
         request_fingerprint = str(getattr(task, "request_fingerprint", "") or "").strip()
         if request_fingerprint:
@@ -3182,6 +3187,7 @@ class TicketAiAnalysisService:
                     is_success=True,
                     message="AI分析请求已命中，直接返回历史成功结果",
                     result=CamelCaseUtil.transform_result(successful_task),
+                    outcome="reused",
                 )
             active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
             if active_task and active_task.task_id != task.task_id:
@@ -3189,6 +3195,7 @@ class TicketAiAnalysisService:
                     is_success=True,
                     message="相同AI分析请求已在执行中，直接返回原任务",
                     result=CamelCaseUtil.transform_result(active_task),
+                    outcome="attached",
                 )
         with cls._executor_lock:
             if task_id in cls._active_task_ids:
@@ -3269,10 +3276,148 @@ class TicketAiAnalysisService:
                 is_success=True,
                 message="AI分析任务已重新提交",
                 result=CamelCaseUtil.transform_result(TicketAiDao.get_task_by_id(db, task_id) or task),
+                outcome="retried",
             )
         except Exception:
             db.rollback()
             raise
+
+    @classmethod
+    def cancel_analysis_task_services(
+        cls,
+        db: Session,
+        ticket_id: int,
+        task_id: int,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        协作式取消指定 AI 分析任务。
+
+        只允许取消 created/running 任务（终态任务无需取消，直接返回当前状态）。
+        数据库状态先落为 canceled 并写审计与工单事件；执行中的任务再向 Agent
+        发送取消通知，Agent 在 Worker 前后检查点感知后放弃继续执行/回传。
+        Worker 若已完成，迟到结果由"回传后重读状态"逻辑丢弃写回（不覆盖取消态）。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param task_id: 任务ID
+        :param current_user: 当前登录用户
+        :return: 取消结果
+        """
+        task = TicketAiDao.get_task_by_id(db, task_id)
+        if not task or task.ticket_id != ticket_id:
+            return CrudResponseModel(is_success=False, message="AI分析任务不存在")
+        if task.status not in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
+            return CrudResponseModel(
+                is_success=True,
+                message="任务已结束，无需取消",
+                result=CamelCaseUtil.transform_result(task),
+            )
+        now = datetime.now()
+        notify_agent_code = str((task.analysis_context or {}).get("selectedAgentCode") or "").strip() if isinstance(
+            task.analysis_context, dict
+        ) else ""
+        if not notify_agent_code:
+            notify_agent_code = cls._resolve_agent_code(db, None)
+        cls._mark_task_status(
+            db,
+            task_id,
+            status=TicketAiAnalysisStatus.CANCELED.value,
+            status_desc="用户取消",
+            error_message=f"任务由 {cls._user_name(current_user)} 手动取消",
+            finished_at=now,
+            command_line=task.command_line or "",
+        )
+        audit_execution_id = getattr(task, "audit_execution_id", None)
+        cls._update_execution_record(
+            db,
+            audit_execution_id,
+            status="canceled",
+            error_message=f"任务由 {cls._user_name(current_user)} 手动取消",
+        )
+        TicketDao.add_event(
+            db,
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=TicketEventType.ANALYSIS.value,
+                operator_id=cls._user_id(current_user),
+                operator_name=cls._user_name(current_user),
+                content="取消AI分析任务",
+                event_data={
+                    "task_id": task.task_id,
+                    "origin_status": task.status,
+                    "version_id": task.version_id,
+                },
+                create_time=now,
+            ),
+        )
+        db.commit()
+        logger.info(
+            f"工单 AI 分析任务已取消: task_id={task_id}, ticket_id={ticket_id}, operator={cls._user_name(current_user)}"
+        )
+        # 执行中的任务向 Agent 发送取消通知（协作式：Agent 尽力停止 Worker，
+        # 通知失败不影响取消结果，Worker 迟到结果会被服务端丢弃写回）。
+        if task.status == TicketAiAnalysisStatus.RUNNING.value and notify_agent_code:
+            cls._notify_agent_task_canceled(notify_agent_code, task_id)
+        return CrudResponseModel(
+            is_success=True,
+            message="AI分析任务已取消",
+            result=CamelCaseUtil.transform_result(TicketAiDao.get_task_by_id(db, task_id) or task),
+        )
+
+    @staticmethod
+    def _notify_agent_task_canceled(agent_code: str, task_id: int) -> None:
+        """
+        向 Agent 发送任务取消通知（fire-and-forget，不等待响应）。
+
+        直接经 WebSocket 发送 request_chunk 消息，不走通用 send_message 的
+        Future 等待通道——取消通知无需响应，Agent 收到后注册取消标记即可。
+        Agent 离线或发送失败时仅告警：取消已在服务端生效，Worker 迟到结果
+        会被"回传后重读状态"逻辑丢弃。
+        :param agent_code: Agent 编码
+        :param task_id: 任务ID
+        :return: 无
+        """
+        try:
+            from module_hrm.utils.util import compress_dict_to_str
+            from module_qtr.service.agent_service import CHUNK_SIZE, agents
+
+            websocket = agents.get(agent_code)
+            if websocket is None:
+                logger.warning(f"Agent 不在线，跳过取消通知: task_id={task_id}, agent={agent_code}")
+                return
+            message = {
+                "requestType": "cancel_task",
+                "command": "cancel_ticket_ai_analysis",
+                "taskId": task_id,
+            }
+            compress_data = compress_dict_to_str(message)
+            request_chunks = [compress_data[i:i + CHUNK_SIZE] for i in range(0, len(compress_data), CHUNK_SIZE)]
+            total = len(request_chunks) or 1
+            cancel_request_id = f"cancel-{task_id}"
+            chunks_payload = [
+                {
+                    "type": "request_chunk",
+                    "index": idx,
+                    "total": total,
+                    "request_id": cancel_request_id,
+                    "data": chunk,
+                    "finished": (idx == total - 1),
+                    "binary": False,
+                    "meta": {},
+                }
+                for idx, chunk in enumerate(request_chunks)
+            ]
+
+            async def _send() -> None:
+                for chunk_message in chunks_payload:
+                    await websocket.send_text(json.dumps(chunk_message))
+
+            asyncio.run(_send())
+            logger.info(f"任务取消通知已发送到 Agent: task_id={task_id}, agent={agent_code}")
+        except Exception as exc:
+            logger.warning(
+                f"发送任务取消通知失败（取消已在服务端生效）: task_id={task_id}, agent={agent_code}, error={exc}"
+            )
 
     @classmethod
     def _mark_repo_default_if_needed(
@@ -4164,6 +4309,29 @@ class TicketAiAnalysisService:
                 response_error_message=getattr(response_object, "error_message", None),
                 response_result_preview=response_result_preview,
             )
+            # 回传后重读任务状态：任务在等待 Agent 执行期间被用户取消时，
+            # 丢弃结果不做写回（不覆盖取消态），仅把已发生的真实 token 消耗补进审计。
+            refreshed_task = TicketAiDao.get_task_by_id(db, task_id)
+            if refreshed_task and refreshed_task.status == TicketAiAnalysisStatus.CANCELED.value:
+                canceled_token_usage = cls._extract_token_usage_payload(response_dump, response_object)
+                logger.info(
+                    f"AI分析任务[{task_id}] 已被取消，丢弃Agent结果不写回，"
+                    f"仅保留已消耗token进审计: token_usage={canceled_token_usage}"
+                )
+                db.rollback()
+                cls._update_execution_record(
+                    db,
+                    audit_execution_id,
+                    token_usage=canceled_token_usage,
+                )
+                db.commit()
+                cls._finalize_sync_publish_after_ai(
+                    db,
+                    ticket_id=ticket.ticket_id,
+                    status=TicketAiAnalysisStatus.CANCELED.value,
+                )
+                return
+
             if getattr(agent_response, "status_code", 500) != 200:
                 error_code = "AI_AGENT_TRANSPORT_ERROR"
                 failure_message = (

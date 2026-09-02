@@ -15,6 +15,7 @@
     listTicketAiAnalysisTasks,
     listTicketIssues,
     retryTicketAiAnalysis,
+    cancelTicketAiAnalysis,
     saveTicketLogPullProjectVendorMap,
     translateTicketDescription,
     unbindTicketIssue,
@@ -118,6 +119,7 @@
   let aiPollingGeneration = 0;
   const aiAnalysisSubmitting = ref(false);
   const aiAnalysisRetryLoading = ref(false);
+  const aiAnalysisCancelLoading = ref(false);
   const aiAnalysisRefreshLoading = ref(false);
   const aiAnalysisOpen = ref(false);
   const aiAnalysisLogPullLoading = ref(false);
@@ -832,6 +834,28 @@
   }
 
   /**
+   * 按提交结果类型（outcome）区分提示文案，避免"复用历史结果/接管执行中任务"被误认为新提交。
+   * @param {object} response 提交或重试接口响应
+   * @param {string} successMessage 默认成功提示
+   * @returns {void}
+   */
+  function showOutcomeMessage(response, successMessage) {
+    const outcome = String(response?.data?.outcome || response?.outcome || '').toLowerCase();
+    const outcomeMessages = {
+      created: 'AI分析任务已提交',
+      retried: 'AI分析任务已重新提交',
+      attached: '相同分析请求正在执行中，已为您关联原任务',
+      reused: '已命中历史成功结果，直接返回（未重新调用AI）',
+    };
+    const message = outcomeMessages[outcome] || successMessage;
+    if (outcome === 'reused') {
+      proxy.$modal.msgSuccess(message);
+    } else {
+      proxy.$modal.msgSuccess(message);
+    }
+  }
+
+  /**
    * 短轮询指定 AI 分析任务，捕获后台快速失败或成功的终态。
    * @param {number | string} taskId AI 分析任务ID
    * @param {object} options 轮询配置，包含 maxAttempts 和 intervalMs
@@ -883,9 +907,13 @@
    * @param {string} successMessage 提交成功提示文案
    * @returns {Promise<void>} 提示完成 Promise
    */
-  async function notifyAiTaskSubmitResult(response, successMessage) {
+  async function notifyAiTaskSubmitResult(response, successMessage, useOutcomeMessage = false) {
     const submittedTask = extractSubmittedAiTask(response);
-    proxy.$modal.msgSuccess(successMessage);
+    if (useOutcomeMessage) {
+      showOutcomeMessage(response, successMessage);
+    } else {
+      proxy.$modal.msgSuccess(successMessage);
+    }
     if (!submittedTask?.taskId) {
       return;
     }
@@ -1083,7 +1111,7 @@
       }
       addTicketAiAnalysis(currentTicketId.value, payload)
         .then((response) => {
-          proxy.$modal.msgSuccess('AI分析任务已提交');
+          showOutcomeMessage(response, 'AI分析任务已提交');
           aiAnalysisOpen.value = false;
           refreshAiAnalysisData(true);
           watchAiTaskSubmitResult(response);
@@ -1108,7 +1136,7 @@
         return retryTicketAiAnalysis(currentTicketId.value, row.taskId);
       })
       .then(async (response) => {
-        await notifyAiTaskSubmitResult(response, 'AI分析任务已重新提交');
+        await notifyAiTaskSubmitResult(response, 'AI分析任务已重新提交', true);
         return Promise.all([loadAiAnalysisTasks(true), refreshDetail(), emitChanged()]);
       })
       .catch((error) => {
@@ -1118,6 +1146,42 @@
       })
       .finally(() => {
         aiAnalysisRetryLoading.value = false;
+      });
+  }
+
+  function canCancelAiTask(row) {
+    return (
+      Boolean(row?.taskId) &&
+      ['created', 'running'].includes(String(row.status || '').toLowerCase())
+    );
+  }
+
+  function cancelAiAnalysisTask(row) {
+    if (!row?.taskId) {
+      return;
+    }
+    proxy.$modal
+      .confirm(`是否确认取消 AI 分析任务 #${row.taskId}？取消后执行中的分析将停止，已消耗的 Token 会计入统计。`)
+      .then(() => {
+        aiAnalysisCancelLoading.value = true;
+        return cancelTicketAiAnalysis(currentTicketId.value, row.taskId);
+      })
+      .then(async (response) => {
+        const payload = response?.data || response || {};
+        if (payload.is_success === false) {
+          proxy.$modal.msgError(payload.message || '取消失败');
+        } else {
+          proxy.$modal.msgSuccess(payload.message || 'AI分析任务已取消');
+        }
+        return Promise.all([loadAiAnalysisTasks(true), refreshDetail(), emitChanged()]);
+      })
+      .catch((error) => {
+        if (error !== 'cancel' && error !== 'close') {
+          proxy.$modal.msgError(extractReadableError(error, 'AI分析任务取消失败'));
+        }
+      })
+      .finally(() => {
+        aiAnalysisCancelLoading.value = false;
       });
   }
 
@@ -1851,6 +1915,16 @@
             v-hasPermi="['ticket:ai:analysis:run']"
           >
             重试
+          </el-button>
+          <el-button
+            v-if="canCancelAiTask(scope.row)"
+            link
+            type="danger"
+            :loading="aiAnalysisCancelLoading"
+            @click="cancelAiAnalysisTask(scope.row)"
+            v-hasPermi="['ticket:ai:analysis:run']"
+          >
+            取消
           </el-button>
         </template>
       </el-table-column>

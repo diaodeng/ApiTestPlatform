@@ -781,6 +781,15 @@ export function retryTicketAiAnalysis(ticketId, taskId) {
   });
 }
 
+// 取消工单AI分析任务（协作式：服务端置取消态并通知Agent停止Worker）
+export function cancelTicketAiAnalysis(ticketId, taskId) {
+  return request({
+    url: `/ticket/${ticketId}/ai-analysis/tasks/${taskId}/cancel`,
+    method: 'post',
+    showErrorMessage: false,
+  });
+}
+
 // 查询日志拉取文本内容
 export function getTicketLogPullContent(recordId, query) {
   return request({
