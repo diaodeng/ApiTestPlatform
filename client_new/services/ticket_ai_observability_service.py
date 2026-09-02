@@ -226,6 +226,9 @@ class TicketAiObservabilityService:
                 "Content-Type": "application/json",
             },
             timeout=cls.REQUEST_TIMEOUT_SECONDS,
+            # 平台是内网域名，必须直连：绕过代理环境变量（HTTP_PROXY/HTTPS_PROXY），
+            # 否则 Agent 终端配置的代理会把内网上报劫持到外网代理，TLS 握手超时
+            trust_env=False,
         )
         if response.status_code >= 400:
             logger.warning(

@@ -43,7 +43,7 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
         """任务span应包含 input.value/output.value/gen_ai.usage/session.id 并复用traceId。"""
         captured = {}
 
-        def fake_post(url, json=None, headers=None, timeout=None):
+        def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
             captured["url"] = url
             captured["json"] = json
             captured["headers"] = headers
@@ -92,7 +92,7 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
         """失败任务应携带 error 属性与 OTLP ERROR 状态。"""
         captured = {}
 
-        def fake_post(url, json=None, headers=None, timeout=None):
+        def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
             captured["json"] = json
 
             class FakeResponse:
