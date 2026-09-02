@@ -3,7 +3,9 @@ import json
 import traceback
 import uuid
 from collections import defaultdict
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -26,6 +28,14 @@ EVENT_CHUNK_TYPE = "event_chunk"
 HEARTBEAT_INTERVAL = 30
 
 request_all_chunk = defaultdict(str)
+
+# 断连待补交清单文件：与 agent_config.json 同目录（storage/data），进程重启后仍可补交。
+# 结构：{"<request_id>": {"payload": "<压缩后完整响应>", "queuedAt": "<ISO时间>", "retryCount": 0}}
+PENDING_RESPONSE_FILE = Path("storage/data/pending_response_deliveries.json")
+# 单次补交最多处理的条数，避免一次占用连接过久。
+PENDING_DELIVERY_BATCH_SIZE = 10
+# 清单文件最大条数，超出时丢弃最旧的记录（理论上极少达到）。
+PENDING_DELIVERY_MAX_ENTRIES = 200
 
 
 def _is_websocket_open(websocket) -> bool:
@@ -277,6 +287,9 @@ class WebSocketClient:
         self.max_retry_num = 0
         self.retry = False
         self.interval_time = 5
+        # 永续重连开关：窗口内重试次数用尽后，是否降级为低频重连直到手动停止。
+        self.retry_forever = False
+        self.retry_forever_interval = 300
         self.running = False
         self.websocket = None
         self.status = False
@@ -294,6 +307,8 @@ class WebSocketClient:
         retry_num=None,
         retry=None,
         interval_time=None,
+        retry_forever=None,
+        retry_forever_interval=None,
         is_retry=False,
     ):
         if not is_retry:
@@ -306,12 +321,21 @@ class WebSocketClient:
         self.interval_time = (
             interval_time if interval_time is not None else self.interval_time
         )
+        self.retry_forever = bool(retry_forever) if retry_forever is not None else self.retry_forever
+        self.retry_forever_interval = (
+            retry_forever_interval
+            if retry_forever_interval is not None
+            else self.retry_forever_interval
+        )
         self.running = True
         self.status = True
         try:
             self.websocket = await websockets.connect(self.uri, max_size=None)
             logger.info(f"服务链接成功：{self.uri}")
             self._notify_status("connected", f"服务连接成功：{self.uri}")
+            # 连接建立后先补交断连期间未送达的响应，再进入正常消息循环。
+            await self._flush_pending_responses()
+            self.retry_num = 0
             async with httpx.AsyncClient(verify=False) as http_client:
                 while self.running:
                     message = await self.websocket.recv()
@@ -397,11 +421,117 @@ class WebSocketClient:
         response = compress_dict_to_str(response)
         # 如果响应不是None，则发送它回去
         if response is not None:
-            await self._send_chunked_message(
+            await self._send_response_with_recovery(
                 response,
+                request_id=request_id,
+            )
+
+    async def _send_response_with_recovery(self, payload: str, *, request_id: str) -> bool:
+        """
+        发送响应分片；发送失败时把完整响应写入本地待补交清单，待重连成功后补交。
+
+        :param payload: 压缩后的完整响应字符串
+        :param request_id: 请求ID
+        :return: 是否发送成功
+        """
+        try:
+            await self._send_chunked_message(
+                payload,
                 chunk_type="response_chunk",
                 extra={"request_id": request_id},
             )
+            return True
+        except Exception as exc:
+            # 连接断开或发送异常：入待补交清单，等重连后补交，避免执行结果因断连丢失。
+            logger.warning(f"响应回传失败，已加入待补交清单: request_id={request_id}, error={exc}")
+            self._enqueue_pending_response(request_id, payload)
+            return False
+
+    @staticmethod
+    def _load_pending_responses() -> dict[str, dict[str, Any]]:
+        """
+        读取待补交清单文件。
+        :return: 待补交记录字典，读取失败返回空字典
+        """
+        try:
+            if not PENDING_RESPONSE_FILE.exists():
+                return {}
+            data = json.loads(PENDING_RESPONSE_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:
+            logger.warning(f"读取待补交清单失败: {exc}")
+            return {}
+
+    @staticmethod
+    def _save_pending_responses(entries: dict[str, dict[str, Any]]) -> None:
+        """
+        写入待补交清单文件；超出上限时按入队时间丢弃最旧记录。
+        :param entries: 待补交记录字典
+        :return: 无
+        """
+        try:
+            if len(entries) > PENDING_DELIVERY_MAX_ENTRIES:
+                ordered = sorted(entries.items(), key=lambda item: str(item[1].get("queuedAt") or ""))
+                entries = dict(ordered[-PENDING_DELIVERY_MAX_ENTRIES:])
+                logger.warning(f"待补交清单超出上限，已丢弃最旧记录 {len(ordered) - PENDING_DELIVERY_MAX_ENTRIES} 条")
+            PENDING_RESPONSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            PENDING_RESPONSE_FILE.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+        except Exception as exc:
+            logger.warning(f"写入待补交清单失败: {exc}")
+
+    def _enqueue_pending_response(self, request_id: str, payload: str) -> None:
+        """
+        把回传失败的响应加入待补交清单（已存在同 request_id 记录时不覆盖，保留最早一次）。
+        :param request_id: 请求ID
+        :param payload: 压缩后的完整响应
+        :return: 无
+        """
+        entries = self._load_pending_responses()
+        if request_id in entries:
+            return
+        entries[request_id] = {
+            "payload": payload,
+            "queuedAt": datetime.now().isoformat(),
+            "retryCount": 0,
+        }
+        self._save_pending_responses(entries)
+
+    async def _flush_pending_responses(self) -> None:
+        """
+        补交待补交清单中的响应：连接建立成功后调用；补交成功的记录从清单移除。
+        :return: 无
+        """
+        entries = self._load_pending_responses()
+        if not entries:
+            return
+        delivered_ids: list[str] = []
+        failed_ids: list[str] = []
+        for request_id, record in list(entries.items())[:PENDING_DELIVERY_BATCH_SIZE]:
+            payload = str(record.get("payload") or "")
+            if not payload:
+                delivered_ids.append(request_id)
+                continue
+            try:
+                await self._send_chunked_message(
+                    payload,
+                    chunk_type="response_chunk",
+                    extra={"request_id": request_id},
+                )
+                delivered_ids.append(request_id)
+                logger.info(f"补交断连期间的响应成功: request_id={request_id}")
+            except Exception as exc:
+                failed_ids.append(request_id)
+                record["retryCount"] = int(record.get("retryCount") or 0) + 1
+                logger.warning(f"补交断连期间的响应失败: request_id={request_id}, error={exc}")
+        if delivered_ids:
+            for request_id in delivered_ids:
+                entries.pop(request_id, None)
+            self._save_pending_responses(entries)
+        elif failed_ids:
+            self._save_pending_responses(entries)
+        remaining = len(entries)
+        if remaining:
+            logger.info(f"待补交清单剩余 {remaining} 条，将在下次连接或重连后继续补交")
 
     async def _send_chunked_message(
         self,
@@ -437,15 +567,21 @@ class WebSocketClient:
 
     async def reconnect(self):
         """
-        重新建立连接
+        重新建立连接。
+
+        重连策略分两段：
+        1. 窗口内高频重连：retry 开启时按 interval_time 间隔重试 max_retry_num 次（原行为不变）；
+        2. 窗口用尽后低频永续重连：retry_forever 开启时按 retry_forever_interval 秒间隔
+           继续重试直到手动停止，保证服务端发布重启超过高频窗口时仍能自愈。
         :param interval_time: 时间间隔,默认5秒
         """
-        if (
+        can_window_retry = (
             self.retry
             and self.max_retry_num > self.retry_num
             and self.running
             and not self.manual_stop
-        ):
+        )
+        if can_window_retry:
             self.retry_num += 1
             self.update_status(False)
             self._notify_status(
@@ -453,6 +589,21 @@ class WebSocketClient:
                 f"连接已断开，{self.interval_time} 秒后重试 ({self.retry_num}/{self.max_retry_num})",
             )
             await asyncio.sleep(self.interval_time)
+            await self.connect(is_retry=True)
+            return
+        # 窗口高频重试已用尽（或未开启），进入低频永续重连阶段。
+        can_forever_retry = (
+            self.retry_forever
+            and self.running
+            and not self.manual_stop
+        )
+        if can_forever_retry:
+            self.update_status(False)
+            self._notify_status(
+                "retry",
+                f"高频重试已用尽，进入低频重连模式，{self.retry_forever_interval} 秒后重试",
+            )
+            await asyncio.sleep(max(self.retry_forever_interval, 1.0))
             await self.connect(is_retry=True)
 
     async def send_message(self, message):

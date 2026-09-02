@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, WebSocket
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
@@ -21,6 +22,7 @@ from module_qtr.service.agent_bootstrap_service import AgentBootstrapService
 from module_qtr.service.agent_dispatch_service import AgentDispatchService
 from module_qtr.service.agent_service import (
     AgentResponseEnum,
+    HandleResponse,
     agent_loops,
     agents,
     handle_response,
@@ -29,6 +31,7 @@ from module_qtr.service.agent_service import (
 from module_qtr.service.agent_service import (
     send_message as agent_service_send_message,
 )
+from module_qtr.util.agent_dispatch_config import AGENT_AI_ANALYSIS_RESULT_TTL_SECONDS
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 from utils.snowflake import snowIdWorker
@@ -51,6 +54,11 @@ agent_status = defaultdict(dict)
 # event_chunk 分片注册表：value 额外维护 first_seen_at 时间戳，供过期清理使用
 event_chunks = defaultdict(lambda: {"chunks": {}, "total": 0, "first_seen_at": 0.0})
 _event_chunks_last_sweep_log_at = {"ts": 0.0}
+
+# 孤儿响应分片注册表：服务重启/等待方超时后，Agent 补交的响应没有等待者，
+# 这里先在内存攒齐完整响应，再写入 Redis 结果缓存，供任务恢复逻辑补写回。
+# 结构：request_id -> {"chunks": [...], "first_seen_at": monotonic, "redis": redis实例}
+orphan_response_chunks: dict[str, dict[str, Any]] = {}
 
 
 def _sweep_stale_event_chunks(now_ts: float) -> int:
@@ -104,6 +112,64 @@ def _prune_response_future_chunks(now_ts: float) -> int:
             # 等待方已不存在，完整移除该请求条目。
             response_futures.pop(request_id, None)
     return removed
+
+
+async def _stash_orphan_response_chunk(
+    agent_code: str,
+    request_id: str,
+    message_data: dict[str, Any],
+    websocket: WebSocket,
+) -> None:
+    """
+    处理没有等待者的迟到响应分片：在内存攒齐完整响应后写入 Redis 结果缓存。
+
+    场景：服务端重启或等待方超时后，Agent 补交的响应找不到对应的 Future。
+    此前这些响应被直接丢弃，导致 Agent 实际执行成功的任务永远无法恢复。
+    现在攒齐后写入 Redis（key 与调度侧结果缓存一致），任务恢复/重试时读取补写回。
+
+    :param agent_code: Agent 编码
+    :param request_id: 请求ID
+    :param message_data: 响应分片消息体
+    :param websocket: 当前 WebSocket 连接（仅用于 app 引用获取 Redis）
+    :return: 无
+    """
+    # 服务重启后尚无 Redis 可用时无法缓存，只能丢弃并告警。
+    app_state = getattr(websocket, "app", None)
+    redis = getattr(getattr(app_state, "state", None), "redis", None)
+    if redis is None:
+        logger.warning(f"收到孤儿响应分片且 Redis 不可用，已丢弃: agent={agent_code}, request_id={request_id}")
+        return
+
+    entry = orphan_response_chunks.get(request_id)
+    if entry is None:
+        entry = {"chunks": [], "first_seen_at": time.monotonic()}
+        orphan_response_chunks[request_id] = entry
+    entry["chunks"].append(message_data.get("data") or "")
+
+    if not message_data.get("finished"):
+        return
+
+    # 已凑齐：解压并写入 Redis 结果缓存，随后清理内存条目。
+    orphan_response_chunks.pop(request_id, None)
+    try:
+        complete_payload = "".join(entry["chunks"])
+        response_data = decompress_str_to_dict(complete_payload)
+        validated = HandleResponse.validate_transport_payload(response_data)
+        # 与调度侧 _store_result 保持相同序列化方式，确保缓存格式一致。
+        serialized = json.dumps(jsonable_encoder(validated), ensure_ascii=False)
+        await redis.set(
+            AgentDispatchService._result_key(request_id),
+            serialized,
+            # 与调度侧正常结果缓存使用同一 TTL，保证恢复窗口内均可读取。
+            ex=AGENT_AI_ANALYSIS_RESULT_TTL_SECONDS,
+        )
+        logger.info(
+            f"迟到响应已写入结果缓存，等待任务恢复读取: agent={agent_code}, request_id={request_id}"
+        )
+    except Exception as exc:
+        logger.warning(
+            f"迟到响应写入结果缓存失败，已丢弃: agent={agent_code}, request_id={request_id}, error={exc}"
+        )
 
 
 def _sanitize_log_value(value, *, key: str | None = None):
@@ -447,9 +513,10 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                 data_chunk = message_data["data"]
                 request_state = response_futures.get(request_id)
                 if not request_state:
-                    # 等待方已不存在（超时/取消/断连清理），直接丢弃分片，
-                    # 避免为孤儿分片重建条目造成内存累积。
-                    logger.warning(f"收到未知响应分片，已丢弃，request_id={request_id}")
+                    # 等待方已不存在（服务重启/超时/取消/断连清理）：不再直接丢弃，
+                    # 攒齐完整响应后写入 Redis 结果缓存，供任务恢复逻辑补写回，
+                    # 否则 Agent 断连期间执行成功的任务结果会永久丢失。
+                    await _stash_orphan_response_chunk(agent_code, request_id, message_data, current_websocket)
                     continue
 
                 # 将分片存储在字典中

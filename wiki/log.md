@@ -1,3 +1,12 @@
+## [2026-09-02] FEAT | AI分析断链恢复链路与失败路径Token真实消耗
+
+- 触发：用户确认方案——失败但已发生的模型调用必须记录真实 token；服务重启不应导致 Agent 已完成的执行结果丢失；Agent 重连配置增加永续重连开关。
+- Agent 端（client_new）：`WebSocketClient` 新增 `retry_forever`/`retry_forever_interval` 永续重连（窗口高频用尽后降级低频重连直到手动停止，config/UI/agent_client_service 全链路接线，默认关闭不改变现网行为）；新增断连待补交清单 `storage/data/pending_response_deliveries.json`——响应回传失败自动入清单（按 request_id 去重、上限 200 条），连接建立成功后自动补交（单批 10 条），`handle_message_chunk` 的回传改走 `_send_response_with_recovery`；token 补齐：新增 `_parse_failure_token_usage`（失败路径统一提取，Claude 解析新增 `accept_error_result` 参数仅失败路径接受 is_error 报文）、`_recover_token_usage_from_workspace`（超时/异常分支从工作区落盘 stdout/stderr/result.json 恢复），缓存命中路径恢复 token（此前固定 None）。
+- 服务端：`agent_controller` 孤儿响应分片不再丢弃——新注册表 `orphan_response_chunks` 内存攒齐后经 `HandleResponse.validate_transport_payload` 校验写入 Redis 结果缓存（key 与调度侧 `_result_key` 一致、TTL 同为 24h），等待方存在时路径不变；`resume_pending_tasks` 启动恢复前按审计 payload 中的 requestId `_peek_agent_result_cache` 检测迟到结果，命中任务重新排队（不再标 AI_TASK_INTERRUPTED），`_process_task` 开头 `_load_recovered_agent_response` 读缓存、`_process_recovered_success` 走成功写回（任务描述"恢复服务重启前的执行结果"，command_line=agent:recovered）；业务失败/结果不可解析路径补 token 提取计入审计；request_id 写入审计 request_payload；`_persist_success_result` 改传 `_submission_user_placeholder(task)`（SimpleNamespace 占位），成功消息/RCA/快照创建者归属提交人。
+- 边界：只有传输成功且业务成功的迟到响应才恢复写回；存量任务（审计无 requestId）无法自动恢复仍按中断；缓存命中/失败提取均为"尽力而为"，无凭据返回 None（语义为未知，非 0）；attempt 拆分审计、心跳锁、任务接管等待为后续阶段，本次未做。
+- 验证：服务端相关 40 测试（token/dispatch/chunk_registry/transport/task_status）全部通过，ruff 通过；客户端 32 测试（含新增 `test_ticket_ai_failure_token_usage.py` 失败提取/工作区恢复/缓存提取 7 组）全部通过；全部存量失败项经 git stash 对照确认为与本改动无关的既有问题。两端均未做真实 WebSocket 链路联调（需部署环境）。
+- 文档：新增更新记录 `web/public/docs/updates/2026-09-02-ticket-ai-reconnect-recovery-and-token-usage.md`，history.md 同步。
+
 ## [2026-09-01] FIX | 内存分析图表联动与闪烁修复（时间轴/zr 点击/contextLoading）
 
 - 触发：用户反馈两个问题——图表只有点到极小的数据点符号才跳日志（`showSymbol:false`+lttb 下几乎点不到，点时间轴/空白无效）；点击搜索结果行时页面闪烁（分栏布局后全局 v-loading 遮罩 + 结果面板高度类 `log-view-panel-fill` 依赖 context 是否存在，加载期间来回切换 + 虚拟表格高度级联重算）。

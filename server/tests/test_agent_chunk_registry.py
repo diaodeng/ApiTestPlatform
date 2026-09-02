@@ -138,3 +138,56 @@ def test_response_chunk_dropped_when_waiting_state_missing():
         assert unknown_request not in dict(controller.response_futures)
     finally:
         controller.response_futures.clear()
+
+
+def test_orphan_response_chunk_stashed_without_redis(monkeypatch, caplog):
+    """Redis 不可用时孤儿分片应被安全丢弃且不抛异常。"""
+    controller.orphan_response_chunks.clear()
+    try:
+        message = {"type": "response_chunk", "request_id": "req-x", "data": "abc", "finished": False}
+        websocket = type("WS", (), {"app": None})()
+        import asyncio
+
+        asyncio.run(
+            controller._stash_orphan_response_chunk("agent-a", "req-x", message, websocket)
+        )
+        assert "req-x" not in controller.orphan_response_chunks
+    finally:
+        controller.orphan_response_chunks.clear()
+
+
+def test_orphan_response_chunk_assembles_and_caches(monkeypatch):
+    """孤儿分片攒齐后应写入 Redis 结果缓存并清理内存条目。"""
+    import asyncio
+    import json
+
+    from module_qtr.service.agent_service import HandleResponse
+
+    controller.orphan_response_chunks.clear()
+    stored = {}
+
+    class FakeRedis:
+        async def set(self, key, value, ex=None):
+            stored[key] = (value, ex)
+
+    payload = HandleResponse(status_code=200, response={"success": True, "result": {}}, message="ok")
+    serialized = json.dumps(
+        {"statusCode": 200, "response": {"success": True, "result": {}}, "message": "ok"}
+    )
+    # 压缩格式由 decompress_str_to_dict 解开：直接 monkeypatch 解压返回结构化 dict。
+    monkeypatch.setattr(controller, "decompress_str_to_dict", lambda raw: json.loads(serialized))
+    websocket = type("WS", (), {})()
+    websocket.app = type("App", (), {})()
+    websocket.app.state = type("State", (), {})()
+    websocket.app.state.redis = FakeRedis()
+    try:
+        message_first = {"type": "response_chunk", "request_id": "req-y", "data": "part", "finished": False}
+        asyncio.run(controller._stash_orphan_response_chunk("agent-a", "req-y", message_first, websocket))
+        assert "req-y" in controller.orphan_response_chunks
+
+        message_last = {"type": "response_chunk", "request_id": "req-y", "data": "part", "finished": True}
+        asyncio.run(controller._stash_orphan_response_chunk("agent-a", "req-y", message_last, websocket))
+        assert "req-y" not in controller.orphan_response_chunks
+        assert stored, "完整响应应写入 Redis 结果缓存"
+    finally:
+        controller.orphan_response_chunks.clear()
