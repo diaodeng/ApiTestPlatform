@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
 from modules.ticket.service.ai.ticket_ai_observability_service import TicketAiObservabilityService
 from utils.api_key_util import ApiKeyUtil
 
@@ -14,16 +15,36 @@ def build_provider(**overrides):
         "observability_auth_type": "bearer",
         "observability_api_key_cipher_text": ApiKeyUtil.encrypt_api_key("obs-key-123"),
         "observability_service_name": "",
-        "observability_cli_enabled": True,
+        "observability_cli_enabled": False,
         "provider_code": "obs-provider",
         "platform_code": "custom",
+        "api_key_cipher_text": ApiKeyUtil.encrypt_api_key("provider-key"),
+        "api_protocol": "openai_chat_completions",
+        "base_url": "",
+        "default_model": "",
+        "provider_name": "Provider",
+        "provider_level": 1,
+        "worker_env": {},
     }
     fields.update(overrides)
     return SimpleNamespace(**fields)
 
 
+def build_obs_config(**overrides):
+    """构造可观测上报配置。"""
+    config = {
+        "endpoint": "https://observe.example/observe",
+        "auth_header": "Bearer obs-key-123",
+        "service_name": "ticket-ai-analysis",
+        "provider_code": "obs-provider",
+        "platform_code": "custom",
+    }
+    config.update(overrides)
+    return config
+
+
 class TicketAiObservabilityServiceTests(unittest.TestCase):
-    """验证工单 AI 可观测上报的配置解析与 OTLP payload 组装。"""
+    """验证工单 AI 可观测配置解析与 Agent 环境注入分层。"""
 
     def test_build_provider_config_bearer(self) -> None:
         """bearer 模式应解密密钥并生成 Bearer 头与默认 service name。"""
@@ -55,63 +76,45 @@ class TicketAiObservabilityServiceTests(unittest.TestCase):
         ):
             self.assertIsNone(TicketAiObservabilityService.build_provider_config(build_provider()))
 
-    def test_report_task_span_builds_otlp_payload(self) -> None:
-        """任务span应包含 input.value/output.value/gen_ai.usage/session.id 并复用traceId。"""
-        captured = {}
+    def test_env_base_otel_injected_when_enabled_without_cli(self) -> None:
+        """主开关开启（CLI 关闭）应下发基础 OTLP + session/trace，供 Agent 任务span上报。"""
+        result = TicketAiAnalysisService._build_provider_env_overrides(
+            build_provider(observability_cli_enabled=False),
+            observability_config=build_obs_config(),
+            session_id="ticket-ai-task-1001",
+            observability_trace={"trace_id": "a" * 32, "span_id": "b" * 16},
+        )
+        self.assertEqual(result["OTEL_EXPORTER_OTLP_ENDPOINT"], "https://observe.example/observe")
+        self.assertEqual(result["OTEL_EXPORTER_OTLP_HEADERS"], "Authorization=Bearer obs-key-123")
+        self.assertEqual(result["OTEL_SESSION_ID"], "ticket-ai-task-1001")
+        self.assertEqual(result["OTEL_TRACE_ID"], "a" * 32)
+        self.assertEqual(result["OTEL_SPAN_ID"], "b" * 16)
+        # CLI 关闭时不下发 CLI 专属开关与 TRACEPARENT
+        self.assertNotIn("CLAUDE_CODE_ENABLE_TELEMETRY", result)
+        self.assertNotIn("CODEX_OTEL_ENABLED", result)
+        self.assertNotIn("TRACEPARENT", result)
 
-        def fake_post(url, json=None, headers=None, timeout=None):
-            captured["url"] = url
-            captured["json"] = json
-            captured["headers"] = headers
+    def test_env_cli_vars_injected_when_cli_enabled(self) -> None:
+        """CLI 原生遥测开启时应追加 CLI 专属开关与 TRACEPARENT。"""
+        result = TicketAiAnalysisService._build_provider_env_overrides(
+            build_provider(observability_cli_enabled=True),
+            observability_config=build_obs_config(),
+            session_id="ticket-ai-task-1001",
+            traceparent=f"00-{'a' * 32}-{'b' * 16}-01",
+            observability_trace={"trace_id": "a" * 32, "span_id": "b" * 16},
+        )
+        self.assertEqual(result["CLAUDE_CODE_ENABLE_TELEMETRY"], "1")
+        self.assertEqual(result["CLAUDE_CODE_ENHANCED_TELEMETRY_BETA"], "1")
+        self.assertEqual(result["CODEX_OTEL_ENABLED"], "1")
+        self.assertEqual(result["OTEL_TRACES_EXPORTER"], "otlp")
+        self.assertEqual(result["TRACEPARENT"], f"00-{'a' * 32}-{'b' * 16}-01")
 
-            class FakeResponse:
-                status_code = 200
-                text = ""
-
-            return FakeResponse()
-
-        config = TicketAiObservabilityService.build_provider_config(build_provider())
-        with patch(
-            "modules.ticket.service.ai.ticket_ai_observability_service.httpx.post",
-            side_effect=fake_post,
-        ):
-            TicketAiObservabilityService.report_task_span(
-                config,
-                task_id=1001,
-                ticket_id=2002,
-                model_name="test-model",
-                prompt_text="测试输入",
-                result_text="测试输出",
-                input_tokens=10,
-                output_tokens=5,
-                total_tokens=15,
-                latency_ms=120.5,
-                success=True,
-                trace_id="a" * 32,
-                span_id="b" * 16,
-            )
-        self.assertEqual(captured["url"], "https://observe.example/observe/v1/traces")
-        self.assertEqual(captured["headers"]["Authorization"], "Bearer obs-key-123")
-        span = captured["json"]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
-        self.assertEqual(span["traceId"], "a" * 32)
-        self.assertEqual(span["spanId"], "b" * 16)
-        attrs = {attr["key"]: attr["value"] for attr in span["attributes"]}
-        self.assertEqual(attrs["input.value"]["stringValue"], "测试输入")
-        self.assertEqual(attrs["output.value"]["stringValue"], "测试输出")
-        self.assertEqual(attrs["gen_ai.usage.input_tokens"]["intValue"], 10)
-        self.assertEqual(attrs["gen_ai.usage.output_tokens"]["intValue"], 5)
-        self.assertEqual(attrs["gen_ai.request.model"]["stringValue"], "test-model")
-        self.assertEqual(attrs["session.id"]["stringValue"], "ticket-ai-task-1001")
-
-    def test_report_task_span_skips_without_config(self) -> None:
-        """config 为 None 时应直接跳过，不发起网络请求。"""
-        with patch(
-            "modules.ticket.service.ai.ticket_ai_observability_service.httpx.post"
-        ) as mock_post:
-            TicketAiObservabilityService.report_task_span(
-                None, task_id=1, ticket_id=1, model_name=None, prompt_text=None, result_text=None
-            )
-            mock_post.assert_not_called()
+    def test_env_otel_skipped_when_disabled(self) -> None:
+        """可观测未启用时不注入任何 OTEL 变量。"""
+        result = TicketAiAnalysisService._build_provider_env_overrides(
+            build_provider(observability_enabled=False),
+        )
+        self.assertFalse(any(key.startswith("OTEL_") for key in result))
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ import httpx
 
 from server.config import AgentConfig
 from services.ticket_ai_codex_config_service import TicketAiCodexConfigService
+from services.ticket_ai_observability_service import TicketAiObservabilityService
 from utils.common import get_client_root_dir
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
@@ -3090,6 +3091,18 @@ class TicketAiAnalysisService:
                 if cached_token_usage is not None:
                     token_usage_payload = cached_token_usage
                     logger.info(f"缓存命中恢复 Token 用量: {token_usage_payload}")
+                # 缓存命中同样上报任务级 span（真实历史执行，token 消耗已恢复）
+                TicketAiObservabilityService.report_task_span(
+                    provider_env_overrides,
+                    task_id=task_id,
+                    ticket_id=ticket_id,
+                    model_name=selected_worker_model or None,
+                    system_name=cls._resolve_provider_type(context_payload),
+                    prompt_text=None,
+                    result_text=result_text,
+                    token_usage=token_usage_payload,
+                    success=True,
+                )
                 return {
                     "request_type": req_data.get("requestType"),
                     "command": req_data.get("command"),
@@ -3497,6 +3510,21 @@ class TicketAiAnalysisService:
                         worker_exit_code=failure_payload["worker_exit_code"],
                         diagnostics=failure_payload["diagnostics"],
                     )
+                    # 失败任务同样上报（带错误与已消耗token），便于统计失败率与错误分布
+                    TicketAiObservabilityService.report_task_span(
+                        provider_env_overrides,
+                        task_id=task_id,
+                        ticket_id=ticket_id,
+                        model_name=selected_worker_model or None,
+                        system_name=provider_type,
+                        prompt_text=resolved_prompt,
+                        result_text=None,
+                        token_usage=failure_token_usage,
+                        latency_ms=worker_elapsed * 1000,
+                        success=False,
+                        error_code=failure_payload["error_code"],
+                        error_message=failure_message,
+                    )
                     return {
                         "request_type": req_data.get("requestType"),
                         "command": req_data.get("command"),
@@ -3592,6 +3620,21 @@ class TicketAiAnalysisService:
                         diagnostics=failure_payload["diagnostics"],
                         auth_diagnostic=worker_auth_diagnostic,
                     )
+                    # 结果无效同样上报：模型调用已真实发生，token 尽力提取
+                    TicketAiObservabilityService.report_task_span(
+                        provider_env_overrides,
+                        task_id=task_id,
+                        ticket_id=ticket_id,
+                        model_name=selected_worker_model or None,
+                        system_name=provider_type,
+                        prompt_text=resolved_prompt,
+                        result_text=result_text,
+                        token_usage=invalid_result_token_usage,
+                        latency_ms=worker_elapsed * 1000,
+                        success=False,
+                        error_code=failure_payload["error_code"],
+                        error_message=failure_payload["error_message"],
+                    )
                     # 结果无效同样可能已产生模型消耗（如结果不符合 schema），尽力提取 token。
                     invalid_result_token_usage = cls._parse_failure_token_usage(
                         provider_type=provider_type,
@@ -3634,6 +3677,19 @@ class TicketAiAnalysisService:
                     task_id,
                     "Worker 已完成分析",
                     workspace_path=str(workspace_dir),
+                )
+                # 任务级 LLM span 上报：Agent 侧直连可观测平台（服务端可能与平台网络隔离）
+                TicketAiObservabilityService.report_task_span(
+                    provider_env_overrides,
+                    task_id=task_id,
+                    ticket_id=ticket_id,
+                    model_name=selected_worker_model or None,
+                    system_name=provider_type,
+                    prompt_text=resolved_prompt,
+                    result_text=cls._dumps(normalized_result),
+                    token_usage=token_usage_payload,
+                    latency_ms=worker_elapsed * 1000,
+                    success=True,
                 )
                 return {
                     "request_type": req_data.get("requestType"),
@@ -3682,6 +3738,19 @@ class TicketAiAnalysisService:
                 failure_message,
                 error_code="AI_WORKER_TIMEOUT",
             )
+            TicketAiObservabilityService.report_task_span(
+                provider_env_overrides,
+                task_id=task_id,
+                ticket_id=ticket_id,
+                model_name=selected_worker_model or None,
+                system_name=cls._resolve_provider_type(context_payload),
+                prompt_text=locals().get("resolved_prompt"),
+                result_text=None,
+                token_usage=timeout_token_usage,
+                success=False,
+                error_code="AI_WORKER_TIMEOUT",
+                error_message=failure_message,
+            )
             return {
                 "request_type": req_data.get("requestType"),
                 "command": req_data.get("command"),
@@ -3707,6 +3776,19 @@ class TicketAiAnalysisService:
                 failure_message,
                 error_code="AI_WORKER_EXECUTION_ERROR",
                 error=str(exc),
+            )
+            TicketAiObservabilityService.report_task_span(
+                provider_env_overrides,
+                task_id=task_id,
+                ticket_id=ticket_id,
+                model_name=selected_worker_model or None,
+                system_name=cls._resolve_provider_type(context_payload),
+                prompt_text=locals().get("resolved_prompt"),
+                result_text=None,
+                token_usage=exception_token_usage,
+                success=False,
+                error_code="AI_WORKER_EXECUTION_ERROR",
+                error_message=failure_message,
             )
             return {
                 "request_type": req_data.get("requestType"),

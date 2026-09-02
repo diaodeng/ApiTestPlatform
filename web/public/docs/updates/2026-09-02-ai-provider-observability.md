@@ -14,7 +14,7 @@ title: AI Provider 可观测上报（OTLP）
 
 整体链路分两层：
 
-1. **任务级上报（服务端）**：分析任务执行结束时，服务端将本次调用的完整提示词（INPUT）、分析结果 JSON（OUTPUT）、Token 用量、模型名、耗时、成功/失败状态按 OTLP 协议上报；失败任务同样上报并带错误码。上报为旁路 best-effort，平台不可达时只记日志，不影响分析任务。
+1. **任务级上报（Agent 侧）**：分析任务执行结束时，执行 Agent 将本次调用的最终提示词（INPUT）、分析结果 JSON（OUTPUT）、Token 用量、模型名、耗时、成功/失败状态按 OTLP 协议直连可观测平台上报；失败任务同样上报并带错误码。上报为旁路 best-effort，平台不可达时只记日志，不影响分析任务。（2026-09-02 修正：原设计为服务端上报，实测测试环境服务端与生产可观测平台网络隔离导致超时，已迁移至 Agent 侧——服务端只下发配置，不再出站上报。）
 2. **CLI 原生遥测（可选，Agent 侧）**：Provider 可选开启"CLI 原生遥测"，Agent 会把 OTLP 配置注入本机 Codex（任务级 `config.toml` 的 `[otel]` 段）和 Claude Code（环境变量），CLI 自身的执行细节（工具调用、模型请求、事件日志）也会上报。Claude Code 通过 W3C Trace 上下文（`TRACEPARENT`）挂接到任务级 trace，Codex 通过相同 `session.id` 关联。
 
 配套改动：
