@@ -1978,6 +1978,40 @@ class TicketAiAnalysisService:
             return False
 
     @staticmethod
+    def _refresh_task_lock_heartbeat(lock_file: Path) -> None:
+        """
+        刷新任务锁心跳时间戳（Worker 存活证明，纯本地文件写）。
+        :param lock_file: 锁文件路径
+        :return: 无
+        """
+        try:
+            if not lock_file.exists():
+                return
+            payload = json.loads(lock_file.read_text(encoding="utf-8") or "{}")
+            if not isinstance(payload, dict):
+                return
+            payload["lastHeartbeatAt"] = datetime.now().isoformat()
+            lock_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning(f"刷新 AI 分析任务锁心跳失败: {exc}")
+
+    @classmethod
+    async def _run_lock_heartbeat(cls, lock_file: Path, interval_sec: float = 15.0) -> None:
+        """
+        Worker 执行期间周期刷新锁心跳，直到被取消（finally 中随执行结束取消）。
+        :param lock_file: 锁文件路径
+        :param interval_sec: 心跳间隔秒数
+        :return: 无
+        """
+        try:
+            while True:
+                await asyncio.sleep(interval_sec)
+                await asyncio.to_thread(cls._refresh_task_lock_heartbeat, lock_file)
+        except asyncio.CancelledError:
+            # 正常取消：Worker 已结束，锁即将释放。
+            raise
+
+    @staticmethod
     def _release_task_lock(lock_file: Path) -> None:
         """
         释放任务运行锁。
@@ -2009,13 +2043,23 @@ class TicketAiAnalysisService:
     @classmethod
     def _is_stale_lock(cls, lock_payload: dict[str, Any] | None, timeout_sec: int) -> bool:
         """
-        判断锁文件是否已经过期。
+        判断锁文件是否已经过期（可被安全接管）。
+
+        心跳续租优先：锁内有 lastHeartbeatAt 时按心跳判活——Worker 存活期间持续刷新，
+        心跳停止超过 max(间隔×4, 60) 秒视为 Worker 已死，锁过期可接管。
+        无心跳字段的旧版本锁回退到"启动时间 + 超时×2"的时间窗判定，保持兼容。
         :param lock_payload: 锁文件内容
         :param timeout_sec: 当前任务超时时间
         :return: 是否过期
         """
         if not isinstance(lock_payload, dict):
             return True
+        # 新版心跳锁：以最近心跳时间为存活依据。
+        heartbeat_at = cls._parse_iso_datetime(lock_payload.get("lastHeartbeatAt"))
+        if heartbeat_at:
+            # 心跳间隔 15 秒，4 倍窗口容忍单次刷新抖动；下限 60 秒防止过激接管。
+            stale_after = max(60.0, 15.0 * 4)
+            return (datetime.now() - heartbeat_at).total_seconds() > stale_after
         started_at = cls._parse_iso_datetime(lock_payload.get("startedAt") or lock_payload.get("started_at"))
         if not started_at:
             return True
@@ -3030,6 +3074,7 @@ class TicketAiAnalysisService:
                     "ticketId": ticket_id,
                     "status": "running",
                     "startedAt": datetime.now().isoformat(),
+                    "lastHeartbeatAt": datetime.now().isoformat(),
                     "requestType": req_data.get("requestType"),
                     "command": req_data.get("command"),
                 },
@@ -3045,6 +3090,9 @@ class TicketAiAnalysisService:
                     "error_code": "AI_TASK_ALREADY_RUNNING",
                     "error_message": failure_message,
                 }
+            # 锁心跳续租：Worker 执行期间周期刷新 lastHeartbeatAt，证明 Worker 存活；
+            # 心跳停止（Worker 崩溃/被杀）后短窗口即可被安全接管，避免长任务锁假死。
+            lock_heartbeat_task = asyncio.create_task(cls._run_lock_heartbeat(task_lock_file))
             try:
                 ticket_file.write_text(cls._dumps(ticket), encoding="utf-8")
                 timeline_file.write_text(cls._dumps(timeline_payload), encoding="utf-8")
@@ -3511,6 +3559,12 @@ class TicketAiAnalysisService:
                     },
                 }
             finally:
+                # 先停心跳再释放锁：锁文件删除后心跳刷新会自动跳过（文件不存在）。
+                lock_heartbeat_task.cancel()
+                try:
+                    await lock_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
                 cls._release_task_lock(task_lock_file)
         except subprocess.TimeoutExpired as exc:
             failure_message = f"AI Worker 执行超时：{exc}"

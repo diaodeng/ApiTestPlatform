@@ -513,6 +513,9 @@ class TicketAiAnalysisTask(Base):
         ),
         Index("idx_ticket_ai_task_request_fingerprint", "request_fingerprint"),
         UniqueConstraint("success_fingerprint", name="uk_ticket_ai_task_success_fingerprint"),
+        # 活跃请求指纹唯一锁：任务进入 created/running 时写入指纹，终态置 NULL。
+        # 唯一索引允许多个 NULL，从而实现"同指纹最多一个活跃任务"的数据库级防护。
+        Index("uk_ticket_ai_task_active_lock", "active_lock", unique=True),
     )
 
     task_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=snowIdWorker.get_id, comment="任务ID")
@@ -543,6 +546,9 @@ class TicketAiAnalysisTask(Base):
     total_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="总Token数")
     request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="分析请求指纹")
     success_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="成功结果唯一指纹")
+    active_lock: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="活跃任务指纹锁（created/running 时等于请求指纹，终态置空）"
+    )
     source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
     source_log_view_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="stored", comment="日志来源模式"

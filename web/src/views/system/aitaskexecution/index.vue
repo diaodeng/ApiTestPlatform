@@ -182,6 +182,8 @@ const statusOptions = [
   { label: '成功', value: 'success' },
   { label: '失败', value: 'failed' },
   { label: '跳过', value: 'skipped' },
+  { label: '已取消（重复请求）', value: 'canceled' },
+  { label: '复用历史结果', value: 'reused' },
 ]
 
 const executionList = ref([])
@@ -235,6 +237,7 @@ function statusTagType(status) {
   if (status === 'success') return 'success'
   if (status === 'running' || status === 'pending') return 'warning'
   if (status === 'failed') return 'danger'
+  if (status === 'reused') return 'success'
   return 'info'
 }
 

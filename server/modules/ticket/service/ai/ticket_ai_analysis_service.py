@@ -148,6 +148,93 @@ class TicketAiAnalysisService:
             user=SimpleNamespace(user_id=task.submitted_by_id, user_name=task.submitted_by_name, nick_name=None),
         )
 
+    @classmethod
+    def _record_reuse_event(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        reused_task: TicketAiAnalysisTask,
+        request_fingerprint: str,
+        current_user: CurrentUserModel,
+    ) -> None:
+        """
+        记录一次"复用历史成功结果"事件（轻量审计）。
+
+        复用不发起模型调用，不产生 token 消耗，因此独立记一条 status=reused、
+        usage_state=not_called 的事件，与真实调用的审计区分开，避免：
+        1) 页面把复用误认为一次新的模型调用；
+        2) Token 统计把复用事件重复累计。
+        写失败只告警不影响幂等返回。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param reused_task: 被复用的历史成功任务
+        :param request_fingerprint: 本次请求指纹
+        :param current_user: 当前登录用户
+        :return: 无
+        """
+        try:
+            AiTaskExecutionDao.add_ai_task_execution_dao(
+                db,
+                cls._build_execution_payload(
+                    task_type="ticket_ai_analysis",
+                    task_name="工单AI分析",
+                    source_type="ticket",
+                    source_id=ticket.ticket_id,
+                    source_ref=ticket.ticket_no or str(ticket.ticket_id),
+                    request_payload={
+                        "task_id": reused_task.task_id,
+                        "ticket_id": ticket.ticket_id,
+                        "request_fingerprint": request_fingerprint,
+                        "reused_from_task_id": reused_task.task_id,
+                        "reused_from_audit_execution_id": getattr(reused_task, "audit_execution_id", None),
+                        "usage_state": "not_called",
+                    },
+                    status="reused",
+                    created_by_id=cls._user_id(current_user),
+                    created_by_name=cls._user_name(current_user),
+                ),
+            )
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning(f"记录复用事件审计失败（不影响结果返回）: task_id={reused_task.task_id}, error={exc}")
+
+    @classmethod
+    def _resolve_task_attempt_no(cls, task: TicketAiAnalysisTask) -> int:
+        """
+        解析任务当前已有的调用尝试序号（按审计链回溯），新重试将使用序号+1。
+        首次创建的任务没有 attempt_of_task_id 记录，序号视为 1。
+        :param task: AI 分析任务
+        :return: 当前尝试次数
+        """
+        audit_execution_id = getattr(task, "audit_execution_id", None)
+        if not audit_execution_id:
+            return 1
+        try:
+            with SessionLocal() as audit_db:
+                execution = AiTaskExecutionDao.get_ai_task_execution_by_id(audit_db, int(audit_execution_id))
+                payload = getattr(execution, "request_payload", None) if execution else None
+                if isinstance(payload, str):
+                    payload = cls._loads(payload, {})
+                if isinstance(payload, dict) and payload.get("attempt_of_task_id"):
+                    return int(payload.get("attempt_no") or 1)
+        except Exception as exc:
+            logger.warning(f"解析任务尝试序号失败，按首次重试处理: task_id={task.task_id}, error={exc}")
+        return 1
+
+    @classmethod
+    def _resolve_task_provider_code(cls, task: TicketAiAnalysisTask) -> str | None:
+        """从任务上下文快照解析 Provider 编码，供重试审计记录沿用原配置。"""
+        context = task.analysis_context if isinstance(task.analysis_context, dict) else {}
+        return str(context.get("selectedAiProviderCode") or "").strip() or None
+
+    @classmethod
+    def _resolve_task_model_name(cls, task: TicketAiAnalysisTask) -> str | None:
+        """从任务上下文快照解析模型名，供重试审计记录沿用原配置。"""
+        context = task.analysis_context if isinstance(task.analysis_context, dict) else {}
+        return str(context.get("selectedWorkerModel") or "").strip() or None
+
     @staticmethod
     def _log_task_step(task_id: int, stage: str, message: str, **extra: Any) -> None:
         """
@@ -2678,6 +2765,7 @@ class TicketAiAnalysisService:
         input_token_count: int | None = None,
         output_token_count: int | None = None,
         total_token_count: int | None = None,
+        active_lock_fingerprint: str | None = None,
     ) -> None:
         """
         更新 AI 分析任务状态。
@@ -2692,6 +2780,8 @@ class TicketAiAnalysisService:
         :param analysis_result: 分析结果
         :param raw_output: 原始输出
         :param command_line: 执行命令
+        :param active_lock_fingerprint: 活跃锁指纹；活跃态（created/running）传请求指纹占锁，
+            终态无需传（自动清锁）。占锁冲突由唯一索引兜底，并发同指纹任务写入失败。
         :return: 无
         """
         update_data = {
@@ -2708,6 +2798,12 @@ class TicketAiAnalysisService:
         }
         if status != TicketAiAnalysisStatus.SUCCESS.value:
             update_data["success_fingerprint"] = None
+        # 活跃锁维护：终态释放；活跃态按调用方传入的指纹占锁（未传则同样释放，
+        # 兼容无指纹的历史任务）。并发同指纹占锁冲突由唯一索引兜底。
+        if status in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
+            update_data["active_lock"] = active_lock_fingerprint
+        else:
+            update_data["active_lock"] = None
         if analysis_result is not None:
             update_data["analysis_result"] = analysis_result
         if raw_output is not None:
@@ -2869,9 +2965,16 @@ class TicketAiAnalysisService:
                     f"工单 AI 分析命中成功指纹，复用历史结果: ticket_id={ticket_id}, "
                     f"request_fingerprint={request_fingerprint}, task_id={successful_task.task_id}"
                 )
+                cls._record_reuse_event(
+                    db,
+                    ticket=ticket,
+                    reused_task=successful_task,
+                    request_fingerprint=request_fingerprint,
+                    current_user=current_user,
+                )
                 return CrudResponseModel(
                     is_success=True,
-                    message="AI分析请求已幂等命中，直接返回历史结果",
+                    message="AI分析请求已命中，直接返回历史成功结果",
                     result=CamelCaseUtil.transform_result(successful_task),
                 )
             active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
@@ -2951,6 +3054,8 @@ class TicketAiAnalysisService:
             source_log_view_mode=str(context_payload.get("sourceLogViewMode") or "stored"),
             request_fingerprint=request_fingerprint,
             success_fingerprint=None,
+            # 新任务即为活跃任务：直接占活跃锁，同指纹并发创建由唯一索引兜底。
+            active_lock=request_fingerprint,
             submitted_by_id=cls._user_id(current_user),
             submitted_by_name=cls._user_name(current_user),
             create_by=cls._user_name(current_user),  # type: ignore[arg-type]
@@ -3004,6 +3109,21 @@ class TicketAiAnalysisService:
             cls.queue_task(task.task_id)
             result = CamelCaseUtil.transform_result(task)
             return CrudResponseModel(is_success=True, message="AI分析任务已提交", result=result)
+        except IntegrityError:
+            # 并发提交同一指纹：活跃锁唯一索引冲突。回滚后按幂等语义返回原活跃任务。
+            db.rollback()
+            active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
+            if active_task:
+                logger.info(
+                    f"工单 AI 分析并发提交命中活跃锁，复用原任务: request_fingerprint={request_fingerprint}, "
+                    f"task_id={active_task.task_id}"
+                )
+                return CrudResponseModel(
+                    is_success=True,
+                    message="相同AI分析请求已在执行中，直接返回原任务",
+                    result=CamelCaseUtil.transform_result(active_task),
+                )
+            raise
         except Exception:
             db.rollback()
             raise
@@ -3027,7 +3147,17 @@ class TicketAiAnalysisService:
         task = TicketAiDao.get_task_by_id(db, task_id)
         if not task or task.ticket_id != ticket_id:
             return CrudResponseModel(is_success=False, message="AI分析任务不存在")
+        ticket = TicketDao.get_ticket_by_id(db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="AI分析任务不存在")
         if task.status == TicketAiAnalysisStatus.SUCCESS.value and task.analysis_result:
+            cls._record_reuse_event(
+                db,
+                ticket=ticket,
+                reused_task=task,
+                request_fingerprint=str(getattr(task, "request_fingerprint", "") or ""),
+                current_user=current_user,
+            )
             return CrudResponseModel(
                 is_success=True,
                 message="AI分析任务已完成，直接返回历史结果",
@@ -3041,9 +3171,16 @@ class TicketAiAnalysisService:
                     f"工单 AI 分析重试命中成功指纹，复用历史结果: ticket_id={ticket_id}, "
                     f"request_fingerprint={request_fingerprint}, task_id={successful_task.task_id}"
                 )
+                cls._record_reuse_event(
+                    db,
+                    ticket=ticket,
+                    reused_task=successful_task,
+                    request_fingerprint=request_fingerprint,
+                    current_user=current_user,
+                )
                 return CrudResponseModel(
                     is_success=True,
-                    message="AI分析请求已幂等命中，直接返回历史结果",
+                    message="AI分析请求已命中，直接返回历史成功结果",
                     result=CamelCaseUtil.transform_result(successful_task),
                 )
             active_task = TicketAiDao.get_active_task_by_request_fingerprint(db, request_fingerprint)
@@ -3061,7 +3198,39 @@ class TicketAiAnalysisService:
             "update_by": cls._user_name(current_user),
             "update_time": now,
         }
+        new_audit_execution_id: int | None = None
         if task.status in (TicketAiAnalysisStatus.FAILED.value, TicketAiAnalysisStatus.CANCELED.value):
+            # 重试=一次新的真实调用尝试：新建独立审计记录并关联到任务，
+            # 原审计记录保持终态不可变，历次尝试的 token 与失败原因各自可追溯。
+            prior_audit_id = getattr(task, "audit_execution_id", None)
+            prior_attempt_no = cls._resolve_task_attempt_no(task)
+            new_audit_execution = AiTaskExecutionDao.add_ai_task_execution_dao(
+                db,
+                cls._build_execution_payload(
+                    task_type="ticket_ai_analysis",
+                    task_name="工单AI分析",
+                    source_type="ticket",
+                    source_id=task.ticket_id,
+                    source_ref=str(task.ticket_id),
+                    provider_code=cls._resolve_task_provider_code(task),
+                    model_name=cls._resolve_task_model_name(task),
+                    request_payload={
+                        "task_id": task.task_id,
+                        "ticket_id": task.ticket_id,
+                        "version_id": task.version_id,
+                        "mapping_id": task.mapping_id,
+                        "request_fingerprint": request_fingerprint or None,
+                        "attempt_of_task_id": task.task_id,
+                        "attempt_no": prior_attempt_no + 1,
+                        "attempt_source": "retry",
+                        "prior_audit_execution_id": prior_audit_id,
+                    },
+                    status="pending",
+                    created_by_id=cls._user_id(current_user),
+                    created_by_name=cls._user_name(current_user),
+                ),
+            )
+            new_audit_execution_id = int(new_audit_execution.execution_id)
             update_data.update(
                 {
                     "status": TicketAiAnalysisStatus.CREATED.value,
@@ -3070,6 +3239,7 @@ class TicketAiAnalysisService:
                     "started_at": None,
                     "finished_at": None,
                     "success_fingerprint": None,
+                    "audit_execution_id": new_audit_execution_id,
                 }
             )
         try:
@@ -3701,6 +3871,15 @@ class TicketAiAnalysisService:
         task = TicketAiDao.get_task_by_id(db, task_id)
         if not task or task.status == TicketAiAnalysisStatus.SUCCESS.value:
             cls._log_task_step(task_id, "LOAD", "任务不存在或已成功，跳过")
+            return
+        # 执行入口状态白名单：只允许新建和重试后的任务进入执行，
+        # 防止并发失败者（canceled）或其它终态任务被误排队后再次执行、重复消耗模型调用。
+        if task.status not in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
+            cls._log_task_step(
+                task_id,
+                "LOAD",
+                f"任务状态为 {task.status}，不在可执行白名单内，跳过",
+            )
             return
         cls._log_task_step(task_id, "LOAD", "读取工单记录", ticket_id=getattr(task, "ticket_id", None))
         ticket = TicketDao.get_ticket_by_id(db, task.ticket_id)

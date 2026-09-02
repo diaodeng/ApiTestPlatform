@@ -75,6 +75,7 @@ async def init_create_table():
     _ensure_ticket_ai_analysis_token_columns()
     _ensure_ai_analysis_error_code_columns()
     _ensure_ticket_ai_analysis_fingerprint_columns()
+    _ensure_ticket_ai_analysis_active_lock()
     _ensure_user_config_unique_index()
     logger.info("数据库连接成功")
     auto_seed_current_sqlite_if_needed()
@@ -762,6 +763,90 @@ def _ensure_ticket_ai_analysis_fingerprint_columns():
                 )
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_ai_analysis_task 指纹字段失败: {exc}")
+
+
+def _ensure_ticket_ai_analysis_active_lock():
+    """
+    为工单 AI 任务表补齐活跃任务指纹锁字段及唯一索引，兼容旧库。
+
+    活跃锁用于数据库级防重：任务进入 created/running 时写入请求指纹，
+    终态置 NULL。唯一索引对 NULL 不去重，实现"同指纹最多一个活跃任务"。
+    迁移时会把存量任务的活跃锁统一清空，避免历史执行中数据阻塞新任务。
+    :return: 无
+    """
+    if DATABASE_BACKEND not in {"mysql", "sqlite"}:
+        return
+
+    try:
+        with engine.begin() as connection:
+            if DATABASE_BACKEND == "mysql":
+                existing_columns = {
+                    str(row.get("COLUMN_NAME") or "")
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT COLUMN_NAME
+                            FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'ticket_ai_analysis_task'
+                            """
+                        )
+                    ).mappings().all()
+                }
+                if "active_lock" not in existing_columns:
+                    logger.info("检测到 ticket_ai_analysis_task 缺少 active_lock，自动补齐")
+                    connection.execute(
+                        text(
+                            "ALTER TABLE ticket_ai_analysis_task ADD COLUMN active_lock VARCHAR(64) NULL "
+                            "COMMENT '活跃任务指纹锁（created/running 时等于请求指纹，终态置空）' "
+                            "AFTER success_fingerprint"
+                        )
+                    )
+                # 补列后先清理存量值再建唯一索引，避免历史脏数据阻塞迁移。
+                connection.execute(text("UPDATE ticket_ai_analysis_task SET active_lock = NULL"))
+                index_names = {
+                    str(row.get("INDEX_NAME") or "")
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT INDEX_NAME
+                            FROM information_schema.STATISTICS
+                            WHERE TABLE_SCHEMA = DATABASE()
+                              AND TABLE_NAME = 'ticket_ai_analysis_task'
+                            """
+                        )
+                    ).mappings().all()
+                }
+                if "uk_ticket_ai_task_active_lock" not in index_names:
+                    connection.execute(
+                        text(
+                            "CREATE UNIQUE INDEX uk_ticket_ai_task_active_lock "
+                            "ON ticket_ai_analysis_task (active_lock)"
+                        )
+                    )
+                return
+
+            columns = {
+                str(row.get("name") or "")
+                for row in connection.execute(text("PRAGMA table_info(ticket_ai_analysis_task)")).mappings().all()
+            }
+            if "active_lock" not in columns:
+                logger.info("检测到 sqlite ticket_ai_analysis_task 缺少 active_lock，自动补齐")
+                connection.execute(text("ALTER TABLE ticket_ai_analysis_task ADD COLUMN active_lock VARCHAR(64)"))
+            connection.execute(text("UPDATE ticket_ai_analysis_task SET active_lock = NULL"))
+            index_names = {
+                str(row.get("name") or "")
+                for row in connection.execute(text("PRAGMA index_list(ticket_ai_analysis_task)")).mappings().all()
+            }
+            if "uk_ticket_ai_task_active_lock" not in index_names:
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX uk_ticket_ai_task_active_lock "
+                        "ON ticket_ai_analysis_task (active_lock)"
+                    )
+                )
+    except Exception as exc:
+        logger.warning(f"检查或升级 ticket_ai_analysis_task 活跃锁字段失败: {exc}")
 
 
 def _ensure_user_config_unique_index():
