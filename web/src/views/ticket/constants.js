@@ -98,3 +98,34 @@ export function getStatusTagType(value) {
 export function getLogPullStatusTagType(value) {
   return logPullStatusOptions.find(item => item.value === value)?.type || 'info'
 }
+
+/**
+ * 解析工单的外部详情链接。
+ *
+ * 多级兜底取值，与后端 `_decorate_ticket_item` 的同步摘要兜底互补：
+ * ticketUrl（含后端装饰后的兜底值）→ syncSummary → extraData.externalSync.source。
+ * @param {object} ticketRow 工单行数据（兼容 camelCase / snake_case）
+ * @returns {string} 外部链接，无链接时返回空字符串
+ */
+export function resolveTicketDetailUrl(ticketRow) {
+  const row = ticketRow || {}
+  const syncSummary = row.syncSummary || row.sync_summary || {}
+  const extraData = row.extraData || row.extra_data || {}
+  const externalSync = extraData.externalSync || extraData.external_sync || {}
+  const source = externalSync.source || {}
+  const value = String(
+    row.ticketUrl
+      || row.ticket_url
+      || row.url
+      || syncSummary.ticketUrl
+      || syncSummary.ticket_url
+      || syncSummary.sourceRecordUrl
+      || syncSummary.source_record_url
+      || source.ticketUrl
+      || source.ticket_url
+      || source.recordUrl
+      || source.record_url
+      || ''
+  ).trim()
+  return value || ''
+}

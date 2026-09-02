@@ -905,7 +905,7 @@
         />
         <el-checkbox-group v-model="ticketExportColumnKeys" class="ticket-column-config">
           <el-checkbox
-            v-for="item in ticketColumnOptions"
+            v-for="item in ticketExportColumnOptions"
             :key="item.key"
             :label="item.key"
           >
@@ -1787,6 +1787,7 @@
     queryInternalOwnerOption,
     columnConfigOpen,
     ticketColumnOptions,
+    ticketExportColumnOptions,
     visibleTicketColumnKeys,
     loadTicketColumnConfig,
     saveTicketColumnConfig,
@@ -1924,11 +1925,10 @@
    * @returns {Array<string>} 追加提示词编码列表
    */
 
-  // 导出列配置（与 Web 页面列名一致，复用列表列配置）
-  const ticketExportColumnOptions = computed(() => ticketColumnOptions);
+  // ticketExportColumnOptions（含表格显示列之外的 URL 导出项）已通过 useTicketList() 提供
 
   function resetTicketExportColumns() {
-    ticketExportColumnKeys.value = ticketColumnOptions.map((item) => item.key);
+    ticketExportColumnKeys.value = ticketExportColumnOptions.map((item) => item.key);
   }
 
   function openTicketExportDialog() {
