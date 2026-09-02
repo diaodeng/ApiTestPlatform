@@ -1,9 +1,20 @@
-## [2026-09-01] UI | 工单详情日志拉取 Tab 操作列主次分离
+## [2026-09-01] FIX | 内存分析图表联动与闪烁修复（时间轴/zr 点击/contextLoading）
 
-- 触发：管理页操作列已收敛为主次分离布局，工单详情日志拉取 Tab 仍是 6 个圆形按钮平铺，两处体验不一致。
-- 实现：`TicketDetailLogPullTab.vue` 操作列与管理页同构改造——查看常显（下载中显示进度环）、重试悬浮显、其余操作收纳「更多」下拉，删除红字置底；保留该 Tab 原有禁用态语义（执行中不可复制/重试/删除），操作函数复用 Tab 解构出的 composable 方法，新增 `handleRowCommand` 分发；列宽 170px 并 fixed right。
-- 边界：不改变任何操作函数逻辑与权限指令；归档/原始下载仍通过对应列链接下载。
-- 文档：更新 `web/public/docs/ticket_log_viewer.md` 1.3 操作按钮章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-detail-log-pull-action-column.md`。
+- 触发：用户反馈两个问题——图表只有点到极小的数据点符号才跳日志（`showSymbol:false`+lttb 下几乎点不到，点时间轴/空白无效）；点击搜索结果行时页面闪烁（分栏布局后全局 v-loading 遮罩 + 结果面板高度类 `log-view-panel-fill` 依赖 context 是否存在，加载期间来回切换 + 虚拟表格高度级联重算）。
+- 图表修复：横轴从 category（降采样后点间距不均导致时间失真）改为 time 真实时间轴（数据用 epoch 毫秒）；点击改用 `chart.getZr().on('click')` + `convertFromPixel` 换算时间 + 二分 `findNearestIndex` 就近匹配数据点，点曲线/时间轴/空白均可跳日志，命中 legend/dataZoom 组件元素时忽略；反向联动 markLine 同步改为毫秒定位；数据点毫秒缓存渲染时构建一次复用。
+- 闪烁修复：`loadContext` 拆出独立 `contextLoading`，loading 遮罩就地显示在日志明细块内，不再触发全局遮罩与面板高度类切换；高亮刷新 watch 去 `deep:true`（context 整体替换、highlightKeywords 整体赋值，引用监听即可）。
+- 体验补强：`loadContext` 成功后调用新增 `scrollToContextLine()`，按行号文本就近 `scrollIntoView` 定位目标行。
+- 解析兼容：`MEMORY_LOG_PATTERN` 毫秒分隔符 `[,.]` 兼容（此前点号格式行被静默跳过），time 捕获组改秒级、strptime 同步 `"%Y-%m-%d %H:%M:%S"`。
+- 资源优化：内存分析逐文件扫描时仅首个文件向 `LogService.search` 传 db 读取保护配置，后续文件传 `db=None` 走默认值——实测单次配置读取约 100ms（含 ensure 两次 SELECT + JSON 解析 + 线程池校准），200 文件累计省 20s+ 查库。
+- 验证：ruff 通过；parse_hit_line 六组用例（逗号/点号毫秒、无小数、无时间戳、非法日期、非法数值）全部通过；`npm run build:prod` 通过。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md` 图表交互与注意事项，更新记录追加至 `2026-09-01-ticket-log-resource-curve-linkage.md`。
+
+## [2026-09-01] UI | 日志拉取列表操作按钮常显与操作列溢出修复
+
+- 触发：工单详情页日志拉取列表的重新拉取按钮依赖行悬浮；日志拉取管理列表的资源曲线、重新拉取按钮也依赖悬浮，且固定右侧操作列宽度不足导致按钮显示不全、部分按钮跑出页面。
+- 实现：移除两处 `.hover-only-action` 的显隐样式和模板类名，详情页重新拉取、管理页资源曲线与重新拉取均常显；管理页操作列宽度从 170px 调整为 270px，详情页调整为 220px，保留 fixed right 与原有权限、禁用态和操作逻辑。
+- 文档：同步更新 `web/public/docs/ticket_log_viewer.md`、两份操作列更新记录及更新历史。
+
 
 ## [2026-09-01] FIX | 内存分析图表空白修复（成功态引入的挂载时序问题）
 
@@ -36,9 +47,10 @@
 ## [2026-09-01] UI | 日志拉取记录管理页操作列主次分离
 
 - 触发：操作列 6 个彩色圆形按钮平铺（270px 宽）视觉散乱，不符合中后台主流的主次分离规范。
-- 实现：`logPullRecord/index.vue` 操作列改为「查看常显 + 重新拉取悬浮显 + 更多下拉常显收纳（复制/停止/重新拉取/重新下载/删除）」，删除在下拉内红字置底并用分隔线隔离；保留禁用态语义与下载进度环替换逻辑；列宽收敛 170px 并 fixed right。原单行操作函数全部复用，新增 `handleRowCommand` 统一分发。
-- 边界：仅改动日志拉取记录管理页；工单详情日志拉取 Tab 的操作列本次未动，后续可按同样模式收敛。
-- 文档：更新 `web/public/docs/ticket_log_viewer.md` 管理页操作说明与准备进度章节，新增更新记录 `web/public/docs/updates/2026-09-01-ticket-log-pull-action-column.md`。
+- 实现：`logPullRecord/index.vue` 操作列改为「查看、资源曲线、重新拉取常显 + 更多下拉常显收纳（复制/停止/重新拉取/重新下载/删除）」；删除在下拉内红字置底并用分隔线隔离；保留禁用态语义与下载进度环替换逻辑；列宽固定 270px 并 fixed right。原单行操作函数全部复用，新增 `handleRowCommand` 统一分发。
+- 边界：仅改动日志拉取记录管理页；工单详情日志拉取 Tab 的重新拉取按钮同步改为常显，列宽固定 220px。
+- 文档：更新 `web/public/docs/ticket_log_viewer.md` 管理页操作说明与准备进度章节，新增更新记录 `2026-09-01-ticket-log-pull-action-column.md`。
+
 
 ## [2026-09-01] FEAT | 日志查看器内置内存分析图表
 

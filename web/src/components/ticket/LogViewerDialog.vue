@@ -12,7 +12,6 @@
   >
     <div
       ref="viewerContentRef"
-      v-loading="searching"
       class="log-viewer-content"
       :class="{
         'log-viewer-split-h': memoryPanelVisible && !isSplitVertical,
@@ -284,13 +283,15 @@
             />
           </div>
         </div>
-        <div
-          ref="contextBlockRef"
-          v-show="contextViewMode !== 'minimized'"
-          :class="['log-content-block', 'log-context-block', { 'log-content-wrap': wrapEnabled }]"
-          @mouseup="handleContextSelection"
-          @keyup="handleContextSelection"
-        >
+          <div
+            ref="contextBlockRef"
+            v-loading="contextLoading"
+            element-loading-text="加载上下文..."
+            v-show="contextViewMode !== 'minimized'"
+            :class="['log-content-block', 'log-context-block', { 'log-content-wrap': wrapEnabled }]"
+            @mouseup="handleContextSelection"
+            @keyup="handleContextSelection"
+          >
           <template v-for="item in contextDisplayLines" :key="`${item.file}:${item.line}`">
             <span class="log-context-line"><span class="log-context-line-no">{{ item.paddedLine }}</span><span v-if="item.contentTruncated && !isLineExpanded(item)" class="log-context-line-content"><template v-for="(part, partIndex) in item.parts" :key="partIndex"><mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark><span v-else>{{ part.text }}</span></template> <button class="log-line-expand-btn" @click="expandLine(item)">展开完整内容（{{ formatFileSize(item.contentLength) }}）</button></span><span v-else-if="item.contentTruncated && isLineExpanded(item)" class="log-context-line-content log-context-line-content-ph">[已展开，见下方]</span><span v-else class="log-context-line-content"><template v-for="(part, partIndex) in item.parts" :key="partIndex"><mark v-if="part.highlight" :class="['log-context-highlight', part.highlightClass]">{{ part.text }}</mark><span v-else>{{ part.text }}</span></template></span></span>
             <div v-if="item.contentTruncated && isLineExpanded(item)" :class="['log-line-expanded-block', { 'log-line-expanded-block-fullwidth': getExpandedMode(item) === 'fullwidth', 'log-line-expanded-block-fullscreen': getExpandedMode(item) === 'fullscreen' }]">
@@ -382,6 +383,8 @@ const prepareTimer = ref(null)
 
 // ── 搜索状态 ──
 const searching = ref(false)
+// 上下文加载独立 loading：与全局 searching 分离，避免点击结果行时整块遮罩闪烁
+const contextLoading = ref(false)
 const hits = ref([])
 const context = ref(null)
 const errorSummary = ref(null)
@@ -987,6 +990,7 @@ watch(
 function resetViewerState() {
   hits.value = []
   context.value = null
+  contextLoading.value = false
   errorSummary.value = null
   availableFiles.value = []
   form.value.keywords = ''
@@ -1370,7 +1374,9 @@ function loadContext(file, line) {
   const ticketId = props.record?.ticketId || 0
   if (!file || !line) return
   const contextLines = Number(form.value.contextLines || 0)
-  searching.value = true
+  // 上下文加载使用独立 loading 标记：不触发全局 v-loading 遮罩与结果面板
+  // 高度类切换（log-view-panel-fill 依赖 context 是否存在），避免点击结果行时页面闪烁
+  contextLoading.value = true
   getTicketLogContext({
     ticketId,
     record_id: props.record?.id,
@@ -1386,9 +1392,10 @@ function loadContext(file, line) {
       loadingLineSet.value.clear()
       expandedModeMap.value = {}
       copySuccessMap.value = {}
+      scrollToContextLine()
     })
     .finally(() => {
-      searching.value = false
+      contextLoading.value = false
     })
 }
 
@@ -1401,6 +1408,47 @@ function jumpToContextLine() {
   const line = Math.max(Math.floor(Number(contextJumpLine.value || 1)), 1)
   if (!file) return
   loadContext(file, line)
+}
+
+/**
+ * 加载完成后把上下文块滚动到目标行可见位置。
+ * 通过目标行号最接近的行元素定位，找不到时回退到块的 1/3 高度处，
+ * 保证目标行大致出现在视口上部而不被头部遮挡。
+ * @returns {void}
+ */
+function scrollToContextLine() {
+  nextTick(() => {
+    const block = contextBlockRef.value
+    if (!block) return
+    const targetLine = Math.floor(Number(context.value?.line || contextJumpLine.value || 0))
+    let targetEl = null
+    if (targetLine > 0) {
+      // 行号元素文本为 6 位补零格式，trim 后 Number 解析；
+      // 找不到精确行号时退化为最后一个行号小于目标的行做近似定位
+      const lineEls = block.querySelectorAll('.log-context-line')
+      for (const el of lineEls) {
+        const lineNoEl = el.querySelector('.log-context-line-no')
+        const lineNo = Number(String(lineNoEl?.textContent || '').trim())
+        if (Number.isFinite(lineNo) && lineNo === targetLine) {
+          targetEl = el
+          break
+        }
+        // 目标行可能不在当前上下文范围（上下文被压缩），
+        // 记录最后一个行号小于目标的行作为近似定位点
+        if (Number.isFinite(lineNo) && lineNo < targetLine) {
+          targetEl = el
+        }
+        if (Number.isFinite(lineNo) && lineNo > targetLine) {
+          break
+        }
+      }
+    }
+    if (targetEl) {
+      targetEl.scrollIntoView({ block: 'center', behavior: 'auto' })
+    } else {
+      block.scrollTop = block.scrollHeight / 3
+    }
+  })
 }
 
 /**
@@ -1697,12 +1745,13 @@ function handleEscapeKey(event) {
 }
 
 // ── 高亮刷新 ──
+// context 为整体替换、highlightKeywords 为整体赋值，引用级监听即可感知变化；
+// 去掉 deep:true 避免点击结果行加载上下文时对整个 context 对象做深度对比
 watch(
   [context, highlightKeywords, contextViewMode],
   () => {
     nextTick(() => refreshNativeHighlights())
-  },
-  { deep: true }
+  }
 )
 
 /**

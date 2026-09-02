@@ -16,8 +16,10 @@ from pathlib import Path
 
 # 匹配格式：
 # 2026-05-31 23:59:42,527 ... Process cpu:0.00%, mem:4.65%/375.02Mb, threads:61/46
+# 毫秒分隔符兼容逗号和点号（不同日志框架输出不同），捕获组 time 不含分隔符，
+# 解析时统一用 "%Y-%m-%d %H:%M:%S" 只取秒级精度
 MEMORY_LOG_PATTERN = re.compile(
-    r"(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}).*?"
+    r"(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})[,.]\d+.*?"
     r"Process cpu:(?P<cpu>[\d.]+)%.*?"
     r"mem:(?P<mem_pct>[\d.]+)%/(?P<mem_mb>[\d.]+)Mb.*?"
     r"threads:(?P<threads_active>\d+)/(?P<threads_max>\d+)"
@@ -97,7 +99,8 @@ class TicketLogMemoryMetricsUtil:
                     match = MEMORY_LOG_PATTERN.search(line)
                 if match:
                     try:
-                        log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S,%f")
+                        # time 捕获组只含秒级时间戳（毫秒分隔符已在正则层兼容）
+                        log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S")
                     except ValueError:
                         log_time = None
                     if log_time is not None:
@@ -146,7 +149,8 @@ class TicketLogMemoryMetricsUtil:
         if not match:
             return None
         try:
-            log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S,%f")
+            # time 捕获组只含秒级时间戳（毫秒分隔符已在正则层兼容逗号/点号）
+            log_time = datetime.strptime(match.group("time"), "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return None
         return TicketLogMemoryMetricPoint(

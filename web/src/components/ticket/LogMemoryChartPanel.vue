@@ -32,7 +32,11 @@
  * 内存曲线、CPU 曲线和线程曲线，数据由日志查看器弹窗负责加载。
  *
  * 联动能力：
- * - 点击曲线数据点回抛 point-click 事件（携带 file/line/time/epoch），由父组件跳转日志上下文；
+ * - X 轴为真实时间轴（type: 'time'，数据用 epoch 毫秒），降采样后点间距不均
+ *   也不会造成时间视觉失真，跨天数据可正常展示日期；
+ * - 点击图表任意位置（曲线、时间线、网格空白）通过 zr 全局点击 + convertFromPixel
+ *   换算目标时间并就近匹配数据点，回抛 point-click 事件（携带 file/line/time/epoch），
+ *   由父组件跳转日志上下文；点击 legend / dataZoom 等组件区域不触发跳转；
  * - 暴露 highlightTime(epochMs)，父组件点击日志行时在曲线上按时间就近画标记线。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -55,9 +59,11 @@ let cpuChart = null
 let threadsChart = null
 // 当前反向联动标记时间（毫秒 epoch），重渲染时保持
 let highlightEpochMs = null
+// 三个图表共享同一份数据点缓存（epoch 毫秒），渲染时构建一次，点击就近匹配直接复用
+let cachedPointMsList = []
 
-/** 将后端时间（epoch 秒优先，兼容 ISO 字符串）格式化为 HH:mm:ss 展示。 */
-function formatTime(value) {
+/** 将后端时间（epoch 秒优先，兼容 ISO 字符串）格式化为展示文本。 */
+function formatTime(value, withDate = false) {
   if (value === null || value === undefined || value === '') return '-'
   let date
   if (typeof value === 'number') {
@@ -68,46 +74,25 @@ function formatTime(value) {
   }
   if (!date || Number.isNaN(date.getTime())) return String(value)
   const pad = (item) => String(item).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const timeText = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  if (!withDate) return timeText
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${timeText}`
 }
 
-/** 取数据点展示时间标签：优先 epoch（跨端解析安全），回退 ISO 字符串。 */
-function pointTimeLabel(point) {
-  if (point.epoch) return formatTime(point.epoch)
-  return formatTime(point.time)
+/** 取数据点毫秒 epoch：优先 epoch 字段，回退 ISO 字符串解析。 */
+function pointEpochMs(point) {
+  if (Number(point.epoch)) return Number(point.epoch) * 1000
+  const parsed = Date.parse(point.time)
+  return Number.isFinite(parsed) ? parsed : NaN
 }
 
-/** 构建三张图表共享的 X 轴时间列表。 */
-function buildTimeAxis() {
-  return (props.metrics?.points || []).map((point) => pointTimeLabel(point))
-}
-
-/** 构建单张折线图配置，series 由调用方传入。 */
-function buildOption(times, seriesList) {
-  return {
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (value) => (value === null || value === undefined ? '-' : value),
-    },
-    legend: { top: 0 },
-    grid: { left: 64, right: 32, top: 32, bottom: 56 },
-    xAxis: {
-      type: 'category',
-      data: times,
-      boundaryGap: false,
-      axisLabel: { rotate: 30 },
-    },
-    yAxis: { type: 'value', scale: true },
-    dataZoom: [
-      { type: 'inside', start: 0, end: 100 },
-      { type: 'slider', height: 18, bottom: 8 },
-    ],
-    series: seriesList,
-  }
+/** 构建共享数据点缓存：epoch 毫秒列表（时间升序，由后端保证）。 */
+function buildPointCache() {
+  cachedPointMsList = (props.metrics?.points || []).map((point) => pointEpochMs(point))
 }
 
 /**
- * 找到与目标时间（毫秒 epoch）最接近的数据点下标。
+ * 找到与目标时间（毫秒 epoch）最接近的数据点下标（二分查找）。
  * @param {number} epochMs 目标时间毫秒值
  * @returns {number} 最接近的数据点下标，无数据时返回 -1
  */
@@ -115,18 +100,26 @@ function findNearestIndex(epochMs) {
   const points = props.metrics?.points || []
   if (!points.length || !Number.isFinite(Number(epochMs))) return -1
   const target = Number(epochMs)
-  let nearest = -1
-  let minDelta = Infinity
-  points.forEach((point, index) => {
-    const pointMs = Number(point.epoch) ? Number(point.epoch) * 1000 : Date.parse(point.time)
-    if (!Number.isFinite(pointMs)) return
-    const delta = Math.abs(pointMs - target)
-    if (delta < minDelta) {
-      minDelta = delta
-      nearest = index
+  let low = 0
+  let high = cachedPointMsList.length - 1
+  if (target <= cachedPointMsList[0]) return 0
+  if (target >= cachedPointMsList[high]) return high
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    const midMs = cachedPointMsList[mid]
+    if (midMs === target) return mid
+    if (midMs < target) {
+      low = mid + 1
+    } else {
+      high = mid - 1
     }
-  })
-  return nearest
+  }
+  // low/high 交叉后，比较两侧邻居取更近者
+  const before = Math.max(0, Math.min(low, cachedPointMsList.length - 1))
+  const after = Math.max(0, before - 1)
+  const deltaBefore = Math.abs(cachedPointMsList[before] - target)
+  const deltaAfter = Math.abs(cachedPointMsList[after] - target)
+  return deltaBefore <= deltaAfter ? before : after
 }
 
 /**
@@ -139,14 +132,17 @@ function highlightTime(epochMs) {
   disposeMarkLines()
   if (index < 0) return
   const points = props.metrics?.points || []
-  highlightEpochMs = Number(points[index].epoch) ? Number(points[index].epoch) * 1000 : Date.parse(points[index].time)
-  const label = pointTimeLabel(points[index])
+  highlightEpochMs = cachedPointMsList[index]
   const markLine = {
     symbol: 'none',
     silent: true,
     lineStyle: { color: '#F56C6C', type: 'dashed', width: 1.5 },
-    label: { formatter: `行 ${points[index].line || '-'}`, position: 'insideEndTop' },
-    data: [{ xAxis: label }],
+    label: {
+      formatter: `行 ${points[index].line || '-'} · ${formatTime(highlightEpochMs)}`,
+      position: 'insideEndTop',
+    },
+    // time 轴的 markLine 直接用毫秒值定位，不依赖 category 索引
+    data: [{ xAxis: highlightEpochMs }],
   }
   memoryChart?.setOption({ series: [{ markLine }] })
   cpuChart?.setOption({ series: [{ markLine }] })
@@ -162,40 +158,88 @@ function disposeMarkLines() {
   threadsChart?.setOption(empty)
 }
 
-/** 绑定图表点击事件：按 dataIndex 回抛数据点，供父组件跳转日志上下文。 */
-function bindClickEvent(chart) {
-  if (!chart) return
-  chart.off('click')
-  chart.on('click', (params) => {
-    const points = props.metrics?.points || []
-    const point = points[params.dataIndex]
-    if (!point) return
-    emit('point-click', {
-      file: point.sourceFile || point.source_file || '',
-      line: Number(point.line) || 0,
-      time: point.time,
-      epoch: Number(point.epoch) || 0,
-    })
+/** 按下标回抛数据点点击事件，供父组件跳转日志上下文。 */
+function emitPointClick(index) {
+  const points = props.metrics?.points || []
+  const point = points[index]
+  if (!point) return
+  emit('point-click', {
+    file: point.sourceFile || point.source_file || '',
+    line: Number(point.line) || 0,
+    time: point.time,
+    epoch: Number(point.epoch) || 0,
   })
+}
+
+/**
+ * 绑定 zr 全局点击：点击图表任意位置（时间线、空白、曲线）都换算为时间并就近匹配数据点。
+ * 只处理点击落在网格坐标系内的情形，legend / dataZoom / toolbox 等组件区域不触发跳转。
+ * @param {object} chart ECharts 实例
+ * @returns {void}
+ */
+function bindCanvasClick(chart) {
+  if (!chart) return
+  const zr = chart.getZr()
+  if (!zr) return
+  zr.off('click')
+  zr.on('click', (event) => {
+    // 命中图形元素（折线、symbol 等）时 event.target 存在且 topoi 为空；
+    // 命中 legend/dataZoom 等组件时 ECharts 自己的 click 事件已处理或不需要处理，
+    // 这里统一走坐标换算，但先确认像素点能转换为有效时间坐标
+    if (event.target && event.target.eventData && event.target.eventData.componentType) {
+      // 点到 legend / dataZoom / 标记线等组件元素时忽略，避免误跳转
+      return
+    }
+    const pointInPixel = chart.convertFromPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [event.offsetX, event.offsetY])
+    if (!pointInPixel || !Number.isFinite(pointInPixel[0])) return
+    const epochMs = pointInPixel[0]
+    const index = findNearestIndex(epochMs)
+    if (index >= 0) {
+      emitPointClick(index)
+    }
+  })
+}
+
+/** 构建单张折线图配置（真实时间轴），series 由调用方传入。 */
+function buildOption(seriesList) {
+  return {
+    animation: false,
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value) => (value === null || value === undefined ? '-' : value),
+    },
+    legend: { top: 0 },
+    grid: { left: 64, right: 32, top: 32, bottom: 56 },
+    xAxis: {
+      type: 'time',
+      axisLabel: { hideOverlap: true },
+    },
+    yAxis: { type: 'value', scale: true },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0 },
+      { type: 'slider', xAxisIndex: 0, height: 18, bottom: 8 },
+    ],
+    series: seriesList,
+  }
 }
 
 /** 渲染内存、CPU、线程三张图表。 */
 function renderCharts() {
   const points = props.metrics?.points || []
   if (!points.length) return
-  const times = buildTimeAxis()
+  buildPointCache()
   nextTick(() => {
     // 内存曲线：绝对占用（Mb）与占用百分比双轴展示
     if (memoryChartRef.value) {
       memoryChart = memoryChart || echarts.init(memoryChartRef.value)
       memoryChart.setOption({
-        ...buildOption(times, [
+        ...buildOption([
           {
             name: '内存 (Mb)',
             type: 'line',
             showSymbol: false,
             sampling: 'lttb',
-            data: points.map((point) => point.memMb),
+            data: points.map((point) => [pointEpochMs(point), point.memMb]),
             lineStyle: { width: 1.5, color: '#2196F3' },
             areaStyle: { opacity: 0.12, color: '#2196F3' },
           },
@@ -205,7 +249,7 @@ function renderCharts() {
             showSymbol: false,
             sampling: 'lttb',
             yAxisIndex: 1,
-            data: points.map((point) => point.memPercent),
+            data: points.map((point) => [pointEpochMs(point), point.memPercent]),
             lineStyle: { width: 1, type: 'dashed', color: '#9E9E9E' },
           },
         ]),
@@ -215,34 +259,34 @@ function renderCharts() {
           { type: 'value', scale: true, name: '%', position: 'right' },
         ],
       }, { notMerge: true })
-      bindClickEvent(memoryChart)
+      bindCanvasClick(memoryChart)
     }
     // CPU 曲线
     if (cpuChartRef.value) {
       cpuChart = cpuChart || echarts.init(cpuChartRef.value)
-      cpuChart.setOption(buildOption(times, [
+      cpuChart.setOption(buildOption([
         {
           name: 'CPU (%)',
           type: 'line',
           showSymbol: false,
           sampling: 'lttb',
-          data: points.map((point) => point.cpuPercent),
+          data: points.map((point) => [pointEpochMs(point), point.cpuPercent]),
           lineStyle: { width: 1.5, color: '#FF9800' },
           areaStyle: { opacity: 0.12, color: '#FF9800' },
         },
       ]), { notMerge: true })
-      bindClickEvent(cpuChart)
+      bindCanvasClick(cpuChart)
     }
     // 线程曲线：活跃线程与线程上限
     if (threadsChartRef.value) {
       threadsChart = threadsChart || echarts.init(threadsChartRef.value)
-      threadsChart.setOption(buildOption(times, [
+      threadsChart.setOption(buildOption([
         {
           name: '活跃线程',
           type: 'line',
           showSymbol: false,
           sampling: 'lttb',
-          data: points.map((point) => point.threadsActive),
+          data: points.map((point) => [pointEpochMs(point), point.threadsActive]),
           lineStyle: { width: 1.5, color: '#4CAF50' },
         },
         {
@@ -250,11 +294,11 @@ function renderCharts() {
           type: 'line',
           showSymbol: false,
           sampling: 'lttb',
-          data: points.map((point) => point.threadsMax),
+          data: points.map((point) => [pointEpochMs(point), point.threadsMax]),
           lineStyle: { width: 1, type: 'dashed', color: '#9E9E9E' },
         },
       ]), { notMerge: true })
-      bindClickEvent(threadsChart)
+      bindCanvasClick(threadsChart)
     }
     // 重渲染后如存在反向联动标记，恢复标记线
     if (highlightEpochMs) {
@@ -274,6 +318,7 @@ function disposeCharts() {
   cpuChart = null
   threadsChart = null
   highlightEpochMs = null
+  cachedPointMsList = []
 }
 
 /** 供外部在容器尺寸变化后重绘图表。 */
