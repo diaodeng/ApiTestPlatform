@@ -566,11 +566,16 @@ def _ensure_ai_provider_observability_columns():
 
     column_specs = [
         ("observability_enabled", "TINYINT(1) NOT NULL DEFAULT 0", "是否启用可观测上报", "AFTER worker_env"),
-        ("observability_endpoint", "VARCHAR(500)", "OTLP上报端点基础地址", "AFTER observability_enabled"),
-        ("observability_auth_type", "VARCHAR(32)", "可观测鉴权类型：bearer/basic", "AFTER observability_endpoint"),
-        ("observability_api_key_prefix", "VARCHAR(128)", "可观测密钥掩码前缀", "AFTER observability_auth_type"),
-        ("observability_api_key_cipher_text", "TEXT", "可观测鉴权密钥密文", "AFTER observability_api_key_prefix"),
-        ("observability_service_name", "VARCHAR(128)", "OTLP service.name", "AFTER observability_api_key_cipher_text"),
+        ("observability_endpoint", "VARCHAR(500) NULL", "OTLP上报端点基础地址", "AFTER observability_enabled"),
+        ("observability_auth_type", "VARCHAR(32) NULL", "可观测鉴权类型：bearer/basic", "AFTER observability_endpoint"),
+        ("observability_api_key_prefix", "VARCHAR(128) NULL", "可观测密钥掩码前缀", "AFTER observability_auth_type"),
+        ("observability_api_key_cipher_text", "TEXT NULL", "可观测鉴权密钥密文", "AFTER observability_api_key_prefix"),
+        (
+            "observability_service_name",
+            "VARCHAR(128) NULL",
+            "OTLP service.name",
+            "AFTER observability_api_key_cipher_text",
+        ),
         (
             "observability_cli_enabled",
             "TINYINT(1) NOT NULL DEFAULT 0",
@@ -605,7 +610,7 @@ def _ensure_ai_provider_observability_columns():
                         text(
                             f"""
                             ALTER TABLE sys_ai_provider
-                            ADD COLUMN {column_name} {column_type} NULL COMMENT '{column_comment}' {column_position}
+                            ADD COLUMN {column_name} {column_type} COMMENT '{column_comment}' {column_position}
                             """
                         )
                     )
@@ -662,7 +667,7 @@ def _ensure_ticket_ai_analysis_token_columns():
                         text(
                             f"""
                             ALTER TABLE ticket_ai_analysis_task
-                            ADD COLUMN {column_name} {column_type} NULL COMMENT '{column_comment}' {column_position}
+                            ADD COLUMN {column_name} {column_type} COMMENT '{column_comment}' {column_position}
                             """
                         )
                     )
