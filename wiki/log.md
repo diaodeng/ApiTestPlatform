@@ -1,3 +1,15 @@
+## [2026-09-03] FIX | 工单AI分析结果schema清洗与失败分支崩溃修复
+
+- 触发：INC00001920244（task_2046322511408128，prod，Provider shuidi / ai-router / deepseek-v4-flash-0731）AI 分析失败。Worker 正常退出且 result.json 内容完整，但 Agent 报 `AI_WORKER_RESULT_INVALID`（`ticket_no`/`merchant_name`/`version`/`root_cause_type` 为 schema 外额外字段、`$.evidence[0..5]` 期望 string 实际 object），随后又抛 `UnboundLocalError: invalid_result_token_usage` 把真实失败原因覆盖为 `AI_WORKER_EXECUTION_ERROR`。
+- 根因一（schema 违规）：deepseek-v4-flash 经 ai-router 中转时 codex `--output-schema` 未真正约束模型输出，模型自行附加 schema 外字段并把 evidence 写成 `{source, content}` 对象数组；结果内容质量完好仅结构不符。根因二（崩溃）：`client_new/services/ticket_ai_analysis_service.py` 结果无效分支中 `invalid_result_token_usage` 在 `report_task_span` 使用之后才赋值，任何走该分支的任务必然二次崩溃。
+- 清洗修复：新增两端同规则的纯函数清洗（schema 校验前的保守归一化）：①剔除 `additionalProperties=False` 时的 schema 外字段；②evidence 元素为 `{source, content}` 对象时拼接为 `"source: content"` 字符串；③其他非字符串元素 JSON 序列化保留信息。清洗动作写日志可审计；清洗后仍走完整 schema 校验，防线未绕过；明显非法结果依旧按原逻辑失败上报。服务端 `server/modules/ticket/util/ticket_ai_result_schema_util.py`（`TicketAiResultSchemaUtil`），Agent 端 `client_new/services/ticket_ai_result_schema_service.py`（`TicketAiResultSchemaService`）。
+- 接入点：服务端在 Agent 回传解析后、`_normalize_analysis_result` 与 `_validate_analysis_result_schema` 之前清洗；Agent 端在 `_parse_worker_output.accept_candidate` 与 `_load_cached_result`（缓存复用路径）清洗后再校验。清洗只影响内存结果，不回写工作区 `result.json` 原始文件。
+- 崩溃修复：结果无效分支改为先提取 `invalid_result_token_usage` 再上报 span 再返回。
+- 提示词加固（两端）：第 6 条明确"禁止输出 schema 外字段（点名 ticket_no/merchant_name/version/root_cause_type）；evidence 必须字符串数组、格式 `来源文件路径:行号: 证据内容摘要`，禁止 `{source, content}` 对象"。注意 f-string 内 `{source, content}` 必须写成 `{{source, content}}`，否则 ruff F821。
+- 变更传播链：`server/modules/ticket/service/ai/ticket_ai_analysis_service.py` / `server/modules/ticket/util/ticket_ai_result_schema_util.py` / `client_new/services/ticket_ai_analysis_service.py` / `client_new/services/ticket_ai_result_schema_service.py` -> 工单域知识页。
+- 验证：用真实失败 result.json 验证清洗前 12 条违规（与线上日志一致）、清洗后 0 条，`_parse_worker_output` 完整链路解析成功；边界用例（仅 content、数字/None 元素、合规结果零动作、schema 要求对象时不误清洗）通过。client_new 新增 6 回归用例（`tests/test_ticket_ai_result_schema_sanitize.py`）+ 既有 AI 测试（引号修复/失败契约/鉴权诊断/token 用量/可观测/Codex 配置/取消/锁心跳）全部通过；server ruff + 提示词测试 5 用例通过。未验证项：真实 Agent 重跑该工单（需重启 Agent 后重新提交分析）。
+- 文档：新增 `web/public/docs/updates/2026-09-03-ticket-ai-schema-sanitize-and-unbound-fix.md`，history.md 同步。
+
 ## [2026-09-03] FIX+PERF | 相似召回精确信号缺陷修复与相似结果 Redis 缓存
 
 - 触发：量化分析（生产库只读查询：2109 工单、1647 条 bge-m3 symptom 向量、覆盖率 85.5%、外部同步/导入/远端拉取场景开关为 false 为缺口主因——用户确认为故意配置）后确认后台任务化在当前量级不必要，改为修召回缺陷 + 结果缓存。

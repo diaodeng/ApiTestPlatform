@@ -69,6 +69,7 @@ from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
 from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
+from modules.ticket.util.ticket_ai_result_schema_util import TicketAiResultSchemaUtil
 from utils.api_key_util import ApiKeyUtil
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -2085,6 +2086,10 @@ class TicketAiAnalysisService:
    - evidence
    - risk_items
    - next_steps
+   除上述字段和 schema 中的扩展字段外，**禁止输出任何其他字段**（如 ticket_no、
+   merchant_name、version、root_cause_type 等 schema 外字段），多出的字段会导致结果校验失败。
+   evidence 必须是字符串数组：每条证据是一个字符串，格式为"来源文件路径:行号: 证据内容摘要"，
+   禁止把证据写成 {{source, content}} 之类的 JSON 对象。
 7. 如果你能从上下文中推断协同增强信息，可在分析内容里自然体现；服务端会负责把缺省增强字段补为空值。
 
 工单基础信息:
@@ -4495,6 +4500,13 @@ class TicketAiAnalysisService:
                 )
                 raise ValueError(failure_message)
             token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump, response_object)
+            # Schema 校验前先做保守清洗：部分模型未被 --output-schema 真实约束，
+            # 会输出 schema 外字段或把 evidence 写成对象数组，清洗后再校验可挽救此类结果。
+            parsed_result, sanitize_actions = TicketAiResultSchemaUtil.sanitize_result_payload(
+                parsed_result, schema_payload
+            )
+            if sanitize_actions:
+                logger.info(f"AI分析任务[{task_id}] 分析结果已按 schema 清洗: {sanitize_actions}")
             normalized_token_usage = cls._normalize_token_usage(token_usage_payload)
             normalized = cls._normalize_analysis_result(
                 result_payload=parsed_result,
