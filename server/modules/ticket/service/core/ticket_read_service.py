@@ -1,7 +1,9 @@
+import hashlib
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from module_admin.dao.config_dao import ConfigDao
 from module_hrm.entity.do.module_do import HrmModule
 from module_hrm.entity.do.project_do import HrmProject
 from module_hrm.enums.enums import QtrDataStatusEnum
@@ -19,7 +21,9 @@ from modules.ticket.entity.vo.ticket_read_vo import (
     TicketSummaryModel,
 )
 from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_prompt_service import TicketPromptService
+from modules.ticket.service.ai.ticket_similar_result_cache_service import TicketSimilarResultCacheService
 from modules.ticket.service.ai.ticket_similarity_query_service import TicketSimilarityQueryService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
@@ -168,11 +172,37 @@ class TicketReadService:
         return TicketSimilarItemModel.model_validate(allowed)
 
     @classmethod
+    def _build_similar_cache_key(cls, db: Session, ticket_id: int, limit: int) -> str:
+        """
+        构建相似结果缓存键。
+        配置指纹取 sys_config 原始值哈希：相似度配置变更后自然产生新键，旧键随 TTL 淘汰。
+        :param db: 数据库会话
+        :param ticket_id: 源工单ID
+        :param limit: 查询数量
+        :return: 缓存键
+        """
+        fingerprint = "default"
+        try:
+            config_info = ConfigDao.get_config_detail_by_key(db, TicketEmbeddingService.CONFIG_KEY)
+            raw_value = getattr(config_info, "config_value", None)
+            # 指纹只取字符串类型的配置原文；非字符串（如 Mock、异常对象）一律回退默认指纹
+            if isinstance(raw_value, str) and raw_value.strip():
+                fingerprint = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+        except Exception as exc:
+            logger.warning(f"相似结果缓存配置指纹获取失败，使用默认指纹: ticket_id={ticket_id}, error={exc}")
+        return TicketSimilarResultCacheService.build_key(ticket_id, limit, fingerprint)
+
+    @classmethod
     def get_similar_tickets(cls, db: Session, ticket_id: int, limit: int) -> TicketSimilarResponseModel | None:
-        """查询相似工单并使用白名单字段投影，避免复用完整详情数据。"""
+        """查询相似工单并使用白名单字段投影，先查缓存，未命中再执行完整相似链路。"""
         if not TicketDao.get_ticket_by_id(db, ticket_id):
             logger.info(f"相似工单未查询到源工单 | ticket_id={ticket_id}")
             return None
+        cache_key = cls._build_similar_cache_key(db, ticket_id, limit)
+        cached = TicketSimilarResultCacheService.get(cache_key)
+        if cached is not None:
+            logger.info(f"相似工单查询命中缓存 | ticket_id={ticket_id} limit={limit}")
+            return TicketSimilarResponseModel.model_validate(cached)
         result = TicketSimilarityQueryService.search_similar_tickets_by_ticket(db, ticket_id, limit=limit)
         items = [cls._project_similar_item(item) for item in result.get("similarTickets") or []]
         symptom_items = [cls._project_similar_item(item) for item in result.get("symptomTickets") or []]
@@ -184,6 +214,9 @@ class TicketReadService:
             symptom_tickets=symptom_items,
             case_tickets=case_items,
         )
+        # 只有查询成功（非 error）才缓存；missing/stale 等待向量刷新的结果每次都重查
+        if str(result.get("similarEmbeddingStatus") or "") != "error":
+            TicketSimilarResultCacheService.set(cache_key, response.model_dump(by_alias=True))
         logger.info(
             f"相似工单查询完成 | ticket_id={ticket_id} limit={limit} status={response.status} count={len(items)}"
         )

@@ -49,13 +49,14 @@ class TicketHybridSimilarityService:
         source_meta = TicketSimilarityProfileService.get_metadata(db, source_ticket)
         if include_exact_signal_candidates:
             source_signals = source_meta.get("signals") if isinstance(source_meta.get("signals"), dict) else {}
+            # 每种信号类型的命中候选都必须进入候选池，不能只保留最后一种信号的查询结果
             for signal_type in ("trace_id", "request_id", "error_code"):
                 signal_hits = TicketDao.list_ticket_ids_by_similarity_signals(
                     db, signal_type, list(source_signals.get(signal_type) or [])
                 )
-            for ticket_id in signal_hits:
-                if ticket_id != source_ticket.ticket_id:
-                    scored.setdefault(ticket_id, 0.0)
+                for ticket_id in signal_hits:
+                    if ticket_id != source_ticket.ticket_id:
+                        scored.setdefault(ticket_id, 0.0)
         # 排除当前工单自身：自向量余弦相似度恒为 1.0，不排除会占据相似结果首位。
         scored.pop(int(source_ticket.ticket_id), None)
         ticket_map = {row.ticket_id: row for row in TicketDao.get_tickets_by_ids(db, list(scored.keys()))}

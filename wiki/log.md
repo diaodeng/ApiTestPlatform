@@ -1,4 +1,14 @@
-## [2026-09-02] REFACTOR | 工单详情展示组件统一复用，独立详情页纯只读化
+## [2026-09-03] FIX+PERF | 相似召回精确信号缺陷修复与相似结果 Redis 缓存
+
+- 触发：量化分析（生产库只读查询：2109 工单、1647 条 bge-m3 symptom 向量、覆盖率 85.5%、外部同步/导入/远端拉取场景开关为 false 为缺口主因——用户确认为故意配置）后确认后台任务化在当前量级不必要，改为修召回缺陷 + 结果缓存。
+- 缺陷修复：`ticket_hybrid_similarity_service.search_by_vector` 精确信号候选扩展的 `for ticket_id in signal_hits` 缩进在 `for signal_type` 循环外，`signal_hits` 逐轮覆盖导致只消费最后一种信号（error_code）命中，Trace ID/Request ID 命中候选全部丢失；修复后三类信号命中均进入候选池（`setdefault(0.0)` 进重排加分：trace 0.55/request 0.45/error_code 0.35）。
+- 结果缓存：新增 `ticket_similar_result_cache_service.py`。缓存对象为 `TicketReadService.get_similar_tickets` 最终结果（symptom+case 两路，非向量）；键 `ticket:similar-result:{ticketId}:{limit}:{配置指纹}`（指纹=sys_config `ticket.similarity.config` 原文 SHA-256 前 16 位，配置变更自然换键）；TTL 5 分钟；后端跟随 `CACHE_BACKEND`（dev/prod 均 redis）：redis 时用**同步客户端**独立建池（相似链路在 run_in_threadpool 同步线程内，不能复用 app.state asyncio 客户端；key 前缀隔离共用实例），memory 时降级进程内 TTL 字典（上限 500 条）；连接失败自动降级直查不抛异常；error 状态结果不缓存。
+- 失效点：① `vectorize_ticket_for_scene` 向量刷新成功后（覆盖 manualCreate/manualUpdate/bitablePull/closeKnowledge 全部自动场景）；② `POST /ticket/{id}/similarity-case/status` 案例状态变更提交后。
+- 坑点记录：`_build_similar_cache_key` 指纹构建用 `str(config_value)` 时，Mock/非字符串对象会生成含内存地址的不稳定指纹（pytest 下预写键与读取键不一致导致缓存测试失败）；已改为仅接受字符串类型原文，否则回退 default。
+- 验证：ruff（5 个改动文件）通过；pytest 相关 3 套件 36 passed（新增 6 用例：三类信号查询/候选集进入/memory 读写失效过期/缓存命中不触发完整链路/error 不缓存）。本机到 dev(192.168.100.12:6633)/prod(10.56.130.136:7218) Redis 均超时不可达（网络隔离），降级路径已验证，**真实 Redis 读写待部署环境验证**。
+- 文档：`server/docs/ticket_read_api.md` 补缓存契约说明，新增 `web/public/docs/updates/2026-09-03-ticket-similarity-signal-fix-and-result-cache.md`，history.md 同步。
+
+
 
 - 触发：用户确认第二阶段方案——将列表详情弹窗与独立详情页内部组件合逻辑复用，仅去掉独立页可编辑功能。
 - 新增共享组件 `web/src/views/ticket/components/detail-shared/`：`TicketSimilarPanel.vue`（工单内容相似+处理案例相似统一面板，含向量状态提示、系统/飞书详情跳转；"归入同一问题"由 `allowBindIssue` 控制并经 `bind-issue` 事件回传宿主）、`TicketDescriptionBlock.vue`（描述+AI翻译展示块，独立折叠；"翻译"按钮由 `allowTranslate` 控制并经 `translate` 事件回传，权限仍走 `v-hasPermi`）。跳转/链接解析逻辑收敛进共享面板，删除 OverviewTab 与独立页各自重复的 `resolveTicketDetailUrl/openSystemTicketDetail` 等实现。
