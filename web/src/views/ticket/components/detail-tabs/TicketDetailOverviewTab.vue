@@ -1,7 +1,7 @@
 <script setup name="TicketDetailOverviewTab">
   import { computed, getCurrentInstance, ref, watch } from 'vue';
-  import { useRouter } from 'vue-router';
   import { bindTicketIssueFromSimilar, getTicketSummary } from '@/api/ticket/ticket';
+  import TicketSimilarPanel from '../detail-shared/TicketSimilarPanel.vue';
 
   const props = defineProps({
     ticketId: {
@@ -51,7 +51,6 @@
     'changed',
   ]);
   const { proxy } = getCurrentInstance();
-  const router = useRouter();
 
   const loading = ref(false);
   const detail = ref({});
@@ -166,60 +165,7 @@
   }
 
   /**
-   * 解析外部工单详情链接。
-   * @param {object} ticketRow 工单行。
-   * @returns {string} 外部链接。
-   */
-  function resolveTicketDetailUrl(ticketRow) {
-    const row = ticketRow || {};
-    const syncSummary = row.syncSummary || row.sync_summary || {};
-    const extraData = row.extraData || row.extra_data || {};
-    const externalSync = extraData.externalSync || extraData.external_sync || {};
-    const source = externalSync.source || {};
-    return String(
-      row.ticketUrl ||
-        row.ticket_url ||
-        row.url ||
-        syncSummary.ticketUrl ||
-        syncSummary.ticket_url ||
-        syncSummary.sourceRecordUrl ||
-        syncSummary.source_record_url ||
-        source.ticketUrl ||
-        source.ticket_url ||
-        source.recordUrl ||
-        source.record_url ||
-        ''
-    ).trim();
-  }
-
-  /**
-   * 打开外部工单详情链接。
-   * @param {object} ticketRow 工单行。
-   * @returns {void}
-   */
-  function openTicketLink(ticketRow) {
-    const url = resolveTicketDetailUrl(ticketRow);
-    if (!url) {
-      proxy.$modal.msgWarning('当前工单未配置详情链接');
-      return;
-    }
-    window.open(url, '_blank', 'noopener');
-  }
-
-  /**
-   * 打开系统内工单详情页。
-   * @param {object} ticketRow 工单行。
-   * @returns {void}
-   */
-  function openSystemTicketDetail(ticketRow) {
-    const ticketId = Number(ticketRow?.ticketId || ticketRow?.ticket_id);
-    if (!Number.isFinite(ticketId) || ticketId <= 0) return;
-    const resolved = router.resolve({ name: 'TicketDetail', params: { ticketId } });
-    window.open(resolved.href, '_blank');
-  }
-
-  /**
-   * 将当前工单与相似工单归入同一问题。
+   * 将当前工单与相似工单归入同一问题（共享相似面板回传事件）。
    * @param {object} item 相似工单。
    * @returns {void}
    */
@@ -378,66 +324,16 @@
       </el-card>
     </el-col>
     <el-col :span="8">
-      <el-card shadow="never" v-loading="similarLoading">
-        <template #header>工单内容相似</template>
-        <el-alert
-          v-if="similarError"
-          type="error"
-          :closable="false"
-          :title="similarError"
-          class="mb12"
-        />
-        <el-empty
-          v-else-if="similarStatus === 'ready' && !symptomSimilarTickets.length"
-          description="暂无内容相似工单"
-        />
-        <el-empty
-          v-else-if="similarStatus === 'pending'"
-          description="相似工单正在生成，请稍后刷新"
-        />
-        <div v-for="item in symptomSimilarTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
-          <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
-          <div class="similar-meta">
-            <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
-            <span>{{ item.moduleName || '-' }}</span>
-          </div>
-          <div class="similar-actions">
-            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)">系统详情</el-link>
-            <el-link
-              v-if="resolveTicketDetailUrl(item)"
-              type="info"
-              underline="never"
-              @click="openTicketLink(item)"
-            >
-              飞书详情
-            </el-link>
-            <el-button
-              link
-              type="success"
-              :loading="issueActionLoading"
-              @click="bindSimilarIssue(item)"
-              v-hasPermi="['ticket:issue:bind']"
-            >
-              归入同一问题
-            </el-button>
-          </div>
-        </div>
-      </el-card>
-      <el-card shadow="never" class="mt16">
-        <template #header>处理案例相似</template>
-        <el-empty v-if="!caseSimilarTickets.length" description="暂无可复用处理案例" />
-        <div v-for="item in caseSimilarTickets" :key="`case-${item.ticketId}`" class="similar-item">
-          <div class="similar-title">{{ item.ticketNo }} {{ item.title }}</div>
-          <div class="similar-meta">
-            <span>相似度 {{ Math.round((item.score || 0) * 100) }}%</span>
-            <span>{{ item.caseStatus === 'verified' ? '已验证案例' : '案例草稿' }}</span>
-          </div>
-          <div class="similar-meta">根因：{{ item.rootCause || '-' }}</div>
-          <div class="similar-actions">
-            <el-link type="primary" underline="never" @click="openSystemTicketDetail(item)">系统详情</el-link>
-          </div>
-        </div>
-      </el-card>
+      <TicketSimilarPanel
+        :symptom-tickets="symptomSimilarTickets"
+        :case-tickets="caseSimilarTickets"
+        :similar-loading="similarLoading"
+        :similar-error="similarError"
+        :similar-status="similarStatus"
+        :allow-bind-issue="true"
+        :issue-action-loading="issueActionLoading"
+        @bind-issue="bindSimilarIssue"
+      />
     </el-col>
   </el-row>
 </template>
@@ -448,35 +344,5 @@
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 1.65;
-  }
-
-  .similar-item {
-    padding: 10px 0;
-    border-bottom: 1px solid #ebeef5;
-  }
-
-  .similar-item:last-child {
-    border-bottom: 0;
-  }
-
-  .similar-title {
-    margin-bottom: 4px;
-    font-weight: 600;
-  }
-
-  .similar-meta {
-    display: flex;
-    gap: 10px;
-    color: #606266;
-    font-size: 12px;
-  }
-
-  .similar-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    margin-top: 6px;
-    font-size: 12px;
   }
 </style>

@@ -1,3 +1,14 @@
+## [2026-09-02] REFACTOR | 工单详情展示组件统一复用，独立详情页纯只读化
+
+- 触发：用户确认第二阶段方案——将列表详情弹窗与独立详情页内部组件合逻辑复用，仅去掉独立页可编辑功能。
+- 新增共享组件 `web/src/views/ticket/components/detail-shared/`：`TicketSimilarPanel.vue`（工单内容相似+处理案例相似统一面板，含向量状态提示、系统/飞书详情跳转；"归入同一问题"由 `allowBindIssue` 控制并经 `bind-issue` 事件回传宿主）、`TicketDescriptionBlock.vue`（描述+AI翻译展示块，独立折叠；"翻译"按钮由 `allowTranslate` 控制并经 `translate` 事件回传，权限仍走 `v-hasPermi`）。跳转/链接解析逻辑收敛进共享面板，删除 OverviewTab 与独立页各自重复的 `resolveTicketDetailUrl/openSystemTicketDetail` 等实现。
+- 共享 Tab 只读能力：`TicketDetailCollabTab`、`TicketDetailCommentsTab` 新增 `readOnly` prop（默认 false，弹窗侧不传行为不变），为 true 时分别隐藏追问编辑区+分析结果操作、评论提交区。
+- 独立详情页 `TicketDetailView.vue` 重写为纯只读：移除问题实例关联按钮与整个绑定弹窗（含搜索/归因表单逻辑）、移除相似案例确认（`updateTicketSimilarityCaseStatus` 不再被引用）、相似/描述区接入共享组件、Collab/Comments 标签传 `read-only`；顶部仅保留"刷新"。保留阶段一的轻量链路（summary+相似懒加载+generation 保护）。
+- 弹窗侧 `TicketDetailWithList.vue`：描述/翻译区替换为 `TicketDescriptionBlock`（allow-translate: true），删除旧网格布局样式与 `descriptionExpanded/translationExpanded` 死状态；`TicketDetailOverviewTab.vue` 相似两卡片替换为 `TicketSimilarPanel`（allow-bind-issue: true，归因仍走原 `bindTicketIssueFromSimilar`），相似度统一为一位小数百分比展示。
+- 后端无改动；接口、权限码、写操作全部保留在列表弹窗。
+- 验证：`npm run build:prod` 通过（37.15s，仅 chunk 体积常规提示）。残留检查：独立页无写 API 引用、弹窗/概览 Tab 无死样式死状态。未做浏览器端双入口回归（需运行环境），剩余风险：弹窗描述区视觉布局变化（网格改上下结构）与概览相似按钮样式变化，用户可感知但行为一致。
+- 文档：更新 `web/public/docs/ticket_detail.md`（独立页只读边界、评论只读说明、独立页关联问题实例章节改写为跳转指引），新增 `web/public/docs/updates/2026-09-02-ticket-detail-shared-components-readonly.md`，history.md 同步。
+
 ## [2026-09-02] PERF | 独立工单详情页改用轻量读取链路，相似工单懒加载
 
 - 触发：用户反馈独立工单详情页 `/ticket/detail/{ticketId}` 打开慢，怀疑被相似工单查询拖住；经分析确认主因是独立页仍调用旧完整详情接口 `GET /ticket/{id}`（`TicketService.get_ticket_detail_services` 串行组装主单+消息+全部快照+相似+提示词层，消息/快照 DAO 无 limit），相似查询（可能触发同步向量生成、外部 Embedding、MySQL 分批扫描与重排）也被串在其中。列表弹窗此前已走 `summary + similar-tickets` 并行轻量链路。
