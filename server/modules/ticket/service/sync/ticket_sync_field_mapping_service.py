@@ -373,7 +373,8 @@ class TicketSyncFieldMappingService:
     @classmethod
     def match_mapping_contains(cls, field_value: str, mappings: Any) -> dict[str, Any] | None:
         """
-        按关键字“包含关系”匹配映射配置（外部字段包含任意关键词即命中）。
+        按关键字匹配映射配置（保持历史“包含”语义的精确等值实现：外部字段值归一化后
+        与任意关键词完全相等即命中，不做模糊猜测）。
         :param field_value: 外部字段值
         :param mappings: 映射配置列表
         :return: 命中的映射对象
@@ -588,6 +589,9 @@ class TicketSyncFieldMappingService:
         target = str(module_text or "").strip()
         if not target or not isinstance(module_mappings, list):
             return None
+        # keywords 经 SyncUtil.normalize_keywords 归一化后已统一小写，此处 target 必须同步小写比较，
+        # 否则大小写不一致会导致映射永远无法命中（module_id/module_code 全部落空）。
+        target_lower = target.lower()
         for mapping in module_mappings:
             if not isinstance(mapping, dict):
                 continue
@@ -596,7 +600,7 @@ class TicketSyncFieldMappingService:
             if mapping_project_id is not None and mapping_project_id != project_id:
                 continue
             keywords = cls.mapping_keywords(mapping)
-            if target in keywords:
+            if target_lower in keywords:
                 return mapping
         return None
 

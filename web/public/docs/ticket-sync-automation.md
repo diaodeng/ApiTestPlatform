@@ -75,6 +75,12 @@
 2. 未命中时通过 `projectCode/moduleCode` 匹配
 3. 仍未命中且携带当前环境 ID 时，按 `projectId/moduleId` 兜底
 
+### 关键字匹配语义
+
+`projectMappings` / `moduleMappings` 的关键字（`keywords` / `aliases` / `matchText`）在匹配时统一忽略大小写：外部字段文本会先转小写，再与归一化（去空格、转小写）后的关键字做**完全相等**比较，不做模糊包含猜测。因此配置关键字时填写完整文本即可，大小写不影响命中；如果配置了片段式关键字（例如只写“优惠券”而外部文本是“POS - 优惠券”），则无法命中，需要补充完整文本关键字。
+
+映射命中后按 `moduleId → moduleCode → moduleName` 顺序查 `hrm_module` 表解析模块；命中映射但查不到模块记录时只回填映射配置值，模块表无记录时 `module_id` 为空、`module_code` 为空字符串属正常现象。模块字段（`module_id` / `module_code` / `module_name`）在入库与更新时作为整体原子写入，避免三者不一致。
+
 ---
 
 ## 四、日志拉取默认值
