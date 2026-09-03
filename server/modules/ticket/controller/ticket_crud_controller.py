@@ -31,6 +31,7 @@ from modules.ticket.entity.vo.ticket_vo import (
     TicketUserOptionQueryModel,
 )
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.ai.ticket_similar_result_cache_service import TicketSimilarResultCacheService
 from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
 from modules.ticket.service.core.ticket_import_service import TicketImportService
 from modules.ticket.service.core.ticket_read_service import TicketReadService
@@ -355,6 +356,8 @@ async def update_ticket_similarity_case_status(
         await run_in_threadpool(query_db.commit)
         if case.case_status in {"draft", "verified"}:
             TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id, case.case_status)
+        # 案例状态变化会改变 case 相似结果，失效该工单的相似结果缓存
+        TicketSimilarResultCacheService.invalidate_ticket(ticket.ticket_id)
         return ResponseUtil.success(
             data={"ticketId": str(ticket_id), "caseStatus": case.case_status}, msg="案例状态更新成功"
         )

@@ -14,6 +14,7 @@ from module_admin.dao.config_dao import ConfigDao
 from module_admin.entity.do.config_do import SysConfig
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import EmbeddingRecord, Ticket, TicketRca
+from modules.ticket.service.ai.ticket_similar_result_cache_service import TicketSimilarResultCacheService
 from modules.ticket.service.ai.ticket_similarity_profile_service import TicketSimilarityProfileService
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
@@ -350,6 +351,8 @@ class TicketEmbeddingService:
             )
             return False
         cls.vectorize_ticket(query_db, ticket, rca=rca, config=active_config)
+        # 工单内容变化会改变相似结果，向量刷新成功后失效该工单的相似结果缓存
+        TicketSimilarResultCacheService.invalidate_ticket(ticket.ticket_id)
         logger.info(f"工单场景向量刷新完成: ticket_id={ticket.ticket_id}, ticket_no={ticket.ticket_no}, scene={scene}")
         return True
 

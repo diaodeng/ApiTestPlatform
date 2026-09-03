@@ -5,6 +5,7 @@
   import TicketDetailCollabTab from './detail-tabs/TicketDetailCollabTab.vue';
   import TicketDetailCommentsTab from './detail-tabs/TicketDetailCommentsTab.vue';
   import TicketDetailHistoryTab from './detail-tabs/TicketDetailHistoryTab.vue';
+  import TicketDescriptionBlock from './detail-shared/TicketDescriptionBlock.vue';
   import {
     addTicketAiAnalysis,
     bindTicketIssue,
@@ -96,8 +97,6 @@
     useWorkflow(currentTicketStatus);
 
   const detailMainTab = ref('overview');
-  const descriptionExpanded = ref(true);
-  const translationExpanded = ref(false);
   const detailMoreInfoExpanded = ref(false);
   const descriptionTranslateLoading = ref(false);
   const issueCreateBindOpen = ref(false);
@@ -1198,8 +1197,6 @@
     resetDetailLoadingState();
     detailOpen.value = true;
     detailMainTab.value = 'overview';
-    descriptionExpanded.value = true;
-    translationExpanded.value = false;
     detailMoreInfoExpanded.value = false;
     aiTaskHistoryOpen.value = false;
     aiTaskDetailOpen.value = false;
@@ -1237,8 +1234,6 @@
     detailRequestGeneration += 1;
     currentTicketId.value = undefined;
     detailMainTab.value = 'overview';
-    descriptionExpanded.value = true;
-    translationExpanded.value = false;
     detailMoreInfoExpanded.value = false;
     detail.value = {};
     detailLoading.value = false;
@@ -1506,49 +1501,15 @@
             }}</el-descriptions-item>
           </template>
         </el-descriptions>
-        <div class="ticket-detail-description">
-          <div class="ticket-detail-description__label">
-            <span>描述</span>
-            <div class="ticket-detail-description__actions">
-              <el-button
-                link
-                type="primary"
-                :loading="descriptionTranslateLoading"
-                @click="handleTranslateDescription"
-                v-hasPermi="['ticket:ticket:edit']"
-              >
-                翻译
-              </el-button>
-              <el-button link type="primary" @click="descriptionExpanded = !descriptionExpanded">
-                {{ descriptionExpanded ? '收起' : '展开' }}
-              </el-button>
-            </div>
-          </div>
-          <div
-            :class="[
-              'ticket-detail-description__content',
-              { 'ticket-detail-description__content--collapsed': !descriptionExpanded },
-            ]"
-          >
-            {{ detailOriginalDescription || '-' }}
-          </div>
-        </div>
-        <div v-if="detailAiTranslation" class="ticket-detail-description ticket-detail-translation">
-          <div class="ticket-detail-description__label">
-            <span>翻译</span>
-            <el-button link type="primary" @click="translationExpanded = !translationExpanded">
-              {{ translationExpanded ? '收起' : '展开' }}
-            </el-button>
-          </div>
-          <div
-            :class="[
-              'ticket-detail-description__content',
-              { 'ticket-detail-description__content--collapsed': !translationExpanded },
-            ]"
-          >
-            {{ detailAiTranslation }}
-          </div>
-        </div>
+        <TicketDescriptionBlock
+          :key="detail.ticketId"
+          class="ticket-detail-description-block"
+          :original-description="detailOriginalDescription"
+          :ai-translation="detailAiTranslation"
+          :allow-translate="true"
+          :translate-loading="descriptionTranslateLoading"
+          @translate="handleTranslateDescription"
+        />
 
         <el-tabs v-model="detailMainTab" class="detail-main-tabs">
           <el-tab-pane label="概览" name="overview" lazy>
@@ -2348,54 +2309,6 @@
     height: 100%;
     overflow: auto;
     padding-right: 4px;
-  }
-
-  .ticket-detail-description {
-    display: grid;
-    grid-template-columns: 112px minmax(0, 1fr);
-    border: 1px solid var(--el-border-color-lighter);
-    border-top: 0;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-
-  .ticket-detail-description__label {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 8px 11px;
-    color: var(--el-text-color-regular);
-    background: var(--el-fill-color-light);
-    border-right: 1px solid var(--el-border-color-lighter);
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  .ticket-detail-description__actions {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    align-items: flex-end;
-    line-height: 1.2;
-  }
-
-  .ticket-detail-description__actions :deep(.el-button + .el-button) {
-    margin-left: 0;
-  }
-
-  .ticket-detail-description__content {
-    min-width: 0;
-    padding: 8px 11px;
-    color: var(--el-text-color-primary);
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .ticket-detail-description__content--collapsed {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
   }
 
   :deep(.detail-main-tabs) {

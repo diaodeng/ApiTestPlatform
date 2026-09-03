@@ -12,6 +12,11 @@
       type: Boolean,
       default: false,
     },
+    // 只读模式：隐藏评论提交区，仅保留评论列表查看
+    readOnly: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emit = defineEmits(['changed']);
@@ -94,7 +99,7 @@
 
 <template>
   <div class="comments-tab">
-    <section class="comment-composer">
+    <section v-if="!readOnly" class="comment-composer">
       <div class="composer-heading">
         <div>
           <div class="composer-title">发表评论</div>

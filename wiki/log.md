@@ -1,3 +1,33 @@
+## [2026-09-03] FIX+PERF | 相似召回精确信号缺陷修复与相似结果 Redis 缓存
+
+- 触发：量化分析（生产库只读查询：2109 工单、1647 条 bge-m3 symptom 向量、覆盖率 85.5%、外部同步/导入/远端拉取场景开关为 false 为缺口主因——用户确认为故意配置）后确认后台任务化在当前量级不必要，改为修召回缺陷 + 结果缓存。
+- 缺陷修复：`ticket_hybrid_similarity_service.search_by_vector` 精确信号候选扩展的 `for ticket_id in signal_hits` 缩进在 `for signal_type` 循环外，`signal_hits` 逐轮覆盖导致只消费最后一种信号（error_code）命中，Trace ID/Request ID 命中候选全部丢失；修复后三类信号命中均进入候选池（`setdefault(0.0)` 进重排加分：trace 0.55/request 0.45/error_code 0.35）。
+- 结果缓存：新增 `ticket_similar_result_cache_service.py`。缓存对象为 `TicketReadService.get_similar_tickets` 最终结果（symptom+case 两路，非向量）；键 `ticket:similar-result:{ticketId}:{limit}:{配置指纹}`（指纹=sys_config `ticket.similarity.config` 原文 SHA-256 前 16 位，配置变更自然换键）；TTL 5 分钟；后端跟随 `CACHE_BACKEND`（dev/prod 均 redis）：redis 时用**同步客户端**独立建池（相似链路在 run_in_threadpool 同步线程内，不能复用 app.state asyncio 客户端；key 前缀隔离共用实例），memory 时降级进程内 TTL 字典（上限 500 条）；连接失败自动降级直查不抛异常；error 状态结果不缓存。
+- 失效点：① `vectorize_ticket_for_scene` 向量刷新成功后（覆盖 manualCreate/manualUpdate/bitablePull/closeKnowledge 全部自动场景）；② `POST /ticket/{id}/similarity-case/status` 案例状态变更提交后。
+- 坑点记录：`_build_similar_cache_key` 指纹构建用 `str(config_value)` 时，Mock/非字符串对象会生成含内存地址的不稳定指纹（pytest 下预写键与读取键不一致导致缓存测试失败）；已改为仅接受字符串类型原文，否则回退 default。
+- 验证：ruff（5 个改动文件）通过；pytest 相关 3 套件 36 passed（新增 6 用例：三类信号查询/候选集进入/memory 读写失效过期/缓存命中不触发完整链路/error 不缓存）。本机到 dev(192.168.100.12:6633)/prod(10.56.130.136:7218) Redis 均超时不可达（网络隔离），降级路径已验证，**真实 Redis 读写待部署环境验证**。
+- 文档：`server/docs/ticket_read_api.md` 补缓存契约说明，新增 `web/public/docs/updates/2026-09-03-ticket-similarity-signal-fix-and-result-cache.md`，history.md 同步。
+
+
+
+- 触发：用户确认第二阶段方案——将列表详情弹窗与独立详情页内部组件合逻辑复用，仅去掉独立页可编辑功能。
+- 新增共享组件 `web/src/views/ticket/components/detail-shared/`：`TicketSimilarPanel.vue`（工单内容相似+处理案例相似统一面板，含向量状态提示、系统/飞书详情跳转；"归入同一问题"由 `allowBindIssue` 控制并经 `bind-issue` 事件回传宿主）、`TicketDescriptionBlock.vue`（描述+AI翻译展示块，独立折叠；"翻译"按钮由 `allowTranslate` 控制并经 `translate` 事件回传，权限仍走 `v-hasPermi`）。跳转/链接解析逻辑收敛进共享面板，删除 OverviewTab 与独立页各自重复的 `resolveTicketDetailUrl/openSystemTicketDetail` 等实现。
+- 共享 Tab 只读能力：`TicketDetailCollabTab`、`TicketDetailCommentsTab` 新增 `readOnly` prop（默认 false，弹窗侧不传行为不变），为 true 时分别隐藏追问编辑区+分析结果操作、评论提交区。
+- 独立详情页 `TicketDetailView.vue` 重写为纯只读：移除问题实例关联按钮与整个绑定弹窗（含搜索/归因表单逻辑）、移除相似案例确认（`updateTicketSimilarityCaseStatus` 不再被引用）、相似/描述区接入共享组件、Collab/Comments 标签传 `read-only`；顶部仅保留"刷新"。保留阶段一的轻量链路（summary+相似懒加载+generation 保护）。
+- 弹窗侧 `TicketDetailWithList.vue`：描述/翻译区替换为 `TicketDescriptionBlock`（allow-translate: true），删除旧网格布局样式与 `descriptionExpanded/translationExpanded` 死状态；`TicketDetailOverviewTab.vue` 相似两卡片替换为 `TicketSimilarPanel`（allow-bind-issue: true，归因仍走原 `bindTicketIssueFromSimilar`），相似度统一为一位小数百分比展示。
+- 后端无改动；接口、权限码、写操作全部保留在列表弹窗。
+- 验证：`npm run build:prod` 通过（37.15s，仅 chunk 体积常规提示）。残留检查：独立页无写 API 引用、弹窗/概览 Tab 无死样式死状态。未做浏览器端双入口回归（需运行环境），剩余风险：弹窗描述区视觉布局变化（网格改上下结构）与概览相似按钮样式变化，用户可感知但行为一致。
+- 文档：更新 `web/public/docs/ticket_detail.md`（独立页只读边界、评论只读说明、独立页关联问题实例章节改写为跳转指引），新增 `web/public/docs/updates/2026-09-02-ticket-detail-shared-components-readonly.md`，history.md 同步。
+
+## [2026-09-02] PERF | 独立工单详情页改用轻量读取链路，相似工单懒加载
+
+- 触发：用户反馈独立工单详情页 `/ticket/detail/{ticketId}` 打开慢，怀疑被相似工单查询拖住；经分析确认主因是独立页仍调用旧完整详情接口 `GET /ticket/{id}`（`TicketService.get_ticket_detail_services` 串行组装主单+消息+全部快照+相似+提示词层，消息/快照 DAO 无 limit），相似查询（可能触发同步向量生成、外部 Embedding、MySQL 分批扫描与重排）也被串在其中。列表弹窗此前已走 `summary + similar-tickets` 并行轻量链路。
+- 前端 `TicketDetailView.vue`：`loadDetail` 从 `getTicket` 切换为 `getTicketSummary`（首屏只含基础信息/描述/翻译/版本/Issue/最新AI摘要/提示词层）；相似工单拆为独立 `loadSimilarTickets`（`GET /ticket/{id}/similar-tickets`），首次切换"相似工单"标签时懒加载（`ensureSimilarLoaded` + `similarLoadedTicketId` 去重），重复切换不重查；新增 `requestGeneration` 代次校验 + `isCurrentRequest`，快速切单/刷新丢弃旧响应，切单时清空相似状态；顶部"刷新"改为 `refreshDetailData`（summary+similar 并行强制重查），CollabTab changed 事件同样联动；概览"最新AI结论"取值去掉 `latestSnapshot.summary` 兜底（summary 契约不含快照），保留 `latestAiAnalysis.analysisSummary/summary`；相似区域 alert/列表按 `similarError/similarLoading` 独立展示，样式新增 `.similar-loading-wrap` 最小高度。
+- 后端无改动；轻量接口（summary/similar-tickets/messages/page/snapshots/page）与 Pydantic 契约此前已存在（`server/docs/ticket_read_api.md`），权限不变（summary/similar 均 `ticket:ticket:query`）。
+- 验证：`npm run build:prod` 构建通过（36.98s）。未做浏览器端实际打开耗时对比（需运行环境），剩余风险：概览卡片不再展示最新快照摘要（以最新 AI 分析结论为准，快照仍在 AI 标签按需加载）。
+- 遗留（后续单独处理）：完整详情接口 `/ticket/{id}` 仍被其他调用方使用、契约保持不变；`TicketHybridSimilarityService.search_by_vector` 精确信号循环缩进疑似缺陷（只消费最后一种信号命中，影响召回质量非首屏耗时）；相似服务与 controller/read service 重复查询源工单；相似 missing/stale 向量后台化（第二阶段）未启动。
+- 文档：更新 `web/public/docs/ticket_detail.md`（独立详情页加载规则、FAQ），新增 `web/public/docs/updates/2026-09-02-ticket-standalone-detail-light-load.md`，history.md 同步。
+
 ## [2026-09-02] FEAT | 问题实例绑定工单操作列新增外部地址按钮
 
 - 触发：用户要求问题实例详情中已绑定工单列表右侧操作按钮增加外部地址按钮，点击打开外部链接。

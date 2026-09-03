@@ -34,6 +34,11 @@
       type: Boolean,
       default: true,
     },
+    // 只读模式：隐藏追问发送、快照生成、知识库生成等写入口，仅保留记录查看
+    readOnly: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emit = defineEmits(['changed', 'open-ai-history']);
@@ -451,7 +456,7 @@
       </el-card>
     </section>
 
-    <section class="ai-composer" aria-label="AI追问编辑区">
+    <section v-if="!readOnly" class="ai-composer" aria-label="AI追问编辑区">
       <div class="ai-config-bar">
         <div class="ai-config-heading">
           <el-icon><Setting /></el-icon>
@@ -577,7 +582,7 @@
       </div>
     </section>
 
-    <section class="ai-actions-bar">
+    <section v-if="!readOnly" class="ai-actions-bar">
       <div class="ai-actions-title">
         <el-icon><Operation /></el-icon>
         <span>分析结果操作</span>
