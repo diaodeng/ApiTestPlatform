@@ -1,3 +1,13 @@
+## [2026-09-04] FIX+PERF | 新版客户端 Agent 连接服务器点击卡死修复
+
+- 触发：用户反馈新版客户端 Agent 菜单点击"连接服务器"后页面卡住直到连接成功或失败。
+- 根因：点击在 UI 线程同步执行两类阻塞操作——① `AgentClientService.start()` 在启动连接线程前首次导入 `server.agent_server`（级联 playwright.async_api、pyautogui、cv2、py7zr 等，`-X importtime` 实测 1458ms：httpx 754ms、ticket_ai_analysis_service 674ms、pyautogui 415ms、cv2 209ms）；② `AgentController.start()` 同步调用 `get_active_mac()`（UDP socket 连 8.8.8.8 探测出口 IP + psutil 枚举网卡，网络不佳秒级阻塞）与 `AgentConfig.read_config()` 磁盘 IO。事件循环被占死导致界面假死。
+- 修复（`client_new/services/agent_client_service.py`）：`start()` 不再在调用线程导入重模块，首次导入与 `MAX_MESSAGE_SIZE` 设置全部移入 `_thread_main` 后台线程；`_agent_server_module()` 双重检查锁（`_AGENT_SERVER_LOCK`）保证只导入一次且仅在后台线程；新增 `is_running()` 区分"准备中/已启动"；`update_runtime_config()` 增加模块已加载守卫，避免保存配置在 UI 线程误触发导入。
+- 修复（`client_new/controller/agent_controller.py`）：新增 `_ConnectPrepareThread` 把 `get_active_mac()` 与配置读取移出 UI 线程；`start()` 两段式——UI 线程仅状态校验+置灰（同步 0.4ms，实测），`starting` 即时生效，准备完成后主线程回调 `_on_connect_prepared` 再发起连接；`stop()` 补连接准备阶段取消分支；`shutdown()` 等待准备线程退出。
+- 坑点：重写 `_agent_server_module()` 时丢失 `global` 声明触发 ruff F823（函数内既有读取又有赋值），运行即 UnboundLocalError，靠 ruff 对照基线发现修复。
+- 验证：新增 `client_new/tests/test_agent_start_nonblocking.py`（FakeWidget+QCoreApplication 事件循环模拟 UI 线程，卡顿监控 >200ms 零记录；update_runtime_config 不触发导入；连接被拒后正确落回 stopped）；ruff 改动文件 4 告警与基线完全一致零新增；既有 test_ticket_ai_task_cancel 3 用例通过。未验证：真实 GUI 手写连点场景（需人工确认），逻辑上状态机已防重入。
+- 文档：新增 `web/public/docs/updates/2026-09-04-client-agent-connect-nonblocking.md`，history.md 同步，wiki `entities/services/new-client-services.md` 补线程边界约束。
+
 ## [2026-09-03] FIX | 工单AI分析结果schema清洗与失败分支崩溃修复
 
 - 触发：INC00001920244（task_2046322511408128，prod，Provider shuidi / ai-router / deepseek-v4-flash-0731）AI 分析失败。Worker 正常退出且 result.json 内容完整，但 Agent 报 `AI_WORKER_RESULT_INVALID`（`ticket_no`/`merchant_name`/`version`/`root_cause_type` 为 schema 外额外字段、`$.evidence[0..5]` 期望 string 实际 object），随后又抛 `UnboundLocalError: invalid_result_token_usage` 把真实失败原因覆盖为 `AI_WORKER_EXECUTION_ERROR`。

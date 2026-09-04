@@ -43,6 +43,28 @@ class _LocalMacThread(QThread):
         self.done.emit(mac)
 
 
+class _ConnectPrepareThread(QThread):
+    """
+    连接准备线程：执行点击"连接服务器"后的阻塞准备工作（MAC 解析、配置读取），
+    完成后由主线程回调真正启动连接，避免 UI 线程卡顿。
+    """
+
+    done = Signal(object, str, str)
+
+    def run(self):
+        try:
+            mac = get_active_mac() or ""
+        except Exception as e:
+            logger.exception(f"连接前获取本机 MAC 失败: {e}")
+            mac = ""
+        try:
+            config = AgentConfig.read_config()
+        except Exception as e:
+            logger.exception(f"连接前读取 Agent 配置失败: {e}")
+            config = None
+        self.done.emit(config, mac, "")
+
+
 class _BrowserInstallThread(QThread):
     done = Signal(bool, str)
 
@@ -84,6 +106,7 @@ class AgentController(QObject):
         self.service = AgentClientService()
         self._config_sync_thread: _ConfigSyncThread | None = None
         self._local_mac_thread: _LocalMacThread | None = None
+        self._connect_thread: _ConnectPrepareThread | None = None
         self._browser_install_thread: _BrowserInstallThread | None = None
         self._install_listener_registered = False
         self.playwright_install_log.connect(self._on_playwright_install_log)
@@ -119,25 +142,51 @@ class AgentController(QObject):
         self.service.error_message.connect(self._on_service_error)
 
     def start(self):
-        self.local_mac = get_active_mac() or self.local_mac
-        if hasattr(self.widget, "set_local_mac"):
-            self.widget.set_local_mac(self.local_mac)
-        self.config = AgentConfig.read_config()
-
+        # 状态校验放在 UI 线程，避免连点导致重复发起连接准备。
         if self.connection_state in {"starting", "running", "stopping"}:
             logger.warning(f"Agent 启动请求被忽略，当前状态: {self.connection_state}")
+            return
+        if self._connect_thread and self._connect_thread.isRunning():
+            logger.warning("Agent 启动请求被忽略，连接准备仍在进行中")
+            return
+
+        logger.info("Agent 开始连接准备（后台执行 MAC 解析与配置读取）")
+        self.connection_state = "starting"
+        self._sync_ui_state()
+        self.widget.set_status_message("正在准备连接...")
+
+        # MAC 解析与配置读取存在磁盘与网络枚举开销，放后台线程执行，
+        # 完成后在主线程回调 _on_connect_prepared。
+        self._connect_thread = _ConnectPrepareThread()
+        self._connect_thread.done.connect(self._on_connect_prepared)
+        self._connect_thread.finished.connect(self._on_connect_prepare_finished)
+        self._connect_thread.start()
+
+    def _on_connect_prepared(self, config, mac: str, _error: str):
+        """
+        连接准备完成回调（主线程执行）：根据准备结果真正启动连接。
+        """
+        if config is not None:
+            self.config = config
+        if mac:
+            self.local_mac = mac
+        if hasattr(self.widget, "set_local_mac"):
+            self.widget.set_local_mac(self.local_mac)
+
+        if self.connection_state not in {"starting"}:
+            # 准备期间用户已停止或状态已变化，放弃本次启动。
+            logger.info(f"Agent 连接准备完成但状态已变为 {self.connection_state}，放弃启动")
             return
 
         server = (self.config.current_server or "").strip()
         if not server:
             self.widget.set_status_message("请先输入或选择服务地址")
+            self.connection_state = "stopped"
+            self._sync_ui_state()
             return
 
         connect_url = self._build_connect_url(server)
         logger.info(f"启动 Agent 连接: {connect_url}")
-
-        self.connection_state = "starting"
-        self._sync_ui_state()
 
         ok, message = self.service.start(self.config, connect_url)
         if not ok:
@@ -146,7 +195,21 @@ class AgentController(QObject):
             self._sync_ui_state()
             self.widget.set_status_message(message)
 
+    def _on_connect_prepare_finished(self):
+        """
+        清理连接准备线程引用。
+        """
+        self._connect_thread = None
+
     def stop(self):
+        # 连接准备阶段（后台线程尚未启动 WebSocket 连接）直接取消启动。
+        if self.connection_state == "starting" and not self.service.is_running():
+            logger.info("Agent 处于连接准备阶段，直接取消启动")
+            self.connection_state = "stopped"
+            self._sync_ui_state()
+            self.widget.set_status_message("已取消连接")
+            return
+
         if self.connection_state in {"stopped", "stopping"}:
             return
 
@@ -196,6 +259,9 @@ class AgentController(QObject):
         except Exception as e:
             logger.exception(f"关闭 Agent 服务失败: {e}")
         self._unregister_playwright_install_listener()
+        if self._connect_thread and self._connect_thread.isRunning():
+            self._connect_thread.quit()
+            self._connect_thread.wait(500)
         if self._config_sync_thread and self._config_sync_thread.isRunning():
             self._config_sync_thread.quit()
             self._config_sync_thread.wait(1000)
