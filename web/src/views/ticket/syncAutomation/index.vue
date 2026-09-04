@@ -9,9 +9,9 @@
       </p>
     </section>
 
-    <el-container>
+    <div class="config-tabs-wrap">
       <el-tabs>
-        <el-tab-pane label="入库流程">
+        <el-tab-pane label="入库流程" lazy>
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
@@ -145,51 +145,26 @@
               <div class="card-header">
                 <span>① 字段识别与映射</span>
                 <el-tag effect="plain">入库后先按规则识别归属；按文本匹配，找不到则保留原值</el-tag>
+                <el-button type="primary" plain size="small" class="card-setting-btn" @click="mappingDialogVisible = true">
+                  设置
+                </el-button>
               </div>
             </template>
 
-            <el-divider content-position="left">正则识别规则</el-divider>
-
-            <el-form ref="patternFormRef" :model="form" label-width="150px">
-              <el-form-item label="POS 正则规则">
-                <el-input
-                  v-model="posPatternsText"
-                  type="textarea"
-                  :rows="6"
-                  placeholder='请输入 JSON 数组，例如 ["A", "B"]'
-                />
-              </el-form-item>
-              <el-form-item label="SCO 正则规则">
-                <el-input
-                  v-model="scoPatternsText"
-                  type="textarea"
-                  :rows="6"
-                  placeholder='请输入 JSON 数组，例如 ["A", "B"]'
-                />
-              </el-form-item>
-              <el-form-item label="版本号正则规则">
-                <el-input
-                  v-model="versionPatternsText"
-                  type="textarea"
-                  :rows="6"
-                  placeholder='请输入 JSON 数组，例如 ["A", "B"]'
-                />
-              </el-form-item>
-            </el-form>
-
-            <el-divider content-position="left">映射配置（三方直推与内网拉取共用）</el-divider>
-
-            <div class="mapping-blocks">
-              <div v-for="item in mappingSections" :key="item.key" class="mapping-section">
-                <div class="mapping-title">{{ item.label }}</div>
-                <div class="mapping-desc">{{ item.description }}</div>
-                <el-input
-                  v-model="mappingTexts[item.key]"
-                  type="textarea"
-                  :rows="item.rows"
-                  placeholder='请输入 JSON 数组，例如 [{"source":"A","target":"B"}]'
-                />
+            <div class="card-summary-grid">
+              <div class="card-summary-item">
+                <div class="card-summary-item__label">正则识别规则</div>
+                <div class="card-summary-item__value">POS / SCO / 版本号 三组正则，从工单文本提取编号与版本</div>
               </div>
+              <div class="card-summary-item">
+                <div class="card-summary-item__label">映射配置</div>
+                <div class="card-summary-item__value">
+                  {{ mappingSections.length }} 组映射（项目 / 模块 / 商家 / 门店 / 状态 / 处理人），三方直推与内网拉取共用
+                </div>
+              </div>
+            </div>
+            <div class="mapping-desc">
+              点击右上角「设置」在弹窗中维护各映射组 JSON 与正则规则；识别失败不阻断入库，找不到时保留外部原值。
             </div>
           </el-card>
 
@@ -568,11 +543,14 @@
               <div class="card-header">
                 <span>⑦ 同步后自动化</span>
                 <el-tag type="danger" effect="plain">识别/拉日志/AI分析；场景开关见顶部总表</el-tag>
+                <el-button type="primary" plain size="small" class="card-setting-btn" @click="logPullDialogVisible = true">
+                  日志拉取设置
+                </el-button>
               </div>
             </template>
 
             <el-form :model="form.automationConfig" label-width="180px">
-              <div class="mapping-desc">识别、自动拉日志、自动 AI 分析的场景开关已聚合到「场景 × 步骤 开关总表」；自动拉日志的参数与停止条件见「日志拉取配置」。</div>
+              <div class="mapping-desc">识别、自动拉日志、自动 AI 分析的场景开关已聚合到「场景 × 步骤 开关总表」；自动拉日志的参数与停止条件点击右上角「日志拉取设置」在弹窗中维护。</div>
 
               <el-divider content-position="left">自动化结果通知</el-divider>
               <el-row :gutter="16">
@@ -880,7 +858,7 @@
             </el-form>
           </el-card>
         </el-tab-pane>
-        <el-tab-pane label="来源与拉取">
+        <el-tab-pane label="来源与拉取" lazy>
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
@@ -1402,610 +1380,7 @@
             </el-form>
           </el-card>
         </el-tab-pane>
-        <el-tab-pane label="日志拉取配置">
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>拉日志默认值</span>
-                <el-tag type="info" effect="plain">提交参数默认值</el-tag>
-              </div>
-            </template>
-            <el-form :model="form.logPullDefaults" label-width="150px">
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="默认日志环境">
-                    <el-select
-                      v-model="form.logPullDefaults.environment"
-                      filterable
-                      clearable
-                      placeholder="选择环境分组和子环境"
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in logPullExternalEnvironmentOptions"
-                        :key="item.value"
-                        :label="item.label"
-                        :value="item.value"
-                      />
-                    </el-select>
-                    <div class="form-tip">自动拉日志未单独指定环境时使用；格式为“分组:子环境”。</div>
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="命令类型">
-                    <el-input-number
-                      v-model="form.logPullDefaults.commandDataType"
-                      :min="1"
-                      :max="10"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="文件上限(MB)">
-                    <el-input-number
-                      v-model="form.logPullDefaults.fileMaxSize"
-                      :min="1"
-                      :max="2000"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="压缩包上限(MB)">
-                    <el-input-number
-                      v-model="form.logPullDefaults.zipMaxSize"
-                      :min="1"
-                      :max="2000"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="存储方式">
-                    <el-select
-                      v-model="form.logPullDefaults.storageMode"
-                      placeholder="请选择"
-                      style="width: 100%"
-                    >
-                      <el-option label="本地" value="local" />
-                      <el-option label="FTP" value="ftp" />
-                      <el-option label="对象存储" value="oss" />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="前置分钟数">
-                    <el-input-number
-                      v-model="form.logPullDefaults.rangeBeforeMinutes"
-                      :min="0"
-                      :max="120"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="后置分钟数">
-                    <el-input-number
-                      v-model="form.logPullDefaults.rangeAfterMinutes"
-                      :min="0"
-                      :max="120"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-divider content-position="left">日志拉取后自动 AI 分析</el-divider>
-                  <div class="form-help-text form-help-text--section">
-                    这里控制自动日志拉取成功后的 AI 分析行为，手工 AI 分析不受这里影响。
-                  </div>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="自动 AI 分析">
-                    <el-switch
-                      v-model="form.logPullDefaults.autoAiEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="Agent 编码">
-                    <el-select
-                      v-model="form.logPullDefaults.aiAgentCode"
-                      placeholder="留空则走默认 Agent"
-                      filterable
-                      clearable
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in agentOptions"
-                        :key="item.agentCode"
-                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
-                        :value="item.agentCode"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-form-item label="Provider 编码">
-                    <el-select
-                      v-model="form.logPullDefaults.aiProviderCode"
-                      placeholder="留空则走默认 Provider"
-                      filterable
-                      clearable
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in analysisProviderOptions"
-                        :key="item.providerCode"
-                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? '- ' + item.defaultModel : ''}`"
-                        :value="item.providerCode"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
-                  <el-form-item label="历史分析条件">
-                    <el-radio-group v-model="form.logPullDefaults.autoAiAnalysisCondition.analysisMode">
-                      <el-radio-button label="always">允许重复分析</el-radio-button>
-                      <el-radio-button label="not_successful">仅无成功记录</el-radio-button>
-                    </el-radio-group>
-                  </el-form-item>
-                </el-col>
-                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
-                  <el-form-item label="状态过滤">
-                    <el-switch
-                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                    <div class="form-help-text">仅自动分析受影响；手动分析不受影响</div>
-                  </el-form-item>
-                </el-col>
-                <el-col
-                  v-if="form.logPullDefaults.autoAiEnabled && form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
-                  :span="24"
-                >
-                  <el-form-item label="允许的工单状态" required>
-                    <el-select
-                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusCodes"
-                      multiple
-                      filterable
-                      collapse-tags
-                      collapse-tags-tooltip
-                      placeholder="请选择内部工作流状态（多选）"
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in workflowStatusOptions"
-                        :key="`auto-ai-status-${item.value}`"
-                        :label="`${item.label} [${item.value}]`"
-                        :value="item.value"
-                      />
-                    </el-select>
-                    <div class="form-help-text">工单状态需先映射为内部状态；未满足条件时不会消耗 Token</div>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-divider content-position="left">自动拉日志停止条件</el-divider>
-                  <div class="form-help-text form-help-text--section">
-                    这里控制哪些内部状态命中后不再自动拉日志，只影响自动任务，不影响手工拉日志。
-                  </div>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="自动拉日志停止条件">
-                    <el-switch
-                      v-model="form.logPullDefaults.autoLogPullStopCondition.enabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                    <div class="form-help-text">仅影响自动拉日志；手工拉日志不受影响</div>
-                  </el-form-item>
-                </el-col>
-                <el-col
-                  v-if="form.logPullDefaults.autoLogPullStopCondition.enabled"
-                  :xs="24"
-                  :md="12"
-                >
-                  <el-form-item label="停止运行中自动任务">
-                    <el-switch
-                      v-model="form.logPullDefaults.autoLogPullStopCondition.cancelActiveRecords"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                    <div class="form-help-text">命中状态后可自动停止仍在执行中的自动日志任务</div>
-                  </el-form-item>
-                </el-col>
-                <el-col v-if="form.logPullDefaults.autoLogPullStopCondition.enabled" :span="24">
-                  <el-form-item label="停止状态（多选）" required>
-                    <el-select
-                      v-model="form.logPullDefaults.autoLogPullStopCondition.statusCodes"
-                      multiple
-                      filterable
-                      collapse-tags
-                      collapse-tags-tooltip
-                      placeholder="请选择命中后停止自动拉日志的内部工作流状态"
-                      style="width: 100%"
-                    >
-                      <el-option
-                        v-for="item in workflowStatusOptions"
-                        :key="`auto-log-stop-status-${item.value}`"
-                        :label="`${item.label} [${item.value}]`"
-                        :value="item.value"
-                      />
-                    </el-select>
-                    <div class="form-help-text">命中任一状态即停止自动拉日志，并不再发送无意义的拉取失败通知</div>
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
-          </el-card>
-
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>存储与资源限制</span>
-                <el-tag type="warning" effect="plain">运行态护栏</el-tag>
-              </div>
-            </template>
-            <el-form :model="logPullStorage" label-width="170px">
-              <el-row :gutter="16">
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="最大并发数">
-                    <el-input-number
-                      v-model="logPullStorage.maxWorkers"
-                      :min="1"
-                      :max="20"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="轮询间隔(秒)">
-                    <el-input-number
-                      v-model="logPullStorage.pollIntervalSec"
-                      :min="3"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="轮询超时(秒)">
-                    <el-input-number
-                      v-model="logPullStorage.pollTimeoutSec"
-                      :min="60"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="下载超时(秒)">
-                    <el-input-number
-                      v-model="logPullStorage.downloadTimeoutSec"
-                      :min="30"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="入库字符上限">
-                    <el-input-number
-                      v-model="logPullStorage.maxContentChars"
-                      :min="10000"
-                      :step="10000"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="解压时限(秒)">
-                    <el-input-number
-                      v-model="logPullStorage.maxExtractSeconds"
-                      :min="30"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="解压文件数上限">
-                    <el-input-number
-                      v-model="logPullStorage.maxExtractFileCount"
-                      :min="100"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="解压总字节上限">
-                    <el-input-number
-                      v-model="logPullStorage.maxExtractTotalBytes"
-                      :min="10485760"
-                      :step="10485760"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="搜索时限(秒)">
-                    <el-input-number
-                      v-model="logPullStorage.maxSearchSeconds"
-                      :min="3"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="搜索文件数上限">
-                    <el-input-number
-                      v-model="logPullStorage.maxSearchFileCount"
-                      :min="10"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="降级搜索字节上限">
-                    <el-input-number
-                      v-model="logPullStorage.maxPythonSearchBytes"
-                      :min="10485760"
-                      :step="10485760"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="搜索最大并发数">
-                    <el-input-number
-                      v-model="logPullStorage.maxConcurrentSearches"
-                      :min="1"
-                      :max="8"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="搜索单行最大字节数">
-                    <el-input-number
-                      v-model="logPullStorage.maxSearchLineBytes"
-                      :min="256"
-                      :max="4194304"
-                      :step="65536"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12">
-                  <el-form-item label="存储方式">
-                    <el-select
-                      v-model="logPullStorage.mode"
-                      placeholder="请选择"
-                      style="width: 100%"
-                    >
-                      <el-option label="本地" value="local" />
-                      <el-option label="FTP" value="ftp" />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="12" v-if="logPullStorage.mode === 'local'">
-                  <el-form-item label="本地保存目录">
-                    <el-input v-model="logPullStorage.localDirectory" placeholder="留空则使用默认目录" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24" v-if="logPullStorage.mode === 'ftp'">
-                  <el-form-item label="FTP 配置">
-                    <div class="ftp-config-grid">
-                      <el-input v-model="logPullStorage.ftp.host" placeholder="主机" class="ftp-item" />
-                      <el-input-number v-model="logPullStorage.ftp.port" :min="1" placeholder="端口" class="ftp-item" />
-                      <el-input v-model="logPullStorage.ftp.username" placeholder="用户名" class="ftp-item" />
-                      <el-input v-model="logPullStorage.ftp.password" type="password" show-password placeholder="密码" class="ftp-item" />
-                      <el-input v-model="logPullStorage.ftp.baseDir" placeholder="基础目录" class="ftp-item" />
-                      <el-input-number v-model="logPullStorage.ftp.timeoutSec" :min="1" placeholder="超时秒数" class="ftp-item" />
-                      <el-input v-model="logPullStorage.ftp.encoding" placeholder="编码" class="ftp-item" />
-                    </div>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="24">
-                  <el-divider content-position="left">下载完成后处理</el-divider>
-                </el-col>
-                <el-col :xs="24" :md="8">
-                  <el-form-item label="下载完成后解压">
-                    <el-switch
-                      v-model="logPullStorage.postDownloadExtractEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="8">
-                  <el-form-item label="下载完成后提取版本">
-                    <el-switch
-                      v-model="logPullStorage.postDownloadVersionExtractEnabled"
-                      :disabled="!logPullStorage.postDownloadExtractEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :md="8">
-                  <el-form-item label="下载完成后生成索引">
-                    <el-switch
-                      v-model="logPullStorage.postDownloadIndexEnabled"
-                      :disabled="!logPullStorage.postDownloadExtractEnabled"
-                      inline-prompt
-                      active-text="开"
-                      inactive-text="关"
-                    />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
-            <div class="mt16">
-              <el-button type="success" :loading="logPullStorageSaving" @click="logPullStorageHandleSave">保存存储与资源限制</el-button>
-            </div>
-          </el-card>
-
-          <el-card shadow="never" class="config-card mt16">
-            <template #header>
-              <div class="card-header">
-                <span>日志拉取外部接口配置</span>
-                <el-tag type="warning" effect="plain">环境分组 + 子环境 + 商家映射</el-tag>
-              </div>
-            </template>
-            <el-alert
-              class="mb16"
-              title="配置说明"
-              type="info"
-              :closable="false"
-              show-icon
-              description="每个环境分组（如 prod、uat）下可配置多个子环境，每个子环境绑定独立凭证。商家选择后根据 vendorFilter 自动匹配子环境；「*」表示覆盖所有商家。未匹配到时可指定默认子环境兜底。"
-            />
-            <div v-loading="logPullExternalLoading" class="env-groups-container">
-              <el-empty v-if="!logPullExternalGroupKeys.length && !logPullExternalLoading" description="暂无环境分组配置，请新增" />
-              <div v-for="groupKey in logPullExternalGroupKeys" :key="groupKey" class="env-group-card">
-                <div class="env-group-header">
-                  <el-input
-                    :model-value="logPullExternalGroups[groupKey].label"
-                    placeholder="分组名称，如 生产环境"
-                    style="width: 260px"
-                    @update:model-value="val => logPullExternalUpdateGroupLabel(groupKey, val)"
-                  />
-                  <el-tag type="info" size="small" class="ml8">{{ groupKey }}</el-tag>
-                  <div class="env-group-actions">
-                    <el-button type="danger" link icon="Delete" @click="logPullExternalRemoveGroup(groupKey)">删除分组</el-button>
-                  </div>
-                </div>
-                <el-table :data="Object.entries(logPullExternalGroups[groupKey].items)" border size="small" class="env-items-table">
-                  <el-table-column label="子环境 key" width="130">
-                    <template #default="{ row }">
-                      <el-tag size="small">{{ row[0] }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="名称" width="150">
-                    <template #default="{ row }">
-                      <el-input
-                        :model-value="row[1].label"
-                        placeholder="UAT1"
-                        size="small"
-                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'label', val)"
-                      />
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="insertUrl" min-width="200">
-                    <template #default="{ row }">
-                      <el-input
-                        :model-value="row[1].insertUrl"
-                        placeholder="https://..."
-                        size="small"
-                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'insertUrl', val)"
-                      />
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="pageUrl" min-width="200">
-                    <template #default="{ row }">
-                      <el-input
-                        :model-value="row[1].pageUrl"
-                        placeholder="https://..."
-                        size="small"
-                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'pageUrl', val)"
-                      />
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="凭证绑定" width="220">
-                    <template #default="{ row }">
-                      <el-select
-                        :model-value="row[1].credentialBindingId"
-                        placeholder="选择凭证绑定"
-                        filterable
-                        clearable
-                        size="small"
-                        style="width: 100%"
-                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'credentialBindingId', val)"
-                      >
-                        <el-option
-                          v-for="opt in logPullExternalCredentialBindingOptions"
-                          :key="opt.bindingId"
-                          :label="opt.label"
-                          :value="String(opt.bindingId)"
-                        />
-                      </el-select>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="origin" min-width="200">
-                    <template #default="{ row }">
-                      <el-input
-                        :model-value="row[1].origin"
-                        placeholder="https://..."
-                        size="small"
-                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'origin', val)"
-                      />
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="商家范围" width="280">
-                    <template #default="{ row }">
-                      <el-select
-                        :model-value="row[1].vendorFilter"
-                        multiple
-                        filterable
-                        collapse-tags
-                        collapse-tags-tooltip
-                        placeholder="选择商家（* 表示全部）"
-                        size="small"
-                        style="width: 100%"
-                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'vendorFilter', val)"
-                      >
-                        <el-option label="★ 全部商家" value="*" />
-                        <el-option
-                          v-for="opt in logPullExternalVendorFilterOptions"
-                          :key="opt.value"
-                          :label="opt.label"
-                          :value="opt.value"
-                          :disabled="row[1].vendorFilter.includes('*')"
-                        />
-                      </el-select>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="70" align="center">
-                    <template #default="{ row }">
-                      <el-button link type="danger" icon="Delete" size="small" @click="logPullExternalRemoveEnvItem(groupKey, row[0])" />
-                    </template>
-                  </el-table-column>
-                </el-table>
-                <div class="env-group-footer">
-                  <el-button type="primary" link icon="Plus" @click="logPullExternalAddEnvItem(groupKey)">新增子环境</el-button>
-                  <el-form-item label="默认子环境" label-width="100px" class="env-default-item">
-                    <el-select
-                      :model-value="logPullExternalGroups[groupKey].defaultItem"
-                      placeholder="商家未匹配时兜底"
-                      clearable
-                      size="small"
-                      style="width: 200px"
-                      @update:model-value="val => logPullExternalUpdateGroupDefaultItem(groupKey, val)"
-                    >
-                      <el-option
-                        v-for="itemKey in logPullExternalGetItemKeysForGroup(groupKey)"
-                        :key="itemKey"
-                        :label="`${logPullExternalGroups[groupKey].items[itemKey]?.label || itemKey} (${itemKey})`"
-                        :value="itemKey"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </div>
-              </div>
-            </div>
-            <div class="mt16">
-              <el-button type="primary" icon="Plus" @click="logPullExternalAddGroup">新增环境分组</el-button>
-              <el-button type="success" :loading="logPullExternalSaving" @click="logPullExternalHandleSave" class="ml8">保存外部接口配置</el-button>
-            </div>
-          </el-card>
-        </el-tab-pane>
-        <el-tab-pane label="评论同步">
+        <el-tab-pane label="评论同步" lazy>
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
@@ -2167,7 +1542,7 @@
             </el-form>
           </el-card>
         </el-tab-pane>
-        <el-tab-pane label="通知任务">
+        <el-tab-pane label="通知任务" lazy>
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
@@ -2668,7 +2043,7 @@
             </el-form>
           </el-card>
         </el-tab-pane>
-        <el-tab-pane label="统计与分类">
+        <el-tab-pane label="统计与分类" lazy>
           <el-alert
             title="统计结果不写入快照表。任务运行时按当前工单数据聚合；同一历史区间在工单后续状态变化后可能得到不同结果。"
             type="warning"
@@ -2990,7 +2365,7 @@
             <el-empty v-if="!form.customStatisticsProfiles.length" description="暂无统计方案，请新增后保存配置" />
           </el-card>
         </el-tab-pane>
-        <el-tab-pane label="操作">
+        <el-tab-pane label="操作" lazy>
           <el-card shadow="never" class="config-card mt16">
             <template #header>
               <div class="card-header">
@@ -3295,7 +2670,672 @@
           </el-card>
         </el-tab-pane>
       </el-tabs>
-    </el-container>
+    </div>
+
+    <!-- ① 字段识别与映射设置弹窗：内容较多，收进弹窗维护；映射文本与正则跟随页面底部"保存配置"一起保存 -->
+    <el-dialog v-model="mappingDialogVisible" title="① 字段识别与映射设置" width="900px" top="6vh" destroy-on-close class="config-dialog">
+      <el-divider content-position="left">正则识别规则</el-divider>
+
+      <el-form ref="patternFormRef" :model="form" label-width="150px">
+        <el-form-item label="POS 正则规则">
+          <el-input
+            v-model="posPatternsText"
+            type="textarea"
+            :rows="6"
+            placeholder='请输入 JSON 数组，例如 ["A", "B"]'
+          />
+        </el-form-item>
+        <el-form-item label="SCO 正则规则">
+          <el-input
+            v-model="scoPatternsText"
+            type="textarea"
+            :rows="6"
+            placeholder='请输入 JSON 数组，例如 ["A", "B"]'
+          />
+        </el-form-item>
+        <el-form-item label="版本号正则规则">
+          <el-input
+            v-model="versionPatternsText"
+            type="textarea"
+            :rows="6"
+            placeholder='请输入 JSON 数组，例如 ["A", "B"]'
+          />
+        </el-form-item>
+      </el-form>
+
+      <el-divider content-position="left">映射配置（三方直推与内网拉取共用）</el-divider>
+
+      <div class="mapping-blocks">
+        <div v-for="item in mappingSections" :key="item.key" class="mapping-section">
+          <div class="mapping-title">{{ item.label }}</div>
+          <div class="mapping-desc">{{ item.description }}</div>
+          <el-input
+            v-model="mappingTexts[item.key]"
+            type="textarea"
+            :rows="item.rows"
+            placeholder='请输入 JSON 数组，例如 [{"source":"A","target":"B"}]'
+          />
+        </div>
+      </div>
+      <template #footer>
+        <span class="config-dialog__tip">此处修改跟随页面底部「保存配置」一起生效</span>
+        <el-button type="primary" @click="mappingDialogVisible = false">完成</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ⑦ 日志拉取设置弹窗：拉日志默认值跟随主保存；存储与外部接口配置保持各自独立保存按钮 -->
+    <el-dialog v-model="logPullDialogVisible" title="⑦ 日志拉取设置" width="960px" top="4vh" destroy-on-close class="config-dialog">
+      <el-alert
+        type="info"
+        show-icon
+        :closable="false"
+        title="保存方式说明"
+        description="「拉日志默认值」跟随页面底部「保存配置」一起保存；「存储与资源限制」和「日志拉取外部接口配置」相互独立，分别使用各自弹窗底部的保存按钮立即生效。"
+      />
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>拉日志默认值</span>
+                <el-tag type="info" effect="plain">提交参数默认值</el-tag>
+              </div>
+            </template>
+            <el-form :model="form.logPullDefaults" label-width="150px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="默认日志环境">
+                    <el-select
+                      v-model="form.logPullDefaults.environment"
+                      filterable
+                      clearable
+                      placeholder="选择环境分组和子环境"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in logPullExternalEnvironmentOptions"
+                        :key="item.value"
+                        :label="item.label"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-tip">自动拉日志未单独指定环境时使用；格式为“分组:子环境”。</div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="命令类型">
+                    <el-input-number
+                      v-model="form.logPullDefaults.commandDataType"
+                      :min="1"
+                      :max="10"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="文件上限(MB)">
+                    <el-input-number
+                      v-model="form.logPullDefaults.fileMaxSize"
+                      :min="1"
+                      :max="2000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="压缩包上限(MB)">
+                    <el-input-number
+                      v-model="form.logPullDefaults.zipMaxSize"
+                      :min="1"
+                      :max="2000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="存储方式">
+                    <el-select
+                      v-model="form.logPullDefaults.storageMode"
+                      placeholder="请选择"
+                      style="width: 100%"
+                    >
+                      <el-option label="本地" value="local" />
+                      <el-option label="FTP" value="ftp" />
+                      <el-option label="对象存储" value="oss" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="前置分钟数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.rangeBeforeMinutes"
+                      :min="0"
+                      :max="120"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="后置分钟数">
+                    <el-input-number
+                      v-model="form.logPullDefaults.rangeAfterMinutes"
+                      :min="0"
+                      :max="120"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-divider content-position="left">日志拉取后自动 AI 分析</el-divider>
+                  <div class="form-help-text form-help-text--section">
+                    这里控制自动日志拉取成功后的 AI 分析行为，手工 AI 分析不受这里影响。
+                  </div>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="自动 AI 分析">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoAiEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Agent 编码">
+                    <el-select
+                      v-model="form.logPullDefaults.aiAgentCode"
+                      placeholder="留空则走默认 Agent"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in agentOptions"
+                        :key="item.agentCode"
+                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                        :value="item.agentCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="Provider 编码">
+                    <el-select
+                      v-model="form.logPullDefaults.aiProviderCode"
+                      placeholder="留空则走默认 Provider"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in analysisProviderOptions"
+                        :key="item.providerCode"
+                        :label="`${item.providerName || item.providerCode} [${item.providerCode}] ${item.defaultModel ? '- ' + item.defaultModel : ''}`"
+                        :value="item.providerCode"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
+                  <el-form-item label="历史分析条件">
+                    <el-radio-group v-model="form.logPullDefaults.autoAiAnalysisCondition.analysisMode">
+                      <el-radio-button label="always">允许重复分析</el-radio-button>
+                      <el-radio-button label="not_successful">仅无成功记录</el-radio-button>
+                    </el-radio-group>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoAiEnabled" :xs="24" :md="12">
+                  <el-form-item label="状态过滤">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">仅自动分析受影响；手动分析不受影响</div>
+                  </el-form-item>
+                </el-col>
+                <el-col
+                  v-if="form.logPullDefaults.autoAiEnabled && form.logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled"
+                  :span="24"
+                >
+                  <el-form-item label="允许的工单状态" required>
+                    <el-select
+                      v-model="form.logPullDefaults.autoAiAnalysisCondition.statusCodes"
+                      multiple
+                      filterable
+                      collapse-tags
+                      collapse-tags-tooltip
+                      placeholder="请选择内部工作流状态（多选）"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in workflowStatusOptions"
+                        :key="`auto-ai-status-${item.value}`"
+                        :label="`${item.label} [${item.value}]`"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-help-text">工单状态需先映射为内部状态；未满足条件时不会消耗 Token</div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-divider content-position="left">自动拉日志停止条件</el-divider>
+                  <div class="form-help-text form-help-text--section">
+                    这里控制哪些内部状态命中后不再自动拉日志，只影响自动任务，不影响手工拉日志。
+                  </div>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="自动拉日志停止条件">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoLogPullStopCondition.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">仅影响自动拉日志；手工拉日志不受影响</div>
+                  </el-form-item>
+                </el-col>
+                <el-col
+                  v-if="form.logPullDefaults.autoLogPullStopCondition.enabled"
+                  :xs="24"
+                  :md="12"
+                >
+                  <el-form-item label="停止运行中自动任务">
+                    <el-switch
+                      v-model="form.logPullDefaults.autoLogPullStopCondition.cancelActiveRecords"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                    <div class="form-help-text">命中状态后可自动停止仍在执行中的自动日志任务</div>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.logPullDefaults.autoLogPullStopCondition.enabled" :span="24">
+                  <el-form-item label="停止状态（多选）" required>
+                    <el-select
+                      v-model="form.logPullDefaults.autoLogPullStopCondition.statusCodes"
+                      multiple
+                      filterable
+                      collapse-tags
+                      collapse-tags-tooltip
+                      placeholder="请选择命中后停止自动拉日志的内部工作流状态"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="item in workflowStatusOptions"
+                        :key="`auto-log-stop-status-${item.value}`"
+                        :label="`${item.label} [${item.value}]`"
+                        :value="item.value"
+                      />
+                    </el-select>
+                    <div class="form-help-text">命中任一状态即停止自动拉日志，并不再发送无意义的拉取失败通知</div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+          </el-card>
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>存储与资源限制</span>
+                <el-tag type="warning" effect="plain">运行态护栏</el-tag>
+              </div>
+            </template>
+            <el-form :model="logPullStorage" label-width="170px">
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="最大并发数">
+                    <el-input-number
+                      v-model="logPullStorage.maxWorkers"
+                      :min="1"
+                      :max="20"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="轮询间隔(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.pollIntervalSec"
+                      :min="3"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="轮询超时(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.pollTimeoutSec"
+                      :min="60"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="下载超时(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.downloadTimeoutSec"
+                      :min="30"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="入库字符上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxContentChars"
+                      :min="10000"
+                      :step="10000"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="解压时限(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.maxExtractSeconds"
+                      :min="30"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="解压文件数上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxExtractFileCount"
+                      :min="100"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="解压总字节上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxExtractTotalBytes"
+                      :min="10485760"
+                      :step="10485760"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索时限(秒)">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchSeconds"
+                      :min="3"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索文件数上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchFileCount"
+                      :min="10"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="降级搜索字节上限">
+                    <el-input-number
+                      v-model="logPullStorage.maxPythonSearchBytes"
+                      :min="10485760"
+                      :step="10485760"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索最大并发数">
+                    <el-input-number
+                      v-model="logPullStorage.maxConcurrentSearches"
+                      :min="1"
+                      :max="8"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="搜索单行最大字节数">
+                    <el-input-number
+                      v-model="logPullStorage.maxSearchLineBytes"
+                      :min="256"
+                      :max="4194304"
+                      :step="65536"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="存储方式">
+                    <el-select
+                      v-model="logPullStorage.mode"
+                      placeholder="请选择"
+                      style="width: 100%"
+                    >
+                      <el-option label="本地" value="local" />
+                      <el-option label="FTP" value="ftp" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12" v-if="logPullStorage.mode === 'local'">
+                  <el-form-item label="本地保存目录">
+                    <el-input v-model="logPullStorage.localDirectory" placeholder="留空则使用默认目录" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24" v-if="logPullStorage.mode === 'ftp'">
+                  <el-form-item label="FTP 配置">
+                    <div class="ftp-config-grid">
+                      <el-input v-model="logPullStorage.ftp.host" placeholder="主机" class="ftp-item" />
+                      <el-input-number v-model="logPullStorage.ftp.port" :min="1" placeholder="端口" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.username" placeholder="用户名" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.password" type="password" show-password placeholder="密码" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.baseDir" placeholder="基础目录" class="ftp-item" />
+                      <el-input-number v-model="logPullStorage.ftp.timeoutSec" :min="1" placeholder="超时秒数" class="ftp-item" />
+                      <el-input v-model="logPullStorage.ftp.encoding" placeholder="编码" class="ftp-item" />
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-divider content-position="left">下载完成后处理</el-divider>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后解压">
+                    <el-switch
+                      v-model="logPullStorage.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后提取版本">
+                    <el-switch
+                      v-model="logPullStorage.postDownloadVersionExtractEnabled"
+                      :disabled="!logPullStorage.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="下载完成后生成索引">
+                    <el-switch
+                      v-model="logPullStorage.postDownloadIndexEnabled"
+                      :disabled="!logPullStorage.postDownloadExtractEnabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+            <div class="mt16">
+              <el-button type="success" :loading="logPullStorageSaving" @click="logPullStorageHandleSave">保存存储与资源限制</el-button>
+            </div>
+          </el-card>
+          <el-card shadow="never" class="config-card mt16">
+            <template #header>
+              <div class="card-header">
+                <span>日志拉取外部接口配置</span>
+                <el-tag type="warning" effect="plain">环境分组 + 子环境 + 商家映射</el-tag>
+              </div>
+            </template>
+            <el-alert
+              class="mb16"
+              title="配置说明"
+              type="info"
+              :closable="false"
+              show-icon
+              description="每个环境分组（如 prod、uat）下可配置多个子环境，每个子环境绑定独立凭证。商家选择后根据 vendorFilter 自动匹配子环境；「*」表示覆盖所有商家。未匹配到时可指定默认子环境兜底。"
+            />
+            <div v-loading="logPullExternalLoading" class="env-groups-container">
+              <el-empty v-if="!logPullExternalGroupKeys.length && !logPullExternalLoading" description="暂无环境分组配置，请新增" />
+              <div v-for="groupKey in logPullExternalGroupKeys" :key="groupKey" class="env-group-card">
+                <div class="env-group-header">
+                  <el-input
+                    :model-value="logPullExternalGroups[groupKey].label"
+                    placeholder="分组名称，如 生产环境"
+                    style="width: 260px"
+                    @update:model-value="val => logPullExternalUpdateGroupLabel(groupKey, val)"
+                  />
+                  <el-tag type="info" size="small" class="ml8">{{ groupKey }}</el-tag>
+                  <div class="env-group-actions">
+                    <el-button type="danger" link icon="Delete" @click="logPullExternalRemoveGroup(groupKey)">删除分组</el-button>
+                  </div>
+                </div>
+                <el-table :data="Object.entries(logPullExternalGroups[groupKey].items)" border size="small" class="env-items-table">
+                  <el-table-column label="子环境 key" width="130">
+                    <template #default="{ row }">
+                      <el-tag size="small">{{ row[0] }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="名称" width="150">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].label"
+                        placeholder="UAT1"
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'label', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="insertUrl" min-width="200">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].insertUrl"
+                        placeholder="https://..."
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'insertUrl', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="pageUrl" min-width="200">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].pageUrl"
+                        placeholder="https://..."
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'pageUrl', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="凭证绑定" width="220">
+                    <template #default="{ row }">
+                      <el-select
+                        :model-value="row[1].credentialBindingId"
+                        placeholder="选择凭证绑定"
+                        filterable
+                        clearable
+                        size="small"
+                        style="width: 100%"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'credentialBindingId', val)"
+                      >
+                        <el-option
+                          v-for="opt in logPullExternalCredentialBindingOptions"
+                          :key="opt.bindingId"
+                          :label="opt.label"
+                          :value="String(opt.bindingId)"
+                        />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="origin" min-width="200">
+                    <template #default="{ row }">
+                      <el-input
+                        :model-value="row[1].origin"
+                        placeholder="https://..."
+                        size="small"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'origin', val)"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="商家范围" width="280">
+                    <template #default="{ row }">
+                      <el-select
+                        :model-value="row[1].vendorFilter"
+                        multiple
+                        filterable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="选择商家（* 表示全部）"
+                        size="small"
+                        style="width: 100%"
+                        @update:model-value="val => logPullExternalUpdateItemConfig(groupKey, row[0], 'vendorFilter', val)"
+                      >
+                        <el-option label="★ 全部商家" value="*" />
+                        <el-option
+                          v-for="opt in logPullExternalVendorFilterOptions"
+                          :key="opt.value"
+                          :label="opt.label"
+                          :value="opt.value"
+                          :disabled="row[1].vendorFilter.includes('*')"
+                        />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="70" align="center">
+                    <template #default="{ row }">
+                      <el-button link type="danger" icon="Delete" size="small" @click="logPullExternalRemoveEnvItem(groupKey, row[0])" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div class="env-group-footer">
+                  <el-button type="primary" link icon="Plus" @click="logPullExternalAddEnvItem(groupKey)">新增子环境</el-button>
+                  <el-form-item label="默认子环境" label-width="100px" class="env-default-item">
+                    <el-select
+                      :model-value="logPullExternalGroups[groupKey].defaultItem"
+                      placeholder="商家未匹配时兜底"
+                      clearable
+                      size="small"
+                      style="width: 200px"
+                      @update:model-value="val => logPullExternalUpdateGroupDefaultItem(groupKey, val)"
+                    >
+                      <el-option
+                        v-for="itemKey in logPullExternalGetItemKeysForGroup(groupKey)"
+                        :key="itemKey"
+                        :label="`${logPullExternalGroups[groupKey].items[itemKey]?.label || itemKey} (${itemKey})`"
+                        :value="itemKey"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </div>
+              </div>
+            </div>
+            <div class="mt16">
+              <el-button type="primary" icon="Plus" @click="logPullExternalAddGroup">新增环境分组</el-button>
+              <el-button type="success" :loading="logPullExternalSaving" @click="logPullExternalHandleSave" class="ml8">保存外部接口配置</el-button>
+            </div>
+          </el-card>
+      <template #footer>
+        <el-button @click="logPullDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="saving" @click="handleSave">保存拉日志默认值</el-button>
+      </template>
+    </el-dialog>
 
     <div class="action-bar">
       <el-button
@@ -3487,6 +3527,10 @@
       tableId: resolveCommon(consumer.section.tableId, form.bitableCommon.tableId),
     }));
   });
+
+  // 弹窗可见性：字段识别与映射 / 日志拉取设置
+  const mappingDialogVisible = ref(false);
+  const logPullDialogVisible = ref(false);
 
   const pushOptionsLoading = ref(false);
   const pushOptions = ref([]);
@@ -4046,11 +4090,28 @@ const lightModelOptionsMap = ref({});
 <style scoped>
   .ticket-sync-automation-page {
     background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 1));
-    padding-bottom: 96px;
+    padding-bottom: 72px;
     display: block;
     width: 100%;
+    max-width: 100%;
     align-self: stretch;
     box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  /* 页签容器：块级 + 允许收缩，避免 flex 主轴撑出横向滚动 */
+  .config-tabs-wrap {
+    width: 100%;
+    min-width: 0;
+    display: block;
+  }
+
+  .config-tabs-wrap :deep(.el-tabs__content) {
+    overflow: hidden;
+  }
+
+  .config-tabs-wrap :deep(.el-tab-pane) {
+    min-width: 0;
   }
 
   .ticket-sync-automation-page :deep(.el-form),
@@ -4079,6 +4140,81 @@ const lightModelOptionsMap = ref({});
   .ticket-sync-automation-page :deep(.el-date-editor),
   .ticket-sync-automation-page :deep(.el-textarea) {
     width: 100%;
+  }
+
+  /* ---- 自适应与紧凑化 ---- */
+
+  /* 表格撑宽根治：表格本体宽度受限，超宽列由 el-table 内部横向滚动，不再把页面撑宽 */
+  .ticket-sync-automation-page :deep(.el-table),
+  .config-dialog :deep(.el-table) {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .ticket-sync-automation-page :deep(.el-table__inner-wrapper),
+  .config-dialog :deep(.el-table__inner-wrapper) {
+    max-width: 100%;
+  }
+
+  /* 页签导航紧凑 */
+  .config-tabs-wrap :deep(.el-tabs__nav-wrap)::after {
+    height: 1px;
+  }
+
+  /* 卡片间距紧凑：mt16 → 视觉 12px */
+  .ticket-sync-automation-page :deep(.config-card) {
+    border-radius: 10px;
+  }
+
+  .ticket-sync-automation-page :deep(.config-card .el-card__body) {
+    padding: 14px 16px;
+  }
+
+  /* 表单项间距紧凑 */
+  .ticket-sync-automation-page :deep(.el-form-item) {
+    margin-bottom: 12px;
+  }
+
+  .ticket-sync-automation-page :deep(.el-form-item__label) {
+    padding-bottom: 2px;
+  }
+
+  /* 分隔线上下间距紧凑 */
+  .ticket-sync-automation-page :deep(.el-divider--horizontal) {
+    margin: 14px 0 12px;
+  }
+
+  /* 提示条紧凑 */
+  .ticket-sync-automation-page :deep(.el-alert) {
+    padding: 6px 12px;
+  }
+
+  .ticket-sync-automation-page :deep(.el-alert__description) {
+    margin-top: 2px;
+  }
+
+  /* mt16 在本页统一收紧为 12px */
+  .ticket-sync-automation-page .mt16,
+  .ticket-sync-automation-page :deep(.mt16) {
+    margin-top: 12px;
+  }
+
+  /* 弹窗内表单：窄屏降为单列（覆盖 Element Plus 的百分比列宽，需同时覆盖 width） */
+  @media (max-width: 768px) {
+    .config-dialog :deep(.el-col) {
+      max-width: 100%;
+      flex: 0 0 100%;
+      width: 100%;
+    }
+
+    .config-dialog :deep(.el-form-item) {
+      margin-bottom: 10px;
+    }
+  }
+
+  /* 弹窗遮罩下页面禁止滚动 */
+  .config-dialog :deep(.el-dialog) {
+    margin-bottom: 4vh;
   }
 
   .page-intro {
@@ -4123,8 +4259,17 @@ const lightModelOptionsMap = ref({});
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
     font-weight: 600;
+  }
+
+  .card-header .el-tag {
+    max-width: 100%;
+    white-space: normal;
+    height: auto;
+    padding-top: 2px;
+    padding-bottom: 2px;
   }
 
   .mapping-blocks {
@@ -4388,6 +4533,54 @@ const lightModelOptionsMap = ref({});
   .connection-preview-cell {
     word-break: break-all;
     line-height: 1.4;
+  }
+
+  /* 卡片头部设置按钮（靠右） */
+  .card-setting-btn {
+    margin-left: auto;
+  }
+
+  /* 摘要卡片（设置入口卡片的内容概览） */
+  .card-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .card-summary-item {
+    border: 1px dashed var(--el-border-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--el-fill-color-blank);
+  }
+
+  .card-summary-item__label {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .card-summary-item__value {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+  }
+
+  /* 配置弹窗：内容区限宽滚动，避免撑出横向滚动 */
+  .config-dialog {
+    max-width: 96vw;
+  }
+
+  .config-dialog .el-dialog__body {
+    max-height: 72vh;
+    overflow-y: auto;
+    padding-top: 10px;
+  }
+
+  .config-dialog__tip {
+    margin-right: 12px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
   }
 
 </style>
