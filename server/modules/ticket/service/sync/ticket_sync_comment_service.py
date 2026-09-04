@@ -13,27 +13,41 @@ from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.util.sync_util import SyncUtil
+from utils.log_util import logger
 
 
 class TicketSyncCommentService:
-    """stepReason 排查过程评论同步。"""
+    """stepReason/L1Response 排查过程评论同步。"""
 
     SOURCE_CODE = "external_sync"
+    # 支持分段解析为评论的外部字段名，新增字段时同步扩展此处与 build_segment_field_key。
+    SUPPORTED_SEGMENT_FIELDS = ("stepReason", "l1Response")
 
     @classmethod
     def parse_step_reason_date(cls, value: str) -> datetime | None:
         """
-        解析 stepReason 分段开头的日期。
+        解析 stepReason/L1Response 分段开头的日期并应用时间边界规则。
+
+        边界规则：解析出的日期等于服务器本地"今天"时返回 None，
+        评论时间由入库时刻兜底（避免当天记录出现 00:00:00 误导时间线）；
+        非当天日期返回当天 00:00:00（表格中只写了日期，时间不可知）。
+
         :param value: 日期文本，支持 yyyyMMdd
-        :return: 日期时间，解析失败返回 None
+        :return: 日期时间；当天日期或解析失败返回 None
         """
         text = str(value or "").strip()
         if not re.fullmatch(r"\d{8}", text):
             return None
         try:
-            return datetime.combine(datetime.strptime(text, "%Y%m%d").date(), time.min)
+            parsed_date = datetime.strptime(text, "%Y%m%d").date()
         except Exception:
             return None
+        if parsed_date == datetime.now().date():
+            logger.info(
+                f"排查过程分段日期为当天，使用入库时间作为评论时间: date={text}"
+            )
+            return None
+        return datetime.combine(parsed_date, time.min)
 
     @classmethod
     def parse_step_reason_segments(cls, step_reason: Any) -> list[dict[str, Any]]:
@@ -99,30 +113,44 @@ class TicketSyncCommentService:
         source_system: str,
         source_record_id: str,
         segment_index: int,
+        source_field: str = "stepReason",
     ) -> str:
         """
-        构建 stepReason 评论分段幂等键。
+        构建排查过程评论分段幂等键。
+
+        stepReason 保持历史键结构（不拼字段名）以兼容已入库评论；
+        其他字段（如 l1Response）把字段名拼入键，避免与 stepReason 同序号段冲突。
+
         :param source_system: 来源系统
         :param source_record_id: 来源记录ID
         :param segment_index: 分段序号
+        :param source_field: 来源字段名
         :return: 稳定幂等键
         """
-        raw_key = "|".join(
-            [
-                str(source_system or "").strip() or cls.SOURCE_CODE,
-                str(source_record_id or "").strip(),
-                "stepReason",
-                str(int(segment_index or 0)),
-            ]
-        )
+        normalized_field = str(source_field or "").strip() or "stepReason"
+        key_parts = [
+            str(source_system or "").strip() or cls.SOURCE_CODE,
+            str(source_record_id or "").strip(),
+        ]
+        if normalized_field != "stepReason":
+            key_parts.append(normalized_field)
+        key_parts.append("stepReason" if normalized_field == "stepReason" else "segment")
+        key_parts.append(str(int(segment_index or 0)))
+        raw_key = "|".join(key_parts)
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     @classmethod
-    def get_step_reason_content_segments(cls, sync_object: TicketExternalSyncUpsertModel) -> list[dict[str, Any]]:
+    def get_step_reason_content_segments(
+        cls,
+        sync_object: TicketExternalSyncUpsertModel,
+        *,
+        source_field: str = "stepReason",
+    ) -> list[dict[str, Any]]:
         """
-        从同步模型中读取 stepReason 对应的富文本片段。
+        从同步模型中读取指定来源字段对应的富文本片段。
 
         :param sync_object: 外部同步入参。
+        :param source_field: 来源字段名，如 stepReason/l1Response。
         :return: text/mention 片段列表。
         """
         extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
@@ -131,7 +159,14 @@ class TicketSyncCommentService:
             if isinstance(extra_data.get("_bitable_field_segments"), dict)
             else {}
         )
-        for key in ("stepReason", "step_reason"):
+        candidate_keys = [source_field]
+        # 驼峰转下划线：l1Response -> l1_response，兼容 extra_data 中两种键写法。
+        snake_field = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", source_field).lower()
+        if snake_field and snake_field != source_field:
+            candidate_keys.append(snake_field)
+        if source_field == "stepReason":
+            candidate_keys.append("step_reason")
+        for key in candidate_keys:
             segments = field_segments.get(key)
             if isinstance(segments, list):
                 return [item for item in segments if isinstance(item, dict)]
@@ -178,6 +213,38 @@ class TicketSyncCommentService:
         return result
 
     @classmethod
+    def _resolve_field_text(
+        cls,
+        sync_object: TicketExternalSyncUpsertModel,
+        *,
+        source_field: str,
+    ) -> str:
+        """
+        从同步模型中读取指定外部字段的原始文本。
+
+        读取顺序：模型同名属性 -> extra_data（驼峰/下划线键）-> raw_payload。
+
+        :param sync_object: 外部同步入参。
+        :param source_field: 外部字段名，如 stepReason/l1Response。
+        :return: 字段文本，缺失返回空字符串。
+        """
+        snake_field = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", source_field).lower()
+        attr_text = str(getattr(sync_object, snake_field, "") or "").strip()
+        if attr_text:
+            return attr_text
+        extra_data = sync_object.extra_data if isinstance(sync_object.extra_data, dict) else {}
+        for key in (source_field, snake_field):
+            text = str(extra_data.get(key) or "").strip()
+            if text:
+                return text
+        raw_payload = sync_object.raw_payload if isinstance(sync_object.raw_payload, dict) else {}
+        for key in (source_field, snake_field):
+            text = str(raw_payload.get(key) or "").strip()
+            if text:
+                return text
+        return ""
+
+    @classmethod
     def sync_step_reason_comments(
         cls,
         db: Session,
@@ -186,57 +253,107 @@ class TicketSyncCommentService:
         sync_object: TicketExternalSyncUpsertModel,
     ) -> dict[str, Any]:
         """
-        将外部 stepReason 排查过程幂等同步为工单评论。
+        将外部排查过程类字段（stepReason/l1Response）幂等同步为工单评论。
+
+        每个字段独立解析、独立幂等键；l1Response 评论追加一线回复标识文案。
         :param db: 数据库会话
         :param ticket: 工单对象
         :param sync_object: 外部同步入参
-        :return: 同步结果摘要
+        :return: 同步结果摘要，按来源字段分组。
         """
-        step_reason = str(getattr(sync_object, "step_reason", "") or "").strip()
-        if not step_reason and isinstance(sync_object.extra_data, dict):
-            step_reason = str(sync_object.extra_data.get("step_reason") or "").strip()
-        if not step_reason and isinstance(sync_object.raw_payload, dict):
-            step_reason = str(
-                sync_object.raw_payload.get("stepReason")
-                or sync_object.raw_payload.get("step_reason")
-                or ""
-            ).strip()
-        if not step_reason:
-            return {"skipped": True, "reason": "empty_step_reason", "created": 0, "updated": 0, "skippedCount": 0}
+        summary: dict[str, Any] = {"skipped": False, "fields": {}, "created": 0, "updated": 0, "skippedCount": 0}
+        for source_field in cls.SUPPORTED_SEGMENT_FIELDS:
+            field_text = cls._resolve_field_text(sync_object, source_field=source_field)
+            if not field_text:
+                continue
+            field_summary = cls._sync_single_segment_field(
+                db,
+                ticket=ticket,
+                sync_object=sync_object,
+                source_field=source_field,
+                field_text=field_text,
+            )
+            summary["fields"][source_field] = field_summary
+            summary["created"] += field_summary.get("created") or 0
+            summary["updated"] += field_summary.get("updated") or 0
+            summary["skippedCount"] += field_summary.get("skippedCount") or 0
+        if not summary["fields"]:
+            return {
+                "skipped": True,
+                "reason": "empty_segment_fields",
+                "created": 0,
+                "updated": 0,
+                "skippedCount": 0,
+            }
+        return summary
+
+    @classmethod
+    def _sync_single_segment_field(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        sync_object: TicketExternalSyncUpsertModel,
+        source_field: str,
+        field_text: str,
+    ) -> dict[str, Any]:
+        """
+        将单个排查过程类字段的分段文本幂等同步为工单评论。
+
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param sync_object: 外部同步入参
+        :param source_field: 外部字段名
+        :param field_text: 字段原始文本
+        :return: 单字段同步结果摘要。
+        """
         source_system = str(getattr(sync_object.source, "system", "") or "").strip() or cls.SOURCE_CODE
         source_record_id = str(getattr(sync_object.source, "record_id", "") or "").strip() or str(
             sync_object.ticket_no or ""
         ).strip()
-        segments = cls.parse_step_reason_segments(step_reason)
-        rich_text_segments = cls.get_step_reason_content_segments(sync_object)
+        segments = cls.parse_step_reason_segments(field_text)
+        rich_text_segments = cls.get_step_reason_content_segments(sync_object, source_field=source_field)
+        is_l1_response = source_field == "l1Response"
         summary = {"skipped": False, "total": len(segments), "created": 0, "updated": 0, "skippedCount": 0}
         for segment in segments:
             segment_index = int(segment.get("segmentIndex") or 0)
             content = str(segment.get("content") or "").strip()
+            if not content:
+                continue
             segment_key = cls.build_step_reason_segment_key(
                 source_system=source_system,
                 source_record_id=source_record_id,
                 segment_index=segment_index,
+                source_field=source_field,
             )
             comment_segments = cls.slice_content_segments_for_text(
-                full_text=step_reason,
+                full_text=field_text,
                 content=content,
                 content_segments=rich_text_segments,
             )
+            # 一线回复标识：l1Response 字段产生的评论在正文末尾追加文案，随内容哈希幂等。
+            display_content = f"{content}\n【一线回复】" if is_l1_response else content
+            attachments: dict[str, Any] | None = None
+            if comment_segments or is_l1_response:
+                attachments = {
+                    "sourceFieldLabel": "一线回复" if is_l1_response else "排查过程",
+                }
+                if comment_segments:
+                    attachments["content_segments"] = comment_segments
             _, action = TicketCommentCoreService.upsert_synced_comment(
                 db,
                 ticket_id=ticket.ticket_id,
-                content=content,
+                content=display_content,
                 user_name=str(segment.get("personName") or "").strip() or "外部同步",
                 source_type="feishu_bitable",
                 source_system=source_system,
                 source_record_id=source_record_id,
-                source_field="stepReason",
+                source_field=source_field,
                 source_segment_key=segment_key,
                 source_segment_index=segment_index,
                 source_content_hash=str(segment.get("contentHash") or "").strip(),
                 external_created_at=segment.get("externalCreatedAt"),
-                attachments={"content_segments": comment_segments} if comment_segments else None,
+                attachments=attachments,
                 is_internal=False,
             )
             if action == "created":

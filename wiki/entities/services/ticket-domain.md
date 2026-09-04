@@ -349,6 +349,12 @@ graph TD
   - `_update_execution_record` 对审计写入集中裁剪：响应文本按 `EXECUTION_TEXT_MAX_CHARS`（20000 字符）截断；`request_payload/response_payload/token_usage` 经 `_compact_execution_payload` 把超过 20000 字符的字符串字段替换为占位文本、超 200 项的列表截断。AI 分析请求载荷中的 80 万字节日志正文不再整包写入内存和审计长文本列。
   - 成功任务的 `raw_output` 写库前截断到 5000 字符，完整内容以工作区 result 文件与分析结果结构化字段为准。
 - 2026-08-30 修复 `_serialize_task_summary` 结论字段键名不匹配：`analysis_result` 入库键为 snake_case（`analysis_summary/root_cause/fix_suggestion`），摘要提取曾用驼峰键导致概览 `latestAiAnalysis` 三个结论字段恒为空；现以 snake_case 优先、驼峰兼容读取。`TicketReadService.get_summary` 的 `latestAiAnalysis` 与工单列表 `get_list_services` 摘要同源受益。注意轻量概览不返回 `latestSnapshot`，概览快照字段展示依赖独立快照接口或完整详情链路。
+- 2026-09-03 起工单附件与评论来源扩展：
+  - 工单附件（方案A）：外部字段模型新增 `ticketAttachments`/`replyAttachments` 附件类目标字段，`FeishuBitableUtil.extract_attachment_tokens` 只持久化 `fileToken/name/size/type`（飞书 API 返回的临时 URL 约 24 小时过期，不落库）；附件元信息存 `ticket.extra_data.bitable_attachments` 并参与快照哈希（替换文件会触发重同步）。新增 `service/attachment/TicketAttachmentUrlService` 按 fileToken 实时换临时下载链接（30 分钟进程内缓存），接口 `GET /ticket/{id}/attachments` 与 `GET /ticket/{id}/attachments/{fileToken}/url`（302）挂在 CRUD 控制器，权限 `ticket:ticket:query`。
+  - 一线回复评论：同步模型新增 `l1_response`（驼峰 `l1Response`）；`TicketSyncCommentService` 泛化为多字段分段评论（`SUPPORTED_SEGMENT_FIELDS`），l1Response 评论正文追加【一线回复】文案且 `attachments.sourceFieldLabel=一线回复`；幂等键 `build_step_reason_segment_key` 新增 `source_field` 参数，stepReason 保持历史键结构（不重复入库），l1Response 键拼入字段名。
+  - 评论时间边界：`parse_step_reason_date` 解析日期等于本地"今天"时返回 None（评论时间落到入库时刻），非当天维持 `00:00:00`；仅影响增量，存量不回填。
+  - 记录评论拉取（预留）：`service/sync/TicketBitableRecordCommentService` 扫描本地带 `bitableRecordId` 的工单同步飞书记录自带评论，幂等键 `sha256("bitable_comment|{record_id}|{comment_id}")`。**截至 2026-09 飞书 bitable 服务端 API 无"记录评论"接口**（官方 SDK 1.6.9 资源清单与概览文档确认仅 app/table/view/field/form/record/role/member/dashboard 八类资源，真实环境各路径探测均 404）；端点经 `messageSync.bitableRecordCommentApiPath` 可配置，404 记录警告并安全跳过，API 上线后配置路径即可启用。配置项 `syncBitableRecordComments`（默认 false）、`bitableRecordCommentMaxTickets`（默认 200）；手动接口 `POST /ticket/sync/automation/bitable-record-comments/run`，定时任务 `module_task.scheduler_maintenance.pull_feishu_bitable_record_comments`。
+  - 前端：评论列表展示一线回复标签与评论附件（图片内联、文件下载）；概览页新增"工单附件"卡片。用户说明见 `web/public/docs/ticket/ticket-attachment-comments.md`，更新记录见 `web/public/docs/updates/2026-09-03-ticket-attachment-and-comments.md`。
 
 ## 参见
 

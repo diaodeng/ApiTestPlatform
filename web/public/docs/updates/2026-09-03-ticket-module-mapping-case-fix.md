@@ -38,4 +38,4 @@
 
 ## 遗留事项
 
-- 存量数据修复：可执行 `server/scripts/sync_ticket_module_mapping.py` 重新回填历史工单的 `module_id` / `module_code`（脚本语义已与运行时对齐）。注意脚本为"预览确认后执行"交互式设计，需人工确认。
+- 存量数据修复：2026-09-03 已执行 `server/scripts/sync_ticket_module_mapping.py` 全量回填，共更新 1045 条工单的 `module_id` / `module_code`（与 `hrm_module` 实际行一致，`module_name` 未改动，一致性抽查无异常）。修复后仍有约 725 条因映射配置未覆盖（如 `POS - 促销/优惠券/会员（包括集成）`、`POS - NewStore`、`店务 - 收货/退货/DDR`、`BI` 等）或项目下缺模块记录而无法回填，需在「工单同步自动化 → 模块映射」补齐配置 / 补齐模块数据后重跑脚本继续修复。脚本为预览确认后执行的幂等设计，可安全重复执行。

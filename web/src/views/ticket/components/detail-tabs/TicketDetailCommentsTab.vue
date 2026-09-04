@@ -1,7 +1,8 @@
 <script setup name="TicketDetailCommentsTab">
   import { ref, watch } from 'vue';
   import { getCurrentInstance } from 'vue';
-  import { addTicketComment, getTicketComments } from '@/api/ticket/ticket';
+  import { Document } from '@element-plus/icons-vue';
+  import { addTicketComment, buildTicketAttachmentUrl, getTicketComments } from '@/api/ticket/ticket';
 
   const props = defineProps({
     ticketId: {
@@ -30,6 +31,52 @@
     content: '',
     isInternal: false,
   });
+
+  /**
+   * 判断评论是否来自一线回复字段（l1Response）。
+   * @param {object} item 评论对象。
+   * @returns {boolean} 是否一线回复。
+   */
+  function isL1ResponseComment(item) {
+    return String(item?.sourceField || '') === 'l1Response';
+  }
+
+  /**
+   * 从评论附件中提取附件文件列表。
+   * attachments 可能形如 { comment_attachments: [...] }（记录评论）或
+   * { content_segments: [...] }（排查过程富文本，无文件），只取文件类附件。
+   * @param {object|Array} attachments 评论附件字段。
+   * @returns {Array} 附件文件列表 [{fileToken,name,size,type}]。
+   */
+  function extractCommentFiles(attachments) {
+    let files = [];
+    if (Array.isArray(attachments)) {
+      files = attachments;
+    } else if (attachments && typeof attachments === 'object') {
+      files = Array.isArray(attachments.comment_attachments) ? attachments.comment_attachments : [];
+    }
+    return (files || []).filter((file) => file && file.fileToken);
+  }
+
+  /**
+   * 构建附件临时链接地址（后端 302 跳转飞书临时下载链接）。
+   * @param {object} file 附件对象。
+   * @returns {string} 临时链接地址。
+   */
+  function attachmentSrc(file) {
+    return buildTicketAttachmentUrl(props.ticketId, file.fileToken);
+  }
+
+  /**
+   * 判断附件是否为图片类型（用于决定内联展示或链接下载）。
+   * @param {object} file 附件对象。
+   * @returns {boolean} 是否图片。
+   */
+  function isImageFile(file) {
+    const type = String(file.type || '').toLowerCase();
+    const name = String(file.name || '').toLowerCase();
+    return type.includes('image') || /\.(png|jpe?g|gif|bmp|webp|svg)$/.test(name);
+  }
 
   /**
    * 获取当前工单评论列表，组件内部维护加载状态和缓存。
@@ -148,9 +195,27 @@
           <div class="comment-meta">
             <strong>{{ item.userName || '-' }}</strong>
             <el-tag v-if="item.isInternal" size="small" type="warning" effect="plain">内部</el-tag>
+            <el-tag v-if="isL1ResponseComment(item)" size="small" type="success" effect="plain">一线回复</el-tag>
             <span class="comment-time">{{ parseTime(item.createTime) }}</span>
           </div>
           <div class="comment-content">{{ item.content || '-' }}</div>
+          <div v-if="extractCommentFiles(item.attachments).length" class="comment-files">
+            <template v-for="file in extractCommentFiles(item.attachments)" :key="file.fileToken">
+              <a
+                v-if="isImageFile(file)"
+                class="comment-file-image"
+                :href="attachmentSrc(file)"
+                target="_blank"
+                rel="noopener"
+              >
+                <img :src="attachmentSrc(file)" :alt="file.name" loading="lazy" />
+              </a>
+              <a v-else class="comment-file-link" :href="attachmentSrc(file)" target="_blank" rel="noopener">
+                <el-icon><Document /></el-icon>
+                {{ file.name }}
+              </a>
+            </template>
+          </div>
         </article>
       </div>
     </section>
@@ -269,6 +334,32 @@
     word-break: break-word;
     background: #f8fafc;
     border-radius: 6px;
+  }
+
+  .comment-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .comment-file-image img {
+    max-width: 180px;
+    max-height: 140px;
+    border: 1px solid #e4e7ed;
+    border-radius: 6px;
+    display: block;
+  }
+
+  .comment-file-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    color: #409eff;
+    font-size: 12px;
+    background: #f0f7ff;
+    border-radius: 4px;
   }
 </style>
 

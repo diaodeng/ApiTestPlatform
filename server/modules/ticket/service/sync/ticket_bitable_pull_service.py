@@ -471,6 +471,14 @@ class TicketBitablePullService:
         ):
             payload["ticketAssigneeEmail"] = payload.get("currentAssigneeEmail")
         mapping_payload = dict(payload)
+        # 附件类目标字段不属于外部同步模型顶层字段，转移到 extra_data 保存，
+        # 并从 mapping_payload 中移除避免模型校验丢弃或污染 external_field_mapping 快照。
+        attachment_payload: dict[str, Any] = {}
+        for attachment_field in FeishuBitableUtil.ATTACHMENT_TARGET_FIELDS:
+            value = payload.pop(attachment_field, None)
+            mapping_payload.pop(attachment_field, None)
+            if value:
+                attachment_payload[attachment_field] = value
         top_level_alias_map = {
             "ticketVender": "projectName",
             "ticketModle": "moduleName",
@@ -485,6 +493,7 @@ class TicketBitablePullService:
             "ticketPos": "ticketPos",
             "ticketSco": "ticketSco",
             "stepReason": "stepReason",
+            "l1Response": "l1Response",
             "customerPriority": "customerPriority",
             "internalPriority": "internalPriority",
         }
@@ -553,6 +562,9 @@ class TicketBitablePullService:
         if record_url:
             external_field_mapping["bitableRecordUrl"] = record_url
         extra_data["external_field_mapping"] = external_field_mapping
+        if attachment_payload:
+            # 附件元信息（fileToken/name/size/type）持久化到 extra_data，供前端换临时链接查看。
+            extra_data["bitable_attachments"] = attachment_payload
         bitable_pull_meta: dict[str, Any] = {
             "recordId": record_id,
             "snapshotHash": FeishuBitableUtil.build_pull_snapshot_hash(

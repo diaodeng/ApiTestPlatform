@@ -503,6 +503,27 @@ export function getTicketComments(ticketId) {
   });
 }
 
+// 查询工单附件元信息列表（多维表格附件字段，含 fileToken/name/size/type）
+export function getTicketAttachments(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/attachments`,
+    method: 'get',
+  });
+}
+
+// 构建附件临时下载链接地址（由后端 302 跳转到飞书临时链接，可直接用于 <img> 或下载）
+export function buildTicketAttachmentUrl(ticketId, fileToken) {
+  return `${import.meta.env.VITE_APP_BASE_API}/ticket/${ticketId}/attachments/${fileToken}/url`;
+}
+
+// 手动执行多维表格记录评论拉取
+export function runBitableRecordCommentPull() {
+  return request({
+    url: '/ticket/sync/automation/bitable-record-comments/run',
+    method: 'post',
+  });
+}
+
 // 查询工单协同消息
 export function getTicketMessages(ticketId) {
   return request({

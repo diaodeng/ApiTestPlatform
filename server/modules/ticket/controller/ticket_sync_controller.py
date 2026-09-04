@@ -28,6 +28,7 @@ from modules.ticket.service.stats.ticket_custom_statistics_definition_service im
 from modules.ticket.service.stats.ticket_custom_statistics_service import TicketCustomStatisticsService
 from modules.ticket.service.sync.ticket_batch_reclassification_service import TicketBatchReclassificationService
 from modules.ticket.service.sync.ticket_bitable_pull_service import TicketBitablePullService
+from modules.ticket.service.sync.ticket_bitable_record_comment_service import TicketBitableRecordCommentService
 from modules.ticket.service.sync.ticket_external_sync_request_service import TicketExternalSyncRequestService
 from modules.ticket.service.sync.ticket_manual_automation_service import TicketManualAutomationService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
@@ -233,6 +234,32 @@ async def preview_bitable_pull_fields(
             TicketBitablePullService.preview_bitable_pull_fields_services,
             query_db,
             bitable_pull_override=config_value,
+        )
+        return ResponseUtil.success(data=result)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketSyncController.post(
+    "/sync/automation/bitable-record-comments/run",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:sync:config:edit"))],
+)
+async def run_bitable_record_comment_pull(
+    request: Request,
+    query_db: Session = Depends(get_db),
+):
+    """
+    手动执行多维表格记录评论拉取。
+
+    扫描本地带 bitableRecordId 的工单，逐条拉取记录自带评论并幂等同步为工单评论；
+    需 messageSync.syncBitableRecordComments 开启，单次处理量由配置上限控制。
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketBitableRecordCommentService.run_record_comment_pull_services,
+            query_db,
+            trigger_source="manual",
         )
         return ResponseUtil.success(data=result)
     except Exception as e:

@@ -1,6 +1,6 @@
 <script setup name="TicketDetailOverviewTab">
   import { computed, getCurrentInstance, ref, watch } from 'vue';
-  import { bindTicketIssueFromSimilar, getTicketSummary } from '@/api/ticket/ticket';
+  import { bindTicketIssueFromSimilar, buildTicketAttachmentUrl, getTicketAttachments, getTicketSummary } from '@/api/ticket/ticket';
   import TicketSimilarPanel from '../detail-shared/TicketSimilarPanel.vue';
 
   const props = defineProps({
@@ -55,6 +55,8 @@
   const loading = ref(false);
   const detail = ref({});
   const issueActionLoading = ref(false);
+  const ticketAttachments = ref([]);
+  const attachmentsLoading = ref(false);
   const hasExternalDetail = computed(() =>
     Boolean(props.detail?.ticketId || props.detail?.ticket_id)
   );
@@ -111,6 +113,37 @@
   function refreshAiData() {
     emit('refresh-ai');
     loadOverview();
+  }
+
+  /**
+   * 加载工单附件元信息（多维表格附件字段，fileToken 结构）。
+   * @returns {Promise<void>} 附件加载完成 Promise。
+   */
+  function loadAttachments() {
+    if (!resolvedTicketId.value) return Promise.resolve();
+    attachmentsLoading.value = true;
+    return getTicketAttachments(resolvedTicketId.value)
+      .then((response) => {
+        const groups = response.data?.attachments || {};
+        ticketAttachments.value = Object.entries(groups).flatMap(([fieldLabel, files]) =>
+          (files || []).map((file) => ({ ...file, fieldLabel }))
+        );
+      })
+      .catch(() => {
+        ticketAttachments.value = [];
+      })
+      .finally(() => {
+        attachmentsLoading.value = false;
+      });
+  }
+
+  /**
+   * 构建附件临时下载链接（后端 302 跳转飞书临时链接）。
+   * @param {object} file 附件对象。
+   * @returns {string} 临时链接地址。
+   */
+  function attachmentSrc(file) {
+    return buildTicketAttachmentUrl(resolvedTicketId.value, file.fileToken);
   }
 
   /**
@@ -210,7 +243,10 @@
   watch(
     () => props.active,
     (active) => {
-      if (active) loadOverview();
+      if (active) {
+        loadOverview();
+        loadAttachments();
+      }
     },
     { immediate: true }
   );
@@ -322,6 +358,28 @@
           class="mt16"
         />
       </el-card>
+
+      <el-card v-if="ticketAttachments.length" shadow="never" class="mb16">
+        <template #header>
+          <div class="panel-header">
+            <span>工单附件</span>
+            <span class="attachment-count">{{ ticketAttachments.length }} 个</span>
+          </div>
+        </template>
+        <div v-loading="attachmentsLoading" class="attachment-list">
+          <a
+            v-for="file in ticketAttachments"
+            :key="file.fileToken"
+            class="attachment-item"
+            :href="attachmentSrc(file)"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="attachment-name">{{ file.name }}</span>
+            <span class="attachment-meta">{{ file.fieldLabel }}</span>
+          </a>
+        </div>
+      </el-card>
     </el-col>
     <el-col :span="8">
       <TicketSimilarPanel
@@ -344,5 +402,48 @@
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 1.65;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .attachment-count {
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .attachment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .attachment-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    color: #303133;
+    background: #f8fafc;
+    border-radius: 6px;
+  }
+
+  .attachment-item:hover {
+    background: #f0f7ff;
+  }
+
+  .attachment-name {
+    font-size: 13px;
+    word-break: break-all;
+  }
+
+  .attachment-meta {
+    flex-shrink: 0;
+    color: #909399;
+    font-size: 12px;
   }
 </style>

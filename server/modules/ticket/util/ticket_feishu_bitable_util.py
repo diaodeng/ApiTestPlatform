@@ -15,6 +15,11 @@ from modules.ticket.util.sync_util import SyncUtil
 class FeishuBitableUtil:
     """飞书多维表格数据解析与转换工具。"""
 
+    # 需要按分段拆为评论的富文本目标字段（与 TicketSyncCommentService.SUPPORTED_SEGMENT_FIELDS 对应）。
+    SEGMENT_COMMENT_TARGET_FIELDS = {"stepReason", "l1Response"}
+    # 附件类目标字段：保存 file_token 列表结构而不是纯文本。
+    ATTACHMENT_TARGET_FIELDS = {"ticketAttachments", "replyAttachments"}
+
     # ---- 目标字段名归一化 ----
 
     @staticmethod
@@ -231,6 +236,42 @@ class FeishuBitableUtil:
     # ---- 字段值归一化 ----
 
     @staticmethod
+    def extract_attachment_tokens(value: Any) -> list[dict[str, Any]]:
+        """
+        从飞书多维表格附件字段中提取文件元信息列表。
+
+        飞书附件字段返回形如 [{"file_token": "...", "name": "...", "size": 1, "type": "png/png"}] 的数组。
+        这里只保留 file_token/name/size/type 结构化信息，不保留临时下载 URL（约 24 小时过期，不可持久化）。
+
+        :param value: 多维表格附件字段原始值。
+        :return: 附件元信息列表；非附件结构返回空列表。
+        """
+        if not isinstance(value, list):
+            return []
+        attachments: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            file_token = str(
+                item.get("file_token") or item.get("fileToken") or item.get("token") or ""
+            ).strip()
+            if not file_token:
+                continue
+            attachment = {
+                "fileToken": file_token,
+                "name": str(item.get("name") or item.get("title") or "").strip() or file_token,
+            }
+            size = item.get("size")
+            if isinstance(size, (int, float)):
+                attachment["size"] = int(size)
+            file_type = str(item.get("type") or item.get("mimeType") or "").strip()
+            if file_type:
+                attachment["type"] = file_type
+            if all(existing.get("fileToken") != file_token for existing in attachments):
+                attachments.append(attachment)
+        return attachments
+
+    @staticmethod
     def normalize_record_scalar(
         value: Any,
         *,
@@ -425,6 +466,13 @@ class FeishuBitableUtil:
                     FeishuBitableUtil.extract_person_name(raw_value, join_separator=join_separator)
                     or FeishuBitableUtil.normalize_record_scalar(raw_value, join_separator=join_separator)
                 )
+            elif target_field in FeishuBitableUtil.ATTACHMENT_TARGET_FIELDS:
+                # 附件字段保存结构化 file_token 列表，空列表不写入 payload。
+                normalized_value = FeishuBitableUtil.extract_attachment_tokens(raw_value)
+                if not normalized_value:
+                    continue
+                payload[target_field] = normalized_value
+                continue
             else:
                 normalized_value = FeishuBitableUtil.normalize_record_scalar(
                     raw_value,
@@ -439,7 +487,7 @@ class FeishuBitableUtil:
                 payload[target_field] = FeishuBitableUtil.normalize_record_datetime_text(normalized_value)
             else:
                 payload[target_field] = normalized_value
-            if target_field == "stepReason":
+            if target_field in FeishuBitableUtil.SEGMENT_COMMENT_TARGET_FIELDS:
                 segments = FeishuBitableUtil.normalize_rich_text_segments_for_comment(raw_value)
                 if segments:
                     field_segments[target_field] = segments

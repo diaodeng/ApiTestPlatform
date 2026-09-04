@@ -669,6 +669,7 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
     sync_consumer: str | None = Field(default=None, description="同步消费者名称，用于预初始化交付状态")
     raw_payload: dict[str, Any] | None = Field(default=None, description="外部工单原始载荷")
     step_reason: str | None = Field(default=None, description="外部排查过程原始文本")
+    l1_response: str | None = Field(default=None, description="外部一线回复（L1 Response）原始文本")
     detected_version_key: str | None = Field(default=None, description="外部来源识别到的版本文本，仅用于解析版本中心ID")
     ticket_no: str = Field(description="工单编号")
     title: str | None = Field(default=None, description="工单标题，可为空后由服务端自动生成")
@@ -679,6 +680,7 @@ class TicketExternalSyncUpsertModel(TicketBaseModel):
         self.title = str(self.title or "").strip() or None
         self.sync_consumer = str(self.sync_consumer or "").strip() or None
         self.step_reason = str(self.step_reason or "").strip() or None
+        self.l1_response = str(self.l1_response or "").strip() or None
         if not self.ticket_no:
             raise ValueError("ticketNo 不能为空")
         return self

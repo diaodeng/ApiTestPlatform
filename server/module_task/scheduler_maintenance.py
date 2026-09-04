@@ -305,6 +305,49 @@ def pull_feishu_bitable_ticket_sync(
     return result
 
 
+@register_job("module_task.scheduler_maintenance.pull_feishu_bitable_record_comments")
+def pull_feishu_bitable_record_comments(
+    *args,
+    **kwargs,
+):
+    """
+    多维表格记录评论拉取定时任务。
+
+    扫描本地带 bitableRecordId 的工单，把记录自带评论幂等同步为工单评论。
+    需要 messageSync.syncBitableRecordComments 开启，未开启时任务直接跳过。
+
+    :param kwargs: 支持 maxTickets 覆盖单次最大处理工单数（默认取配置值 200）。
+    :return: 执行结果摘要。
+    """
+    start_time = time.time()
+    logger.info(f"任务module_task.scheduler_maintenance.pull_feishu_bitable_record_comments开始执行:{start_time}")
+
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    max_tickets = kwargs.pop("maxTickets", None)
+    from modules.ticket.service.sync.ticket_bitable_record_comment_service import (
+        TicketBitableRecordCommentService,
+    )
+
+    with SessionLocal() as db:
+        result = TicketBitableRecordCommentService.run_record_comment_pull_services(
+            db,
+            trigger_source="scheduler",
+            max_tickets=int(max_tickets) if max_tickets else 200,
+        )
+    logger.info(
+        f"多维表格记录评论拉取任务执行完成 | tickets={result.get('ticketCount')} "
+        f"created={result.get('created')} updated={result.get('updated')} "
+        f"skipped={result.get('skippedCount')} failures={len(result.get('failures') or [])}"
+    )
+    logger.info(
+        f"任务module_task.scheduler_maintenance.pull_feishu_bitable_record_comments执行耗时："
+        f"{time.time() - start_time}"
+    )
+    return result
+
+
 @register_job("module_task.scheduler_maintenance.ticket_person_overdue_reminder")
 def ticket_person_overdue_reminder(
     *args,

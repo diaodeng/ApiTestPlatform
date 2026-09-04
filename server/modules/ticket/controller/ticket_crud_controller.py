@@ -2,6 +2,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -33,6 +34,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_similar_result_cache_service import TicketSimilarResultCacheService
 from modules.ticket.service.ai.ticket_similarity_case_service import TicketSimilarityCaseService
+from modules.ticket.service.attachment.ticket_attachment_url_service import TicketAttachmentUrlService
 from modules.ticket.service.core.ticket_import_service import TicketImportService
 from modules.ticket.service.core.ticket_read_service import TicketReadService
 from modules.ticket.service.core.ticket_service import TicketService
@@ -304,6 +306,59 @@ async def get_ticket_summary(request: Request, ticket_id: int, query_db: Session
     try:
         result = await run_in_threadpool(TicketReadService.get_summary, query_db, ticket_id)
         return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/attachments", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
+)
+async def get_ticket_attachments(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
+    """
+    获取工单附件元信息列表（来自多维表格附件字段，只含 fileToken/name/size/type）。
+
+    前端拿到 fileToken 后调用 /{ticket_id}/attachments/{file_token}/url 换取临时下载链接。
+    """
+    try:
+        ticket = await run_in_threadpool(TicketDao.get_ticket_by_id, query_db, ticket_id)
+        if not ticket:
+            return ResponseUtil.failure(msg="工单不存在")
+        attachments = await run_in_threadpool(
+            TicketAttachmentUrlService.collect_ticket_extra_attachments, ticket.extra_data
+        )
+        return ResponseUtil.success(data={"ticketId": ticket_id, "attachments": attachments})
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
+    "/{ticket_id:int}/attachments/{file_token}/url",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))],
+)
+async def get_ticket_attachment_url(
+    request: Request,
+    ticket_id: int,
+    file_token: str,
+    query_db: Session = Depends(get_db),
+):
+    """
+    按附件 fileToken 换取飞书临时下载链接，302 跳转。
+
+    临时链接约 24 小时有效，由服务端实时换取并做短 TTL 缓存；前端可直接用于 <img>/下载。
+    """
+    del ticket_id  # fileToken 全局唯一，ticket_id 仅用于路由鉴权归属
+    try:
+        config = await run_in_threadpool(TicketAttachmentUrlService.resolve_bitable_runtime, query_db)
+        tmp_url = await run_in_threadpool(
+            TicketAttachmentUrlService.get_tmp_download_url,
+            config=config,
+            file_token=file_token,
+        )
+        if not tmp_url:
+            return ResponseUtil.failure(msg="附件临时链接获取失败，请稍后重试")
+        return RedirectResponse(url=tmp_url, status_code=302)
     except Exception as e:
         logger.exception(e)
         return ResponseUtil.error(msg=str(e))

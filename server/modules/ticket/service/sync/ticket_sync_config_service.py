@@ -57,6 +57,9 @@ class TicketSyncConfigService:
         {"fieldName": "recordId", "label": "多维表格记录ID", "required": False, "category": "source"},
         {"fieldName": "reason", "label": "原因说明", "required": False, "category": "basic"},
         {"fieldName": "stepReason", "label": "排查过程", "required": False, "category": "basic"},
+        {"fieldName": "l1Response", "label": "一线回复", "required": False, "category": "basic"},
+        {"fieldName": "ticketAttachments", "label": "工单附件", "required": False, "category": "attachment"},
+        {"fieldName": "replyAttachments", "label": "答复附件", "required": False, "category": "attachment"},
     ]
     DEFAULT_TICKET_STAT_CLASSIFICATIONS = {
         "issueTypes": [
@@ -425,6 +428,9 @@ class TicketSyncConfigService:
             "syncTicketCommentToBitable": False,
             "syncTicketCommentToFeishuThread": False,
             "syncBitableNewStepToFeishuThread": False,
+            "syncBitableRecordComments": False,
+            "bitableRecordCommentMaxTickets": 200,
+            "bitableRecordCommentApiPath": "",
             "bitableStepReasonField": "stepReason",
             "bitableTicketNoField": "ticketNo",
             "appendStepReasonFormat": "{date} {user}：{content}",
@@ -1509,6 +1515,17 @@ class TicketSyncConfigService:
             message_sync.get("syncBitableNewStepToFeishuThread"),
             False,
         )
+        message_sync["syncBitableRecordComments"] = SyncUtil.to_bool(
+            message_sync.get("syncBitableRecordComments"),
+            False,
+        )
+        message_sync["bitableRecordCommentMaxTickets"] = max(
+            SyncUtil.safe_int(message_sync.get("bitableRecordCommentMaxTickets")) or 200,
+            1,
+        )
+        message_sync["bitableRecordCommentApiPath"] = str(
+            message_sync.get("bitableRecordCommentApiPath") or ""
+        ).strip()
         message_sync["bitableStepReasonField"] = (
             str(message_sync.get("bitableStepReasonField") or "stepReason").strip() or "stepReason"
         )
