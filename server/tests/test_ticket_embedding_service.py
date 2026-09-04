@@ -246,6 +246,76 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         self.assertFalse(default_payload.force_rebuild)
         self.assertTrue(force_payload.force_rebuild)
 
+    def test_openai_compatible_embedding_truncates_text_by_max_text_chars(self):
+        """文本超过 maxTextChars 时应在请求前截断，0 表示不限制。"""
+        response = self._response(200, {"data": [{"embedding": [0.1] * 2}]})
+        config = {
+            "endpoint": "http://embedding.local/v1/embeddings",
+            "model": "mock-embedding",
+            "dimension": 2,
+            "timeoutSeconds": 15,
+            "maxTextChars": 100,
+        }
+
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.post", return_value=response) as post_mock:
+            TicketEmbeddingService._embed_text_openai_compatible("字" * 500, config)
+
+        sent_text = post_mock.call_args.kwargs["json"]["input"]
+        self.assertEqual(len(sent_text), 100)
+
+        # maxTextChars=0 表示不限制
+        config_unlimited = {**config, "maxTextChars": 0}
+        with patch("modules.ticket.service.ai.ticket_embedding_service.httpx.post", return_value=response) as post_mock:
+            TicketEmbeddingService._embed_text_openai_compatible("字" * 500, config_unlimited)
+
+        self.assertEqual(len(post_mock.call_args.kwargs["json"]["input"]), 500)
+
+    def test_normalize_config_keeps_max_text_chars(self):
+        """保存配置时应保留 maxTextChars，非法值回退默认 12000。"""
+        normalized = TicketEmbeddingService._normalize_config_for_save(
+            {"embedding": {"maxTextChars": 8000}}
+        )
+        self.assertEqual(normalized["embedding"]["maxTextChars"], 8000)
+
+        normalized_default = TicketEmbeddingService._normalize_config_for_save({"embedding": {}})
+        self.assertEqual(normalized_default["embedding"]["maxTextChars"], 12000)
+
+    def test_build_ticket_text_shrinks_long_description_within_budget(self):
+        """描述超预算时应压缩长行保留头部，标题等短字段保持完整。"""
+        from types import SimpleNamespace
+
+        ticket = SimpleNamespace(
+            title="Open ticket: Missing '預訂' button in cashier",
+            description="正文头部关键信息。" + "填充内容" * 5000,
+            ai_analysis={},
+            tags=None,
+        )
+        config = {"fields": ["title", "description"], "embedding": {"maxTextChars": 1000}}
+
+        text = TicketEmbeddingService.build_ticket_text(ticket, config=config)
+
+        self.assertLessEqual(len(text), 1000)
+        # 标题是短行，必须完整保留
+        self.assertIn(ticket.title, text)
+        # 描述被压缩但保留头部关键信息
+        self.assertIn("正文头部关键信息。", text)
+
+    def test_build_ticket_text_keeps_short_text_untouched(self):
+        """未超预算的文本不应被改写。"""
+        from types import SimpleNamespace
+
+        ticket = SimpleNamespace(
+            title="短标题",
+            description="短描述",
+            ai_analysis={},
+            tags=None,
+        )
+        config = {"fields": ["title", "description"], "embedding": {"maxTextChars": 1000}}
+
+        text = TicketEmbeddingService.build_ticket_text(ticket, config=config)
+
+        self.assertEqual(text, "短标题\n短描述")
+
     def test_normalize_provider_supports_embedding(self):
         """检索 Provider 支持本地 hash、数据库 Embedding 和 Qdrant 三种严格模式。"""
         self.assertEqual(TicketEmbeddingService._normalize_provider("embedding"), "embedding")

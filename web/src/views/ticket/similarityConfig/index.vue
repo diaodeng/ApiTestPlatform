@@ -142,6 +142,25 @@
               />
             </el-form-item>
           </el-col>
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="8">
+            <el-form-item label="文本上限(字符)">
+              <el-input-number
+                v-model="form.embedding.maxTextChars"
+                :min="0"
+                :max="100000"
+                :step="1000"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="usesExternalEmbedding" :xs="24" :md="24">
+            <el-alert
+              type="info"
+              show-icon
+              :closable="false"
+              title="向量化文本超过文本上限时会在请求前截断（0 表示不限制），需小于模型上下文长度对应的字符数；如 BAAI/bge-m3 上限 8192 token，建议保持 12000。"
+            />
+          </el-col>
           <el-col v-if="usesExternalEmbedding" :xs="24" :md="24">
             <el-form-item label="自定义请求参数">
               <el-input
@@ -407,21 +426,14 @@
   const qdrantCollections = ref([]);
   const embeddingRequestParamsText = ref('{}');
 
+  // 向量化字段白名单与后端 build_ticket_text 的 field_map 保持一致，
+  // 后端会静默忽略白名单外的取值，这里不再展示无效选项。
   const fieldOptions = [
-    { value: 'ticketNo', label: '工单号' },
     { value: 'title', label: '标题' },
     { value: 'description', label: '描述' },
-    { value: 'originDescription', label: '原始描述' },
     { value: 'aiSummary', label: 'AI摘要' },
-    { value: 'rootCause', label: '最终根因' },
-    { value: 'solution', label: '解决方案' },
-    { value: 'rca', label: 'RCA结构化内容' },
-    { value: 'moduleName', label: '模块' },
-    { value: 'categoryName', label: '分类' },
-    { value: 'issueTypeName', label: '工单类型' },
-    { value: 'status', label: '状态' },
-    { value: 'assignee', label: '当前处理人' },
-    { value: 'tags', label: '标签' },
+    { value: 'symptom', label: 'RCA问题现象' },
+    { value: 'importantKeywords', label: '重要关键词' },
   ];
 
   const sceneOptions = [
@@ -481,18 +493,7 @@
       threshold: 0.05,
       keywordWeight: 0.15,
       vectorWeight: 0.85,
-      fields: [
-        'ticketNo',
-        'title',
-        'description',
-        'aiSummary',
-        'rootCause',
-        'solution',
-        'rca',
-        'moduleName',
-        'categoryName',
-        'tags',
-      ],
+      fields: ['title', 'description', 'aiSummary', 'symptom', 'importantKeywords'],
       embedding: {
         provider: 'local_hash',
         model: 'local-hash',
@@ -501,6 +502,7 @@
         endpoint: '',
         apiKey: '',
         timeoutSeconds: 15,
+        maxTextChars: 12000,
         requestParams: {},
       },
       qdrant: {
@@ -594,6 +596,7 @@
         endpoint: String(form.embedding.endpoint || '').trim(),
         apiKey: String(form.embedding.apiKey || '').trim(),
         timeoutSeconds: Number(form.embedding.timeoutSeconds || 15),
+        maxTextChars: Number(form.embedding.maxTextChars ?? 12000),
         requestParams:
           requestParams && typeof requestParams === 'object' && !Array.isArray(requestParams)
             ? requestParams
