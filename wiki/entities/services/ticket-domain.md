@@ -342,6 +342,7 @@ graph TD
 - 2026-08-27 起，工单 AI 分析任务在服务端创建审计记录后，会把 `sys_ai_task_execution.execution_id` 回填到 `TicketAiAnalysisTask.audit_execution_id`；任务成功后优先回写原始 `token_usage` JSON 到 AI 审计表，再把可聚合的 `input/output/total` Token 统计写入工单 AI 任务表，供历史列表和概览直接读取。
 - 同日起，`GET /ticket/{ticket_id}/summary` 增加 `aiTokenSummary`，只在单工单维度按 `ticket_id` 进行一次 SQL 聚合，用于展示整单 AI Token 合计；该聚合不会扩散到工单列表或批量摘要接口，因此不引入列表查询性能回退。
 - AI 执行审计服务保留 `tokenUsage` 原始 JSON 作为详情追溯依据；审计列表仅派生 `totalTokenCount` 展示摘要，避免在审计表和任务表双写重复统计字段。
+- 2026-09-04 起，AI 分析审计的"一次真实调用对应一份 token"口径统一：重试新建尝试审计的 `source_ref` 与首次创建同口径（优先业务工单号）；Agent 命中本地工作区缓存 `result.json` 直接回传成功时（`AgentResponseWebUI.cache_hit=true`，旧版 Agent 兼容识别 result 内 `command_line == "cached:result.json"`），服务端视为复用而非新调用，不把恢复出的历史 token 写入本次任务统计与审计（真实消耗以首次尝试的失败/中断审计为准），任务状态描述提示"复用 Agent 缓存结果"；服务重启恢复迟到结果的 `_process_recovered_success` 链路同口径处理。此前重试审计的 `source_ref` 曾用系统工单ID、与首次记录的 INC 编号不一致，且缓存命中会把同一份消耗在失败审计与缓存成功审计各记一遍。
 - 同一详情弹窗切换工单前会清空概览、相似工单、AI 任务和问题操作状态，并通过工单 ID、请求 generation 和弹窗打开状态校验异步响应；关闭详情时停止日志列表自动刷新、日志准备进度查询和 AI 短轮询，清理日志查看器和历史临时表单状态。前端用户说明见 `web/public/docs/ticket_detail.md`，接口契约见 `server/docs/ticket_read_api.md`。
 - 2026-08-27 起工单链路执行内存治理（背景：1.4G 内存预算下 RSS 持续爬升）：
   - `TicketLogPullDao.get_record_meta_by_id` 提供轻量记录查询，defer `compressed_content` 和 `exception_detail` 两个长文本列；状态轮询、重拉、停止、删除、下载文件名、自动 AI 触发等只关心元数据的后台与控制器路径统一改用该查询，日志查看正文两条路径保留全量读取。`get_latest_success_record_by_ticket_id` 与 `list_success_records_by_pull_identity` 同样增加 defer，避免 AI 分析触发时整包加载压缩正文。

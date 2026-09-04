@@ -3284,7 +3284,9 @@ class TicketAiAnalysisService:
                     task_name="工单AI分析",
                     source_type="ticket",
                     source_id=task.ticket_id,
-                    source_ref=str(task.ticket_id),
+                    # 来源引用与首次创建保持同一口径：优先业务工单号，工单号缺失时才回退系统ID，
+                    # 避免重试审计的来源引用从 INC 编号变成纯数字 ticket_id。
+                    source_ref=str(getattr(ticket, "ticket_no", "") or task.ticket_id),
                     provider_code=cls._resolve_task_provider_code(task),
                     model_name=cls._resolve_task_model_name(task),
                     request_payload={
@@ -4006,6 +4008,18 @@ class TicketAiAnalysisService:
             db.commit()
             return
         token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump)
+        # 与主执行链路同口径：Agent 回传的是本地缓存结果时，恢复出的 token 属于历史尝试，
+        # 本次审计不再重复计入，避免服务重启恢复把同一次消耗再记一遍。
+        recovered_cache_hit = bool(
+            response_dump.get("cache_hit")
+            or response_payload.get("cache_hit")
+            or str(response_payload.get("command_line") or "").strip() == "cached:result.json"
+        )
+        if recovered_cache_hit:
+            logger.info(
+                f"AI分析任务[{task_id}] 恢复的迟到结果来自 Agent 本地缓存，不重复计入 Token"
+            )
+            token_usage_payload = None
         normalized_token_usage = cls._normalize_token_usage(token_usage_payload)
         mapping = TicketAiDao.get_repo_mapping_by_id(db, getattr(task, "mapping_id", None) or 0)
         version_key = cls._get_version_key(db, task.version_id)
@@ -4028,7 +4042,10 @@ class TicketAiAnalysisService:
             db,
             task_id,
             status=TicketAiAnalysisStatus.SUCCESS.value,
-            status_desc="分析成功（恢复服务重启前的执行结果）",
+            status_desc=(
+                "复用 Agent 缓存结果（恢复服务重启前的执行结果）" if recovered_cache_hit
+                else "分析成功（恢复服务重启前的执行结果）"
+            ),
             finished_at=datetime.now(),
             analysis_result=normalized,
             raw_output=result_text[:5000],
@@ -4043,7 +4060,8 @@ class TicketAiAnalysisService:
             status="success",
             response_payload=response_payload,
             response_text=result_text,
-            token_usage=token_usage_payload,
+            # 缓存命中时不写 token_usage，避免把历史尝试的消耗重复计入本次恢复。
+            token_usage=None if recovered_cache_hit else token_usage_payload,
         )
         db.commit()
 
@@ -4500,6 +4518,23 @@ class TicketAiAnalysisService:
                 )
                 raise ValueError(failure_message)
             token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump, response_object)
+            # 缓存命中（Agent 直接回传工作区历史 result.json）说明本次没有发生新的模型调用。
+            # 恢复出的 token 属于历史尝试的真实消耗（已随原失败/中断审计留痕），本次不再重复计入，
+            # 否则重试一次就会把同一次消耗在"失败审计"和"缓存成功审计"各记一遍，Token 统计翻倍。
+            cache_hit = bool(
+                getattr(response_object, "cache_hit", False)
+                or response_dump.get("cache_hit")
+                or response_payload.get("cache_hit")
+                # 兼容未回传 cache_hit 字段的旧版 Agent：缓存命中时 result 内
+                # command_line 固定为 cached:result.json（真实执行时是完整命令行）。
+                or str(response_payload.get("command_line") or "").strip() == "cached:result.json"
+            )
+            if cache_hit:
+                logger.info(
+                    f"AI分析任务[{task_id}] Agent 命中本地缓存结果，本次未发生模型调用，"
+                    f"不重复计入 Token: recovered_token_usage={token_usage_payload}"
+                )
+                token_usage_payload = None
             # Schema 校验前先做保守清洗：部分模型未被 --output-schema 真实约束，
             # 会输出 schema 外字段或把 evidence 写成对象数组，清洗后再校验可挽救此类结果。
             parsed_result, sanitize_actions = TicketAiResultSchemaUtil.sanitize_result_payload(
@@ -4565,11 +4600,13 @@ class TicketAiAnalysisService:
                 cls._submission_user_placeholder(task),
             )
             finished_at = datetime.now()
+            # 缓存命中时状态描述明确提示"复用 Agent 缓存结果"，让用户知道本次没有重新跑模型。
+            cache_status_desc = "复用 Agent 缓存结果" if cache_hit else "分析成功"
             cls._mark_task_status(
                 db,
                 task_id,
                 status=TicketAiAnalysisStatus.SUCCESS.value,
-                status_desc="分析成功",
+                status_desc=cache_status_desc,
                 finished_at=finished_at,
                 analysis_result=normalized,
                 raw_output=(result_text or raw_stdout or "")[:5000],
@@ -4587,7 +4624,9 @@ class TicketAiAnalysisService:
                 base_url=(str(selected_provider.base_url or "").strip() or None) if selected_provider else None,
                 response_payload=response_payload or response_dump,
                 response_text=result_text or raw_stdout,
-                token_usage=token_usage_payload,
+                # 缓存命中不写 token_usage：本次审计记录代表一次未发生的调用，
+                # 真实消耗以首次尝试的失败/中断审计记录为准，避免统计翻倍。
+                token_usage=None if cache_hit else token_usage_payload,
             )
             db.commit()
             TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)

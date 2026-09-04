@@ -3133,6 +3133,9 @@ class TicketAiAnalysisService:
                     "success": True,
                     "status": "success",
                     "message": "AI 分析已完成，直接返回缓存结果",
+                    # 结果来自本地工作区历史 result.json，并非本次真实模型调用；
+                    # 服务端据此把审计记为复用缓存，不把恢复出的 token 计入本次统计。
+                    "cache_hit": True,
                     "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": cached_result,
