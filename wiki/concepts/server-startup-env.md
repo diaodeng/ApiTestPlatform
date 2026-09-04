@@ -13,6 +13,11 @@
 
 1. `server/start.sh` 默认设置 `APP_ENV=prod`。
 2. `server/supervisord.conf` 中的 FastAPI、Celery Beat、Celery Worker 统一使用同一个 `APP_ENV`。
+3. `supervisor` 改为在 `start.sh` 中通过 pip 安装（`/usr/local/bin/pip3 install -U supervisor`），不再通过 apt 安装。
+   原因：基础镜像 `python:3.11-slim-bullseye` 已于 2026-08-31 结束 LTS，镜像站的
+   `bullseye-security` 池中 `supervisor` 的依赖 `python3-pkg-resources` 的 .deb 文件被清理
+   （索引仍在，下载 404），导致 apt 安装 supervisor 失败、`supervisord` 不存在。supervisor
+   本身是纯 Python 包，pip 安装即可；apt 部分仅保留 `libcairo2` 和 `ripgrep`。
 
 ## 使用方式
 
