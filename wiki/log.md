@@ -1,3 +1,13 @@
+## [2026-09-04] REFACTOR | 工单同步配置页面按入库执行顺序重组
+
+- 触发：用户反馈工单同步配置页面配置太多太乱，要求按实际执行顺序调整和聚合，且同一配置不要出现在多个地方。
+- 分析：延后后处理 `execute_deferred_sync_post_process` 真实执行顺序为 自动化范围闸门 → AI 提取 → 标题 → 翻译 → AI 分类 → 自动化（识别/拉日志/AI）→ 向量 → 发布收敛+群推送；旧页面按存储结构分组，场景开关在 5 张卡片重复出现（4 种命名风格 ×4 场景共 31 个），连接凭据在 6 处平铺。
+- 改动（仅 `web/src/views/ticket/syncAutomation/index.vue`，零后端改动）：页签重组为 入库流程/来源与拉取/日志拉取配置/评论同步/通知任务/统计与分类/操作 7 个；入库流程卡片按执行顺序编号 ⓪~⑧；新增"场景 × 步骤 开关总表"聚合全部 31 个场景开关（动态绑定 `form[section][field]`，路径与原静态绑定逐一核对一致；翻译/AI分类/群推送行带与后端语义一致的总开关）；移除卡片内重复的 31 个静态开关列；识别规则+映射配置合并为"① 字段识别与映射"卡；主动拉取/邮箱补全/汇总统计/按人催办的连接字段收入"连接与凭证覆盖"折叠区（留空继承 bitableCommon/feishuAuth，隐藏不清空）；"来源与拉取"新增只读"连接解析预览"（模拟 `resolve_bitable_runtime_config` 继承顺序）；远端同步 `credentialBindingId/origin` 从飞书凭证卡迁回远端同步卡；"指定工单手动自动化"从主动拉取卡拆出为独立卡移入"操作"页签。
+- 坑点：① 折叠区把 `el-col` 直接搬进 `el-collapse-item` 违反 el-row/el-col 嵌套结构，4 处均补包 `el-row`；② 飞书凭证卡里原本混放了 remoteSync 的两个字段（视觉分组错误，非存储错误），迁移时严格保持 v-model 路径不变；③ Windows 下无独立 python，用 `server` 的 `uv run python` 执行重排脚本，脚本执行后删除。
+- 验证：`npm run build:prod` 通过（35.8s 无 error）；新旧 v-model 绑定 diff 确认零字段丢失（31 个开关由静态转总表动态绑定）；后端未改动，ruff 805 存量告警与本次无关。
+- 文档：重写 `web/public/docs/ticket-sync-automation.md`（按新页签结构、补执行顺序章节与开关总表键位对照）；新增 `web/public/docs/changelog/2026-09-04-sync-automation-page-reorg.md`；wiki `flows/ticket-external-sync-flow.md` 补"配置页面分组"章节。
+- 明确不做（P5 备选）：不改配置键命名、不抽独立 `sceneMatrix` 存储结构——需要迁移与兼容读取，待展示层稳定后评估。
+
 ## [2026-09-04] FIX+PERF | 新版客户端 Agent 连接服务器点击卡死修复
 
 - 触发：用户反馈新版客户端 Agent 菜单点击"连接服务器"后页面卡住直到连接成功或失败。

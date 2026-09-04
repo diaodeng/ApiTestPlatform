@@ -24,7 +24,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 按工单号手动模拟多维表格拉取或重放本地工单快照自动化
 created: 2026-05-31
-updated: 2026-08-25
+updated: 2026-09-04
 ---
 
 # 工单外部同步与内网拉取流程
@@ -125,6 +125,15 @@ sequenceDiagram
 
 | 手动多维表格补跑未找到记录或存在重复精确匹配 | 请求失败；系统不会同步相似工单号，也不会在重复记录中随机选择。 |
 | 手动数据库快照补跑未找到工单 | 请求失败；不会触发入库覆盖或后处理。 |
+
+## 配置页面分组（2026-09-04 起）
+
+工单同步配置页（`web/src/views/ticket/syncAutomation/index.vue`）按职责重组为 7 个页签，仅前端展示重组，`ticket.sync.automation` 配置存储结构与后端读取逻辑零变化：
+
+- **入库流程**：卡片按延后后处理真实执行顺序编号——⓪ 自动化关注范围（总闸门）→ 场景×步骤开关总表（新增）→ ① 字段识别与映射（原"映射/规则"页签合并）→ ② 外部工单字段模型 → ③ AI 提取 → ④ 标题总结 → ⑤ 翻译 → ⑥ AI 分类 → ⑦ 同步后自动化 → ⑧ 群推送 → 旁路·知识提炼。
+- **来源与拉取**：飞书统一凭证、`bitableCommon` 公共配置、只读"连接解析预览"（模拟 `resolve_bitable_runtime_config` 的继承顺序：模块自身 → bitableCommon → feishuAuth）、远端同步链接（含 `credentialBindingId/origin`）、主动拉取、外部推送邮箱补全；各模块连接字段收入"连接与凭证覆盖"折叠区，留空继承、填写覆盖。
+- **日志拉取配置 / 评论同步 / 通知任务 / 统计与分类 / 操作**：按旁路、定时通知任务、统计口径、手动入口归组。
+- 4 场景（外部推送/远端拉取/多维表格拉取/手动创建）× 7 步骤共 31 个场景开关全部集中在"场景 × 步骤 开关总表"，通过 `form[section][field]` 动态绑定回原配置键；翻译/AI 分类/群推送三行带与后端一致的总开关（`translateConfig.enabled`/`aiClassification.enabled`/`groupPush.enabled`），各步骤卡片中不再重复出现场景开关。
 
 ## 参见
 
