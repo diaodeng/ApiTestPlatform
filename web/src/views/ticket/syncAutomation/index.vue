@@ -4096,7 +4096,10 @@ const lightModelOptionsMap = ref({});
     max-width: 100%;
     align-self: stretch;
     box-sizing: border-box;
-    overflow-x: hidden;
+    /* 必须用 clip 而不是 hidden：hidden 会把 overflow-y 变成 auto，本元素变成滚动容器，
+       导致底部 action-bar 的 position: sticky 失效（按钮悬在内容末尾而非吸附视口底部）；
+       clip 只做裁剪、不产生滚动容器，横向滚动防护与 sticky 吸底两者兼得。 */
+    overflow-x: clip;
   }
 
   /* 页签容器：块级 + 允许收缩，避免 flex 主轴撑出横向滚动 */
