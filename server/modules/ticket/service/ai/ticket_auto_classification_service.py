@@ -391,7 +391,13 @@ class TicketAutoClassificationService:
             return bool(ai_config.get("runOnExternalSync"))
         if normalized_scene == "remote_pull" or normalized_scene.startswith("remote_pull"):
             return bool(ai_config.get("runOnRemotePull"))
-        if normalized_scene == "manual_create" or normalized_scene.startswith("ticket_manual_create"):
+        # manual_create 场景来源包括统一后处理编排（manual_create_auto_category）和
+        # 旧手动入库路径（ticket_manual_create_auto_category），两种前缀都需要命中。
+        if (
+            normalized_scene == "manual_create"
+            or normalized_scene.startswith("manual_create")
+            or normalized_scene.startswith("ticket_manual_create")
+        ):
             return bool(ai_config.get("runOnManualCreate"))
         if normalized_scene == "bitable_pull" or normalized_scene.startswith("bitable_pull"):
             return bool(ai_config.get("runOnBitablePull"))

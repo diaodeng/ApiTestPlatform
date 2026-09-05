@@ -14,6 +14,7 @@ from modules.ticket.service.sync.ticket_sync_post_process_service import TicketS
 from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_feishu_bitable_util import FeishuBitableUtil
+from modules.ticket.util.ticket_person_alias_util import complete_assignee_alias_pair
 from modules.ticket.util.ticket_priority_util import complete_ticket_priority_pair
 from utils.log_util import logger
 
@@ -456,20 +457,8 @@ class TicketBitablePullService:
             payload["customerPriority"] = customer_priority
         if internal_priority:
             payload["internalPriority"] = internal_priority
-        if payload.get("currentAssigneeName") in (None, "", []) and payload.get("ticketAssignee") not in (None, "", []):
-            payload["currentAssigneeName"] = payload.get("ticketAssignee")
-        if (
-            payload.get("currentAssigneeEmail") in (None, "", [])
-            and payload.get("ticketAssigneeEmail") not in (None, "", [])
-        ):
-            payload["currentAssigneeEmail"] = payload.get("ticketAssigneeEmail")
-        if payload.get("ticketAssignee") in (None, "", []) and payload.get("currentAssigneeName") not in (None, "", []):
-            payload["ticketAssignee"] = payload.get("currentAssigneeName")
-        if (
-            payload.get("ticketAssigneeEmail") in (None, "", [])
-            and payload.get("currentAssigneeEmail") not in (None, "", [])
-        ):
-            payload["ticketAssigneeEmail"] = payload.get("currentAssigneeEmail")
+        # 当前处理人别名对（ticketAssignee <-> currentAssigneeName）与外部推送共用同一补齐规则。
+        complete_assignee_alias_pair(payload)
         mapping_payload = dict(payload)
         top_level_alias_map = {
             "ticketVender": "projectName",

@@ -24,7 +24,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 按工单号手动模拟多维表格拉取或重放本地工单快照自动化
 created: 2026-05-31
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # 工单外部同步与内网拉取流程
@@ -110,6 +110,8 @@ sequenceDiagram
 | 20 | `POST /ticket/sync/external` 的请求体读取、外部字段必填校验、人员字段拆分、`external_field_mapping` 与 `raw_payload` 构造已下沉到 `TicketExternalSyncRequestService`；`TicketSyncService` 只接收已通过模型校验的同步对象执行入库主编排。 |
 
 | 21 | `POST /ticket/sync/automation/manual-run` 是指定单工单的独立手动入口：`source=bitable` 仅按工单号查询飞书多维表格，忽略主动拉取定时开关、常规筛选和时间窗口，唯一精确匹配后复用外部同步入库与 `bitable_pull` 后处理；`source=database` 从本地 `Ticket` ORM 实体构造后处理模型，不调用同步入库，不覆盖工单字段。 |
+| 22 | 四种入库场景（`external_sync`/`remote_pull`/`bitable_pull`/`manual_create`）共用同一套后处理步骤：`external_sync`、`bitable_pull` 与 `manual_create` 走延后编排（`execute_deferred_sync_post_process`），`remote_pull` 走 `sync_external_ticket` 内联路径；内联路径在发布收敛前按 `vector_scene_map` 执行向量刷新，使 `sceneTriggers.remotePull` 生效。`TicketSyncService` 内不再保留与 `TicketSyncPostProcessService` 重复的标题/翻译/分类场景解析实现，统一调用其公开方法。 |
+| 23 | 手动创建场景（`manual_create`）由 `TicketManualCreatePostProcessService` 构造轻量同步模型（不写 `external_field_mapping`，不参与外部字段映射与邮箱补齐），表单勾选与场景开关合并为任务级 automation 快照后进入统一编排；自动 AI 需要 Agent/Provider，缺失时降级关闭并记录原因。 |
 
 ## 错误处理
 

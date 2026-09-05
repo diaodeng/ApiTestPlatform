@@ -460,6 +460,7 @@ class TicketSyncPostProcessService:
                     "remote_pull": "remotePull",
                     "bitable_pull": "bitablePull",
                     "external_sync": "externalSync",
+                    "manual_create": "manualCreate",
                 }
                 vector_scene = vector_scene_map.get(sync_scene, "externalSync")
                 TicketEmbeddingService.vectorize_ticket_for_scene(db, ticket, vector_scene)
@@ -483,6 +484,32 @@ class TicketSyncPostProcessService:
                 f"外部工单同步延后发布状态收敛失败: ticket_no={sync_object.ticket_no}, "
                 f"scene={sync_scene}, error={exc}"
             )
+
+    @classmethod
+    def resolve_translate_enabled_by_scene(
+        cls,
+        sync_scene: str,
+        translate_config: dict[str, Any],
+        translate_config_enabled: bool,
+    ) -> bool:
+        """从 translateConfig 读取当前场景的翻译开关；总开关关闭时直接返回 False。"""
+        if not translate_config_enabled:
+            return False
+        return cls._resolve_translate_enabled_for_scene(
+            sync_scene=sync_scene,
+            automation=None,
+            config={},
+            translate_config=translate_config,
+        )
+
+    @classmethod
+    def should_run_automation_by_config(cls, config: dict[str, Any], sync_scene: str) -> bool:
+        """从 automationConfig 判断当前场景是否需要执行同步后自动化。"""
+        return cls._resolve_automation_enabled_for_scene(
+            sync_scene=sync_scene,
+            automation=None,
+            config=config,
+        )
 
     @classmethod
     def resolve_sync_title(
