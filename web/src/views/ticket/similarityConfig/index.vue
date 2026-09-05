@@ -379,10 +379,10 @@
       </el-form>
       <el-alert v-if="rebuildResult" class="mb16" type="success" show-icon :closable="false">
         <template #title>
-          重建结果：总数 {{ rebuildResult.total || 0 }}，成功
-          {{ rebuildResult.processed || 0 }}，失败 {{ rebuildResult.failed || 0 }}，幂等跳过
-          {{ rebuildResult.idempotentSkipped || 0 }}，复用向量同步Qdrant
-          {{ rebuildResult.qdrantSyncedFromCache || 0 }}
+          重建结果：总数 {{ rebuildResult.total }}，成功
+          {{ rebuildResult.processed }}，失败 {{ rebuildResult.failed }}，幂等跳过
+          {{ rebuildResult.idempotentSkipped }}，复用向量同步Qdrant
+          {{ rebuildResult.qdrantSyncedFromCache }}
         </template>
       </el-alert>
       <el-space wrap>
@@ -721,8 +721,17 @@
     rebuilding.value = true;
     rebuildTicketSimilarity(payload)
       .then((response) => {
-        rebuildResult.value = response.data || null;
-        proxy.$modal.msgSuccess(payload.runInBackground ? '重建任务已提交后台执行' : '重建完成');
+        if (payload.runInBackground) {
+          // 后台模式接口只返回任务提交确认（无统计字段），不能作为重建结果渲染；
+          // 实际进度通过服务日志"工单向量重建批次"关键字查看。
+          rebuildResult.value = null;
+          proxy.$modal.msgSuccess('重建任务已提交后台执行，进度请在服务日志中查看');
+          return;
+        }
+        // 同步模式返回真实摘要；校验 total 为数字后再渲染，避免误渲染异常响应
+        const result = response.data || null;
+        rebuildResult.value = result && typeof result.total === 'number' ? result : null;
+        proxy.$modal.msgSuccess('重建完成');
       })
       .finally(() => {
         rebuilding.value = false;

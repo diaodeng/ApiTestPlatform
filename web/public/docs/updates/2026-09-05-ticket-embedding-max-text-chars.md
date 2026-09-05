@@ -71,6 +71,20 @@ error=Embedding请求失败: status=400, detail={"code":20015,"message":"The par
 - `uv run pytest tests/test_ticket_embedding_service.py`：29 passed
 - `uv run ruff check`（三个改动 py 文件）：All checks passed
 - 端到端验证：用 INC00001924237 生产库真实数据走新 `build_ticket_text`（7,594 字符）实际调用 SiliconFlow 接口返回 200
+- 前端 `npm run build:prod` 构建通过
+
+## 同日补充修复：后台重建误显示"总数 0"
+
+**现象**：相似工单配置页勾选"后台执行"触发向量重建后，页面弹出"重建结果：总数 0，成功 0，失败 0……"，但服务日志显示后台任务在正常逐单重建。
+
+**根因**：后台模式下接口只返回任务提交确认（`data` 仅含请求参数回显，无统计字段），前端 `handleRebuild` 不区分同步/后台模式，一律把 `response.data` 赋给结果框；结果框模板用 `|| 0` 兜底渲染 undefined 字段，导致显示假"总数 0"。
+
+**修复**（`web/src/views/ticket/similarityConfig/index.vue`）：
+
+- `handleRebuild` 按模式分流：后台模式清空结果框并提示"重建任务已提交后台执行，进度请在服务日志中查看"；仅同步模式渲染真实摘要；
+- 渲染前校验 `total` 为数字才显示结果框，同时去掉模板中的 `|| 0` 兜底，避免异常响应被误渲染成全 0 结果。
+
+**说明**：后台重建的实际进度通过服务日志关键字"工单向量重建批次/工单向量重建结束"查看；该缺陷自配置页初始版本即存在，与向量化截断改动无关。
 
 ## 遗留事项
 
