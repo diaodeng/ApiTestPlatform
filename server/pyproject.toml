@@ -30,6 +30,7 @@ dependencies = [
     "sqlalchemy==2.0.25",
     "user-agents==2.2.0",
     "uvicorn==0.29.0",
+    "supervisor==4.3.0",
 ]
 
 [dependency-groups]

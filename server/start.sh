@@ -24,12 +24,11 @@ echo "开始安装应用依赖。。。"
 # 安装依赖
 #/usr/local/bin/pip3 install --no-cache-dir -r /app/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 cd /app && python -m uv sync --frozen
-# supervisor 为纯 Python 包，用系统 pip 安装（uv 创建的虚拟环境不带 pip，无法用 python -m pip），
-# 可执行文件位于 /usr/local/bin/supervisord
-/usr/local/bin/pip3 install -U supervisor -i https://pypi.tuna.tsinghua.edu.cn/simple
 echo "应用依赖安装完成。。。"
 
-# 启动 supervisor，由 supervisord.conf 托管 FastAPI、Celery 等进程
+# 启动 supervisor，由 supervisord.conf 托管 FastAPI、Celery 等进程。
+# supervisor 已纳入 pyproject 依赖（supervisor==4.3.0），由上面的 uv sync 安装到 /app/.venv。
+# 不再通过 apt 安装：bullseye 已结束 LTS，镜像站 security 池依赖包 404，apt 安装会失败。
 echo "开始启动。。。"
 echo "当前运行环境：${APP_ENV}"
-exec /usr/local/bin/supervisord -c /app/supervisord.conf
+exec /app/.venv/bin/supervisord -c /app/supervisord.conf
