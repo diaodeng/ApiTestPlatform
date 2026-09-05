@@ -20,7 +20,7 @@
 
       <el-divider content-position="left">凭证内容</el-divider>
       <el-alert type="info" :closable="false" show-icon class="section-alert">
-        <template #title>编辑时会从服务端获取已保存凭证并回填，敏感字段默认掩码显示，点击右侧眼睛图标可查看明文。留空字段保存时保留原值。</template>
+        <template #title>编辑时会从服务端获取已保存凭证并回填，敏感字段默认掩码显示，点击右侧眼睛图标可查看明文。将已保存的字段清空后保存会从凭证中删除该字段。</template>
       </el-alert>
       <template v-if="form.credentialType === 'http_cookie'">
         <el-form-item>
@@ -173,7 +173,14 @@
         </el-alert>
         <el-row :gutter="16">
           <el-col :span="7"><el-form-item label="请求方法"><el-select v-model="editor.request.method" style="width:100%"><el-option v-for="method in requestMethods" :key="method" :value="method" /></el-select></el-form-item></el-col>
-          <el-col :span="17"><el-form-item label="接口地址" required><el-input v-model="editor.request.url" :placeholder="editor.kind === 'login' ? 'https://example.com/api/login' : 'https://example.com/api/refresh'" /></el-form-item></el-col>
+          <el-col :span="17">
+            <el-form-item label="接口地址" required>
+              <div class="url-editor">
+                <el-input v-model="editor.request.url" :placeholder="editor.kind === 'login' ? 'https://example.com/api/login' : 'https://example.com/api/refresh'" />
+                <el-button v-if="editor.kind === 'login'" plain title="将 JSON 请求体恢复为默认的账号密码模板" @click="restoreLoginBodyTemplate">恢复默认模板</el-button>
+              </div>
+            </el-form-item>
+          </el-col>
         </el-row>
         <el-form-item>
           <template #label>请求 Header<PromptButton placement="top" width="440"><div class="credential-help"><div class="credential-help-title">请求 Header 说明</div><p>JSON 对象格式，额外的 HTTP 请求头。系统会自动携带当前凭证的 Cookie/Header，无需在此重复填写。</p><div class="credential-help-code">{"Content-Type":"application/json"}</div></div></PromptButton></template>
@@ -304,6 +311,10 @@
                 <template #label>允许域名<PromptButton placement="top" width="420"><div class="credential-help"><div class="credential-help-title">允许域名说明</div><p>凭证允许被投影到的目标域名模式，多个用英文逗号分隔。</p><div class="credential-help-code">*.example.com, api.example.com, 192.168.*</div><p>支持通配符 <b>*</b>，留空表示不限制域名。</p></div></PromptButton></template>
                 <el-input v-model="targetHostsText" placeholder="多个域名用英文逗号分隔，例如 *.example.com" />
             </el-form-item>
+            <el-form-item>
+                <template #label>到期时间<PromptButton placement="top" width="440"><div class="credential-help"><div class="credential-help-title">到期时间说明</div><p>凭证的预期到期时间，仅用于定时任务临期提醒，可留空。</p><p>开启自动刷新后，到期前 5 分钟内也会触发一次刷新；未开启自动刷新的凭证到期后会被业务直接拒绝使用。</p><p>留空表示不设置到期时间。</p></div></PromptButton></template>
+                <el-date-picker v-model="form.expireTime" type="datetime" placeholder="留空表示不设置" value-format="YYYY-MM-DD HH:mm:ss" style="width:100%" />
+            </el-form-item>
             <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
             <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
         </el-collapse-item>
@@ -327,6 +338,8 @@ const targetHostsText = ref('')
 const advancedPanels = ref([])
 const additionalAuthLoaded = ref(false)
 const preservedSecretKeys = ref(new Set())
+/* 编辑打开时已保存 secret 的字段快照：输入框被清空的字段会在保存时显式传空串，由后端从旧密文中删除。 */
+const savedSecretKeys = ref(new Set())
 const requestTemplateInputRefs = {}
 const sensitive = reactive({ cookie: '', headerName: '', headerValue: '', valuePrefix: 'Bearer ', token: '', username: '', password: '', otpSecret: '' })
 const requestMethods = ['GET', 'POST', 'PUT', 'PATCH']
@@ -341,7 +354,7 @@ const emptyAssertion = () => ({ source:'', operator:'equals', expectedText:'', m
 const emptyRequest = () => ({ url:'', method:'POST', headersText:'{}', queryText:'{}', bodyText:'{}', dataText:'{}', mappings:[], assertions:[] })
 const loginRequest = reactive(emptyRequest())
 const refreshRequest = reactive(emptyRequest())
-const emptyForm = () => ({ credentialName:'', credentialType:'http_cookie', authMode:'manual', enabled:true, autoRefreshEnabled:false, refreshIntervalSec:0, sharingMode:'shared_read', authConfig:{ otpType:'none', targetHostPatterns:[] }, remark:'' })
+const emptyForm = () => ({ credentialName:'', credentialType:'http_cookie', authMode:'manual', enabled:true, autoRefreshEnabled:false, refreshIntervalSec:0, sharingMode:'shared_read', expireTime:'', authConfig:{ otpType:'none', targetHostPatterns:[] }, remark:'' })
 const form = reactive(emptyForm())
 const isHttpMode = computed(() => ['http_login', 'http_refresh'].includes(form.authMode))
 const supportsAutoRefresh = computed(() => ['http_login', 'http_refresh'].includes(form.authMode))
@@ -399,6 +412,7 @@ function resetRequest(target, config, prefix) {
 /** 将解密后的 secret 字典回填到表单敏感字段，编辑时用于回显。 */
 function populateFromSecret(secret) {
   if (!secret || typeof secret !== 'object' || !Object.keys(secret).length) return
+  savedSecretKeys.value = new Set(Object.keys(secret))
   if (secret.cookie != null) sensitive.cookie = String(secret.cookie)
   if (secret.headerName != null) sensitive.headerName = String(secret.headerName)
   if (secret.headerValue != null) sensitive.headerValue = String(secret.headerValue)
@@ -421,7 +435,8 @@ function populateFromSecret(secret) {
   if (additionalHeaders.length || additionalCookies.length || advancedSecretText.value.trim()) advancedPanels.value = ['additional-auth']
 }
 function ensureLoginRequestDefaults() {
-  if (loginRequest.bodyText.trim() === '{}') {
+  /* 默认登录模板仅在新增凭证时自动注入；编辑已有凭证时尊重用户已保存的内容，避免清空后被再次填回。 */
+  if (!form.credentialId && loginRequest.bodyText.trim() === '{}') {
     loginRequest.bodyText = jsonText({ username:'${secret.username}', password:'${secret.password}' })
   }
   if (form.authConfig.otpType !== 'totp') return
@@ -430,6 +445,10 @@ function ensureLoginRequestDefaults() {
     if (!Object.values(body).includes('${secret.otp}')) loginRequest.bodyText = jsonText({ ...body, otp:'${secret.otp}' })
   } catch (_) { /* 用户正在编辑 JSON 时不覆盖输入。 */ }
 }
+/** 将登录接口的 JSON 请求体恢复为默认的账号密码占位模板，由用户显式触发。 */
+function restoreLoginBodyTemplate() {
+  loginRequest.bodyText = jsonText({ username:'${secret.username}', password:'${secret.password}' })
+}
 function open(row) {
   Object.assign(form, emptyForm(), row || {}, { authConfig: { ...emptyForm().authConfig, ...(row?.authConfig || {}) } })
   Object.keys(sensitive).forEach(key => { sensitive[key] = key === 'valuePrefix' ? 'Bearer ' : '' })
@@ -437,6 +456,7 @@ function open(row) {
   advancedSecretText.value = ''
   additionalAuthLoaded.value = false
   preservedSecretKeys.value = new Set()
+  savedSecretKeys.value = new Set()
   advancedPanels.value = []
   replaceRows(additionalHeaders, [])
   replaceRows(additionalCookies, [])
@@ -452,8 +472,7 @@ function open(row) {
       if (secret) populateFromSecret(secret)
     }).catch(() => { /* 无权限或解密失败时保持字段为空，用户可手动填写 */ })
   }
-}
-function parseObject(text, label) {
+}function parseObject(text, label) {
   const value = JSON.parse(text || '{}')
   if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error(`${label}必须是 JSON 对象`)
   return value
@@ -533,7 +552,7 @@ function validateRequestTemplateVariables(authConfig, secret) {
     collectTemplateVariables(template, label, variables)
     for (const variable of variables) {
       if (!templateVariableNamePattern.test(variable.name)) throw new Error(`${variable.location}中的变量 ${variable.expression} 格式错误；仅支持 ${'${secret.字段名}'}，字段名只能包含字母、数字和下划线`)
-      if (!availableKeys.has(variable.name)) throw new Error(`${variable.location}引用了 ${variable.expression}，但当前凭证没有可用的 ${variable.name} 字段`)
+      if (!availableKeys.has(variable.name)) throw new Error(`${variable.location}引用了 ${variable.expression}，但当前凭证没有填写对应的 ${variable.name} 字段；请在登录账号区域填写，或点击"恢复默认模板"后补填账号，不需要账号时请清空该模板中的账号密码变量`)
     }
   }
 }
@@ -578,16 +597,23 @@ function buildAssertions(request) {
 function buildSecret() {
   const secret = {}
   if (form.credentialType === 'http_cookie' && sensitive.cookie.trim()) secret.cookie = sensitive.cookie.trim()
+  else if (form.credentialType === 'http_cookie' && savedSecretKeys.value.has('cookie')) secret.cookie = ''
   if (['http_header','http_api_key'].includes(form.credentialType)) {
     if (sensitive.headerName.trim()) secret.headerName = sensitive.headerName.trim()
+    else if (savedSecretKeys.value.has('headerName')) secret.headerName = ''
     if (sensitive.headerValue) secret.headerValue = sensitive.headerValue
+    else if (savedSecretKeys.value.has('headerValue')) secret.headerValue = ''
   }
   if (form.credentialType === 'http_token') {
     if (sensitive.headerName.trim()) secret.headerName = sensitive.headerName.trim()
+    else if (savedSecretKeys.value.has('headerName')) secret.headerName = ''
     if (sensitive.valuePrefix) secret.valuePrefix = sensitive.valuePrefix
+    else if (savedSecretKeys.value.has('valuePrefix')) secret.valuePrefix = ''
     if (sensitive.token) secret.token = sensitive.token
+    else if (savedSecretKeys.value.has('token')) secret.token = ''
   }
   if (storageStateText.value.trim()) secret.storageState = parseObject(storageStateText.value, 'storageState')
+  else if (savedSecretKeys.value.has('storageState')) secret.storageState = ''
   const headers = buildKeyValue(additionalHeaders, '附加 Header', true)
   const cookies = buildKeyValue(additionalCookies, '附加 Cookie')
   const hasCookieHeader = hasCookieHeaderPrimary.value || Object.keys(headers).some(name => name.toLowerCase() === 'cookie')
@@ -599,7 +625,10 @@ function buildSecret() {
     if ('headers' in advanced || 'cookies' in advanced) throw new Error('额外 Header 和 Cookie 请使用附加认证信息区域配置')
     Object.assign(secret, advanced)
   }
-  for (const key of ['username','password','otpSecret']) if (sensitive[key]) secret[key] = sensitive[key]
+  for (const key of ['username','password','otpSecret']) {
+    if (sensitive[key]) secret[key] = sensitive[key]
+    else if (savedSecretKeys.value.has(key)) secret[key] = ''
+  }
   return secret
 }
 async function save() {
@@ -631,6 +660,9 @@ defineExpose({ open })
 .template-editor > .el-input { flex: 1; min-width: 0; }
 .template-editor :deep(.el-dropdown) { flex: 0 0 auto; margin-top: 2px; }
 .credential-collapse { margin-top: 4px; margin-bottom: 16px; }
+.url-editor { width: 100%; display: flex; align-items: flex-start; gap: 8px; }
+.url-editor > .el-input { flex: 1; min-width: 0; }
+.url-editor > .el-button { flex: 0 0 auto; }
 .key-value-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .key-value-row { width: 100%; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.4fr) 32px; gap: 8px; align-items: center; }
 .assertion-row { width: 100%; display: grid; grid-template-columns: minmax(120px, 1.2fr) 110px minmax(120px, 1fr) minmax(120px, 1fr) 32px; gap: 8px; align-items: center; margin-bottom: 8px; }

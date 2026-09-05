@@ -1,3 +1,14 @@
+## [2026-09-06] FIX | 统一凭证编辑语义与自动刷新可见性
+
+- 触发：用户反馈①新增/编辑凭证不填登录账号会报错，登录接口 JSON 请求体默认填入账号密码占位符，手动清除后下次编辑又自动填回，每次都要手动删；②`.env.prod` 环境 UAT 凭证能登录、定时刷新任务也开着，但凭证仍会过期。
+- 根因①：`CredentialDialog.vue` 的 `ensureLoginRequestDefaults()` 无法区分"未初始化"和"用户显式清空"，每次打开编辑框/切换认证方式都把 `{}` 请求体改写为账号密码模板，保存时 `validateRequestTemplateVariables()` 因 secret 缺 username/password 报错；且后端 `update_credential` 对 secret 做合并式更新（只增不删），编辑页明文回填机制下清空账号保存后旧值仍留在密文里，下次编辑又被回填。
+- 根因②（生产库只读核实）：定时任务 `refresh_credentials` 正常（interval 30min、run_count=1102、每 30 分钟成功刷新 erp-prod）；UAT 三凭证（erp-uat-gray02/06/08，http_login 模式）`auto_refresh_enabled=0`，8-17 起再无刷新记录且无任何跳过提示；`expire_time` 全为 NULL（前端无到期时间入口），临期刷新路径不可达。
+- 修复：默认模板仅新增注入（编辑不再改写）、登录接口加"恢复默认模板"按钮、编辑保存时已回填主字段清空即从密文删除（`_drop_empty_secret_fields`，替代"留空保留原值"）、变量校验报错文案指引化。可见性：凭证列表加"自动刷新"+"最近刷新"列；`refresh_due_credentials` 跳过原因细分（auto_refresh_off/not_due/invalid_config/lease_conflict）并写任务日志，未开启自动刷新的 HTTP 凭证每天最多一条 `auto_refresh_off` 审计日志；编辑页补"到期时间"字段（`expire_time` 后端本已支持）。
+- 数据操作：UAT 三凭证 2026-09-06 00:09 用户已自行在页面开启自动刷新（7200 秒，留有 update 审计日志）；本次幂等脚本检测到后跳过，未重复写入。
+- 清理：`credential_refresh_service.py` 删除 4d3a4794 引入的重复方法（`_execute_http_auth_step`/`_execute_http_refresh_with_login_fallback` 各定义两次）与死代码 `_apply_response_mapping`。
+- 文档：`web/public/docs/credential_management.md`（清空即删除、默认模板、跳过原因、到期时间）、更新记录 `2026-09-06-credential-edit-semantics-and-auto-refresh-visibility.md`、本 wiki 流程文档同步。
+- 验证：见当日会话验证记录（pytest/ruff/前端构建）。
+
 ## [2026-09-05] FIX | 工单页面表格横向滚动条拖拽不灵敏修复
 
 - 触发：用户反馈工单相关页面凡有表格处，底部横向滚动条鼠标拖动不灵敏（鼠标移动很远表格只动一点），shift+滚轮正常，要求分析原因并按方案 A（升级依赖）处理。

@@ -32,7 +32,7 @@ graph TD
 
 | 步骤 | 说明 |
 |---|---|
-| 判断 | 根据 autoRefreshEnabled、刷新间隔、上次成功时间和过期时间窗口判断 |
+| 判断 | 根据 autoRefreshEnabled、刷新间隔、上次成功时间和过期时间窗口判断；跳过原因细分写入任务摘要：未开启自动刷新为 `auto_refresh_off`（HTTP 登录/刷新模式每天最多补一条 `auto_refresh_off` 操作审计日志提醒）、未到期未到间隔为 `not_due`、配置无效为 `invalid_config`、租约冲突为 `lease_conflict` |
 | 租约 | 锁定凭证聚合根行后获取短期独占刷新租约，避免并发刷新 |
 | 刷新 | 用认证配置和密文中的占位符组装请求；自动携带当前 Cookie/Header；当 HTTP Header 凭证的 Header 名称为 `Cookie` 时，`${secret.cookie}` 读取其 Header 值；`${secret.headerValue}` 作为直接读取主 Header 值的高级变量；`http_refresh` 若同时配置登录地址，刷新失败会自动登录并重试刷新；前端会为 `http_refresh` 同时展示刷新接口和兜底登录接口配置区 |
 | 业务成功 | HTTP 状态为 2xx 后，按登录或刷新各自的成功断言逐条校验；断言失败不会提取或写回，并保留旧快照 |
@@ -42,6 +42,10 @@ graph TD
 参见：[统一凭证数据模型](../entities/data-models/credential-management.md)、[凭证接口契约](../contracts/credential-api.md)。
 
 被引用：统一凭证数据模型、凭证接口契约。
+
+## 编辑语义边界
+
+编辑页通过 `/secret` 明文回填已保存敏感字段。默认登录请求模板（`username`/`password` 占位符）只在**新增**凭证时自动注入，编辑时不改写已保存模板；登录接口提供显式"恢复默认模板"按钮。更新凭证时显式传空串的主字段会从密文中删除（"清空即删除"），替代旧的"留空保留原值"语义；`headers`/`cookies` 对象仍由前端整体覆盖。
 
 ## Web 用例浏览器状态
 

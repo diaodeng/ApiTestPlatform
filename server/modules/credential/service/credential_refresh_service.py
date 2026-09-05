@@ -12,6 +12,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from modules.credential.dao.credential_dao import CredentialDao
+from modules.credential.entity.do.credential_do import AuthCredentialOperationLog
 from modules.credential.service.credential_lease_service import CredentialLeaseService
 from modules.credential.util.credential_secret_util import decrypt_secret, encrypt_secret, mask_secret
 from utils.log_util import logger
@@ -93,27 +94,76 @@ class CredentialRefreshService:
                 db.commit()
 
     @classmethod
-    def refresh_due_credentials(cls, db: Session) -> dict[str, int]:
-        """定时任务入口：判断是否到期刷新，手工、浏览器和未到期凭证均明确记录跳过原因。"""
+    def refresh_due_credentials(cls, db: Session) -> dict[str, Any]:
+        """定时任务入口：判断是否到期刷新，手工、浏览器和未到期凭证均明确记录跳过原因。
+
+        跳过原因细分为 auto_refresh_off（未开启自动刷新）、not_due（未到间隔）、
+        manual_required / invalid_config / lease_conflict（配置或并发问题），
+        便于从任务日志直接判断凭证为何没有被刷新。
+        """
         now = datetime.now()
-        summary = {"checked": 0, "refreshed": 0, "failed": 0, "skipped": 0}
+        summary: dict[str, Any] = {"checked": 0, "refreshed": 0, "failed": 0, "skipped": 0, "skip_reasons": {}}
         for credential in CredentialDao.list_credentials(db):
             summary["checked"] += 1
+            if not credential.auto_refresh_enabled:
+                summary["skipped"] += 1
+                summary["skip_reasons"]["auto_refresh_off"] = summary["skip_reasons"].get("auto_refresh_off", 0) + 1
+                cls._log_auto_refresh_off_once(db, credential, now)
+                continue
             interval_due = credential.refresh_interval_sec > 0 and (not credential.last_refresh_time or (now - credential.last_refresh_time).total_seconds() >= credential.refresh_interval_sec)
             expiry_due = bool(credential.expire_time and credential.expire_time <= now + timedelta(minutes=5))
-            due = credential.auto_refresh_enabled and (interval_due or expiry_due)
-            if not due:
+            if not (interval_due or expiry_due):
                 summary["skipped"] += 1
+                summary["skip_reasons"]["not_due"] = summary["skip_reasons"].get("not_due", 0) + 1
                 continue
             result = cls.refresh_credential(db, credential.credential_id, credential.revision, "credential_scheduler")
             if result["success"]:
                 summary["refreshed"] += 1
             elif result["status"] in {"manual_required", "invalid_config", "lease_conflict"}:
                 summary["skipped"] += 1
+                summary["skip_reasons"][result["status"]] = summary["skip_reasons"].get(result["status"], 0) + 1
             else:
                 summary["failed"] += 1
-        logger.info(f"凭证定时刷新完成，checked={summary['checked']}，refreshed={summary['refreshed']}，skipped={summary['skipped']}，failed={summary['failed']}")
+        logger.info(
+            f"凭证定时刷新完成，checked={summary['checked']}，refreshed={summary['refreshed']}，"
+            f"skipped={summary['skipped']}，failed={summary['failed']}，跳过原因={summary['skip_reasons']}"
+        )
         return summary
+
+    @classmethod
+    def _log_auto_refresh_off_once(cls, db: Session, credential, now: datetime) -> None:
+        """对开启可刷新模式但未开启自动刷新的凭证，每天最多写一条审计日志提醒。
+
+        仅 http_login / http_refresh 模式适用；手工和浏览器模式本身就不支持自动刷新，不记录。
+        """
+        if credential.auth_mode not in {"http_login", "http_refresh"}:
+            return
+        recent = (
+            db.query(AuthCredentialOperationLog.operation_id)
+            .filter(
+                AuthCredentialOperationLog.credential_id == credential.credential_id,
+                AuthCredentialOperationLog.operation_type == "auto_refresh_off",
+                AuthCredentialOperationLog.create_time >= now - timedelta(days=1),
+            )
+            .first()
+        )
+        if recent:
+            return
+        CredentialDao.add_operation_log(
+            db,
+            {
+                "credential_id": credential.credential_id,
+                "operation_type": "auto_refresh_off",
+                "status": "skipped",
+                "revision": credential.revision,
+                "message": "凭证未开启自动刷新，定时任务持续跳过该凭证，请注意会话可能过期",
+                "operator": "credential_scheduler",
+            },
+        )
+        db.commit()
+        logger.warning(
+            f"凭证未开启自动刷新已被定时任务跳过，credential_id={credential.credential_id}，credential_name={credential.credential_name}"
+        )
 
     @staticmethod
     def _render_request_template(template: Any, secret: dict[str, Any]) -> Any:
@@ -303,86 +353,6 @@ class CredentialRefreshService:
             kwargs["json"] = body
         logger.info(f"{action_label}请求：url:{url},method:{method},{json.dumps(cls._mask_request_for_log(kwargs), ensure_ascii=False)}")
         return httpx.request(method, url, **kwargs)
-
-    @classmethod
-    def _execute_http_auth_step(
-        cls,
-        url: str,
-        request_config: dict[str, Any],
-        secret: dict[str, Any],
-        otp_type: str,
-        otp_code: str | None,
-        assertions: list[Any],
-        mapping: Any,
-        action_label: str,
-    ) -> dict[str, Any]:
-        """执行单次 HTTP 登录或刷新，并在成功后提取新凭证。"""
-        response = cls._execute_http_request(url, request_config, secret, otp_type, otp_code, action_label)
-        logger.info(f"{action_label}响应状态：{response.status_code},响应cookies：{response.cookies},响应头：{response.headers},响应信息：{response.content.decode('utf-8')}")
-        response.raise_for_status()
-        cls._validate_response_success_assertions(response, assertions)
-        new_secret, extracted_any = cls._extract_response_secret(secret, response, mapping)
-        if not extracted_any:
-            if "登录" in action_label:
-                raise ValueError("登录响应未提取到新凭证，请在凭证编辑页配置【登录响应映射】。")
-            raise ValueError("刷新响应未提取到新凭证，请在凭证编辑页配置【响应提取规则】。若当前凭证主要依赖 Cookie 鉴权，可将凭证类型改为 HTTP Cookie。")
-        return new_secret
-
-    @classmethod
-    def _execute_http_refresh_with_login_fallback(
-        cls,
-        config,
-        secret: dict[str, Any],
-        otp_type: str,
-        otp_code: str | None,
-        credential_id: int,
-    ) -> dict[str, Any]:
-        """先刷新，失败后自动登录兜底，再用登录后的新凭证重试刷新。"""
-        refresh_request_config = cls._request_config(config, "http_refresh")
-        refresh_assertions = cls._response_success_assertions(config, "http_refresh")
-        refresh_mapping = cls._response_mapping(config, "http_refresh")
-        try:
-            return cls._execute_http_auth_step(
-                config.refresh_url,
-                refresh_request_config,
-                secret,
-                otp_type,
-                otp_code,
-                refresh_assertions,
-                refresh_mapping,
-                "HTTP 刷新",
-            )
-        except Exception as refresh_exc:
-            login_url = str(getattr(config, "login_url", "") or "").strip()
-            if not login_url:
-                raise
-            logger.warning(f"HTTP 刷新失败，准备使用登录兜底后重试，credential_id={credential_id}，error={refresh_exc}")
-            try:
-                login_secret = cls._execute_http_auth_step(
-                    login_url,
-                    cls._request_config(config, "http_login"),
-                    secret,
-                    otp_type,
-                    otp_code,
-                    cls._response_success_assertions(config, "http_login"),
-                    cls._response_mapping(config, "http_login"),
-                    "HTTP 登录",
-                )
-            except Exception as login_exc:
-                raise ValueError(f"HTTP 刷新失败且登录兜底失败：原始刷新失败={refresh_exc}；登录失败={login_exc}") from login_exc
-            try:
-                return cls._execute_http_auth_step(
-                    config.refresh_url,
-                    refresh_request_config,
-                    login_secret,
-                    otp_type,
-                    otp_code,
-                    refresh_assertions,
-                    refresh_mapping,
-                    "HTTP 刷新",
-                )
-            except Exception as retry_exc:
-                raise ValueError(f"HTTP 刷新在登录兜底后仍然失败：原始刷新失败={refresh_exc}；登录后重试失败={retry_exc}") from retry_exc
 
     @classmethod
     def _execute_http_auth_step(
@@ -659,19 +629,3 @@ class CredentialRefreshService:
                 seen_keys.add(key)
         return "; ".join(f"{k}={v}" for k, v in pairs)
 
-    @staticmethod
-    def _apply_response_mapping(old_secret: dict[str, Any], payload: Any, mapping: Any) -> dict[str, Any]:
-        """按 responseMapping 的 secret字段:响应字段 路径写入新的凭证快照。"""
-        result = dict(old_secret)
-        if not isinstance(mapping, dict):
-            return result
-        for secret_key, path in mapping.items():
-            value = payload
-            for part in str(path).split("."):
-                if not isinstance(value, dict) or part not in value:
-                    value = None
-                    break
-                value = value[part]
-            if value is not None:
-                result[str(secret_key)] = value
-        return result
