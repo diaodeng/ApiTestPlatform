@@ -85,17 +85,6 @@ class MessageFeishuBotSettings(BaseSettings):
     feishu_bot_push: bool = False
 
 
-class MetricsSettings(BaseSettings):
-    """
-    数据采集配置
-    """
-    vm_url: str = ''
-    vm_user: str = ''
-    vm_password: str = ""
-    vm_job:str = ""
-    vm_instance:str = ""
-    vm_merchant:str = ""
-
 class UploadSettings:
     """
     上传配置
@@ -201,14 +190,6 @@ class GetConfig:
         # 实例上传配置
         return MessageFeishuBotSettings()
 
-    @lru_cache
-    def get_metrics_config(self):
-        """
-        获取数据采集配置
-        """
-        # 实例上传配置
-        return MetricsSettings()
-
     @staticmethod
     def parse_cli_args():
         """
@@ -248,4 +229,3 @@ RedisConfig = get_config.get_redis_config()
 UploadConfig = get_config.get_upload_config()
 
 FeishuBotConfig = get_config.get_feishu_config()
-MetricsConfig = get_config.get_metrics_config()

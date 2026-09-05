@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from utils.metrics.collect import PushDataToServer
+from utils.metrics.collect import CollectorProfileSnapshot, PushDataToServer
 from utils.metrics.process import ProcessCollector, ProcessSnapshot
 from utils.metrics.task_memory import TaskMemoryObserver
 
@@ -104,15 +104,61 @@ def test_prometheus_labels_are_escaped():
 
 
 def test_push_payload_keeps_legacy_batch_boundary():
+    """推送体保持纯样本行拼接语义：整批内容一次性作为请求体发送。"""
     with patch.object(PushDataToServer, "__init__", lambda self: None):
         collector = PushDataToServer()
-    collector.vm_url = "https://metrics.example.test/import"
-    collector.data_lines = ['qtr_test{job="QTR"} 1 1000']
+    profile = CollectorProfileSnapshot(profile_id=1, push_url="https://metrics.example.test/import")
+    data_lines = ['qtr_test{job="QTR"} 1 1000']
     collector.push_failures = 0
     response = SimpleNamespace(status_code=204, text="")
     with patch("utils.metrics.collect.httpx.post", return_value=response) as post:
-        collector._push()
-    assert post.call_args.kwargs["content"] == collector.data_lines[0]
+        collector._push(profile, data_lines)
+    assert post.call_args.kwargs["content"] == data_lines[0]
+    assert post.call_args.args[0] == profile.push_url
+
+
+def test_machine_level_metrics_do_not_carry_role_label():
+    """机器/容器级指标不带 role 标签，进程/任务级指标必须带 role。
+
+    cpu、memory、cgroup 数据在同一台机器上所有进程采集结果相同：带 role 会
+    把一份数据拆成多条序列，导致面板聚合翻倍；rss、任务数据是进程独有数据，
+    不带 role 则三个进程互相覆盖同一条序列（历史缺陷）。
+    """
+    with patch.object(PushDataToServer, "__init__", lambda self: None):
+        collector = PushDataToServer()
+    collector.role = "celery_worker"
+    profile = CollectorProfileSnapshot(profile_id=1, push_url="https://x", extended_enabled=True)
+    raw = {
+        "machine": [("cpu_usage_percent", 1.5), ("memory_used_mb", 100)],
+        "cgroup": {"qtr_cgroup_memory_current_bytes": 2048},
+        "process": {"rss_bytes": 815, "threads": 10},
+        "task": [("qtr_task_active", {"role": "celery_worker", "task_family": "case"}, 1)],
+    }
+    lines = collector._format_samples(raw, profile)
+    machine_lines = [line for line in lines if line.startswith(("cpu_", "memory_", "qtr_cgroup_"))]
+    process_lines = [line for line in lines if line.startswith("qtr_process_")]
+    task_lines = [line for line in lines if line.startswith("qtr_task_")]
+    assert machine_lines and all("role=" not in line for line in machine_lines)
+    assert process_lines and all('role="celery_worker"' in line for line in process_lines)
+    assert task_lines and all('role="celery_worker"' in line for line in task_lines)
+
+
+def test_legacy_mode_samples_exclude_extended_metrics():
+    """扩展指标关闭的通道只发送机器级样本，且保持无 role 的历史格式。"""
+    with patch.object(PushDataToServer, "__init__", lambda self: None):
+        collector = PushDataToServer()
+    collector.role = "api"
+    profile = CollectorProfileSnapshot(profile_id=1, push_url="https://x", extended_enabled=False)
+    raw = {
+        "machine": [("cpu_usage_percent", 1.5)],
+        "cgroup": {"qtr_cgroup_memory_current_bytes": 2048},
+        "process": {"rss_bytes": 815},
+        "task": [("qtr_task_active", {"role": "api"}, 1)],
+    }
+    lines = collector._format_samples(raw, profile)
+    assert len(lines) == 1
+    assert lines[0].startswith("cpu_usage_percent")
+    assert "role=" not in lines[0]
 
 
 def test_process_snapshot_as_dict_contains_only_numeric_fields():

@@ -6,19 +6,42 @@
 
 VM/Prometheus 指标用于查看趋势，日志用于按任务 ID 做归因。三类进程分别使用 `role=api`、`role=celery_worker`、`role=celery_beat`。
 
-## 配置项
+## 采集服务的可视化配置（推荐方式）
 
-现有 `VM_URL`、`VM_USER`、`VM_PASSWORD`、`VM_JOB`、`VM_INSTANCE`、`VM_MERCHANT` 配置继续生效：
+资源指标推送到哪里、以什么节奏推送、是否启用，全部在系统内可视化配置，入口：**系统监控 → 资源采集服务**。该页面支持：
 
-- `VM_URL`：VictoriaMetrics 或 vmagent 接收 Prometheus 文本协议的地址；为空时只记录“不推送”日志。
-- `VM_USER`、`VM_PASSWORD`：推送认证信息，密码不要写入日志或文档。
-- `VM_JOB`：指标的 job 标签，默认 `QTR`。
-- `VM_INSTANCE`：实例标签，默认 `TEST_ENV`。
-- `VM_MERCHANT`：机器/商家标签，未配置时使用 `SYM_GROUP`，默认 `stable`。
-- `QTR_METRICS_ROLE`：进程角色标签。Supervisor 已为 API、Beat、Worker 分别设置；未设置时默认为 `api`。
-- `QTR_METRICS_EXTENDED_ENABLED`：是否发送新增进程、cgroup 和任务指标，默认 `false`。保持 `false` 时完全沿用历史 CPU/内存指标名称、标签集合和请求体格式；确认 vmagent 已支持新增指标后，设置为 `true` 才发送扩展指标。
+- 添加多个采集服务（多个推送通道），分别指向不同的 vmagent/VictoriaMetrics 接收端；
+- 随时启动与停止某个采集服务（开关生效时间最长 5 秒，无需重启任何进程）；
+- 设置每个采集服务的推送间隔（秒）、批次条数、请求超时；
+- 配置 job/instance/machine 标签和 Basic 认证（密码加密存储，页面不回显）；
+- 查看每个采集服务最近一次推送时间、推送状态和累计失败次数；
+- 查看当前进程（API / Worker / Beat）的采集线程运行状态。
 
-采集线程默认每秒采集一次，按批次或 5 秒间隔推送。推送请求超时为 10 秒，失败会记录角色、HTTP 状态和失败次数。
+配置保存或启停后自动热生效，所有采集进程会在 5 秒内轮询到新配置。启用采集服务前必须填写推送地址（`http://` 或 `https://` 开头）。推送间隔下限为 1 秒，建议保持默认 5 秒，间隔过小可能打爆接收端。停止采集服务后对应的监控面板会暂时无数据，属预期行为。
+
+### 采集服务配置项说明
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| 服务名称 | 无 | 页面展示用，需唯一 |
+| 启用推送 | 关 | 总开关，关闭后该通道停止推送 |
+| 推送地址 | 无 | Prometheus 文本协议接收端点，例如 `https://vmagent.example.com/api/v1/import/prometheus` |
+| 认证用户/密码 | 空 | 接收端 Basic 认证；密码加密存储，编辑时留空表示不修改 |
+| job 标签 | `QTR` | 指标 `job` 标签 |
+| instance 标签 | `TEST_ENV` | 指标 `instance` 标签 |
+| machine 标签 | 空 | 指标 `machine` 标签，留空使用默认分组（`SYM_GROUP`，默认 `stable`） |
+| 推送间隔 | 5 秒 | 两次推送之间的最小间隔，范围 1-3600 秒 |
+| 批次条数 | 100 | 缓冲样本达到该条数立即推送，不必等间隔 |
+| 超时 | 10 秒 | 单次推送 HTTP 请求超时，范围 1-60 秒 |
+| 扩展指标 | 关 | 开启后发送进程内存、cgroup、任务级指标（见下文），样本量更大 |
+
+## 兼容说明
+
+历史环境配置中的 `VM_URL`、`VM_USER`、`VM_PASSWORD`、`VM_JOB`、`VM_INSTANCE`、`VM_MERCHANT`、`QTR_METRICS_EXTENDED_ENABLED` 已不再参与采集链路，采集配置统一以数据库中的采集服务为准。升级后如果系统内尚无启用的采集服务，指标会停止推送，请在「系统监控 → 资源采集服务」中新建并启用。
+
+`QTR_METRICS_ROLE` 环境变量仍用于设置进程角色标签（API、Beat、Worker 分别为 `api`、`celery_worker`、`celery_beat`），通常无需修改。
+
+采集线程默认每秒采集一次本机指标，按每个采集服务的批次或推送间隔推送，全部采集与推送异常都会记录日志并计入失败次数，绝不影响主业务。
 
 ## 主要指标
 
@@ -32,7 +55,16 @@ VM/Prometheus 指标用于查看趋势，日志用于按任务 ID 做归因。�
 - `qtr_task_memory_delta_bytes`：任务结束时 RSS 相对开始快照的变化量。
 - `qtr_task_completed_total`：按任务类型和状态聚合的完成数量。
 
-旧 CPU 和内存采集结果在兼容模式下保持历史指标名和标签格式；新增进程、cgroup 和任务指标只有在 `QTR_METRICS_EXTENDED_ENABLED=true` 时发送。非数值状态字段不会发送为 Prometheus 样本。
+旧 CPU 和内存采集结果在兼容模式下保持历史指标名和标签格式；新增进程、cgroup 和任务指标只有在采集服务开启「扩展指标」时发送。非数值状态字段不会发送为 Prometheus 样本。
+
+### 指标标签分层（重要）
+
+推送的指标按归属层级分为两类，`role` 标签的附加规则不同：
+
+- **机器/容器级指标**（`cpu_usage_percent`、`memory_used_mb` 等机器 CPU/内存指标，以及全部 `qtr_cgroup_*`）：同一台机器上所有进程采集到的数据相同，**不带 `role` 标签**。否则同一份数据会被拆成与进程数相同的多条序列，面板聚合（sum/avg）会成倍虚高。
+- **进程级指标**（`qtr_process_*`）与**任务级指标**（`qtr_task_*`）：数据为当前进程独有，**必须携带 `role` 标签**（`api` / `celery_worker` / `celery_beat`）区分进程。否则三个进程会互相覆盖同一条序列，曲线呈无规律锯齿跳变。
+
+查询建议：看整机 CPU/内存/cgroup 时不要按 `role` 分组（这些指标没有该标签）；看进程内存与任务归因时按 `role` 分组。历史数据中 2026-08-27 之前的机器级指标可能带有 `role` 标签、进程序列可能缺失 `role`，该时间段数据存在拆分/覆盖问题，做长期趋势对比时请注意剔除。
 
 ## 日志检索
 

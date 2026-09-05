@@ -14,6 +14,16 @@
 
 每个进程只启动一个指标采集线程。独立进程必须使用对应的 `QTR_METRICS_ROLE`，没有设置时 API 采集器默认使用 `api`。
 
+## 采集推送配置（数据库，热生效）
+
+推送通道配置存储在数据库表 `metrics_collector_profile`，每行代表一个采集服务实例（推送目标 + 标签 + 间隔 + 扩展开关 + 启用状态），由「系统监控 → 资源采集服务」页面管理（模块 `server/modules/metrics/`）。
+
+- 采集线程不直接访问数据库：`MetricsCollectorRuntimeService` 周期加载启用的配置行，转换为 `CollectorProfileSnapshot` 注入线程（`replace_profiles`）；配置修改或启停后各进程 5 秒内热生效（按 `revision` 比对）。
+- 推送结果通过 `result_listener` 回调回写配置行（最近推送时间/状态/失败次数），供页面展示。
+- 历史 `VM_URL`/`VM_USER`/`VM_PASSWORD`/`VM_JOB`/`VM_INSTANCE`/`VM_MERCHANT`/`QTR_METRICS_EXTENDED_ENABLED` 环境配置已不参与采集链路；`QTR_METRICS_ROLE` 仍用于角色标签。
+- 每个通道独立攒批推送；扩展指标（进程/cgroup/任务）只在通道开启 `extended_enabled` 时采集和发送。
+- 采集或推送异常只记日志并累计失败计数，绝不影响主业务；数据库不可用时保留现有通道配置继续推送。
+
 ## 指标口径
 
 进程指标包括 RSS、VMS、USS（操作系统支持时）、线程数、子进程数、累计 CPU 时间、启动时间、运行时长、打开文件数和网络连接数。Linux cgroup 环境还采集当前用量、限制、anon/file/kernel/slab/swap 以及 `high`、`oom`、`oom_kill` 事件计数。

@@ -5,8 +5,8 @@ from celery import Celery
 from celery.signals import worker_ready
 
 from config.env import RedisConfig
+from modules.metrics.service.metrics_collector_runtime_service import MetricsCollectorRuntimeService
 from utils.log_util import logger
-from utils.metrics import PushMetrics
 
 
 def build_redis_url(database: int) -> str:
@@ -54,17 +54,10 @@ celery_app.conf.update(
     beat_max_loop_interval=5,
 )
 
-_metrics_thread = None
-
-
 @worker_ready.connect
 def start_worker_metrics(**kwargs):
-    """Celery Worker 就绪后启动独立的进程指标采集线程。"""
-    global _metrics_thread
-    if _metrics_thread and _metrics_thread.is_alive():
-        return
-    _metrics_thread = PushMetrics(role="celery_worker")
-    _metrics_thread.start()
+    """Celery Worker 就绪后启动独立的进程指标采集线程，配置从数据库热生效。"""
+    MetricsCollectorRuntimeService.start(role="celery_worker")
     logger.info("Celery Worker 指标采集已启动: role=celery_worker")
 
 

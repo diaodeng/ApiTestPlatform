@@ -2398,3 +2398,21 @@ updated: 2026-08-25
 - 工单 AI 任务表和 AI 审计表增加 `error_code`，失败响应不再返回工单信息或工作区结果元数据。
 - `PermissionDenied` 作为本地诊断告警保留；与 Provider 致命错误同时出现时不覆盖主错误。
 - 本次未调整 hybrid 日志读取策略和模型上下文限制。
+
+## [2026-09-06] FEATURE | 资源采集服务可视化配置
+
+- 背景：资源指标推送配置原本写死在 `.env.*`（VM_URL/VM_USER/VM_PASSWORD/VM_JOB/VM_INSTANCE/VM_MERCHANT/QTR_METRICS_EXTENDED_ENABLED），修改或启停需要改配置文件并重启 API/Worker/Beat 三个进程。
+- 方案：新增数据表 `metrics_collector_profile`，每行一个采集服务实例（推送地址、认证密文、标签、间隔、批次、超时、扩展开关、启用状态、revision）；新增后端模块 `server/modules/metrics/`（controller/service×2/dao/entity/util 分层），菜单与权限注册在 `modules/metrics/perms.py`，挂在「系统监控」目录下，权限码 `monitor:metrics_collector:*`。
+- 热生效机制：`MetricsCollectorRuntimeService` 由 API lifespan、Celery `worker_ready` 信号、Beat `setup_schedule` 三处接入；采集线程（`utils/metrics/collect.py` 重构为多通道模型）不访问数据库，运行时服务每 5 秒加载启用配置转换为 `CollectorProfileSnapshot` 注入线程，按 `revision` 比对热生效；推送结果经 `result_listener` 回调回写配置行供页面展示。
+- 兼容处理：env 兜底逻辑按要求移除，`MetricsSettings`/`MetricsConfig` 已删除；`QTR_METRICS_ROLE` 保留用于角色标签。升级后无启用采集服务则指标停止推送，需在页面新建。
+- 前端：新增 `web/src/views/monitor/metrics/`（列表 + 启停开关 + 弹窗表单）与 `web/src/api/system/metricsCollector.js`，接口前缀 `/monitor/metrics-collectors`。
+- 异常隔离：采集器构建失败跳过采集、扩展指标失败不影响基础指标、数据库不可用保留现有通道、推送结果回写失败仅记 debug 日志，任何采集/推送异常不冒泡到主业务。
+- 验证：新模块导入与 `server.py` 全量导入链通过；`uv run ruff check` 无新增问题类别（B008/B019/E501 为项目既有基线）；`npm run build:prod` 构建通过；现有 `tests/test_memory_metrics.py` 语义已对齐（多通道模型）。
+
+## [2026-09-06] FIX | 资源指标 role 标签分层（分组混乱修复）
+
+- 现象：VM 中 blue 组的 `cpu_usage_percent`、`memory_used_mb`、`qtr_cgroup_*` 等 6+ 项机器/容器级指标被拆成 api/celery_beat/celery_worker 三条序列（三进程读到的是同一份数据，值几乎相同），面板按机器聚合时 sum 会三倍虚高；2026-08-27 扩展指标上线前的进程序列则缺失 `role`，三个进程互相覆盖同一条 `qtr_process_*` 序列，RSS/CPU 曲线呈锯齿跳变无法归因。
+- 根因：`collect.py` 对所有指标统一附加标签，未区分指标归属层级——机器级数据不该带 `role`，进程级数据必须带 `role`。
+- 修复：`_format_samples`/`_labels`/`_append_metric` 增加 `with_role` 维度：machine 与 cgroup 指标强制剥离 `role`；`qtr_process_*` 与 `qtr_task_*` 强制携带 `role`。`role` 引入时间经 VM 数据回溯确认约为 2026-08-27（扩展指标上线），该日期前的历史序列存在覆盖问题。
+- 附带发现：VM 中存在 `machine=home`（instance=TEST，无 role）的旧环境数据，已于 2026-09-03 左右停止推送；`machine=dev` 仅存在于 30 天前，均为历史遗留非当前链路。
+- 验证：新增 `test_machine_level_metrics_do_not_carry_role_label` 与 `test_legacy_mode_samples_exclude_extended_metrics` 两个回归用例，tests/test_memory_metrics.py 7 个用例全部通过；ruff 无新增问题。
