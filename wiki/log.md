@@ -1,3 +1,12 @@
+## [2026-09-05] FIX | 工单页面表格横向滚动条拖拽不灵敏修复
+
+- 触发：用户反馈工单相关页面凡有表格处，底部横向滚动条鼠标拖动不灵敏（鼠标移动很远表格只动一点），shift+滚轮正常，要求分析原因并按方案 A（升级依赖）处理。
+- 根因：Element Plus 2.10.0 官方缺陷。el-table 滚动由 el-scrollbar 接管且原生滚动条被 CSS 隐藏（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），拖动的是自绘 thumb，坐标换算在 `scrollbar/src/thumb2.js`：`startDrag` 只记录 `baseScrollHeight`（漏了水平方向应有的 `baseScrollWidth`），`mouseMoveDocumentHandler` 横向也误用 `scrollLeft = 百分比 × baseScrollHeight / 100`，横向拖动灵敏度被压缩为约 scrollHeight/scrollWidth 倍（日志表格内容极宽，600/4000≈0.15，即移 100px 动 15px）。纵向恰好用 scrollHeight 误打误撞正常；shift+滚轮走 wrap 层原生滚动（1:1 像素）不经换算所以正常。官方 changelog 2.10.2（2025-06-13）"Components [scrollbar] horizontal scroll drag invalid"（PR #20953，关联 issue #20951 及 #20957/#20960/#20969/#20984 等一串 el-table 反馈）。项目在 c4f80eac（2025-12-16）恰好升到 2.10.0 落入坏区间。此 bug 影响全站所有 el-scrollbar 横向拖拽（含下拉框），工单页感受最明显。
+- 修复：`web/package.json` element-plus 2.10.0 → 2.10.7（同 minor 最新补丁，含 2.10.2 拖拽修复 + 2.10.5/2.10.6 滚动条 resize 修复；核对 2.10.3~2.10.7 changelog 无破坏性变更，2.10.5 另修表格隐藏时宽度计算错误、dropdown hover 异常滚动）。零业务代码改动。
+- 验证：安装后检查 `node_modules/element-plus/lib|es/components/scrollbar/src/thumb2.js` 已含 `baseScrollWidth` 且横向分支改用它；`npm run build:prod` 两次通过（36.9s 无 error）。未验证：真实浏览器手动拖拽（需连库环境登录后抽查工单列表/日志拉取记录/详情页，注意确认 `:deep(.el-scrollbar__bar)` 加高、thumb `min-width:48px` 覆盖仍生效）。
+- 文档：新增 `web/public/docs/updates/2026-09-05-table-horizontal-scrollbar-drag-fix.md`（重建后 docs-index.json 已收录）；本 wiki 记录。
+- 备查：当时考虑过 patch-package 修补（方案 B，锁版本维护负担）和运行时拦截 thumb 自实现拖拽（方案 C，侵入大），均不如升级；后续若升 2.11.x，2.11.1 还会优化 thumb 尺寸计算。
+
 ## [2026-09-04] REFACTOR | 工单同步配置页面按入库执行顺序重组
 
 - 三轮（同日）：用户反馈底部"保存配置"按钮悬在半空。根因是二轮为治横向滚动给页面根加的 `overflow-x: hidden`——CSS 规定 overflow-x:hidden 会把 overflow-y 连带从 visible 变 auto，页面根自己变成滚动容器，`position:sticky` 的吸附参照从外层主内容区变成这个不滚动的根元素，吸底失效、按钮退回文档流末尾。修复：改为 `overflow-x: clip`（只裁剪、不产生滚动容器），横向滚动防护与 sticky 吸底兼容。浏览器验证：滚动到内容中部时按钮 bottom 恒等于视口高（900/900），页面无横向溢出。此坑已写入 wiki 流程文档的自适应约束（新增裁剪需求一律用 clip 不用 hidden）。
