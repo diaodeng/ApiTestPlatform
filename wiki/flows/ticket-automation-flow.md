@@ -118,6 +118,7 @@ sequenceDiagram
 | 11 | `POST /ticket/sync/automation/manual-run` 按精确工单号手动重放 `bitable_pull` 场景：飞书模式忽略定时开关、常规筛选和时间窗口，仅查询唯一精确匹配的多维表格记录后入库并执行后处理；数据库模式从现有 ORM 工单构造同步模型，只执行后处理，不重新入库或覆盖工单字段。两种模式仍受自动化关注范围和各自动化子开关约束。 |
 | 12 | 手动创建工单（`POST /ticket`）保存成功后由 `TicketManualCreatePostProcessService` 桥接到统一后处理编排（`execute_deferred_sync_post_process`，场景 `manual_create`）：表单勾选与 `manual_create` 场景开关取"或"后固化为任务级 automation 快照，再依次执行 AI 同步提取、翻译、AI 分类、同步后自动化（相似工单/自动拉日志/自动 AI）、向量刷新与发布状态收敛。分发优先投递 Celery，Worker 不可用时降级本地后台线程。表单日志拉取参数写入任务级 `log_pull_config`，优先于 AI 提取结果；已内联翻译的工单携带 `origin_description` 原文参与查重，避免二次翻译。 |
 | 13 | `manual_create` 场景分类匹配同时识别 `manual_create_auto_category`（统一编排）与 `ticket_manual_create_auto_category`（旧内联路径）两种 source_type 前缀；延后后处理的向量场景映射包含 `manual_create → manualCreate`。当前处理人别名对补齐规则（`ticketAssignee` ↔ `currentAssigneeName`）由 `ticket_person_alias_util.complete_assignee_alias_pair` 统一提供，外部推送与多维表格拉取共用。 |
+| 14 | 远端拉取（`remote_pull`）入库后 automation 保持 None，`run_sync_automation` 与翻译开关解析统一读取 `remote_pull` 场景开关；`autoLogPullOnRemotePull`/`autoAiAnalysisOnRemotePull`/`translateOnRemotePull` 打开后内网即按既有链路自动执行（含成功记录复用、停止条件、自动 AI 前置条件检查），未打开时维持"自动化结果随 pending 从公网同步"的双环境默认语义。 |
 
 ## 错误处理
 

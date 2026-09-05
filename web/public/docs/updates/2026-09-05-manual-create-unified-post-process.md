@@ -27,6 +27,9 @@
 - 分类场景匹配放宽：`manual_create_auto_category`（统一编排来源）与 `ticket_manual_create_auto_category`（旧内联来源）均命中 `runOnManualCreate`。
 - 当前处理人别名对补齐规则（`ticketAssignee` ↔ `currentAssigneeName`）下沉到 `modules/ticket/util/ticket_person_alias_util.py`，外部推送与多维表格拉取共用。
 
-## 已知限制
+## 同日追加：远端拉取场景开关放开（方案A）
 
-- 远端拉取场景的任务级 automation 被强制全 False（`TicketRemoteSyncService` 固定行为），因此 `autoLogPullOnRemotePull` / `autoAiAnalysisOnRemotePull` 打开后仍不会在内网自动拉日志/AI；本次未改动该语义。
+- 删除 `TicketRemoteSyncService` 中强制注入 `automation(auto_identify/log_pull/ai_analysis=False)` 的逻辑，远端拉取入库后 automation 保持 None，与其他三个场景一致走"场景开关"分支。
+- 生效变化：`translateOnRemotePull`、`autoIdentifyOnRemotePull`、`autoLogPullOnRemotePull`、`autoAiAnalysisOnRemotePull` 四个开关自此真实生效（此前被写死的任务级参数短路，打开也不执行）。
+- 默认行为不变：四个开关默认值均为 False，未显式打开时内网仍不执行自动拉日志/AI；双环境部署下建议内网保持关闭，自动化结果随 pending 从公网同步。
+- 内网打开自动拉日志/AI 的前置条件与外部推送一致：Agent 在线、日志接口可达、日志参数可解析；参数不完整时走既有"跳过+通知"路径，并受自动化关注范围总闸门约束。

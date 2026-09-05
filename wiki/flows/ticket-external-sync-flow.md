@@ -93,6 +93,7 @@ sequenceDiagram
 | 7 | 内网将远端 pending 工单转换为本地入库模型时，会优先读取 `moduleName/module_name`，并兼容 `ticketModle/ticketModel/ticket_model` 与 `extraData.external_field_mapping.ticketModle`，避免模块文本在跨环境二次同步时丢失。 |
 | 7.1 | 远端拉取入库不会复用公网项目/模块/用户 ID，但已有本地工单会同步远端最新项目/模块文本并清空旧本地 ID；状态会使用内网本地 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析当前处理人、报告人和内部负责人；未命中时保留远端文本。 |
 | 7.1.1 | 远端拉取链路由 `TicketRemoteSyncService` 和 `remoteSync.enabled` 控制，不会再次查询公网飞书多维表格；公网补齐后的邮箱会随 pending payload 带到内网，内网只做本地人员解析。该服务负责远端请求头构造、pending payload 转 `TicketExternalSyncUpsertModel`、本地 revision/time 跳过判断和 ack 回写，定时任务不再通过 `TicketSyncService` 转发。 |
+| 7.1.1.1 | 2026-09-05 起，远端拉取入库不再强制注入全 False 的任务级 automation；automation 保持 None 后与外部推送/多维表格拉取一致读取 `remote_pull` 场景开关（翻译、自动识别、自动拉日志、自动 AI）。开关默认全关，双环境部署下内网通常保持关闭，自动化结果随 pending 从公网同步；内网显式打开开关后行为与外部推送一致，仍受自动化关注范围约束。 |
 | 7.2 | 外部 `stepReason` 会按 `20260616 人员：` 或 `20260616：` 拆分为同步评论；pending payload 携带同步评论，内网按 `sourceSegmentKey` 幂等写入，保留本地评论不被覆盖。 |
 | 8 | pending 返回后，`TicketSyncDeliveryService` 先写入该消费方的 `status=pulled`、`last_revision`、`last_batch_id` 和 `last_pulled_at` 作为租约；成功 ack 后才推进 `delivered_revision`。 |
 | 9 | 如果消费方还需要把“已处理”“处理失败”“部分成功”等结果反馈回公网环境，可调用可选接口 `POST /ticket/sync/ack`；控制器直接调用 `TicketSyncDeliveryService.ack_sync_delivery`，只有成功状态会推进 `delivered_revision`，失败状态只记录错误，保留同一 revision 下次重试。 |
