@@ -5,6 +5,7 @@
 - 修复：`web/package.json` element-plus 2.10.0 → 2.10.7（同 minor 最新补丁，含 2.10.2 拖拽修复 + 2.10.5/2.10.6 滚动条 resize 修复；核对 2.10.3~2.10.7 changelog 无破坏性变更，2.10.5 另修表格隐藏时宽度计算错误、dropdown hover 异常滚动）。零业务代码改动。
 - 验证：安装后检查 `node_modules/element-plus/lib|es/components/scrollbar/src/thumb2.js` 已含 `baseScrollWidth` 且横向分支改用它；`npm run build:prod` 两次通过（36.9s 无 error）。未验证：真实浏览器手动拖拽（需连库环境登录后抽查工单列表/日志拉取记录/详情页，注意确认 `:deep(.el-scrollbar__bar)` 加高、thumb `min-width:48px` 覆盖仍生效）。
 - 文档：新增 `web/public/docs/updates/2026-09-05-table-horizontal-scrollbar-drag-fix.md`（重建后 docs-index.json 已收录）；本 wiki 记录。
+- 追加（同日晚）：Jenkins docker 构建报 `npm ci` 50 条 Missing rollup@4.63.1。根因：当日 `npm install element-plus` 时 npm 顺带删除 lockfile 中 unimport/unplugin-auto-import 下两条嵌套 rollup@4.63.0 条目且未正确写回（顶层 rollup 被 0.25.8 古老传递依赖占位，4.x 只剩 vite/node_modules/rollup），`npm ci` 校验对缺失位置重解析出 4.63.1 与残留 4.63.0 全对不上；本地 build 正常是 node_modules 已就位不依赖 lockfile 重建。本地 `npm ci --dry-run` 完整重现 50 条 Missing。修复：重跑 `npm install` 生成一致 lockfile（850 插入/263 删除），补齐 rollup 4.63.1 全平台二进制 50 条；再用 `--registry=https://registry.npmmirror.com` 重装并把 51 条 `resolved`（element-plus 本体 + rollup 系列）从 npmjs.org 统一 sed 改写为 npmmirror（仓库 HEAD 约定全量镜像源），避免依赖 npm ci 的域名回退行为。验证：`npm ci --dry-run` Missing 0 条、JSON 解析合法、`npm run build:prod` 通过（36.96s）。教训：npm install 的"顺带去重"会产生 lockfile 与实际依赖树不同步的状态，改动依赖后交付前应跑一次 `npm ci --dry-run` 验证 CI 兼容性。
 - 备查：当时考虑过 patch-package 修补（方案 B，锁版本维护负担）和运行时拦截 thumb 自实现拖拽（方案 C，侵入大），均不如升级；后续若升 2.11.x，2.11.1 还会优化 thumb 尺寸计算。
 
 ## [2026-09-04] REFACTOR | 工单同步配置页面按入库执行顺序重组
