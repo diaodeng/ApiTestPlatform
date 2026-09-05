@@ -20,6 +20,7 @@
     saveTicketLogPullProjectVendorMap,
     translateTicketDescription,
     unbindTicketIssue,
+    updateTicketSimilarityCaseStatus,
   } from '@/api/ticket/ticket';
   import { listTicketLogPulls } from '@/api/ticket/logPull';
   import {
@@ -489,6 +490,74 @@
    */
   function refreshDetailAndNotify() {
     return Promise.all([refreshDetail(), emitChanged()]).then(() => undefined);
+  }
+
+  // 案例状态变更请求进行中状态
+  const caseActionLoading = ref(false);
+
+  // 案例状态对应的确认文案；verified 需要说明确认知情，rejected 需要填写驳回原因
+  const CASE_ACTION_CONFIRM = {
+    verified: {
+      title: '确认案例',
+      tip: '确认后该工单处理经验将作为已验证案例参与“处理案例相似”召回。需要根因、解决方案以及证据或验证方式完整。',
+      needRemark: false,
+      remarkLabel: '',
+    },
+    draft: {
+      title: '回退草稿',
+      tip: '回退后该案例将以草稿状态参与召回，可重新编辑确认。',
+      needRemark: false,
+      remarkLabel: '',
+    },
+    rejected: {
+      title: '驳回案例',
+      tip: '驳回后该案例不再参与相似召回，请填写驳回原因。',
+      needRemark: true,
+      remarkLabel: '驳回原因',
+    },
+  };
+
+  /**
+   * 变更当前工单相似处理案例状态（确认/回退草稿/驳回）。
+   * 由相似面板“当前工单案例”区块触发，成功后刷新概览与相似结果缓存。
+   * @param {string} status 目标状态：verified/draft/rejected
+   * @returns {void}
+   */
+  function handleCaseAction(status) {
+    const action = CASE_ACTION_CONFIRM[status];
+    if (!action || !currentTicketId.value || caseActionLoading.value) {
+      return;
+    }
+    let remarkPromise = Promise.resolve('');
+    if (action.needRemark) {
+      const input = window.prompt(action.remarkLabel || '请输入说明', '');
+      if (input === null) {
+        return;
+      }
+      remarkPromise = Promise.resolve(String(input).trim());
+    }
+    remarkPromise
+      .then((remark) => {
+        if (action.needRemark && !remark) {
+          proxy.$modal.msgWarning(`${action.remarkLabel || '说明'}不能为空`);
+          return null;
+        }
+        return proxy.$modal
+          .confirm(action.tip)
+          .then(() => {
+            caseActionLoading.value = true;
+            return updateTicketSimilarityCaseStatus(currentTicketId.value, { status, remark });
+          })
+          .then((response) => {
+            proxy.$modal.msgSuccess(response?.msg || '案例状态更新成功');
+            // 案例状态变化影响相似召回，后端已失效相似缓存，这里同时刷新概览与相似结果
+            return Promise.all([refreshDetail(), reloadSimilarTickets()]);
+          })
+          .finally(() => {
+            caseActionLoading.value = false;
+          });
+      })
+      .catch(() => undefined);
   }
 
   function buildIssueBindExistingForm() {
@@ -1523,12 +1592,15 @@
               :similar-loading="similarLoading"
               :similar-error="similarError"
               :similar-status="similarStatus"
+              :similarity-case="detail.similarityCase || null"
+              :case-action-loading="caseActionLoading"
               @run-ai="openAiAnalysisDialog"
               @refresh-ai="refreshAiAnalysisData"
               @open-ai-history="openAiTaskHistory"
               @open-ai-repo-mapping="openAiRepoMappingDialog"
               @open-project-vendor-map="openProjectVendorMapDialog"
               @changed="refreshDetailAndNotify"
+              @case-action="handleCaseAction"
             />
           </el-tab-pane>
 

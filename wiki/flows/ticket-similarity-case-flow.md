@@ -10,11 +10,15 @@ entry_points:
     path: /ticket/{ticket_id}/similar-tickets
     trigger: 工单详情查询相似候选
   - type: http
+    method: GET
+    path: /ticket/{ticket_id}/summary
+    trigger: 工单概览读取当前工单案例摘要（similarityCase 字段）
+  - type: http
     method: POST
     path: /ticket/{ticket_id}/similarity-case/status
     trigger: 人工确认或驳回处理案例
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-09-05
 ---
 
 # 工单相似度案例索引流程
@@ -58,3 +62,9 @@ sequenceDiagram
 - 案例确认不等于 Issue 归因，相似度不会自动更新 `ticket.issue_id`。
 - 普通评论不触发单条 Embedding；只有评论内容被纳入有效画像、RCA 或案例后才更新索引。
 - 生产默认使用外部 Embedding 和 MySQL 分批扫描，Qdrant 不属于本流程的生产前置依赖。
+
+## 前端确认入口（2026-09-05 补齐）
+
+- 工单列表详情弹窗"概览"页的"处理案例相似"卡片顶部展示当前工单案例摘要，提供确认案例（信息不完整时禁用）、回退草稿、驳回案例（需填驳回原因）三个操作，权限 `ticket:similarity:case`，与后端接口一致。
+- 概览接口 `GET /ticket/{ticket_id}/summary` 响应新增 `similarityCase` 摘要字段（`TicketSummaryModel`），未形成案例时 `caseStatus=none`。
+- 独立只读详情页仅展示案例状态，不提供写操作；状态变更成功后前端同时刷新概览与相似结果（后端已失效相似缓存）。

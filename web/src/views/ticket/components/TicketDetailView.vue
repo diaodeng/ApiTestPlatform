@@ -62,6 +62,8 @@
           :similar-error="similarError"
           :similar-status="similarStatus"
           :allow-bind-issue="false"
+          :similarity-case="detail.similarityCase || null"
+          :allow-case-action="false"
         />
       </el-tab-pane>
 

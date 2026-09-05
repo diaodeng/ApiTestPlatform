@@ -31,15 +31,15 @@
 
   const emit = defineEmits(['translate']);
 
-  // 原文与译文默认展开，切换工单时由父组件通过 key 重建或此处 watch 重置
+  // 原文默认展开；译文默认收起，避免打开详情时大段翻译抢占首屏，切换工单时同样重置
   const descriptionExpanded = ref(true);
-  const translationExpanded = ref(true);
+  const translationExpanded = ref(false);
 
   watch(
     () => [props.originalDescription, props.aiTranslation],
     () => {
       descriptionExpanded.value = true;
-      translationExpanded.value = true;
+      translationExpanded.value = false;
     }
   );
 </script>
