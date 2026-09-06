@@ -35,13 +35,18 @@ class MetricsCollectorRuntimeService:
 
     @classmethod
     def start(cls, role: str) -> PushDataToServer | None:
-        """为当前进程启动采集线程；已有线程时直接复用，返回 None 表示跳过。"""
+        """为当前进程启动采集线程；已有线程时直接复用，返回 None 表示跳过。
+
+        启动时注入配置加载回调，采集线程主循环按固定间隔（PROFILE_REFRESH_SECONDS）
+        自行轮询数据库配置并热生效，不再依赖外部周期任务驱动。
+        """
         with _threads_lock:
             existing = _threads.get(role)
             if existing and existing.is_alive():
                 return None
             thread = PushDataToServer(role=role)
             thread.result_listener = cls._on_push_result
+            thread.profile_provider = lambda: cls.load_active_profiles(role)
             _threads[role] = thread
             thread.start()
         logger.info(f"指标采集线程已启动: role={role}")
@@ -74,20 +79,17 @@ class MetricsCollectorRuntimeService:
         """加载启用的采集服务配置并转换为线程参数快照。
 
         默认使用独立数据库会话；传入 db 时使用该会话（测试或调用方已持有
-        会话的场景）。数据库异常时返回空列表，由采集线程保留现有通道配置。
+        会话的场景）。数据库异常时向上抛出，由调用方决定保留或清空通道：
+        采集线程捕获异常后保留现有通道继续推送，不会误把加载失败当作无通道。
         """
-        if db is not None:
-            try:
-                return [cls._to_snapshot(row) for row in MetricsCollectorConfigService.load_push_profiles(db)]
-            except Exception as exc:
-                logger.warning(f"加载采集服务配置失败，保留现有通道: role={role}, error={exc}")
-                return []
         try:
+            if db is not None:
+                return [cls._to_snapshot(row) for row in MetricsCollectorConfigService.load_push_profiles(db)]
             with SessionLocal() as session:
                 return [cls._to_snapshot(row) for row in MetricsCollectorConfigService.load_push_profiles(session)]
         except Exception as exc:
-            logger.warning(f"加载采集服务配置失败，保留现有通道: role={role}, error={exc}")
-            return []
+            logger.warning(f"加载采集服务配置失败: role={role}, error={exc}")
+            raise
 
     @classmethod
     def poll_and_apply(cls, role: str):

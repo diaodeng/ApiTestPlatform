@@ -75,6 +75,9 @@ class PushDataToServer(threading.Thread):
     # 采集循环的固定节拍：每秒采集一次本机指标。
     TICK_SECONDS = 1
 
+    # 通道配置刷新间隔秒数：与运行时服务的轮询约定一致，配置启停或修改最迟在此时间内热生效。
+    PROFILE_REFRESH_SECONDS = 5
+
     def __init__(self, role: str | None = None):
         super().__init__(daemon=True)
         self.role = role or os.environ.get("QTR_METRICS_ROLE", "api")
@@ -99,6 +102,11 @@ class PushDataToServer(threading.Thread):
         self._profiles_lock = threading.Lock()
         self._channel_buffers: dict[int, list[str]] = {}
         self._channel_last_push: dict[int, float] = {}
+        # 配置加载回调：签名 () -> list[CollectorProfileSnapshot]，由运行时服务注入，
+        # 线程保持不直接访问数据库的边界；未注入时线程只能依赖外部调用 replace_profiles。
+        self.profile_provider = None
+        # 上次刷新通道配置的时间戳，用于主循环按 PROFILE_REFRESH_SECONDS 节拍轮询。
+        self._last_profile_refresh = 0.0
 
     # ------------------------------------------------------------------
     # 采集器构建
@@ -164,12 +172,32 @@ class PushDataToServer(threading.Thread):
         logger.info(f"开始采集信息: role={self.role}")
         while not self.stopped:
             try:
+                self._refresh_profiles_if_due()
                 self._collect_tick()
             except Exception as exc:
                 self.push_failures += 1
                 logger.exception(f"指标采集失败: role={self.role}, failures={self.push_failures}, error={exc}")
             self._interruptible_sleep(self.TICK_SECONDS)
         self._flush_remaining()
+
+    def _refresh_profiles_if_due(self):
+        """按固定间隔通过回调刷新通道配置，保证配置启停与修改热生效。
+
+        回调异常只记日志，保留现有通道继续推送；未注入回调时跳过刷新。
+        """
+        if self.profile_provider is None:
+            return
+        now = time.time()
+        if self._last_profile_refresh > 0 and now - self._last_profile_refresh < self.PROFILE_REFRESH_SECONDS:
+            return
+        self._last_profile_refresh = now
+        try:
+            profiles = self.profile_provider()
+        except Exception as exc:
+            logger.warning(f"刷新采集通道配置失败，保留现有通道: role={self.role}, error={exc}")
+            return
+        if profiles is not None:
+            self.replace_profiles(profiles)
 
     def _interruptible_sleep(self, seconds: float):
         """可被 stop 及时打断的休眠。"""

@@ -18,7 +18,7 @@
 
 推送通道配置存储在数据库表 `metrics_collector_profile`，每行代表一个采集服务实例（推送目标 + 标签 + 间隔 + 扩展开关 + 启用状态），由「系统监控 → 资源采集服务」页面管理（模块 `server/modules/metrics/`）。
 
-- 采集线程不直接访问数据库：`MetricsCollectorRuntimeService` 周期加载启用的配置行，转换为 `CollectorProfileSnapshot` 注入线程（`replace_profiles`）；配置修改或启停后各进程 5 秒内热生效（按 `revision` 比对）。
+- 采集线程不直接访问数据库：`MetricsCollectorRuntimeService.start(role)` 启动线程时注入 `profile_provider` 回调（内部调用 `load_active_profiles`），线程主循环每 5 秒（`PROFILE_REFRESH_SECONDS`，首轮立即）通过回调加载启用的配置行，转换为 `CollectorProfileSnapshot` 后经 `replace_profiles` 注入并按 `revision` 比对热生效；配置修改或启停后各进程 5 秒内生效。回调抛异常时线程保留现有通道继续推送（`load_active_profiles` 数据库异常向上抛出，由线程捕获，避免空列表误清空通道）。注意：该轮询在采集线程内部自驱动，没有外部定时任务；历史版本曾因缺少轮询调用方导致配置从未注入、指标完全不推送（2026-09-06 修复）。
 - 推送结果通过 `result_listener` 回调回写配置行（最近推送时间/状态/失败次数），供页面展示。
 - 历史 `VM_URL`/`VM_USER`/`VM_PASSWORD`/`VM_JOB`/`VM_INSTANCE`/`VM_MERCHANT`/`QTR_METRICS_EXTENDED_ENABLED` 环境配置已不参与采集链路；`QTR_METRICS_ROLE` 仍用于角色标签。
 - 每个通道独立攒批推送；扩展指标（进程/cgroup/任务）只在通道开启 `extended_enabled` 时采集和发送。

@@ -1,4 +1,11 @@
-## [2026-09-06] FIX | 统一凭证编辑语义与自动刷新可见性
+## [2026-09-06] FIX | 资源采集通道配置轮询缺失（Grafana 无数据根因）
+
+- 触发：用户反馈 `.env.dev` 环境部署最新代码、已在「资源采集服务」页面配置启用采集服务后，Grafana 仍搜不到 `memory_pressure{instance="TEST_ENV", machine="home", job="QTR"}` 等任何当前链路指标。
+- 根因：采集线程 `PushDataToServer` 启动时 `_profiles` 为空，`_collect_tick` 无通道直接 return；而本应周期注入配置的 `replace_profiles` 全仓库无任何调用方——`PROFILE_POLL_SECONDS = 5` 只有定义无使用，`poll_and_apply()` 无调用方，三个进程（server.py role=api、celery_app.py role=celery_worker、celery_scheduler.py role=celery_beat）启动后无人喂配置。数据库配置行本身正确（machine=home），只是从未进入线程；wiki 此前描述"周期加载"与实际代码不符。
+- 修复：`collect.py` 新增 `PROFILE_REFRESH_SECONDS = 5` 与 `profile_provider` 回调（保持线程不直接访问数据库边界），主循环每秒节拍先执行 `_refresh_profiles_if_due()`：首轮立即加载、之后每 5 秒刷新，回调异常记日志并保留现有通道；`MetricsCollectorRuntimeService.start(role)` 启动时注入 `profile_provider = lambda: load_active_profiles(role)`；`load_active_profiles` 数据库异常语义从"返回空列表"改为"向上抛出"（空列表会令线程误清空通道，抛出由线程捕获保留通道）。
+- 效果：api/celery_worker/celery_beat 三进程统一自驱动轮询，页面启用采集服务后最迟 5 秒开始推送，配置增删改/启停 5 秒热生效（与既有文档描述一致，此前实际不生效）；观察点：状态接口 `activeProfileIds` 从空数组变为已加载配置 ID，日志出现"采集通道启动: profileId=…"。
+- 文档：更新记录 `web/public/docs/updates/2026-09-06-metrics-collector-profile-polling-fix.md`（history.md 已加条目）、wiki 流程文档 `flows/memory-growth-monitoring.md` 采集链路描述已修正。
+- 验证：`tests/test_memory_metrics.py` 新增 3 个回归用例（轮询回调热生效+异常保留通道、无 provider 保持空通道、运行时服务必须注入回调），10 用例全通过；改动文件 ruff 通过；全量 pytest 27 失败/11 错误经 git stash 基线对比确认为存量问题（ticket/ast 模块），与本次无关。未做真实推送端到端验证（需 dev 环境重启进程后看 VM 数据）。
 
 - 触发：用户反馈①新增/编辑凭证不填登录账号会报错，登录接口 JSON 请求体默认填入账号密码占位符，手动清除后下次编辑又自动填回，每次都要手动删；②`.env.prod` 环境 UAT 凭证能登录、定时刷新任务也开着，但凭证仍会过期。
 - 根因①：`CredentialDialog.vue` 的 `ensureLoginRequestDefaults()` 无法区分"未初始化"和"用户显式清空"，每次打开编辑框/切换认证方式都把 `{}` 请求体改写为账号密码模板，保存时 `validateRequestTemplateVariables()` 因 secret 缺 username/password 报错；且后端 `update_credential` 对 secret 做合并式更新（只增不删），编辑页明文回填机制下清空账号保存后旧值仍留在密文里，下次编辑又被回填。
