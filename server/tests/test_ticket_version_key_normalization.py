@@ -12,6 +12,10 @@ def test_normalize_ticket_version_key_filters_field_label():
 def test_post_download_extract_ignores_plain_version_label(tmp_path):
     """日志版本提取应忽略普通 version 字段名并继续查找后续有效版本。"""
     log_file = tmp_path / "app.log"
-    log_file.write_text("version: version\napp version: 3.4.5\n", encoding="utf-8")
+    log_file.write_text(
+        "version: version\n"
+        "2026-09-04 13:03:53,291 I 001720-Scheduler_0 : ms_h:1, ms_l:1, ls_h:6, ls_l:8, version:3.4.5\n",
+        encoding="utf-8",
+    )
 
     assert TicketLogPostProcessService.extract_version_key_from_files([log_file]) == "3.4.5"

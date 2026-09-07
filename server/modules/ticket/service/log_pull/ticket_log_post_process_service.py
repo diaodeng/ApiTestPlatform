@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import time
 from datetime import datetime
@@ -14,8 +13,8 @@ from sqlalchemy.orm import Session
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_log_pull_do import TicketLogPullRecord
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
-from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
+from modules.ticket.util.ticket_log_version_extract_util import extract_version_key_by_patterns
 from utils.log_util import logger
 
 
@@ -31,10 +30,6 @@ class TicketLogPostProcessService:
     LINE_INDEX_SUFFIX = ".lineidx"
     LINE_INDEX_ENCODING_VERSION = 2
     TEXT_EXTENSIONS = {".log", ".txt", ".out"}
-    VERSION_PATTERN = re.compile(
-        r"(?:版本号|版本|version|app[_\s-]*version)\s*[:：=]\s*([A-Za-z0-9._/-]+)",
-        re.IGNORECASE,
-    )
 
     @classmethod
     def run_after_download(
@@ -71,7 +66,11 @@ class TicketLogPostProcessService:
         log_files = cls._list_log_files(extract_dir)
         version_key = ""
         if cls._config_bool(runtime_config, "postDownloadVersionExtractEnabled", False):
-            version_key = cls.extract_and_update_version_key(db, record.ticket_id, record.id, log_files)
+            # 版本提取正则来自存储配置 versionExtractPatterns，未配置或全部非法时由 util 回退默认正则。
+            version_patterns = runtime_config.get("versionExtractPatterns")
+            version_key = cls.extract_and_update_version_key(
+                db, record.ticket_id, record.id, log_files, version_patterns
+            )
         indexed_count = 0
         if cls._config_bool(runtime_config, "postDownloadIndexEnabled", False):
             indexed_count = cls.build_line_indexes(log_files)
@@ -113,6 +112,7 @@ class TicketLogPostProcessService:
         ticket_id: int,
         record_id: int,
         log_files: list[Path],
+        version_patterns: Any = None,
     ) -> str:
         """
         从已解压日志文件中流式提取版本号，并在工单缺失版本时写入发生版本。
@@ -120,6 +120,7 @@ class TicketLogPostProcessService:
         :param ticket_id: 工单ID
         :param record_id: 日志拉取记录ID
         :param log_files: 已解压日志文件列表
+        :param version_patterns: 版本提取正则列表；None 或全部非法时回退默认正则
         :return: 提取到的版本号，未命中返回空字符串
         """
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
@@ -135,7 +136,7 @@ class TicketLogPostProcessService:
             )
             return current_version_key
 
-        version_key = cls.extract_version_key_from_files(log_files)
+        version_key = cls.extract_version_key_from_files(log_files, version_patterns)
         if not version_key:
             logger.info(f"日志下载完成后版本提取未命中，ticket_id={ticket_id}，record_id={record_id}")
             return ""
@@ -154,10 +155,11 @@ class TicketLogPostProcessService:
         return version_key
 
     @classmethod
-    def extract_version_key_from_files(cls, log_files: list[Path]) -> str:
+    def extract_version_key_from_files(cls, log_files: list[Path], version_patterns: Any = None) -> str:
         """
         从日志文件中按行流式提取版本号，命中后立即返回。
         :param log_files: 日志文件列表
+        :param version_patterns: 版本提取正则列表；None 或全部非法时回退默认正则
         :return: 提取到的版本号
         """
         for path in log_files:
@@ -165,11 +167,9 @@ class TicketLogPostProcessService:
             try:
                 with path.open("r", encoding=encoding, errors="replace") as file_obj:
                     for line in file_obj:
-                        match = cls.VERSION_PATTERN.search(line)
-                        if match:
-                            version_key = normalize_ticket_version_key(match.group(1))
-                            if version_key:
-                                return version_key
+                        version_key = extract_version_key_by_patterns(line, version_patterns)
+                        if version_key:
+                            return version_key
             except Exception as exc:
                 logger.warning(f"日志版本提取读取文件失败，path={path}，reason={exc}")
         return ""

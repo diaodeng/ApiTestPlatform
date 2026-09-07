@@ -15,6 +15,9 @@ export function useLogPullStorageConfig(proxy) {
   const loading = ref(false);
   const saving = ref(false);
 
+  /** 版本提取正则编辑文本（JSON 数组格式，与后端 versionExtractPatterns 对齐）。 */
+  const versionExtractPatternsText = ref('[]');
+
   /** 存储与资源限制配置表单，字段与后端 TicketLogPullStorageConfigModel 对齐（camelCase）。 */
   const storage = reactive(createDefaultStorage());
 
@@ -95,13 +98,52 @@ export function useLogPullStorageConfig(proxy) {
     storage.postDownloadExtractEnabled = Boolean(config.postDownloadExtractEnabled);
     storage.postDownloadVersionExtractEnabled = Boolean(config.postDownloadVersionExtractEnabled);
     storage.postDownloadIndexEnabled = Boolean(config.postDownloadIndexEnabled);
+    versionExtractPatternsText.value = JSON.stringify(normalizePatternArray(config.versionExtractPatterns), null, 2);
+  }
+
+  /**
+   * 归一化正则数组：过滤空串并保留原始顺序，后端负责合法性与去重校验。
+   * @param {any} raw 后端返回的正则配置
+   * @returns {string[]} 正则字符串数组
+   */
+  function normalizePatternArray(raw) {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw.map(item => String(item || '').trim()).filter(Boolean);
+  }
+
+  /**
+   * 解析版本提取正则编辑文本为 JSON 数组，解析失败时抛出错误并返回 null。
+   * @returns {string[]|null} 正则数组；格式非法时返回 null
+   */
+  function parseVersionExtractPatterns() {
+    const rawText = String(versionExtractPatternsText.value || '').trim();
+    if (!rawText) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(rawText);
+      if (!Array.isArray(parsed)) {
+        proxy?.$modal?.msgError?.('版本提取正则必须是 JSON 数组，例如 ["正则1", "正则2"]');
+        return null;
+      }
+      return parsed.map(item => String(item || '').trim()).filter(Boolean);
+    } catch (err) {
+      proxy?.$modal?.msgError?.('版本提取正则不是合法的 JSON 数组: ' + (err?.message || err));
+      return null;
+    }
   }
 
   /**
    * 构建保存载荷，仅提交后端可写入的字段（排除 effectiveLocalDirectory 等派生字段）。
-   * @returns {object} 存储配置保存载荷
+   * @returns {object|null} 存储配置保存载荷；正则格式非法时返回 null
    */
   function buildSavePayload() {
+    const versionExtractPatterns = parseVersionExtractPatterns();
+    if (versionExtractPatterns === null) {
+      return null;
+    }
     return {
       mode: storage.mode,
       localDirectory: storage.localDirectory,
@@ -131,6 +173,7 @@ export function useLogPullStorageConfig(proxy) {
       postDownloadExtractEnabled: Boolean(storage.postDownloadExtractEnabled),
       postDownloadVersionExtractEnabled: Boolean(storage.postDownloadVersionExtractEnabled),
       postDownloadIndexEnabled: Boolean(storage.postDownloadIndexEnabled),
+      versionExtractPatterns,
     };
   }
 
@@ -158,8 +201,11 @@ export function useLogPullStorageConfig(proxy) {
    * @returns {Promise<void>}
    */
   function handleSave() {
-    saving.value = true;
     const payload = buildSavePayload();
+    if (!payload) {
+      return Promise.reject(new Error('版本提取正则格式非法'));
+    }
+    saving.value = true;
     return saveTicketLogPullStorageConfig(payload)
       .then(() => {
         proxy?.$modal?.msgSuccess?.('日志拉取存储与资源限制配置已保存');
@@ -177,6 +223,7 @@ export function useLogPullStorageConfig(proxy) {
     loading,
     saving,
     storage,
+    versionExtractPatternsText,
     loadConfig,
     handleSave,
   };

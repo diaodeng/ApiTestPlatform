@@ -1,4 +1,13 @@
-## [2026-09-06] FIX | 资源采集通道配置轮询缺失（Grafana 无数据根因）
+## [2026-09-07] FEAT | 日志版本号提取正则收紧并支持可视化配置
+
+- 触发：用户反馈日志中 `launcher_version:1.0.6.8`（启动器版本）被误提取为工单版本，正确版本应为 `ms_h:1, ms_l:1, ls_h:6, ls_l:8, version:1.1.6.8` 行的 `1.1.6.8`；`OpenGL parsed version: 4, 6` 也存在误提取风险。
+- 根因：原正则 `(?:版本号|版本|version|...)\s*[:：=]\s*(...)` 对 `version` 无左边界（`launcher_version` 子串命中）、版本值无形态约束（单数字 `4` 命中），且"首个命中即返回"，误报行先出现即抢占结果；该正则在 3 个服务文件中重复硬编码，不可配置。
+- 修复：新增 `modules/ticket/util/ticket_log_version_extract_util.py` 收敛全部版本提取逻辑——日志链路默认正则锚定 `ms_h/ms_l/ls_h/ls_l` 特征行并要求 `x.y.z` 起步版本形态；工单标题/描述文本链路用独立兜底正则（`version` 前禁止字母/下划线 + 同样版本形态约束）。正则列表接入日志拉取存储配置 `versionExtractPatterns`（`TicketLogPullStorageConfigModel`/`TicketLogPullPostProcessConfigModel` 新增字段，归一化时非法项过滤、全空回退默认），两条日志链路（正文回填 `ensure_ticket_version_id_from_log`、下载后处理 `extract_and_update_version_key`）均按配置读取；3 处旧 `VERSION_PATTERN` 类属性全部删除，调用方改走 util 公开函数。
+- 前端：同步自动化页「来源与拉取」→「存储与资源限制」卡片「下载完成后处理」区块下方新增「版本提取正则」JSON 数组 textarea，随存储配置一起保存；`useLogPullStorageConfig.js` 负责 JSON 校验（非法时阻断保存并提示）。
+- 效果：三行混合日志（OpenGL 行、launcher 行在前，ms_h 行在后）整段与逐行提取均只返回 `1.1.6.8`；自定义正则（如改提取 launcher 版本）与回退默认正则路径均验证可用。
+- 文档：`web/public/docs/ticket_log_pull.md` 存储配置表新增 `versionExtractPatterns` 行及专节说明；更新记录 `web/public/docs/updates/2026-09-07-log-version-extract-pattern-config.md`；wiki `flows/ticket-automation-flow.md` 第 8 步已更新。
+- 验证：新增 `tests/test_ticket_log_version_extract.py` 7 个用例 + 更新 `tests/test_ticket_version_key_normalization.py` 1 个用例，9 个全通过；改动文件 ruff 通过；`test_ticket_sync_mapping_boundary.py` 13 个失败经 git stash 基线对比确认为存量问题（`detected_version_key` 属性缺失，与本次无关）；前端 `vite build` 通过。
+
 
 - 触发：用户反馈 `.env.dev` 环境部署最新代码、已在「资源采集服务」页面配置启用采集服务后，Grafana 仍搜不到 `memory_pressure{instance="TEST_ENV", machine="home", job="QTR"}` 等任何当前链路指标。
 - 根因：采集线程 `PushDataToServer` 启动时 `_profiles` 为空，`_collect_tick` 无通道直接 return；而本应周期注入配置的 `replace_profiles` 全仓库无任何调用方——`PROFILE_POLL_SECONDS = 5` 只有定义无使用，`poll_and_apply()` 无调用方，三个进程（server.py role=api、celery_app.py role=celery_worker、celery_scheduler.py role=celery_beat）启动后无人喂配置。数据库配置行本身正确（machine=home），只是从未进入线程；wiki 此前描述"周期加载"与实际代码不符。

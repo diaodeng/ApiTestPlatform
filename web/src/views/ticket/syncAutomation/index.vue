@@ -4109,6 +4109,21 @@
                 />
               </el-form-item>
             </el-col>
+            <el-col :span="24">
+              <el-form-item label="版本提取正则">
+                <el-input
+                  v-model="logPullVersionExtractPatternsText"
+                  type="textarea"
+                  :rows="4"
+                  placeholder='请输入 JSON 数组，例如 ["ms_h\\s*:\\s*\\d+\\s*,\\s*ms_l\\s*:\\s*\\d+[^,\\n]*,\\s*version\\s*[:=]\\s*(\\d+(?:\\.\\d+){2,3})"]'
+                />
+                <div class="form-help-text">
+                  用于日志拉取成功后从日志正文提取应用版本号，按顺序取第一个命中；每个正则的第一个分组作为版本号。
+                  默认锚定"ms_h:...version:"特征行，避免误提取 launcher_version（启动器版本）和 OpenGL
+                  解析版本。清空数组或全部非法时回退内置默认正则；非法正则会被自动忽略。
+                </div>
+              </el-form-item>
+            </el-col>
           </el-row>
         </el-form>
         <div class="mt16">
@@ -4436,6 +4451,7 @@
     loading: logPullStorageLoading,
     saving: logPullStorageSaving,
     storage: logPullStorage,
+    versionExtractPatternsText: logPullVersionExtractPatternsText,
     loadConfig: logPullStorageLoadConfig,
     handleSave: logPullStorageHandleSave,
   } = useLogPullStorageConfig(proxy);
