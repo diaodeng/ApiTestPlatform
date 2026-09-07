@@ -68,6 +68,140 @@ VM/Prometheus 指标用于查看趋势，日志用于按任务 ID 做归因。�
 
 查询建议：看整机 CPU/内存/cgroup 时不要按 `role` 分组（这些指标没有该标签）；看进程内存与任务归因时按 `role` 分组。历史数据中 2026-08-27 之前的机器级指标可能带有 `role` 标签、进程序列可能缺失 `role`，该时间段数据存在拆分/覆盖问题，做长期趋势对比时请注意剔除。
 
+## 指标字典
+
+全部指标都带 `job`、`instance`、`machine`、`sensor` 标签；`machine` 即采集服务上配置的「machine 标签」，用于区分不同部署环境（如 dev 的 `home`、服务器的 `blue`）。下表数值示例取自 dev（home）环境的真实数据。
+
+### 机器级指标（不带 role，每台机器一条序列）
+
+| 指标 | 含义 | 示例值 | 解读 |
+|---|---|---|---|
+| `cpu_usage_percent` | 整机 CPU 使用率（容器内为 cgroup 配额下的使用率） | 0.13 | 单位 %。0.13 表示几乎空闲；持续 >80% 说明 CPU 饱和 |
+| `cpu_limit_cores` | 可用 CPU 核数（容器内为 cgroup 配额折算核数） | 16 | 分母。使用率 = 用量 / 该配额 |
+| `memory_used_mb` | 整机/容器已用内存（cgroup 视角，含文件缓存） | 578 | 容器内是 cgroup `memory.current`，含 page cache |
+| `memory_limit_mb` | 内存上限（容器内为容器限额，物理机为总内存） | 15770 | 分母 |
+| `memory_actual_available_mb` | 可用内存 = 上限 − 已用 | 15192 | 逼近 0 时容器有 OOM 风险 |
+| `memory_pressure` | 内存压力 = 已用 / 上限 × 100% | 3.67 | 单位 %。>70 建议关注，>85 有 OOM 风险 |
+
+### 进程级指标 `qtr_process_*`（带 role，扩展指标）
+
+| 指标 | 含义 | 排查用途 |
+|---|---|---|
+| `qtr_process_rss_bytes` | 进程常驻内存（实际占用的物理内存） | **内存增长排查的第一指标**。持续单调增长（不回落）= 疑似泄漏；锯齿上升回落 = 正常负载波动 |
+| `qtr_process_uss_bytes` | 进程独占内存（仅该进程使用的物理内存） | 区分「真泄漏」与「共享库占用」：RSS 涨但 USS 稳定时，增长来自共享内存或页缓存，不是该进程泄漏 |
+| `qtr_process_vms_bytes` | 进程虚拟内存 | 仅参考，Python 预分配会导致虚高，一般不用 |
+| `qtr_process_threads` | 线程数 | 持续增长 = 线程池/线程泄漏 |
+| `qtr_process_children` | 存活子进程数 | 持续增长 = 子进程（如解压、搜索）未回收 |
+| `qtr_process_cpu_seconds_total` | 进程累计 CPU 时间（秒，单调递增） | 用 `rate(qtr_process_cpu_seconds_total[5m])` 得到进程 CPU 使用率 |
+| `qtr_process_open_files` | 打开文件句柄数 | 持续增长 = 文件/连接泄漏 |
+| `qtr_process_connections` | 网络连接数 | 持续增长 = 连接未释放 |
+| `qtr_process_uptime_seconds` | 进程运行时长 | 判断进程是否重启过（归零即重启） |
+| `qtr_process_start_time_seconds` | 进程启动时刻（Unix 秒） | 同上 |
+
+### 容器内存明细 `qtr_cgroup_memory_*`（不带 role，扩展指标）
+
+| 指标 | 含义 | 排查用途 |
+|---|---|---|
+| `qtr_cgroup_memory_current_bytes` | cgroup 当前内存总量 | 对应 `memory_used_mb` 的字节精确值 |
+| `qtr_cgroup_memory_max_bytes` | cgroup 内存上限 | 分母；`max` 值（无限制）时不上报 |
+| `qtr_cgroup_memory_anon_bytes` | 匿名内存（Python 对象、堆） | **持续增长 = 应用真实泄漏**，这部分无法被内核回收 |
+| `qtr_cgroup_memory_file_bytes` | 文件页缓存 | 可被内核随时回收，增长通常无害；RSS 高但 anon 稳定时优先看这里 |
+| `qtr_cgroup_memory_kernel_bytes` | 内核栈等内核内存 | 异常增长多与 socket/挂载有关 |
+| `qtr_cgroup_memory_slab_bytes` | 内核 slab 缓存（dentry/inode） | 大量小文件操作后会增长，可回收 |
+| `qtr_cgroup_memory_swap_bytes` | 使用的交换分区 | >0 说明物理内存吃紧，系统开始换页 |
+| `qtr_cgroup_memory_events_high_total` | 内存使用触及 high 水位次数 | 触发内核回收，增长说明内存紧张 |
+| `qtr_cgroup_memory_events_oom_total` | 发生 OOM（内存超限）次数 | 增长 = 容器内存超限被限制 |
+| `qtr_cgroup_memory_events_oom_kill_total` | OOM Killer 杀死进程次数 | **增长 = 有进程被强杀**，结合应用日志定位被杀进程 |
+
+### 任务级指标 `qtr_task_*`（带 role 与任务维度标签，扩展指标）
+
+额外标签：`task_family`（任务类型）、`queue_name`（队列）、`owner_type`（业务域）、`trigger_type`（触发方式 scheduler/once/background）、`status`（success/failed/running 等）。
+
+| 指标 | 含义 | 排查用途 |
+|---|---|---|
+| `qtr_task_active` | 当前正在执行的任务数 | 突增后长时间不回落 = 任务卡住 |
+| `qtr_task_completed_total` | 按任务类型/状态聚合的完成数（Counter） | 用 `rate(...[5m])` 看任务吞吐；failed 增长快 = 任务异常 |
+| `qtr_task_duration_ms` | 任务耗时（毫秒，最后一次） | 结合 task_family 看哪类任务变慢 |
+| `qtr_task_memory_before_bytes` / `_after_bytes` | 任务开始/结束时进程 RSS | 差值即任务内存影响 |
+| `qtr_task_memory_delta_bytes` | 任务前后 RSS 变化量 | **定位高内存任务的关键指标**：按 task_family 聚合取 top，即「哪类任务吃内存」 |
+| `qtr_task_memory_after_gc_bytes` | 任务结束后 GC 一次的 RSS | delta 高但 after_gc 回落 = 正常大对象分配；after_gc 仍高 = 内存未释放，疑似泄漏 |
+| `qtr_task_threads` / `qtr_task_children` | 任务结束时的线程数/子进程数 | 异常增长 = 任务泄漏线程/子进程 |
+
+## 统计与排查方法（Grafana / PromQL）
+
+数据源选择 vmagent 对应的 VictoriaMetrics，环境过滤统一用 `machine="home"`（dev）或 `machine="blue"`（服务器），下例以 dev 为例。
+
+### 第一步：确认压力在哪个层面（机器级）
+
+```promql
+# 内存压力曲线（>85% 紧急）
+memory_pressure{machine="home"}
+
+# 整机 CPU
+cpu_usage_percent{machine="home"}
+```
+
+### 第二步：定位是哪个进程（进程级）
+
+```promql
+# 三个进程的 RSS 对比（MB）——谁在涨一目了然
+qtr_process_rss_bytes{machine="home"} / 1024 / 1024
+
+# 最近 1 小时内存增长率（bytes/s），正值持续增长即疑似泄漏
+deriv(qtr_process_rss_bytes{machine="home"}[1h])
+
+# 进程 CPU 使用率（单核百分比）
+rate(qtr_process_cpu_seconds_total{machine="home"}[5m]) * 100
+
+# 线程/句柄/连接泄漏检查
+qtr_process_threads{machine="home"}
+qtr_process_open_files{machine="home"}
+qtr_process_connections{machine="home"}
+```
+
+### 第三步：判断是真泄漏还是页缓存（cgroup 级）
+
+```promql
+# 匿名内存（应用真实占用）趋势——只有这条涨才是应用泄漏
+qtr_cgroup_memory_anon_bytes{machine="home"} / 1024 / 1024
+
+# 文件页缓存趋势——这条涨不用慌，内核可回收
+qtr_cgroup_memory_file_bytes{machine="home"} / 1024 / 1024
+
+# OOM 与换页
+increase(qtr_cgroup_memory_events_oom_kill_total{machine="home"}[24h])
+qtr_cgroup_memory_swap_bytes{machine="home"}
+```
+
+### 第四步：定位是哪类任务吃资源（任务级）
+
+```promql
+# 各任务类型的内存增量 Top（按 task_family 排序）——直接回答"什么任务导致资源高"
+topk(10, avg_over_time(qtr_task_memory_delta_bytes{machine="home"}[1h]))
+
+# 哪类任务最耗 CPU 时间
+topk(10, avg_over_time(qtr_task_duration_ms{machine="home"}[1h]))
+
+# 任务吞吐与失败率
+sum by (task_family, status) (rate(qtr_task_completed_total{machine="home"}[10m]))
+
+# 任务结束后内存仍未释放的类型（after_gc 仍高于 before 的均值差）
+avg_over_time(qtr_task_memory_after_gc_bytes{machine="home"}[1h])
+- ignoring(status, trigger_type, owner_type, queue_name)
+  avg_over_time(qtr_task_memory_before_bytes{machine="home"}[1h])
+```
+
+### 常见结论对照表
+
+| 现象 | 结论 | 处理方向 |
+|---|---|---|
+| `qtr_process_rss_bytes` 单调上涨不回落，`qtr_process_uss_bytes` 同步上涨 | 进程级内存泄漏 | 按第四步找 task_family，结合 `event=task_memory_finish` 日志定位具体任务 |
+| RSS 上涨但 USS 平稳、`qtr_cgroup_memory_file_bytes` 上涨 | 文件页缓存，非泄漏 | 无需处理，内核按需回收 |
+| `memory_pressure` 高但 `anon_bytes` 平稳 | 缓存占用虚高 | 可忽略或调低页缓存 |
+| `qtr_process_cpu_seconds_total` 的 rate 突增 | 某进程 CPU 高 | 结合任务 duration 与 task_active 定位当时在跑的任务 |
+| `oom_kill_total` 增长 | 容器 OOM 杀进程 | 结合内核日志与应用日志找被杀时间点的任务 |
+| `threads`/`open_files`/`connections` 单调涨 | 线程/句柄泄漏 | 检查对应进程的线程池与连接管理 |
+
 ## 日志检索
 
 使用以下事件定位任务边界：
