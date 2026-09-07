@@ -103,6 +103,32 @@ class TicketReadService:
         )
 
     @classmethod
+    def _attach_similarity_case(cls, db: Session, data: dict[str, Any], ticket_id: int) -> None:
+        """组装当前工单自身的相似处理案例摘要，供详情页展示案例状态和人工确认入口。"""
+        case = TicketDao.get_ticket_similarity_case(db, ticket_id)
+        if not case:
+            data["similarityCase"] = {"caseStatus": "none"}
+            return
+        data["similarityCase"] = {
+            "caseStatus": case.case_status,
+            "caseSource": case.case_source,
+            "caseRevision": case.case_revision,
+            "reusable": bool(case.reusable),
+            "rootCauseSummary": case.root_cause_summary,
+            "solutionSummary": case.solution_summary,
+            "evidenceSummary": case.evidence_summary,
+            "investigationSummary": case.investigation_summary,
+            "verifySummary": case.verify_summary,
+            "verifiedBy": case.verified_by,
+            "verifiedAt": case.verified_at,
+            "rejectedBy": case.rejected_by,
+            "rejectedAt": case.rejected_at,
+            "rejectReason": case.reject_reason,
+            "lastIndexStatus": case.last_index_status,
+            "lastIndexError": case.last_index_error,
+        }
+
+    @classmethod
     def get_summary(cls, db: Session, ticket_id: int) -> TicketSummaryModel | None:
         """查询轻量工单概览，并返回当前三层 AI 提示词摘要。"""
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
@@ -115,6 +141,7 @@ class TicketReadService:
         TicketVersionService.attach_ticket_version_labels(db, [data])
         cls._attach_issue(db, data, ticket)
         cls._attach_relation_codes(db, data, ticket)
+        cls._attach_similarity_case(db, data, ticket_id)
         # 仅读取已有摘要表中的最新一条，不触发日志、AI、向量或提示词计算。
         data["latestLogPull"] = TicketLogPullService.get_latest_summary(db, ticket_id)
         data["latestAiAnalysis"] = TicketAiAnalysisService.get_latest_summary(db, ticket_id)

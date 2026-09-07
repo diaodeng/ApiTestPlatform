@@ -1,3 +1,73 @@
+## [2026-09-06] FIX | 资源采集通道配置轮询缺失（Grafana 无数据根因）
+
+- 触发：用户反馈 `.env.dev` 环境部署最新代码、已在「资源采集服务」页面配置启用采集服务后，Grafana 仍搜不到 `memory_pressure{instance="TEST_ENV", machine="home", job="QTR"}` 等任何当前链路指标。
+- 根因：采集线程 `PushDataToServer` 启动时 `_profiles` 为空，`_collect_tick` 无通道直接 return；而本应周期注入配置的 `replace_profiles` 全仓库无任何调用方——`PROFILE_POLL_SECONDS = 5` 只有定义无使用，`poll_and_apply()` 无调用方，三个进程（server.py role=api、celery_app.py role=celery_worker、celery_scheduler.py role=celery_beat）启动后无人喂配置。数据库配置行本身正确（machine=home），只是从未进入线程；wiki 此前描述"周期加载"与实际代码不符。
+- 修复：`collect.py` 新增 `PROFILE_REFRESH_SECONDS = 5` 与 `profile_provider` 回调（保持线程不直接访问数据库边界），主循环每秒节拍先执行 `_refresh_profiles_if_due()`：首轮立即加载、之后每 5 秒刷新，回调异常记日志并保留现有通道；`MetricsCollectorRuntimeService.start(role)` 启动时注入 `profile_provider = lambda: load_active_profiles(role)`；`load_active_profiles` 数据库异常语义从"返回空列表"改为"向上抛出"（空列表会令线程误清空通道，抛出由线程捕获保留通道）。
+- 效果：api/celery_worker/celery_beat 三进程统一自驱动轮询，页面启用采集服务后最迟 5 秒开始推送，配置增删改/启停 5 秒热生效（与既有文档描述一致，此前实际不生效）；观察点：状态接口 `activeProfileIds` 从空数组变为已加载配置 ID，日志出现"采集通道启动: profileId=…"。
+- 文档：更新记录 `web/public/docs/updates/2026-09-06-metrics-collector-profile-polling-fix.md`（history.md 已加条目）、wiki 流程文档 `flows/memory-growth-monitoring.md` 采集链路描述已修正。
+- 验证：`tests/test_memory_metrics.py` 新增 3 个回归用例（轮询回调热生效+异常保留通道、无 provider 保持空通道、运行时服务必须注入回调），10 用例全通过；改动文件 ruff 通过；全量 pytest 27 失败/11 错误经 git stash 基线对比确认为存量问题（ticket/ast 模块），与本次无关。未做真实推送端到端验证（需 dev 环境重启进程后看 VM 数据）。
+
+- 触发：用户反馈①新增/编辑凭证不填登录账号会报错，登录接口 JSON 请求体默认填入账号密码占位符，手动清除后下次编辑又自动填回，每次都要手动删；②`.env.prod` 环境 UAT 凭证能登录、定时刷新任务也开着，但凭证仍会过期。
+- 根因①：`CredentialDialog.vue` 的 `ensureLoginRequestDefaults()` 无法区分"未初始化"和"用户显式清空"，每次打开编辑框/切换认证方式都把 `{}` 请求体改写为账号密码模板，保存时 `validateRequestTemplateVariables()` 因 secret 缺 username/password 报错；且后端 `update_credential` 对 secret 做合并式更新（只增不删），编辑页明文回填机制下清空账号保存后旧值仍留在密文里，下次编辑又被回填。
+- 根因②（生产库只读核实）：定时任务 `refresh_credentials` 正常（interval 30min、run_count=1102、每 30 分钟成功刷新 erp-prod）；UAT 三凭证（erp-uat-gray02/06/08，http_login 模式）`auto_refresh_enabled=0`，8-17 起再无刷新记录且无任何跳过提示；`expire_time` 全为 NULL（前端无到期时间入口），临期刷新路径不可达。
+- 修复：默认模板仅新增注入（编辑不再改写）、登录接口加"恢复默认模板"按钮、编辑保存时已回填主字段清空即从密文删除（`_drop_empty_secret_fields`，替代"留空保留原值"）、变量校验报错文案指引化。可见性：凭证列表加"自动刷新"+"最近刷新"列；`refresh_due_credentials` 跳过原因细分（auto_refresh_off/not_due/invalid_config/lease_conflict）并写任务日志，未开启自动刷新的 HTTP 凭证每天最多一条 `auto_refresh_off` 审计日志；编辑页补"到期时间"字段（`expire_time` 后端本已支持）。
+- 数据操作：UAT 三凭证 2026-09-06 00:09 用户已自行在页面开启自动刷新（7200 秒，留有 update 审计日志）；本次幂等脚本检测到后跳过，未重复写入。
+- 清理：`credential_refresh_service.py` 删除 4d3a4794 引入的重复方法（`_execute_http_auth_step`/`_execute_http_refresh_with_login_fallback` 各定义两次）与死代码 `_apply_response_mapping`。
+- 文档：`web/public/docs/credential_management.md`（清空即删除、默认模板、跳过原因、到期时间）、更新记录 `2026-09-06-credential-edit-semantics-and-auto-refresh-visibility.md`、本 wiki 流程文档同步。
+- 验证：见当日会话验证记录（pytest/ruff/前端构建）。
+
+## [2026-09-05] FIX | 工单页面表格横向滚动条拖拽不灵敏修复
+
+- 触发：用户反馈工单相关页面凡有表格处，底部横向滚动条鼠标拖动不灵敏（鼠标移动很远表格只动一点），shift+滚轮正常，要求分析原因并按方案 A（升级依赖）处理。
+- 根因：Element Plus 2.10.0 官方缺陷。el-table 滚动由 el-scrollbar 接管且原生滚动条被 CSS 隐藏（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），拖动的是自绘 thumb，坐标换算在 `scrollbar/src/thumb2.js`：`startDrag` 只记录 `baseScrollHeight`（漏了水平方向应有的 `baseScrollWidth`），`mouseMoveDocumentHandler` 横向也误用 `scrollLeft = 百分比 × baseScrollHeight / 100`，横向拖动灵敏度被压缩为约 scrollHeight/scrollWidth 倍（日志表格内容极宽，600/4000≈0.15，即移 100px 动 15px）。纵向恰好用 scrollHeight 误打误撞正常；shift+滚轮走 wrap 层原生滚动（1:1 像素）不经换算所以正常。官方 changelog 2.10.2（2025-06-13）"Components [scrollbar] horizontal scroll drag invalid"（PR #20953，关联 issue #20951 及 #20957/#20960/#20969/#20984 等一串 el-table 反馈）。项目在 c4f80eac（2025-12-16）恰好升到 2.10.0 落入坏区间。此 bug 影响全站所有 el-scrollbar 横向拖拽（含下拉框），工单页感受最明显。
+- 修复：`web/package.json` element-plus 2.10.0 → 2.10.7（同 minor 最新补丁，含 2.10.2 拖拽修复 + 2.10.5/2.10.6 滚动条 resize 修复；核对 2.10.3~2.10.7 changelog 无破坏性变更，2.10.5 另修表格隐藏时宽度计算错误、dropdown hover 异常滚动）。零业务代码改动。
+- 验证：安装后检查 `node_modules/element-plus/lib|es/components/scrollbar/src/thumb2.js` 已含 `baseScrollWidth` 且横向分支改用它；`npm run build:prod` 两次通过（36.9s 无 error）。未验证：真实浏览器手动拖拽（需连库环境登录后抽查工单列表/日志拉取记录/详情页，注意确认 `:deep(.el-scrollbar__bar)` 加高、thumb `min-width:48px` 覆盖仍生效）。
+- 文档：新增 `web/public/docs/updates/2026-09-05-table-horizontal-scrollbar-drag-fix.md`（重建后 docs-index.json 已收录）；本 wiki 记录。
+- 追加（同日晚）：Jenkins docker 构建报 `npm ci` 50 条 Missing rollup@4.63.1。根因：当日 `npm install element-plus` 时 npm 顺带删除 lockfile 中 unimport/unplugin-auto-import 下两条嵌套 rollup@4.63.0 条目且未正确写回（顶层 rollup 被 0.25.8 古老传递依赖占位，4.x 只剩 vite/node_modules/rollup），`npm ci` 校验对缺失位置重解析出 4.63.1 与残留 4.63.0 全对不上；本地 build 正常是 node_modules 已就位不依赖 lockfile 重建。本地 `npm ci --dry-run` 完整重现 50 条 Missing。修复：重跑 `npm install` 生成一致 lockfile（850 插入/263 删除），补齐 rollup 4.63.1 全平台二进制 50 条；再用 `--registry=https://registry.npmmirror.com` 重装并把 51 条 `resolved`（element-plus 本体 + rollup 系列）从 npmjs.org 统一 sed 改写为 npmmirror（仓库 HEAD 约定全量镜像源），避免依赖 npm ci 的域名回退行为。验证：`npm ci --dry-run` Missing 0 条、JSON 解析合法、`npm run build:prod` 通过（36.96s）。教训：npm install 的"顺带去重"会产生 lockfile 与实际依赖树不同步的状态，改动依赖后交付前应跑一次 `npm ci --dry-run` 验证 CI 兼容性。
+- 追加二轮（同日 22 时）：Jenkins 复跑仍报 `npm ci` Missing，但收敛为 2 条 `Missing: rollup@4.63.1` 主包条目（平台二进制已齐）。真正根因：本机 node v25/npm 11.6.2 生成的 lockfile 自家 `ci` 校验通过，但 Jenkins node:22-alpine 自带 **npm 10.9.8** 校验不认——npm 11 写 lockfile 时把 `unimport/node_modules/rollup`、`unplugin-auto-import/node_modules/rollup` 两条嵌套主包条目省略（仅保留 53 条 `@rollup/rollup-*` 平台二进制），npm 10 的校验逻辑要求主包条目必须存在。教训：**lockfile 必须用与 CI 相同的 npm 大版本生成**（Dockerfile 基镜像 node:22-alpine → npm 10.x；本机 node 25/npm 11 不行）。修复：`npx --yes npm@10.9.8 install --registry=https://registry.npmmirror.com` 重新生成，两条嵌套主包条目（rollup 4.63.1，resolved 均为 npmmirror）恢复，全文件 0 条 npmjs.org URL；再用 `npx npm@10.9.8 ci --dry-run` 验证 Missing 0 条（与 Jenkins 同版本校验，非本机 npm 11 自验）；`npm run build:prod` 通过（38.19s）。另：用户在二轮前已自行提交 d1264a4f（lockfile 850 行版）与 c5d0eea2（审计依赖），本轮修复基于 d1264a4f 之上。
+- 备查：当时考虑过 patch-package 修补（方案 B，锁版本维护负担）和运行时拦截 thumb 自实现拖拽（方案 C，侵入大），均不如升级；后续若升 2.11.x，2.11.1 还会优化 thumb 尺寸计算。
+
+## [2026-09-04] REFACTOR | 工单同步配置页面按入库执行顺序重组
+
+- 三轮（同日）：用户反馈底部"保存配置"按钮悬在半空。根因是二轮为治横向滚动给页面根加的 `overflow-x: hidden`——CSS 规定 overflow-x:hidden 会把 overflow-y 连带从 visible 变 auto，页面根自己变成滚动容器，`position:sticky` 的吸附参照从外层主内容区变成这个不滚动的根元素，吸底失效、按钮退回文档流末尾。修复：改为 `overflow-x: clip`（只裁剪、不产生滚动容器），横向滚动防护与 sticky 吸底兼容。浏览器验证：滚动到内容中部时按钮 bottom 恒等于视口高（900/900），页面无横向溢出。此坑已写入 wiki 流程文档的自适应约束（新增裁剪需求一律用 clip 不用 hidden）。
+
+- 二轮（同日）：按用户反馈做自适应与弹窗收敛。① `el-container` 换块级 `config-tabs-wrap` + 全链路 `min-width:0` + 表格 `width:100%!important`（超宽列在表格内部滚动）+ 页面根 `overflow-x:hidden`，根治横向滚动；② ①字段识别与映射卡片改摘要+「设置」弹窗（6 组映射+3 正则，跟随主保存）；③ 删除"日志拉取配置"页签，三块配置移入"⑦ 同步后自动化"卡片「日志拉取设置」弹窗——拉日志默认值跟随主保存（弹窗底部按钮直调 `handleSave`），存储与资源限制、日志拉取外部接口配置保留各自独立保存按钮立即生效，弹窗顶部 alert 说明保存方式，回应"独立保存按钮弄成弹窗不友好"的顾虑；④ 紧凑化（卡片 padding 14/16、表单 margin 12、mt16→12、卡片头 wrap）；⑤ 弹窗内 el-col 在 ≤768px 降单列——坑点：Element Plus 百分比列宽是 `width:50%` 而非 flex，媒体查询只覆盖 flex 不生效，必须同时覆盖 `width:100%`（浏览器实测 700px 视口两列堆叠后才修正）；⑥ 页签加 `lazy`。
+- 验证：`npm run build:prod` 通过；浏览器静态渲染验证三项全过（页面 scrollWidth==clientWidth 无横向滚动、5×400px 列只在表格内部出现滚动条、窄屏弹窗单列堆叠）。dev 后端 MySQL（192.168.100.12）网络不可达无法登录真实系统，视觉走查待用户在可连库环境确认。
+- 文档：用户说明页签表改 6 个并补两个弹窗入口说明，changelog 补二轮记录，wiki 流程文档同步。
+- 一轮改动见下方原始记录。
+
+### 一轮原始记录
+
+- 触发：用户反馈工单同步配置页面配置太多太乱，要求按实际执行顺序调整和聚合，且同一配置不要出现在多个地方。
+- 分析：延后后处理 `execute_deferred_sync_post_process` 真实执行顺序为 自动化范围闸门 → AI 提取 → 标题 → 翻译 → AI 分类 → 自动化（识别/拉日志/AI）→ 向量 → 发布收敛+群推送；旧页面按存储结构分组，场景开关在 5 张卡片重复出现（4 种命名风格 ×4 场景共 31 个），连接凭据在 6 处平铺。
+- 改动（仅 `web/src/views/ticket/syncAutomation/index.vue`，零后端改动）：页签重组为 入库流程/来源与拉取/日志拉取配置/评论同步/通知任务/统计与分类/操作 7 个；入库流程卡片按执行顺序编号 ⓪~⑧；新增"场景 × 步骤 开关总表"聚合全部 31 个场景开关（动态绑定 `form[section][field]`，路径与原静态绑定逐一核对一致；翻译/AI分类/群推送行带与后端语义一致的总开关）；移除卡片内重复的 31 个静态开关列；识别规则+映射配置合并为"① 字段识别与映射"卡；主动拉取/邮箱补全/汇总统计/按人催办的连接字段收入"连接与凭证覆盖"折叠区（留空继承 bitableCommon/feishuAuth，隐藏不清空）；"来源与拉取"新增只读"连接解析预览"（模拟 `resolve_bitable_runtime_config` 继承顺序）；远端同步 `credentialBindingId/origin` 从飞书凭证卡迁回远端同步卡；"指定工单手动自动化"从主动拉取卡拆出为独立卡移入"操作"页签。
+- 坑点：① 折叠区把 `el-col` 直接搬进 `el-collapse-item` 违反 el-row/el-col 嵌套结构，4 处均补包 `el-row`；② 飞书凭证卡里原本混放了 remoteSync 的两个字段（视觉分组错误，非存储错误），迁移时严格保持 v-model 路径不变；③ Windows 下无独立 python，用 `server` 的 `uv run python` 执行重排脚本，脚本执行后删除。
+- 验证：`npm run build:prod` 通过（35.8s 无 error）；新旧 v-model 绑定 diff 确认零字段丢失（31 个开关由静态转总表动态绑定）；后端未改动，ruff 805 存量告警与本次无关。
+- 文档：重写 `web/public/docs/ticket-sync-automation.md`（按新页签结构、补执行顺序章节与开关总表键位对照）；新增 `web/public/docs/changelog/2026-09-04-sync-automation-page-reorg.md`；wiki `flows/ticket-external-sync-flow.md` 补"配置页面分组"章节。
+- 明确不做（P5 备选）：不改配置键命名、不抽独立 `sceneMatrix` 存储结构——需要迁移与兼容读取，待展示层稳定后评估。
+
+## [2026-09-04] FIX+PERF | 新版客户端 Agent 连接服务器点击卡死修复
+
+- 触发：用户反馈新版客户端 Agent 菜单点击"连接服务器"后页面卡住直到连接成功或失败。
+- 根因：点击在 UI 线程同步执行两类阻塞操作——① `AgentClientService.start()` 在启动连接线程前首次导入 `server.agent_server`（级联 playwright.async_api、pyautogui、cv2、py7zr 等，`-X importtime` 实测 1458ms：httpx 754ms、ticket_ai_analysis_service 674ms、pyautogui 415ms、cv2 209ms）；② `AgentController.start()` 同步调用 `get_active_mac()`（UDP socket 连 8.8.8.8 探测出口 IP + psutil 枚举网卡，网络不佳秒级阻塞）与 `AgentConfig.read_config()` 磁盘 IO。事件循环被占死导致界面假死。
+- 修复（`client_new/services/agent_client_service.py`）：`start()` 不再在调用线程导入重模块，首次导入与 `MAX_MESSAGE_SIZE` 设置全部移入 `_thread_main` 后台线程；`_agent_server_module()` 双重检查锁（`_AGENT_SERVER_LOCK`）保证只导入一次且仅在后台线程；新增 `is_running()` 区分"准备中/已启动"；`update_runtime_config()` 增加模块已加载守卫，避免保存配置在 UI 线程误触发导入。
+- 修复（`client_new/controller/agent_controller.py`）：新增 `_ConnectPrepareThread` 把 `get_active_mac()` 与配置读取移出 UI 线程；`start()` 两段式——UI 线程仅状态校验+置灰（同步 0.4ms，实测），`starting` 即时生效，准备完成后主线程回调 `_on_connect_prepared` 再发起连接；`stop()` 补连接准备阶段取消分支；`shutdown()` 等待准备线程退出。
+- 坑点：重写 `_agent_server_module()` 时丢失 `global` 声明触发 ruff F823（函数内既有读取又有赋值），运行即 UnboundLocalError，靠 ruff 对照基线发现修复。
+- 验证：新增 `client_new/tests/test_agent_start_nonblocking.py`（FakeWidget+QCoreApplication 事件循环模拟 UI 线程，卡顿监控 >200ms 零记录；update_runtime_config 不触发导入；连接被拒后正确落回 stopped）；ruff 改动文件 4 告警与基线完全一致零新增；既有 test_ticket_ai_task_cancel 3 用例通过。未验证：真实 GUI 手写连点场景（需人工确认），逻辑上状态机已防重入。
+- 文档：新增 `web/public/docs/updates/2026-09-04-client-agent-connect-nonblocking.md`，history.md 同步，wiki `entities/services/new-client-services.md` 补线程边界约束。
+
+## [2026-09-03] FIX | 工单AI分析结果schema清洗与失败分支崩溃修复
+
+- 触发：INC00001920244（task_2046322511408128，prod，Provider shuidi / ai-router / deepseek-v4-flash-0731）AI 分析失败。Worker 正常退出且 result.json 内容完整，但 Agent 报 `AI_WORKER_RESULT_INVALID`（`ticket_no`/`merchant_name`/`version`/`root_cause_type` 为 schema 外额外字段、`$.evidence[0..5]` 期望 string 实际 object），随后又抛 `UnboundLocalError: invalid_result_token_usage` 把真实失败原因覆盖为 `AI_WORKER_EXECUTION_ERROR`。
+- 根因一（schema 违规）：deepseek-v4-flash 经 ai-router 中转时 codex `--output-schema` 未真正约束模型输出，模型自行附加 schema 外字段并把 evidence 写成 `{source, content}` 对象数组；结果内容质量完好仅结构不符。根因二（崩溃）：`client_new/services/ticket_ai_analysis_service.py` 结果无效分支中 `invalid_result_token_usage` 在 `report_task_span` 使用之后才赋值，任何走该分支的任务必然二次崩溃。
+- 清洗修复：新增两端同规则的纯函数清洗（schema 校验前的保守归一化）：①剔除 `additionalProperties=False` 时的 schema 外字段；②evidence 元素为 `{source, content}` 对象时拼接为 `"source: content"` 字符串；③其他非字符串元素 JSON 序列化保留信息。清洗动作写日志可审计；清洗后仍走完整 schema 校验，防线未绕过；明显非法结果依旧按原逻辑失败上报。服务端 `server/modules/ticket/util/ticket_ai_result_schema_util.py`（`TicketAiResultSchemaUtil`），Agent 端 `client_new/services/ticket_ai_result_schema_service.py`（`TicketAiResultSchemaService`）。
+- 接入点：服务端在 Agent 回传解析后、`_normalize_analysis_result` 与 `_validate_analysis_result_schema` 之前清洗；Agent 端在 `_parse_worker_output.accept_candidate` 与 `_load_cached_result`（缓存复用路径）清洗后再校验。清洗只影响内存结果，不回写工作区 `result.json` 原始文件。
+- 崩溃修复：结果无效分支改为先提取 `invalid_result_token_usage` 再上报 span 再返回。
+- 提示词加固（两端）：第 6 条明确"禁止输出 schema 外字段（点名 ticket_no/merchant_name/version/root_cause_type）；evidence 必须字符串数组、格式 `来源文件路径:行号: 证据内容摘要`，禁止 `{source, content}` 对象"。注意 f-string 内 `{source, content}` 必须写成 `{{source, content}}`，否则 ruff F821。
+- 变更传播链：`server/modules/ticket/service/ai/ticket_ai_analysis_service.py` / `server/modules/ticket/util/ticket_ai_result_schema_util.py` / `client_new/services/ticket_ai_analysis_service.py` / `client_new/services/ticket_ai_result_schema_service.py` -> 工单域知识页。
+- 验证：用真实失败 result.json 验证清洗前 12 条违规（与线上日志一致）、清洗后 0 条，`_parse_worker_output` 完整链路解析成功；边界用例（仅 content、数字/None 元素、合规结果零动作、schema 要求对象时不误清洗）通过。client_new 新增 6 回归用例（`tests/test_ticket_ai_result_schema_sanitize.py`）+ 既有 AI 测试（引号修复/失败契约/鉴权诊断/token 用量/可观测/Codex 配置/取消/锁心跳）全部通过；server ruff + 提示词测试 5 用例通过。未验证项：真实 Agent 重跑该工单（需重启 Agent 后重新提交分析）。
+- 文档：新增 `web/public/docs/updates/2026-09-03-ticket-ai-schema-sanitize-and-unbound-fix.md`，history.md 同步。
+
 ## [2026-09-03] FIX+PERF | 相似召回精确信号缺陷修复与相似结果 Redis 缓存
 
 - 触发：量化分析（生产库只读查询：2109 工单、1647 条 bge-m3 symptom 向量、覆盖率 85.5%、外部同步/导入/远端拉取场景开关为 false 为缺口主因——用户确认为故意配置）后确认后台任务化在当前量级不必要，改为修召回缺陷 + 结果缓存。
@@ -2335,3 +2405,21 @@ updated: 2026-08-25
 - 工单 AI 任务表和 AI 审计表增加 `error_code`，失败响应不再返回工单信息或工作区结果元数据。
 - `PermissionDenied` 作为本地诊断告警保留；与 Provider 致命错误同时出现时不覆盖主错误。
 - 本次未调整 hybrid 日志读取策略和模型上下文限制。
+
+## [2026-09-06] FEATURE | 资源采集服务可视化配置
+
+- 背景：资源指标推送配置原本写死在 `.env.*`（VM_URL/VM_USER/VM_PASSWORD/VM_JOB/VM_INSTANCE/VM_MERCHANT/QTR_METRICS_EXTENDED_ENABLED），修改或启停需要改配置文件并重启 API/Worker/Beat 三个进程。
+- 方案：新增数据表 `metrics_collector_profile`，每行一个采集服务实例（推送地址、认证密文、标签、间隔、批次、超时、扩展开关、启用状态、revision）；新增后端模块 `server/modules/metrics/`（controller/service×2/dao/entity/util 分层），菜单与权限注册在 `modules/metrics/perms.py`，挂在「系统监控」目录下，权限码 `monitor:metrics_collector:*`。
+- 热生效机制：`MetricsCollectorRuntimeService` 由 API lifespan、Celery `worker_ready` 信号、Beat `setup_schedule` 三处接入；采集线程（`utils/metrics/collect.py` 重构为多通道模型）不访问数据库，运行时服务每 5 秒加载启用配置转换为 `CollectorProfileSnapshot` 注入线程，按 `revision` 比对热生效；推送结果经 `result_listener` 回调回写配置行供页面展示。
+- 兼容处理：env 兜底逻辑按要求移除，`MetricsSettings`/`MetricsConfig` 已删除；`QTR_METRICS_ROLE` 保留用于角色标签。升级后无启用采集服务则指标停止推送，需在页面新建。
+- 前端：新增 `web/src/views/monitor/metrics/`（列表 + 启停开关 + 弹窗表单）与 `web/src/api/system/metricsCollector.js`，接口前缀 `/monitor/metrics-collectors`。
+- 异常隔离：采集器构建失败跳过采集、扩展指标失败不影响基础指标、数据库不可用保留现有通道、推送结果回写失败仅记 debug 日志，任何采集/推送异常不冒泡到主业务。
+- 验证：新模块导入与 `server.py` 全量导入链通过；`uv run ruff check` 无新增问题类别（B008/B019/E501 为项目既有基线）；`npm run build:prod` 构建通过；现有 `tests/test_memory_metrics.py` 语义已对齐（多通道模型）。
+
+## [2026-09-06] FIX | 资源指标 role 标签分层（分组混乱修复）
+
+- 现象：VM 中 blue 组的 `cpu_usage_percent`、`memory_used_mb`、`qtr_cgroup_*` 等 6+ 项机器/容器级指标被拆成 api/celery_beat/celery_worker 三条序列（三进程读到的是同一份数据，值几乎相同），面板按机器聚合时 sum 会三倍虚高；2026-08-27 扩展指标上线前的进程序列则缺失 `role`，三个进程互相覆盖同一条 `qtr_process_*` 序列，RSS/CPU 曲线呈锯齿跳变无法归因。
+- 根因：`collect.py` 对所有指标统一附加标签，未区分指标归属层级——机器级数据不该带 `role`，进程级数据必须带 `role`。
+- 修复：`_format_samples`/`_labels`/`_append_metric` 增加 `with_role` 维度：machine 与 cgroup 指标强制剥离 `role`；`qtr_process_*` 与 `qtr_task_*` 强制携带 `role`。`role` 引入时间经 VM 数据回溯确认约为 2026-08-27（扩展指标上线），该日期前的历史序列存在覆盖问题。
+- 附带发现：VM 中存在 `machine=home`（instance=TEST，无 role）的旧环境数据，已于 2026-09-03 左右停止推送；`machine=dev` 仅存在于 30 天前，均为历史遗留非当前链路。
+- 验证：新增 `test_machine_level_metrics_do_not_carry_role_label` 与 `test_legacy_mode_samples_exclude_extended_metrics` 两个回归用例，tests/test_memory_metrics.py 7 个用例全部通过；ruff 无新增问题。

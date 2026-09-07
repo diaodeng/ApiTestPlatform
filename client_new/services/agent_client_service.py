@@ -9,15 +9,22 @@ from PySide6.QtCore import QObject, Signal
 from model.config import AgentConfigModel
 
 _AGENT_SERVER_MODULE = None
+# 重型模块导入锁：首次导入 server.agent_server 约需 1.5 秒（含 playwright、
+# pyautogui、cv2 等重依赖），必须保证只在后台线程发生一次，避免 UI 线程卡顿。
+_AGENT_SERVER_LOCK = threading.Lock()
 
 
 def _agent_server_module():
     global _AGENT_SERVER_MODULE
-    if _AGENT_SERVER_MODULE is None:
-        from server import agent_server
+    # 已导入时直接返回，避免无谓的锁竞争。
+    if _AGENT_SERVER_MODULE is not None:
+        return _AGENT_SERVER_MODULE
+    with _AGENT_SERVER_LOCK:
+        if _AGENT_SERVER_MODULE is None:
+            from server import agent_server
 
-        _AGENT_SERVER_MODULE = agent_server
-    return _AGENT_SERVER_MODULE
+            _AGENT_SERVER_MODULE = agent_server
+        return _AGENT_SERVER_MODULE
 
 
 def _websocket_client_class():
@@ -45,6 +52,13 @@ class AgentClientService(QObject):
         with self._lock:
             return self._state
 
+    def is_running(self) -> bool:
+        """
+        是否存在存活的后台连接线程（用于区分"连接准备中"与"已启动连接"）。
+        """
+        with self._lock:
+            return bool(self._thread and self._thread.is_alive())
+
     def start(self, config: AgentConfigModel, connect_url: str) -> tuple[bool, str]:
         with self._lock:
             if self._thread and self._thread.is_alive():
@@ -52,18 +66,6 @@ class AgentClientService(QObject):
 
             self._stop_requested = False
             self._state = "starting"
-
-        try:
-            agent_server_module = _agent_server_module()
-            agent_server_module.MAX_MESSAGE_SIZE = agent_server_module.clamp_message_size(
-                config.max_send_size
-            )
-        except Exception as e:
-            logger.exception(f"加载 Agent 通信模块失败: {e}")
-            with self._lock:
-                self._state = "stopped"
-            self.state_changed.emit("stopped")
-            return False, f"加载 Agent 通信模块失败: {e}"
 
         self.state_changed.emit("starting")
         self.status_message.emit(f"开始连接服务器：{connect_url}")
@@ -111,13 +113,16 @@ class AgentClientService(QObject):
         return True, "Agent 停止请求已发送"
 
     def update_runtime_config(self, config: AgentConfigModel):
-        try:
-            agent_server_module = _agent_server_module()
-            agent_server_module.MAX_MESSAGE_SIZE = agent_server_module.clamp_message_size(
-                config.max_send_size
-            )
-        except Exception as e:
-            logger.warning(f"更新 Agent 通信配置失败: {e}")
+        # 仅在通信模块已加载时同步分片配置；模块未加载说明还没有连接过，
+        # 此时不在 UI 线程触发首次导入（约 1.5 秒），保存配置等动作会另行处理。
+        if _AGENT_SERVER_MODULE is not None:
+            try:
+                agent_server_module = _agent_server_module()
+                agent_server_module.MAX_MESSAGE_SIZE = (
+                    agent_server_module.clamp_message_size(config.max_send_size)
+                )
+            except Exception as e:
+                logger.warning(f"更新 Agent 通信配置失败: {e}")
 
         with self._lock:
             client = self._client
@@ -145,6 +150,24 @@ class AgentClientService(QObject):
         return ok, message
 
     def _thread_main(self, config: AgentConfigModel, connect_url: str):
+        # 重型模块首次导入统一放在本后台线程执行，避免阻塞 UI 线程。
+        try:
+            agent_server_module = _agent_server_module()
+            agent_server_module.MAX_MESSAGE_SIZE = agent_server_module.clamp_message_size(
+                config.max_send_size
+            )
+        except Exception as e:
+            logger.exception(f"加载 Agent 通信模块失败: {e}")
+            with self._lock:
+                self._loop = None
+                self._client = None
+                self._thread = None
+                self._state = "stopped"
+                self._stop_requested = False
+            self.state_changed.emit("stopped")
+            self.error_message.emit(f"加载 Agent 通信模块失败: {e}")
+            return
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 

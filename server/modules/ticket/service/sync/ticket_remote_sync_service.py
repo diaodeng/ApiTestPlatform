@@ -7,7 +7,7 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from modules.credential.service.credential_resolve_service import CredentialResolveService
 from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.entity.do.ticket_do import Ticket
-from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel, TicketSyncAutomationModel
+from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_service import TicketSyncService
 from modules.ticket.util.sync_util import SyncUtil
@@ -424,15 +424,9 @@ class TicketRemoteSyncService:
                     )
                 continue
 
-            upsert_model = upsert_model.model_copy(
-                update={
-                    "automation": TicketSyncAutomationModel(
-                        auto_identify=False,
-                        auto_log_pull=False,
-                        auto_ai_analysis=False,
-                    )
-                }
-            )
+            # automation 保持 None，与外部推送/多维表格拉取一致走"场景开关"分支：
+            # 翻译、自动识别、自动拉日志、自动 AI 是否执行由 ticket.sync.automation 的
+            # remote_pull 场景开关决定；双环境部署下内网通常保持关闭，自动化结果随 pending 从公网同步。
             local_ticket = TicketDao.get_ticket_by_no(db, upsert_model.ticket_no)
             should_apply_remote, apply_reason = cls.should_apply_remote_sync_item(
                 local_ticket=local_ticket,

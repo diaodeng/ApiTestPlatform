@@ -5,10 +5,13 @@ export PATH="/usr/local/bin:/app/.venv/bin:$PATH"
 # 统一 supervisor 子进程的运行环境，避免 Celery 退回默认 dev 配置。
 export APP_ENV="${APP_ENV:-prod}"
 
+# bullseye 已结束 LTS，镜像站 bullseye-security 池中部分依赖包（如 python3-pkg-resources）
+# 文件已被清理但索引仍在，apt 安装 supervisor 会 404 失败；故运行时只装运行库，
+# supervisor 为纯 Python 包，改由 pip 安装（版本较新且不依赖系统 apt 包）。
 echo "开始安装系统依赖。。。"
 sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
     sed -i 's|security.debian.org/debian-security|mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list && \
-    apt-get update && apt-get install --no-install-recommends -y libcairo2 supervisor ripgrep && \
+    apt-get update && apt-get install --no-install-recommends -y libcairo2 ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
 echo "系统依赖安装完成。。。"
@@ -23,7 +26,9 @@ echo "开始安装应用依赖。。。"
 cd /app && python -m uv sync --frozen
 echo "应用依赖安装完成。。。"
 
-# 启动 supervisor，由 supervisord.conf 托管 FastAPI、Celery 等进程
+# 启动 supervisor，由 supervisord.conf 托管 FastAPI、Celery 等进程。
+# supervisor 已纳入 pyproject 依赖（supervisor==4.3.0），由上面的 uv sync 安装到 /app/.venv。
+# 不再通过 apt 安装：bullseye 已结束 LTS，镜像站 security 池依赖包 404，apt 安装会失败。
 echo "开始启动。。。"
 echo "当前运行环境：${APP_ENV}"
-exec supervisord -c /app/supervisord.conf
+exec /app/.venv/bin/supervisord -c /app/supervisord.conf

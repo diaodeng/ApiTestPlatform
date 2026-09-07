@@ -24,7 +24,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 按工单号手动模拟多维表格拉取或重放本地工单快照自动化
 created: 2026-05-31
-updated: 2026-08-25
+updated: 2026-09-05
 ---
 
 # 工单外部同步与内网拉取流程
@@ -93,6 +93,7 @@ sequenceDiagram
 | 7 | 内网将远端 pending 工单转换为本地入库模型时，会优先读取 `moduleName/module_name`，并兼容 `ticketModle/ticketModel/ticket_model` 与 `extraData.external_field_mapping.ticketModle`，避免模块文本在跨环境二次同步时丢失。 |
 | 7.1 | 远端拉取入库不会复用公网项目/模块/用户 ID，但已有本地工单会同步远端最新项目/模块文本并清空旧本地 ID；状态会使用内网本地 `statusMappings` 映射远端状态文本，并通过 `assigneeMappings`、邮箱或姓名解析当前处理人、报告人和内部负责人；未命中时保留远端文本。 |
 | 7.1.1 | 远端拉取链路由 `TicketRemoteSyncService` 和 `remoteSync.enabled` 控制，不会再次查询公网飞书多维表格；公网补齐后的邮箱会随 pending payload 带到内网，内网只做本地人员解析。该服务负责远端请求头构造、pending payload 转 `TicketExternalSyncUpsertModel`、本地 revision/time 跳过判断和 ack 回写，定时任务不再通过 `TicketSyncService` 转发。 |
+| 7.1.1.1 | 2026-09-05 起，远端拉取入库不再强制注入全 False 的任务级 automation；automation 保持 None 后与外部推送/多维表格拉取一致读取 `remote_pull` 场景开关（翻译、自动识别、自动拉日志、自动 AI）。开关默认全关，双环境部署下内网通常保持关闭，自动化结果随 pending 从公网同步；内网显式打开开关后行为与外部推送一致，仍受自动化关注范围约束。 |
 | 7.2 | 外部 `stepReason` 会按 `20260616 人员：` 或 `20260616：` 拆分为同步评论；pending payload 携带同步评论，内网按 `sourceSegmentKey` 幂等写入，保留本地评论不被覆盖。 |
 | 8 | pending 返回后，`TicketSyncDeliveryService` 先写入该消费方的 `status=pulled`、`last_revision`、`last_batch_id` 和 `last_pulled_at` 作为租约；成功 ack 后才推进 `delivered_revision`。 |
 | 9 | 如果消费方还需要把“已处理”“处理失败”“部分成功”等结果反馈回公网环境，可调用可选接口 `POST /ticket/sync/ack`；控制器直接调用 `TicketSyncDeliveryService.ack_sync_delivery`，只有成功状态会推进 `delivered_revision`，失败状态只记录错误，保留同一 revision 下次重试。 |
@@ -110,6 +111,8 @@ sequenceDiagram
 | 20 | `POST /ticket/sync/external` 的请求体读取、外部字段必填校验、人员字段拆分、`external_field_mapping` 与 `raw_payload` 构造已下沉到 `TicketExternalSyncRequestService`；`TicketSyncService` 只接收已通过模型校验的同步对象执行入库主编排。 |
 
 | 21 | `POST /ticket/sync/automation/manual-run` 是指定单工单的独立手动入口：`source=bitable` 仅按工单号查询飞书多维表格，忽略主动拉取定时开关、常规筛选和时间窗口，唯一精确匹配后复用外部同步入库与 `bitable_pull` 后处理；`source=database` 从本地 `Ticket` ORM 实体构造后处理模型，不调用同步入库，不覆盖工单字段。 |
+| 22 | 四种入库场景（`external_sync`/`remote_pull`/`bitable_pull`/`manual_create`）共用同一套后处理步骤：`external_sync`、`bitable_pull` 与 `manual_create` 走延后编排（`execute_deferred_sync_post_process`），`remote_pull` 走 `sync_external_ticket` 内联路径；内联路径在发布收敛前按 `vector_scene_map` 执行向量刷新，使 `sceneTriggers.remotePull` 生效。`TicketSyncService` 内不再保留与 `TicketSyncPostProcessService` 重复的标题/翻译/分类场景解析实现，统一调用其公开方法。 |
+| 23 | 手动创建场景（`manual_create`）由 `TicketManualCreatePostProcessService` 构造轻量同步模型（不写 `external_field_mapping`，不参与外部字段映射与邮箱补齐），表单勾选与场景开关合并为任务级 automation 快照后进入统一编排；自动 AI 需要 Agent/Provider，缺失时降级关闭并记录原因。 |
 
 ## 错误处理
 
@@ -125,6 +128,17 @@ sequenceDiagram
 
 | 手动多维表格补跑未找到记录或存在重复精确匹配 | 请求失败；系统不会同步相似工单号，也不会在重复记录中随机选择。 |
 | 手动数据库快照补跑未找到工单 | 请求失败；不会触发入库覆盖或后处理。 |
+
+## 配置页面分组（2026-09-04 起）
+
+工单同步配置页（`web/src/views/ticket/syncAutomation/index.vue`）按职责重组为 6 个页签，仅前端展示重组，`ticket.sync.automation` 配置存储结构与后端读取逻辑零变化：
+
+- **入库流程**：卡片按延后后处理真实执行顺序编号——⓪ 自动化关注范围（总闸门）→ 场景×步骤开关总表（新增）→ ① 字段识别与映射（弹窗设置）→ ② 外部工单字段模型 → ③ AI 提取 → ④ 标题总结 → ⑤ 翻译 → ⑥ AI 分类 → ⑦ 同步后自动化（含日志拉取设置弹窗）→ ⑧ 群推送 → 旁路·知识提炼。
+- **来源与拉取**：飞书统一凭证、`bitableCommon` 公共配置、只读"连接解析预览"（模拟 `resolve_bitable_runtime_config` 的继承顺序：模块自身 → bitableCommon → feishuAuth）、远端同步链接（含 `credentialBindingId/origin`）、主动拉取、外部推送邮箱补全；各模块连接字段收入"连接与凭证覆盖"折叠区，留空继承、填写覆盖。
+- **评论同步 / 通知任务 / 统计与分类 / 操作**：按旁路、定时通知任务、统计口径、手动入口归组。
+- 4 场景（外部推送/远端拉取/多维表格拉取/手动创建）× 7 步骤共 31 个场景开关全部集中在"场景 × 步骤 开关总表"，通过 `form[section][field]` 动态绑定回原配置键；翻译/AI 分类/群推送三行带与后端一致的总开关（`translateConfig.enabled`/`aiClassification.enabled`/`groupPush.enabled`），各步骤卡片中不再重复出现场景开关。
+- **弹窗收敛（二轮）**：① 字段识别与映射卡片只显示摘要，6 组映射与正则收在「设置」弹窗（跟随主保存）；原"日志拉取配置"页签删除，三块配置收在"⑦ 同步后自动化"卡片的「日志拉取设置」弹窗——拉日志默认值跟随主保存，存储与资源限制、日志拉取外部接口配置保留各自独立保存按钮立即生效。
+- **自适应约束**：页签容器块级化 + 全链路 `min-width:0` + 表格 `width:100%!important`（超宽列在表格内部滚动），页面根 `overflow-x:clip`；新增同类卡片或表格时不得引入固定像素宽度容器。注意页面根不能用 `overflow-x:hidden`——hidden 会把 overflow-y 连带变为 auto，使页面根自身变成滚动容器，底部"保存配置"按钮的 `position:sticky` 吸底随之失效（按钮悬在内容末尾）；`clip` 只裁剪不产生滚动容器，横向防护与 sticky 吸底兼容。
 
 ## 参见
 

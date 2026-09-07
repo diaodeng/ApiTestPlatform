@@ -1954,7 +1954,9 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 },
             ),
             patch.object(TicketSyncAutomationService, "detect_fields", return_value={}),
-            patch.object(TicketSyncService, "_translate_sync_description") as translate_description,
+            patch.object(
+                TicketSyncPostProcessService, "translate_sync_description"
+            ) as translate_description,
             patch.object(TicketSyncPayloadService, "build_upsert_payload", return_value=({}, {}, 1)),
             patch.object(TicketSyncCommentService, "sync_step_reason_comments", return_value={}),
             patch.object(
@@ -1969,7 +1971,11 @@ class TicketSyncMappingBoundaryTests(unittest.TestCase):
                 side_effect=lambda _db, ticket, **_kwargs: (ticket, {}, None),
             ),
             patch.object(TicketSyncDeliveryService, "extract_sync_summary", return_value={}),
-            patch.object(TicketSyncService, "_resolve_sync_title", return_value=("T-TRANS", {"mode": "raw"})),
+            patch.object(
+                TicketSyncPostProcessService,
+                "resolve_sync_title",
+                return_value=("T-TRANS", {"mode": "raw"}),
+            ),
             patch.object(
                 TicketExternalBitableEmailService,
                 "enrich_person_emails",

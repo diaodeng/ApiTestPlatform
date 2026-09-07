@@ -12,6 +12,7 @@ from modules.ticket.entity.vo.ticket_vo import (
 )
 from modules.ticket.enums.ticket_enums import TicketEventType
 from modules.ticket.service.ai.ticket_auto_classification_service import TicketAutoClassificationService
+from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
 from modules.ticket.service.ai.ticket_light_ai_service import TicketLightAiService
 from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
@@ -27,6 +28,7 @@ from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncCon
 from modules.ticket.service.sync.ticket_sync_delivery_service import TicketSyncDeliveryService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
+from modules.ticket.service.sync.ticket_sync_post_process_service import TicketSyncPostProcessService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import (
     user_id as _user_id,
@@ -45,248 +47,13 @@ class TicketSyncService:
 
     已提取的子服务（见对应文件，调用方应直接依赖对应子服务）：
     - TicketSyncConfigService (ticket_sync_config_service.py): 配置管理
+    - TicketSyncPostProcessService (ticket_sync_post_process_service.py): 翻译/标题/分类场景解析等
+      可复用业务判定，本服务内不再保留重复实现
     - SyncUtil (util/sync_util.py): 通用工具方法
     后续仅剩外部同步入库主编排仍在本服务内。
     """
 
     PUBLISH_STATUS_PROCESSING_AI = "processing_ai"
-
-    @classmethod
-    def _has_successful_ai_translation(cls, ticket: Ticket | None, source_description: str | None = None) -> bool:
-        """
-        判断工单是否已有成功的 AI 翻译结果。
-
-        :param ticket: 工单对象
-        :param source_description: 本次待翻译原文；传入后会校验是否与历史翻译源一致。
-        :return: 是否已存在翻译结果
-        """
-        if not ticket or not isinstance(ticket.extra_data, dict):
-            return False
-        extra_data = ticket.extra_data
-        translated_text = str(extra_data.get("ai_translation") or "").strip()
-        if not translated_text:
-            return False
-        normalized_source = str(source_description or "").strip()
-        if not normalized_source:
-            return True
-        source_hash = SyncUtil.text_sha256(normalized_source)
-        stored_source_hash = str(extra_data.get("ai_translation_source_hash") or "").strip()
-        if stored_source_hash:
-            return stored_source_hash == source_hash
-        origin_description = str(extra_data.get("origin_description") or "").strip()
-        if origin_description:
-            return SyncUtil.text_sha256(origin_description) == source_hash
-        legacy_source_description = str(extra_data.get("ai_translation_source_description") or "").strip()
-        if legacy_source_description:
-            return SyncUtil.text_sha256(legacy_source_description) == source_hash
-        return False
-
-    @classmethod
-    def _resolve_sync_title(
-        cls,
-        db: Session,
-        *,
-        sync_object: TicketExternalSyncUpsertModel,
-        ticket_id: int | None,
-        current_user: CurrentUserModel,
-    ) -> tuple[str, dict[str, Any]]:
-        """
-        解析外部同步工单标题：优先原始标题，其次轻量AI总结，最后回退描述截断。
-        :param db: 数据库会话
-        :param sync_object: 外部同步模型
-        :param ticket_id: 工单ID
-        :param current_user: 当前用户
-        :return: (最终标题, 标题元信息)
-        """
-        raw_title = str(sync_object.title or "").strip()
-        if raw_title:
-            return raw_title, {"mode": "raw", "title": raw_title}
-        description = str(sync_object.description or "").strip()
-        if not description:
-            return sync_object.ticket_no, {"mode": "fallback", "fallback_reason": "description_empty"}
-        ai_title, title_meta = TicketLightAiService.summarize_ticket_title(
-            db,
-            description=description,
-            source_type="ticket",
-            source_id=ticket_id,
-            source_ref=sync_object.ticket_no,
-            current_user_name=_user_name(current_user),
-        )
-        normalized_ai_title = str(ai_title or "").strip()
-        if normalized_ai_title:
-            return normalized_ai_title, {**title_meta, "mode": "ai"}
-        fallback_title = description[:100]
-        return fallback_title, {**title_meta, "mode": "fallback", "fallback_title": fallback_title}
-
-    @classmethod
-    def _should_skip_ai_analysis_for_update_with_title(
-        cls,
-        *,
-        ticket: Ticket | None,
-        incoming_title: str,
-        meta: dict[str, Any] | None = None,
-    ) -> bool:
-        """
-        判断是否因“更新且已带标题”跳过 AI 分析类任务（标题总结/分类/日志参数提取）。
-        :param ticket: 当前工单对象
-        :param incoming_title: 本次入参标题
-        :param meta: 可选同步元数据，用于补充判断是否更新场景
-        :return: 是否跳过
-        """
-        if not ticket:
-            return False
-        if not str(incoming_title or "").strip():
-            return False
-        revision = SyncUtil.safe_int((meta or {}).get("revision"))
-        if revision is None:
-            return True
-        return revision > 1
-
-    @classmethod
-    def _attach_sync_ai_extract_meta(
-        cls,
-        extra_data: dict[str, Any],
-        *,
-        extract_result: dict[str, Any] | None,
-        extract_meta: dict[str, Any] | None,
-        applied_meta: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """
-        将统一提取执行信息写入 extra_data，便于排查和复盘。
-        :param extra_data: 工单扩展字段
-        :param extract_result: 提取结果
-        :param extract_meta: 提取元信息
-        :param applied_meta: 回填摘要
-        :return: 更新后的扩展字段
-        """
-        payload = dict(extra_data or {})
-        if not isinstance(extract_meta, dict):
-            return payload
-        payload["ai_sync_extract"] = {
-            "executedAt": SyncUtil.now_iso(),
-            "result": extract_result if isinstance(extract_result, dict) else {},
-            "meta": extract_meta,
-            "applied": applied_meta if isinstance(applied_meta, dict) else {},
-        }
-        return payload
-
-    @classmethod
-    def _translate_sync_description(
-        cls,
-        db: Session,
-        *,
-        title: str,
-        description: str,
-        ticket_id: int | None,
-        ticket_no: str,
-        current_user: CurrentUserModel,
-        enabled: bool,
-    ) -> tuple[str, dict[str, Any], str]:
-        origin_description = str(description or "").strip()
-        if not origin_description:
-            return "", {"translated_text": "", "skipped": True}, ""
-        if not enabled:
-            return origin_description, {"translated_text": "", "skipped": True}, origin_description
-        translated_description, translation_meta = TicketLightAiService.translate_ticket_description(
-            db,
-            title=title,
-            content=origin_description,
-            source_type="ticket",
-            source_id=ticket_id,
-            source_ref=ticket_no,
-            current_user_name=_user_name(current_user),
-        )
-        if translation_meta.get("skipped") or not str(translation_meta.get("translated_text") or "").strip():
-            return origin_description, {**translation_meta, "skipped": True}, origin_description
-        return translated_description, translation_meta, origin_description
-
-    @classmethod
-    def _resolve_ai_classification_scene_for_sync_status(
-        cls,
-        config: dict[str, Any],
-        *,
-        sync_scene: str,
-        previous_status: str,
-        current_status: str,
-    ) -> tuple[str, bool, bool, str]:
-        """
-        解析同步入库后应使用的 AI 分类场景。
-
-        外部同步和远端入库也可能带来状态变更。若目标状态命中状态变更自动归类配置，则优先
-        使用状态变更场景；否则继续按原入库场景执行。
-        :param config: 同步自动化配置。
-        :param sync_scene: 原始入库场景。
-        :param previous_status: 入库前状态。
-        :param current_status: 入库后状态。
-        :return: (source_type, enabled_by_scene, force_reclassify, reason)。
-        """
-        ai_config = config.get("aiClassification") if isinstance(config.get("aiClassification"), dict) else {}
-        old_status = str(previous_status or "").strip()
-        new_status = str(current_status or "").strip()
-        trigger_statuses = [
-            str(item or "").strip()
-            for item in (ai_config.get("statusChangeTriggerStatuses") or [])
-            if str(item or "").strip()
-        ]
-        if (
-            old_status
-            and new_status
-            and old_status != new_status
-            and bool(ai_config.get("runOnStatusChange"))
-            and new_status in trigger_statuses
-        ):
-            return (
-                f"{sync_scene}_status_change_auto_category",
-                True,
-                bool(ai_config.get("statusChangeForceReclassify")),
-                f"status_changed:{old_status}->{new_status}",
-            )
-        return (
-            f"{sync_scene}_auto_category",
-            TicketAutoClassificationService.should_run_ai_classification_for_scene(config, sync_scene),
-            False,
-            "sync_scene",
-        )
-
-    @classmethod
-    def _resolve_translate_enabled_by_scene(
-        cls,
-        sync_scene: str,
-        translate_config: dict[str, Any],
-        translate_config_enabled: bool,
-    ) -> bool:
-        """从 translateConfig 读取当前场景的翻译开关。"""
-        if not translate_config_enabled:
-            return False
-        scene_map = {
-            "external_sync": "translateOnExternalSync",
-            "remote_pull": "translateOnRemotePull",
-            "bitable_pull": "translateOnBitablePull",
-            "manual_create": "translateOnManualCreate",
-        }
-        config_key = scene_map.get(sync_scene)
-        if config_key:
-            return bool(translate_config.get(config_key, False))
-        return False
-
-    @classmethod
-    def _should_run_automation_by_config(cls, config: dict[str, Any], sync_scene: str) -> bool:
-        """从 automationConfig 判断当前场景是否需要自动化。"""
-        auto_config = config.get("automationConfig") if isinstance(config.get("automationConfig"), dict) else {}
-        scene_map = {
-            "external_sync": "ExternalSync",
-            "remote_pull": "RemotePull",
-            "bitable_pull": "BitablePull",
-            "manual_create": "ManualCreate",
-        }
-        scene_suffix = scene_map.get(sync_scene, "")
-        if scene_suffix:
-            return bool(
-                auto_config.get(f"autoIdentifyOn{scene_suffix}")
-                or auto_config.get(f"autoLogPullOn{scene_suffix}")
-                or auto_config.get(f"autoAiAnalysisOn{scene_suffix}")
-            )
-        return False
 
     @classmethod
     def sync_external_ticket(
@@ -442,7 +209,7 @@ class TicketSyncService:
                     title_meta = {"mode": "fallback", "fallback_title": resolved_title, "reason": scope_decision.reason}
                 else:
                     try:
-                        resolved_title, title_meta = cls._resolve_sync_title(
+                        resolved_title, title_meta = TicketSyncPostProcessService.resolve_sync_title(
                             db,
                             sync_object=sync_object,
                             ticket_id=getattr(ticket, "ticket_id", None),
@@ -491,9 +258,11 @@ class TicketSyncService:
             sync_translate_enabled = (
                 bool(automation.auto_translate)
                 if automation is not None
-                else cls._resolve_translate_enabled_by_scene(sync_scene, translate_config, translate_config_enabled)
+                else TicketSyncPostProcessService.resolve_translate_enabled_by_scene(
+                    sync_scene, translate_config, translate_config_enabled
+                )
             )
-            translation_already_succeeded = cls._has_successful_ai_translation(
+            translation_already_succeeded = TicketSyncPostProcessService.has_successful_ai_translation(
                 ticket,
                 source_description=sync_object.description,
             )
@@ -507,14 +276,16 @@ class TicketSyncService:
                 f"should_translate={should_translate}"
             )
             try:
-                translated_description, translation_meta, origin_description = cls._translate_sync_description(
-                    db,
-                    title=sync_object.title or "",
-                    description=sync_object.description,
-                    ticket_id=getattr(ticket, "ticket_id", None),
-                    ticket_no=sync_object.ticket_no,
-                    current_user=current_user,
-                    enabled=should_translate,
+                translated_description, translation_meta, origin_description = (
+                    TicketSyncPostProcessService.translate_sync_description(
+                        db,
+                        title=sync_object.title or "",
+                        description=sync_object.description,
+                        ticket_id=getattr(ticket, "ticket_id", None),
+                        ticket_no=sync_object.ticket_no,
+                        current_user=current_user,
+                        enabled=should_translate,
+                    )
                 )
             except Exception as exc:
                 logger.warning(
@@ -570,7 +341,7 @@ class TicketSyncService:
                 extra_data = (
                     dict(payload.get("extra_data") or {}) if isinstance(payload.get("extra_data"), dict) else {}
                 )
-                extra_data = cls._attach_sync_ai_extract_meta(
+                extra_data = TicketSyncPostProcessService.attach_sync_ai_extract_meta(
                     extra_data,
                     extract_result=ai_extract_result,
                     extract_meta=ai_extract_meta,
@@ -693,7 +464,7 @@ class TicketSyncService:
         try:
             ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
             source_type, enabled_by_scene, force_reclassify, classify_reason = (
-                cls._resolve_ai_classification_scene_for_sync_status(
+                TicketSyncPostProcessService.resolve_ai_classification_scene_for_sync_status(
                     config,
                     sync_scene=sync_scene,
                     previous_status=previous_status,
@@ -728,7 +499,7 @@ class TicketSyncService:
 
         should_run_automation = bool(
             (automation and (automation.auto_identify or automation.auto_log_pull or automation.auto_ai_analysis))
-            or cls._should_run_automation_by_config(config, sync_scene)
+            or TicketSyncPostProcessService.should_run_automation_by_config(config, sync_scene)
         )
         automation_summary = None
         if should_run_automation and scope_allowed:
@@ -745,6 +516,28 @@ class TicketSyncService:
             logger.info(
                 f"外部工单同步自动化跳过: ticket_no={sync_object.ticket_no}, reason={scope_decision.reason}"
             )
+
+        # 非延后路径（当前仅远端拉取）内联执行向量刷新，保证 sceneTriggers.remotePull 等场景
+        # 开关在同步入库链路生效；延后路径（external_sync/bitable_pull/manual_create）由
+        # TicketSyncPostProcessService.execute_deferred_sync_post_process 统一刷新，不在此重复执行。
+        if not defer_post_process and scope_allowed:
+            try:
+                vector_scene_map = {
+                    "remote_pull": "remotePull",
+                    "bitable_pull": "bitablePull",
+                    "external_sync": "externalSync",
+                    "manual_create": "manualCreate",
+                }
+                vector_scene = vector_scene_map.get(sync_scene, "externalSync")
+                TicketEmbeddingService.vectorize_ticket_for_scene(db, ticket, vector_scene)
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    f"外部工单同步向量刷新失败: ticket_no={sync_object.ticket_no}, "
+                    f"scene={sync_scene}, error={exc}"
+                )
+                ticket = TicketDao.get_ticket_by_id(db, ticket.ticket_id) or ticket
 
         group_push_summary = None
         try:

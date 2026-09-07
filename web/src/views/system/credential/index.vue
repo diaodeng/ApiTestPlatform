@@ -17,6 +17,18 @@
               <el-tag :type="row.lastRefreshStatus === 'success' ? 'success' : 'info'">{{ refreshStatusLabel(row.lastRefreshStatus) }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="自动刷新" width="190">
+            <template #default="{ row }">
+              <el-tag v-if="row.autoRefreshEnabled" type="success">每 {{ row.refreshIntervalSec }} 秒</el-tag>
+              <el-tag v-else :type="supportsAutoRefreshMode(row.authMode) ? 'warning' : 'info'">{{ supportsAutoRefreshMode(row.authMode) ? '未开启' : '不支持' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="最近刷新" width="160">
+            <template #default="{ row }">
+              <span v-if="row.lastRefreshTime" :title="row.lastRefreshMessage">{{ formatTime(row.lastRefreshTime) }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="启用" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '是' : '否' }}</el-tag></template></el-table-column>
           <el-table-column label="操作" width="190" fixed="right">
             <template #default="{ row }">
@@ -120,6 +132,11 @@ const authModeLabel = value => authModes.find(item => item.value === value)?.lab
 const businessTypeLabel = value => businessTypes.find(item => item.value === value)?.label || value || '-'
 const projectionTypeLabel = value => ({ playwright_storage: 'Playwright storageState', http_header: 'HTTP Header', http_cookie: 'HTTP Cookie' })[value] || value || '-'
 const refreshStatusLabel = value => ({ never: '未刷新', success: '成功', failed: '失败', conflict: '版本冲突' })[value] || value || '-'
+const supportsAutoRefreshMode = mode => ['http_login', 'http_refresh'].includes(mode)
+function formatTime(value) {
+  if (!value) return '-'
+  return String(value).replace('T', ' ').slice(0, 19)
+}
 
 function loadCredentials() {
   credentialLoading.value = true

@@ -41,9 +41,24 @@
       type: Boolean,
       default: false,
     },
+    // 当前工单自身的相似处理案例摘要；caseStatus 为 none 时表示尚未形成案例
+    similarityCase: {
+      type: Object,
+      default: null,
+    },
+    // 是否允许案例状态写操作（确认案例/驳回案例/回退草稿）；只读入口传 false
+    allowCaseAction: {
+      type: Boolean,
+      default: false,
+    },
+    // 案例状态变更请求进行中状态，用于按钮 loading
+    caseActionLoading: {
+      type: Boolean,
+      default: false,
+    },
   });
 
-  const emit = defineEmits(['bind-issue']);
+  const emit = defineEmits(['bind-issue', 'case-action']);
   const router = useRouter();
 
   /**
@@ -111,8 +126,54 @@
    * @returns {string} 状态文案
    */
   function formatCaseStatus(value) {
-    const labels = { draft: '案例草稿', verified: '已验证案例', rejected: '已驳回' };
+    const labels = { draft: '案例草稿', verified: '已验证案例', rejected: '已驳回', none: '未形成案例' };
     return labels[String(value || '')] || String(value || '');
+  }
+
+  /**
+   * 获取当前案例状态对应的标签类型。
+   * @param {string} value 案例状态编码
+   * @returns {string} Element Plus 标签类型
+   */
+  function getCaseStatusTagType(value) {
+    const status = String(value || '');
+    if (status === 'verified') return 'success';
+    if (status === 'rejected') return 'danger';
+    if (status === 'draft') return 'warning';
+    return 'info';
+  }
+
+  /**
+   * 案例向量索引状态说明文案；索引失败时提示用户案例暂不参与相似检索。
+   * @param {object} caseData 案例摘要对象
+   * @returns {string} 状态说明
+   */
+  function formatIndexHint(caseData) {
+    const status = String(caseData?.lastIndexStatus || '');
+    if (status === 'ready') return '案例向量已生成，可被其他工单以“处理案例相似”召回';
+    if (status === 'failed') return `案例向量生成失败，暂不参与相似检索：${caseData?.lastIndexError || '未知原因'}`;
+    if (status === 'skipped') return '案例状态当前不参与相似索引';
+    return '案例向量生成中，稍后可被“处理案例相似”召回';
+  }
+
+  /**
+   * 判断当前案例是否允许确认为已验证：需要根因、解决方案，以及证据或验证方式。
+   * @param {object} caseData 案例摘要对象
+   * @returns {boolean} 是否可确认
+   */
+  function canVerifyCase(caseData) {
+    return Boolean(
+      caseData?.rootCauseSummary && caseData?.solutionSummary && (caseData?.evidenceSummary || caseData?.verifySummary)
+    );
+  }
+
+  /**
+   * 向父组件透传案例状态变更事件。
+   * @param {string} status 目标状态：draft/verified/rejected
+   * @returns {void}
+   */
+  function emitCaseAction(status) {
+    emit('case-action', status);
   }
 </script>
 
@@ -136,7 +197,7 @@
         />
         <el-empty v-else-if="!symptomTickets.length" description="暂无内容相似工单" />
         <div v-for="item in symptomTickets" :key="`symptom-${item.ticketId}`" class="similar-item">
-          <div>
+          <div class="similar-item-body">
             <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
             <div class="similar-meta">
               <span>相似度 {{ formatPercent(item.score) }}</span>
@@ -147,40 +208,99 @@
               <span v-if="item.matchReasons?.length">命中：{{ item.matchReasons.join('、') }}</span>
               <span v-if="item.conflicts?.length">冲突：{{ item.conflicts.join('、') }}</span>
             </div>
-          </div>
-          <div class="similar-actions">
-            <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
-            <el-button v-if="resolveTicketDetailUrl(item)" link type="primary" @click="openExternalTicket(item)">
-              飞书详情
-            </el-button>
-            <el-button
-              v-if="allowBindIssue"
-              link
-              type="success"
-              :loading="issueActionLoading"
-              @click="emit('bind-issue', item)"
-              v-hasPermi="['ticket:issue:bind']"
-            >
-              归入同一问题
-            </el-button>
+            <!-- 操作按钮放在内容下方独占一行，避免右侧竖排按钮在窄屏下挤压标题 -->
+            <div class="similar-actions">
+              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+              <el-button
+                v-if="resolveTicketDetailUrl(item)"
+                link
+                type="primary"
+                @click="openExternalTicket(item)"
+              >
+                飞书详情
+              </el-button>
+              <el-button
+                v-if="allowBindIssue"
+                link
+                type="success"
+                :loading="issueActionLoading"
+                @click="emit('bind-issue', item)"
+                v-hasPermi="['ticket:issue:bind']"
+              >
+                归入同一问题
+              </el-button>
+            </div>
           </div>
         </div>
       </el-card>
 
       <el-card shadow="never" class="similar-card similar-card--case">
         <template #header>处理案例相似</template>
+        <!-- 当前工单自身案例：展示案例状态并提供人工确认/驳回/回退入口 -->
+        <div v-if="similarityCase" class="current-case">
+          <div class="current-case-header">
+            <span class="similar-title">当前工单案例</span>
+            <el-tag :type="getCaseStatusTagType(similarityCase.caseStatus)" size="small">
+              {{ formatCaseStatus(similarityCase.caseStatus) }}
+            </el-tag>
+          </div>
+          <div class="similar-meta">
+            <span>第 {{ similarityCase.caseRevision || 1 }} 版</span>
+            <span v-if="similarityCase.verifiedBy">确认人：{{ similarityCase.verifiedBy }}</span>
+            <span v-if="similarityCase.rejectedBy">驳回人：{{ similarityCase.rejectedBy }}</span>
+          </div>
+          <div class="similar-meta">根因：{{ similarityCase.rootCauseSummary || '-' }}</div>
+          <div class="similar-meta">方案：{{ similarityCase.solutionSummary || '-' }}</div>
+          <div class="similar-meta">{{ formatIndexHint(similarityCase) }}</div>
+          <div v-if="allowCaseAction" class="similar-actions">
+            <el-button
+              v-if="similarityCase.caseStatus !== 'verified'"
+              link
+              type="success"
+              :disabled="!canVerifyCase(similarityCase)"
+              :loading="caseActionLoading"
+              @click="emitCaseAction('verified')"
+              v-hasPermi="['ticket:similarity:case']"
+            >
+              确认案例
+            </el-button>
+            <el-button
+              v-if="similarityCase.caseStatus === 'verified'"
+              link
+              type="warning"
+              :loading="caseActionLoading"
+              @click="emitCaseAction('draft')"
+              v-hasPermi="['ticket:similarity:case']"
+            >
+              回退草稿
+            </el-button>
+            <el-button
+              v-if="similarityCase.caseStatus !== 'rejected'"
+              link
+              type="danger"
+              :loading="caseActionLoading"
+              @click="emitCaseAction('rejected')"
+              v-hasPermi="['ticket:similarity:case']"
+            >
+              驳回案例
+            </el-button>
+            <span v-if="!canVerifyCase(similarityCase) && similarityCase.caseStatus !== 'verified'" class="similar-meta">
+              确认案例需要根因、解决方案以及证据或验证方式
+            </span>
+          </div>
+        </div>
         <el-empty v-if="!caseTickets.length" description="暂无处理案例" />
         <div v-for="item in caseTickets" :key="`case-${item.ticketId}`" class="similar-item">
-          <div>
+          <div class="similar-item-body">
             <div class="similar-title">{{ item.ticketNo || '-' }} {{ item.title || '-' }}</div>
             <div class="similar-meta">
               <span>相似度 {{ formatPercent(item.score) }}</span>
               <span>{{ formatCaseStatus(item.caseStatus) }}</span>
             </div>
             <div class="similar-meta">根因：{{ item.rootCause || '-' }}</div>
-          </div>
-          <div class="similar-actions">
-            <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+            <div class="similar-actions">
+              <el-button link type="primary" @click="openSystemTicketDetail(item)">系统详情</el-button>
+            </div>
           </div>
         </div>
       </el-card>
@@ -198,9 +318,6 @@
   }
 
   .similar-item {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
     padding: 10px 0;
     border-bottom: 1px solid #ebeef5;
   }
@@ -223,11 +340,25 @@
     font-size: 12px;
   }
 
+  /* 操作按钮独占一行，跟随内容左对齐，窄屏下不再与标题争抢横向空间 */
   .similar-actions {
     display: flex;
-    flex: 0 0 auto;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0;
-    white-space: nowrap;
+    margin-top: 4px;
+  }
+
+  /* 当前工单案例区块：与下方相似候选用分隔线区分 */
+  .current-case {
+    padding-bottom: 12px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #ebeef5;
+  }
+
+  .current-case-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 </style>

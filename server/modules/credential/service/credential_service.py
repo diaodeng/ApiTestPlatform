@@ -96,6 +96,8 @@ class CredentialService:
             merged_secret = decrypt_secret(current.secret_cipher_text)
             if current.credential_type != model.credential_type:
                 cls._clear_primary_secret_fields(merged_secret)
+            # 编辑页已回填明文，显式传空串的字段表示用户清空了该敏感项，合并前删除而不是保留旧值。
+            cls._drop_empty_secret_fields(model.secret)
             merged_secret.update(model.secret)
             values["secret_cipher_text"] = encrypt_secret(merged_secret)
             values["secret_mask"] = mask_secret(merged_secret)
@@ -112,6 +114,15 @@ class CredentialService:
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def _drop_empty_secret_fields(secret: dict) -> None:
+        """更新时剔除显式传空串的主字段，使"清空输入框保存"等价于删除该敏感字段。
+
+        仅处理顶层字符串键；headers/cookies 等对象字段由编辑页整体覆盖，不走该逻辑。
+        """
+        for key in [key for key, value in secret.items() if value == ""]:
+            secret.pop(key, None)
 
     @staticmethod
     def _clear_primary_secret_fields(secret: dict) -> None:

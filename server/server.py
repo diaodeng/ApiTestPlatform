@@ -15,7 +15,6 @@ from module_admin.controller.ai_prompt_template_controller import aiPromptTempla
 from module_admin.controller.ai_provider_controller import aiProviderController
 from module_admin.controller.ai_task_execution_controller import aiTaskExecutionController
 from module_admin.controller.api_key_controller import apiKeyController
-from modules.credential.controller.credential_controller import credentialController
 from module_admin.controller.cache_controller import cacheController
 from module_admin.controller.captcha_controller import captchaController
 from module_admin.controller.common_controller import commonController
@@ -61,6 +60,10 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
+from modules.credential.controller.credential_controller import credentialController
+from modules.metrics.controller.metrics_collector_controller import metricsCollectorController
+from modules.metrics.perms import register as register_metrics_permission_defs
+from modules.metrics.service.metrics_collector_runtime_service import MetricsCollectorRuntimeService
 from modules.ticket.controller.ticket_ai_controller import ticketAiController
 from modules.ticket.controller.ticket_ai_test_controller import ticketAiTestController
 from modules.ticket.controller.ticket_config_controller import ticketConfigController
@@ -79,7 +82,6 @@ from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPul
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
 from utils.log_util import logger
-from utils.metrics import PushMetrics
 
 
 # 生命周期事件
@@ -92,6 +94,7 @@ async def lifespan(app: FastAPI):
         register_admin_permission_defs()
         register_hrm_permission_defs()
         register_ticket_permission_defs()
+        register_metrics_permission_defs()
         sync_registered_menus(app)
         with SessionLocal() as db:
             TicketService.init_default_workflow(db)
@@ -106,12 +109,11 @@ async def lifespan(app: FastAPI):
         await RedisUtil.init_sys_config(app.state.redis)
         await startup_handler()
         TicketFeishuEventListenerService.start_from_config()
-        metrics_thread = PushMetrics(role="api")
-        metrics_thread.start()
+        MetricsCollectorRuntimeService.start(role="api")
         logger.info(f"{AppConfig.app_name}启动成功")
         yield
         try:
-            metrics_thread.stop()
+            MetricsCollectorRuntimeService.stop_all()
         except Exception:
             pass
         try:
@@ -163,7 +165,8 @@ controller_list = [
     {"router": logController, "tags": ["系统管理-日志管理"]},
     {"router": onlineController, "tags": ["系统监控-在线用户"]},
     {"router": jobController, "tags": ["系统监控-定时任务"]},
-    {"router": serverController, "tags": ["系统监控-菜单管理"]},
+    {"router": serverController, "tags": ["系统监控-服务监控"]},
+    {"router": metricsCollectorController, "tags": ["系统监控-资源采集服务"]},
     {"router": cacheController, "tags": ["系统监控-缓存监控"]},
     {"router": commonController, "tags": ["通用模块"]},
     {"router": projectController, "tags": ["HRM-项目管理"]},

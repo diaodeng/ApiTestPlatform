@@ -667,7 +667,13 @@ class TicketSyncAutomationService:
                 TicketDao.update_ticket(db, ticket_id, update_data)
                 ticket = TicketDao.get_ticket_by_id(db, ticket_id)
 
-            search_text = cls.collect_text(ticket)
+            # 相似检索文本与入库向量同构：使用 build_ticket_text（symptom scope），
+            # 不再复用 collect_text（其含 raw_payload 全量 JSON 和工单号，超长会击穿
+            # 外部 Embedding 的 token 上限，且查询/入库向量字段分布不一致）。
+            similarity_config = TicketEmbeddingService.get_similarity_config(db)
+            search_text = TicketEmbeddingService.build_ticket_text(
+                ticket, config=similarity_config, scope=TicketEmbeddingService.SCOPE_SYMPTOM
+            )
             similar_tickets = [
                 item
                 for item in TicketEmbeddingService.search_tickets(db, search_text, 6)

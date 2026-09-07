@@ -25,6 +25,7 @@ import httpx
 from server.config import AgentConfig
 from services.ticket_ai_codex_config_service import TicketAiCodexConfigService
 from services.ticket_ai_observability_service import TicketAiObservabilityService
+from services.ticket_ai_result_schema_service import TicketAiResultSchemaService
 from utils.common import get_client_root_dir
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
@@ -975,8 +976,16 @@ class TicketAiAnalysisService:
         def accept_candidate(candidate: Any) -> dict[str, Any] | None:
             if not isinstance(candidate, dict):
                 return None
-            if schema_payload and not cls._validate_json_schema(candidate, schema_payload):
-                return None
+            # 先按 schema 做保守清洗（剔除额外字段、evidence 对象转字符串），
+            # 再校验；部分模型（deepseek-v4-flash 等）未被 --output-schema 真实约束。
+            if schema_payload:
+                candidate, sanitize_actions = TicketAiResultSchemaService.sanitize_result_payload(
+                    candidate, schema_payload
+                )
+                if sanitize_actions:
+                    logger.info(f"AI Worker 结果已按 schema 清洗: {sanitize_actions}")
+                if not cls._validate_json_schema(candidate, schema_payload):
+                    return None
             return candidate
 
         if provider_type == "claude":
@@ -1982,8 +1991,14 @@ class TicketAiAnalysisService:
         payload = cls._read_json_file(result_file)
         if not cls._is_valid_cached_result(payload):
             return None
-        if schema_payload and not cls._validate_json_schema(payload, schema_payload):
-            return None
+        # 缓存命中前同样先清洗再校验：历史结果可能来自未遵守 schema 的模型输出，
+        # 清洗后可通过校验的结果应继续可复用，避免重复消耗模型调用。
+        if schema_payload:
+            payload, sanitize_actions = TicketAiResultSchemaService.sanitize_result_payload(payload, schema_payload)
+            if sanitize_actions:
+                logger.info(f"AI 分析缓存结果已按 schema 清洗: {sanitize_actions}")
+            if not cls._validate_json_schema(payload, schema_payload):
+                return None
         return payload
 
     @staticmethod
@@ -2900,6 +2915,10 @@ class TicketAiAnalysisService:
    - owner_suggestion
    - monitoring_suggestion
    - needs_human_review
+   除上述字段外，**禁止输出任何其他字段**（如 ticket_no、merchant_name、version、
+   root_cause_type 等 schema 外字段），多出的字段会导致结果校验失败。
+   evidence 必须是字符串数组：每条证据是一个字符串，格式为"来源文件路径:行号: 证据内容摘要"，
+   禁止把证据写成 {{source, content}} 之类的 JSON 对象。
 
 工单基础信息:
 - ticket_id: {ticket.get("ticketId") or ticket.get("ticket_id") or ""}
@@ -3114,6 +3133,9 @@ class TicketAiAnalysisService:
                     "success": True,
                     "status": "success",
                     "message": "AI 分析已完成，直接返回缓存结果",
+                    # 结果来自本地工作区历史 result.json，并非本次真实模型调用；
+                    # 服务端据此把审计记为复用缓存，不把恢复出的 token 计入本次统计。
+                    "cache_hit": True,
                     "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": cached_result,
@@ -3627,6 +3649,15 @@ class TicketAiAnalysisService:
                         diagnostics=failure_payload["diagnostics"],
                         auth_diagnostic=worker_auth_diagnostic,
                     )
+                    # 结果无效同样可能已产生模型消耗（如结果不符合 schema），先提取 token
+                    # 再上报，避免先使用后赋值触发 UnboundLocalError（历史缺陷曾导致
+                    # schema 违规分支被二次异常覆盖，失败原因只剩 UnboundLocalError）。
+                    invalid_result_token_usage = cls._parse_failure_token_usage(
+                        provider_type=provider_type,
+                        raw_stdout=raw_stdout,
+                        raw_stderr=raw_stderr,
+                        result_file=result_file,
+                    )
                     # 结果无效同样上报：模型调用已真实发生，token 尽力提取
                     TicketAiObservabilityService.report_task_span(
                         provider_env_overrides,
@@ -3643,13 +3674,6 @@ class TicketAiAnalysisService:
                         success=False,
                         error_code=failure_payload["error_code"],
                         error_message=failure_payload["error_message"],
-                    )
-                    # 结果无效同样可能已产生模型消耗（如结果不符合 schema），尽力提取 token。
-                    invalid_result_token_usage = cls._parse_failure_token_usage(
-                        provider_type=provider_type,
-                        raw_stdout=raw_stdout,
-                        raw_stderr=raw_stderr,
-                        result_file=result_file,
                     )
                     return {
                         "request_type": req_data.get("requestType"),

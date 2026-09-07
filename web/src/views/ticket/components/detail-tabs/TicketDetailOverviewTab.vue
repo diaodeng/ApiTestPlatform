@@ -40,6 +40,16 @@
       type: String,
       default: 'idle',
     },
+    // 当前工单自身的相似处理案例摘要
+    similarityCase: {
+      type: Object,
+      default: null,
+    },
+    // 案例状态变更请求进行中
+    caseActionLoading: {
+      type: Boolean,
+      default: false,
+    },
   });
 
   const emit = defineEmits([
@@ -49,6 +59,7 @@
     'open-ai-repo-mapping',
     'open-project-vendor-map',
     'changed',
+    'case-action',
   ]);
   const { proxy } = getCurrentInstance();
 
@@ -332,7 +343,11 @@
         :similar-status="similarStatus"
         :allow-bind-issue="true"
         :issue-action-loading="issueActionLoading"
+        :similarity-case="similarityCase"
+        :allow-case-action="true"
+        :case-action-loading="caseActionLoading"
         @bind-issue="bindSimilarIssue"
+        @case-action="(status) => emit('case-action', status)"
       />
     </el-col>
   </el-row>

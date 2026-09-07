@@ -56,6 +56,9 @@ from modules.ticket.service.collaboration.ticket_message_sync_service import Tic
 from modules.ticket.service.core.ticket_processing_metric_service import TicketProcessingMetricService
 from modules.ticket.service.core.ticket_version_service import TicketVersionService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.ticket.service.sync.ticket_manual_create_post_process_service import (
+    TicketManualCreatePostProcessService,
+)
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_common_util import (
@@ -1082,41 +1085,20 @@ class TicketService:
                 create_time=now,
             )
             query_db.commit()
+            # 统一提取/翻译/同步后自动化/向量刷新/发布收敛交由手动创建后处理编排，
+            # 按场景开关与表单 automation 参数决定执行；此处不再内联执行 AI 分类。
             try:
-                ticket, ai_stat_summary = TicketAutoClassificationService.run_auto_ticket_ai_classification(
+                dispatch_result = TicketManualCreatePostProcessService.dispatch_manual_create_post_process(
                     query_db,
-                    ticket=ticket,
-                    title=str(ticket.title or "").strip(),
-                    description=str(ticket.description or "").strip(),
-                    current_user_name=_user_name(current_user),
-                    source_type="ticket_manual_create_auto_category",
-                    source_ref=ticket.ticket_no,
-                    force_reclassify=False,
-                    enabled_by_scene=True,
+                    ticket,
+                    log_pull_config=log_pull_config,
+                    auto_translate=auto_translate,
+                    need_log_pull=bool(need_log_pull),
+                    current_user=current_user,
                 )
-                if ai_stat_summary.get("skipped"):
-                    logger.info(f"工单[{ticket.ticket_id}]自动分类统计跳过: {ai_stat_summary.get('skipReason')}")
+                TicketManualCreatePostProcessService.log_dispatch_summary(ticket, dispatch_result)
             except Exception as exc:
-                query_db.rollback()
-                logger.warning(f"工单[{ticket.ticket_id}]自动分类执行失败: {exc}")
-            try:
-                TicketEmbeddingService.vectorize_ticket_for_scene(query_db, ticket, "manualCreate")
-                query_db.commit()
-            except Exception as exc:
-                query_db.rollback()
-                logger.warning(f"工单[{ticket.ticket_id}]手动新增后向量刷新失败: {exc}")
-            if need_log_pull or log_pull_config:
-                try:
-                    log_pull_result = TicketLogPullService.create_log_pull_services(
-                        query_db,
-                        ticket.ticket_id,
-                        TicketLogPullCreateModel.model_validate(log_pull_config),
-                        current_user,
-                    )
-                    if not log_pull_result.is_success:
-                        logger.warning(f"工单[{ticket.ticket_id}]创建后自动提交日志拉取失败: {log_pull_result.message}")
-                except Exception as exc:
-                    logger.exception(f"工单[{ticket.ticket_id}]创建后自动提交日志拉取异常: {exc}")
+                logger.warning(f"工单[{ticket.ticket_id}]手动创建后处理分发失败: {exc}")
             result = CamelCaseUtil.transform_result(ticket)
             cls._decorate_ticket_item(result)
             TicketVersionService.attach_ticket_version_labels(query_db, [result])

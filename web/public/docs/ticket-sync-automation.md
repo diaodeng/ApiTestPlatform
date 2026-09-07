@@ -7,7 +7,7 @@
 
 ## 页面目标
 
-管理"外部同步入库"后的自动化行为，三类数据源：
+管理"外部同步入库"后的自动化行为与工单来源链路，三类数据源：
 
 - 第三方系统直接调用 `/ticket/sync/external` 推送工单
 - 内网系统调用 `/ticket/sync/pending` 拉取外网工单
@@ -15,43 +15,79 @@
 
 手动新增/编辑工单的"创建后拉日志"不在这里配置，走工单新增页。轻量翻译和知识提炼的配置走 **AI 配置中心**。
 
----
+## 页面结构（按职责分 6 个页签）
 
-## 一、基础开关
+| 页签 | 内容 | 归组依据 |
+|------|------|----------|
+| 入库流程 | ⓪自动化关注范围、场景×步骤开关总表、①字段识别与映射（弹窗设置）、②外部工单字段模型、③AI 提取、④标题总结、⑤翻译、⑥AI 分类、⑦同步后自动化（含日志拉取设置弹窗入口）、⑧群推送、旁路·知识提炼、提示词模板 | 工单入库后按执行顺序串起来的主链路 |
+| 来源与拉取 | 飞书统一凭证、多维表格公共配置、连接解析预览、远端同步链接、飞书多维表格主动拉取、外部推送多维表格邮箱补全 | 工单数据从哪里来 |
+| 评论同步 | 工单评论多端同步 | 独立旁路 |
+| 通知任务 | 工单汇总统计通知、按人催办通知 | 独立定时任务，非入库链路 |
+| 统计与分类 | 统计枚举配置、外部字段工单类型映射、自定义趋势指标、当前系统工单统计方案 | 统计口径 |
+| 操作 | 手动触发入口、指定工单手动自动化、自动分类管理 | 手动执行 |
 
-### 1.1 同步基础开关
+所有页签共用页面底部同一个"保存配置"按钮。两处内容较多的配置收在弹窗中维护：
 
-| 配置项 | 说明 |
-|--------|------|
-| `autoRunOnSync` | 外部同步入库后是否进入自动化链路 |
-| `autoTranslateOnSync` | 第三方直推场景下是否自动翻译工单描述 |
-| `defaultPullLimit` | 内网拉取未同步工单时的默认数量 |
-
-### 1.2 发布状态
-
-- 外部推送首先写入 `publish_ready=false`，后台 AI/自动化结束后恢复为可发布。
-- `/ticket/sync/pending` 拉取前检查是否有活动 AI 任务；无活动任务时自动恢复 `publish_ready=true`。
-- 拉取时写入 `status=pulled` 和租约，30 分钟内不重复返回；超时未回执允许重试。
-- `/ticket/sync/ack` 只有 `delivered/success/succeeded` 推进交付版本；`failed` 不阻塞下次拉取。
+- **① 字段识别与映射**：页面卡片默认只显示摘要（正则规则组数、映射组数），点击卡片右上角「设置」打开弹窗维护 6 组映射 JSON 与 POS/SCO/版本号正则；修改跟随页面底部「保存配置」一起生效。
+- **⑦ 日志拉取设置**：点击"⑦ 同步后自动化"卡片右上角「日志拉取设置」打开弹窗，内含三块配置——拉日志默认值（跟随页面底部「保存配置」保存）、存储与资源限制（弹窗底部独立保存按钮立即生效）、日志拉取外部接口配置（独立保存按钮立即生效）。弹窗顶部有保存方式说明。
 
 ---
 
-## 二、远端同步连接
+## 〇、入库流程执行顺序（页面即按此组织）
 
-| 配置项 | 说明 |
-|--------|------|
-| `remoteSync.enabled` | 是否允许远端拉取任务执行。**不是启动定时任务的按钮**，只控制任务是否放行。关闭时页面不强制校验 `pullUrl/ackUrl/consumer` 必填 |
-| `remoteSync.pullUrl` | 拉取未同步工单的地址 |
-| `remoteSync.ackUrl` | 回写交付结果的地址 |
-| `remoteSync.consumer` | 消费者标识 |
-| `remoteSync.includeClosed` | 拉取时是否包含已关闭工单 |
-| `remoteSync.autoTranslateOnPull` | 仅控制内网定时拉取链路是否自动翻译（与第三方直推独立控制） |
-| `remoteSync.sourceSystem` | 内网拉取后写入的外部系统标识 |
-| `credentialBindingId` | 远端同步的凭证绑定 ID（必填） |
+工单入库（`POST /ticket/sync/external` 或主动拉取/远端拉取复用入库）后，后台按以下顺序执行；页面"入库流程"页签的卡片编号就是执行顺序：
+
+| 步骤 | 内容 | 读取的配置 |
+|------|------|------------|
+| ⓪ | 自动化关注范围判定（总闸门） | `automationScope` |
+| ① | 字段识别与映射（项目/模块/商家/门店/人员/正则），识别失败不阻断 | 识别规则、映射配置 |
+| ② | 外部工单字段模型（必填校验与字段全集来源） | `externalFieldModel` |
+| ③ | AI 同步提取（回填门店/POS/SCO/日期/版本） | `aiSyncExtract` |
+| ④ | 标题总结（仅在缺标题时执行） | `titleSummaryConfig` |
+| ⑤ | 翻译（已有成功翻译时跳过） | `translateConfig` |
+| ⑥ | AI 自动分类 | `aiClassification` |
+| ⑦ | 同步后自动化：自动识别回写 → 自动拉日志 → 自动 AI 分析 | `automationConfig` + `logPullDefaults` |
+| ⑧ | 发布状态收敛 + 自动群推送 | `groupPush` |
+
+步骤 ③④⑤⑥⑦⑧ 都受 ⓪ 总闸门约束：范围外工单只执行同步与映射。
+
+该执行顺序对四种入库场景统一生效：外部推送、远端拉取、多维表格拉取和手动创建（页面手工新增工单）。各场景是否执行某一步骤由"场景 × 步骤 开关总表"决定。
 
 ---
 
-## 三、识别规则
+## 一、场景 × 步骤 开关总表（入库流程页签）
+
+所有"哪个场景执行哪一步"的开关都集中在这一张表里，避免同一开关散落在多个卡片。**每个开关只在这一处出现**；下方各步骤卡片只维护参数（Provider、模型、提示词、模板等）。
+
+| 步骤 ↓ / 场景 → | 外部推送 | 远端拉取 | 多维表格拉取 | 手动创建 | 对应配置键 |
+|----------------|---------|---------|-------------|---------|-----------|
+| ③ AI 同步提取 | `externalPushEnabled` | `remotePullEnabled` | `bitablePullEnabled` | `manualCreateEnabled` | `aiSyncExtract.*` |
+| ⑤ 翻译（含总开关） | `translateOnExternalSync` | `translateOnRemotePull` | `translateOnBitablePull` | `translateOnManualCreate` | `translateConfig.*`，总开关 `enabled` |
+| ⑥ AI 自动分类（含总开关） | `runOnExternalSync` | `runOnRemotePull` | `runOnBitablePull` | `runOnManualCreate` | `aiClassification.*`，总开关 `enabled` |
+| ⑦ 自动识别 | `autoIdentifyOnExternalSync` | `autoIdentifyOnRemotePull` | `autoIdentifyOnBitablePull` | `autoIdentifyOnManualCreate` | `automationConfig.*` |
+| ⑦ 自动拉日志 | `autoLogPullOnExternalSync` | `autoLogPullOnRemotePull` | `autoLogPullOnBitablePull` | `autoLogPullOnManualCreate` | `automationConfig.*` |
+| ⑦ 自动 AI 分析 | `autoAiAnalysisOnExternalSync` | `autoAiAnalysisOnRemotePull` | `autoAiAnalysisOnBitablePull` | `autoAiAnalysisOnManualCreate` | `automationConfig.*` |
+| ⑧ 自动群推送（含总开关） | `sendAfterExternalSync` | `sendAfterRemotePull` | `sendAfterBitablePull` | `sendAfterManualCreate` | `groupPush.*`，总开关 `enabled` |
+
+说明：
+
+- 场景含义：**外部推送**=第三方系统直推；**远端拉取**=内网定时拉取公网工单；**多维表格拉取**=飞书多维表格定时拉取；**手动创建**=页面手工新增工单。
+- **双环境部署注意**：日志拉取和 AI 分析通常应在公网（外部推送入口）完成后随 pending 数据同步到内网。内网环境的"远端拉取"列开关建议保持默认关闭；只有内网单独部署了 Agent 和日志链路时才需要打开，打开后行为与外部推送一致（受自动化关注范围约束，参数不完整时跳过并通知）。
+- 翻译、AI 分类、群推送三行带"总开关"，总开关关闭时该行所有场景开关置灰且不生效；AI 提取和自动识别/拉日志/AI 分析没有总开关，场景开关独立生效。
+- 定时任务参数中指定的 automation 配置优先于本表（页面有提示）。
+- 状态变更触发的 AI 重归类（`runOnStatusChange`、`statusChangeForceReclassify`、`statusChangeTriggerStatuses`）不属于入库场景，仍在"⑥ AI 分类统计配置"卡片内维护。
+
+## 一点一、自动化关注范围（总闸门）
+
+`automationScope` 可按系统模块控制同步后的自动化范围：
+
+- 按模块 ID、模块 Code、模块名称关键字配置，任一命中即进入范围
+- 范围外工单仍入库并更新快照和状态，但不执行 AI 提取、标题 AI、翻译、AI 分类、自动拉日志/AI 分析、向量刷新和自动群推送
+- 工单统计页默认选择"关注范围"，可切换"全部数据"
+
+---
+
+## 二、字段识别与映射（入库流程页签 ①）
 
 用于外部同步时将外部字段映射到系统内部字段：
 
@@ -66,7 +102,6 @@
 | `posPatterns` | POS 编号匹配模式 |
 | `scoPatterns` | SCO 匹配模式 |
 | `versionPatterns` | 版本号匹配模式 |
-| `externalSyncBitable` | 外部推送按 recordId 查询飞书多维表格补充人员信息 |
 
 ### 业务码匹配
 
@@ -75,31 +110,39 @@
 2. 未命中时通过 `projectCode/moduleCode` 匹配
 3. 仍未命中且携带当前环境 ID 时，按 `projectId/moduleId` 兜底
 
+### 关键字匹配语义
+
+`projectMappings` / `moduleMappings` 的关键字（`keywords` / `aliases` / `matchText`）在匹配时统一忽略大小写：外部字段文本会先转小写，再与归一化（去空格、转小写）后的关键字做**完全相等**比较，不做模糊包含猜测。因此配置关键字时填写完整文本即可，大小写不影响命中；如果配置了片段式关键字（例如只写“优惠券”而外部文本是“POS - 优惠券”），则无法命中，需要补充完整文本关键字。
+
+映射命中后按 `moduleId → moduleCode → moduleName` 顺序查 `hrm_module` 表解析模块；命中映射但查不到模块记录时只回填映射配置值，模块表无记录时 `module_id` 为空、`module_code` 为空字符串属正常现象。模块字段（`module_id` / `module_code` / `module_name`）在入库与更新时作为整体原子写入，避免三者不一致。
+
+外部工单字段模型（卡片②）定义外部推送字段全集与必填规则，主动拉取字段映射的目标字段也来自这里。
+
 ---
 
-## 四、日志拉取默认值
+## 三、日志拉取默认值
 
-`logPullDefaults` 配置外部同步后自动拉日志的默认参数（已加宽显示）。
+`logPullDefaults` 配置外部同步后自动拉日志的默认参数。
 
 | 配置项 | 说明 |
 |--------|------|
 | `logPullDefaults.environment` | 默认日志环境，格式为 `分组:子环境`；必须来自日志拉取外部接口配置 |
 | `logPullDefaults.commandDataType` | 外部日志命令数据类型 |
 | `logPullDefaults.storageMode` | 日志归档方式，如 `local` 或 `ftp` |
-| `logPullDefaults.autoAiEnabled` | 日志拉取成功后是否自动发起 AI 分析 | `false` |
-| `logPullDefaults.aiAgentCode` / `aiProviderCode` | 自动 AI 使用的 Agent / Provider 编码，至少配置一个 | 空字符串 |
-| `logPullDefaults.autoAiAnalysisCondition.analysisMode` | 历史分析条件：`always` 每次允许，`not_successful` 仅工单没有成功分析记录时允许 | `always` |
-| `logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled` | 是否启用内部工单状态过滤 | `false` |
-| `logPullDefaults.autoAiAnalysisCondition.statusCodes` | 允许自动分析的内部状态编码列表，由页面下拉多选生成 | `[]` |
-| `logPullDefaults.autoLogPullStopCondition.enabled` | 是否启用“自动拉日志停止条件” | `false` |
-| `logPullDefaults.autoLogPullStopCondition.statusCodes` | 命中后停止自动拉日志的内部状态编码列表，支持多选；命中任一状态即停止 | `[]` |
-| `logPullDefaults.autoLogPullStopCondition.cancelActiveRecords` | 命中停止状态后，是否自动停止当前工单下仍在运行中的自动日志任务 | `true` |
+| `logPullDefaults.autoAiEnabled` | 日志拉取成功后是否自动发起 AI 分析 |
+| `logPullDefaults.aiAgentCode` / `aiProviderCode` | 自动 AI 使用的 Agent / Provider 编码，至少配置一个 |
+| `logPullDefaults.autoAiAnalysisCondition.analysisMode` | 历史分析条件：`always` 每次允许，`not_successful` 仅工单没有成功分析记录时允许 |
+| `logPullDefaults.autoAiAnalysisCondition.statusFilterEnabled` | 是否启用内部工单状态过滤 |
+| `logPullDefaults.autoAiAnalysisCondition.statusCodes` | 允许自动分析的内部状态编码列表 |
+| `logPullDefaults.autoLogPullStopCondition.enabled` | 是否启用“自动拉日志停止条件” |
+| `logPullDefaults.autoLogPullStopCondition.statusCodes` | 命中后停止自动拉日志的内部状态编码列表；命中任一状态即停止 |
+| `logPullDefaults.autoLogPullStopCondition.cancelActiveRecords` | 命中停止状态后，是否自动停止当前工单下仍在运行中的自动日志任务 |
 
 自动 AI 条件只有在“自动 AI 分析”开启时生效，并按 AND 关系检查：自动 AI 已开启、工单状态命中允许列表（启用状态过滤时）、历史分析条件满足、没有正在执行的 AI 任务。状态配置使用系统内部状态编码，不直接填写外部状态文案；外部状态必须先通过“状态映射”转换为内部状态。状态为空、未映射或不在允许列表时，只跳过自动 AI，不影响日志拉取，也不会消耗 Token。
 
 自动拉日志停止条件只影响“同步后自动拉日志”，不影响工单详情页手工拉日志、手工重试和手工 AI 分析。启用后，系统会在自动创建日志任务前检查当前工单内部状态；只要命中任一停止状态，就直接跳过自动日志步骤，并且不再发送无意义的“拉不动日志”失败通知。如果同时打开“停止运行中自动任务”，那么当工单后续流转到这些状态时，系统还会自动取消当前工单下仍在执行中的自动日志任务；这里只处理自动化创建的记录，不会停止手工拉取的任务。
 
-页面入口为“工单同步自动化 → 日志拉取配置 → 拉日志默认值”。启用状态过滤后，在“允许的工单状态”中多选内部工作流状态；保存时至少选择一个状态。启用自动拉日志停止条件后，在“停止状态（多选）”中选择命中后需要停止自动拉日志的内部状态即可。手动发起 AI 分析和手动重试不受这些自动分析条件限制。
+页面入口为“工单同步自动化 → 入库流程 → ⑦ 同步后自动化卡片右上角「日志拉取设置」→ 拉日志默认值”。启用状态过滤后，在“允许的工单状态”中多选内部工作流状态；保存时至少选择一个状态。
 
 示例：
 
@@ -114,23 +157,11 @@
 }
 ```
 
-其中“默认日志环境”在“工单同步自动化 → 日志拉取配置 → 拉日志默认值”中选择，选项来自“外部接口”已保存的环境分组和子环境，保存格式为 `分组:子环境`，例如 `PROD:PROD`。自动拉日志未在任务级单独指定环境时使用该值；未配置时会记录缺少 `environment` 并跳过提交，避免创建必然失败的后台任务。
-
 ---
 
-## 五、自动化关注范围
+## 四、自动化结果通知
 
-`ticket.sync.automation.automationScope` 可按系统模块控制同步后的自动化范围：
-
-- 按模块 ID、模块 Code、模块名称关键字配置
-- 范围外工单仍入库并更新快照和状态，但不执行标题 AI、翻译、AI 提取、AI 分类、自动拉日志/AI 分析、向量刷新和自动群推送
-- 工单统计页默认选择"关注范围"，可切换"全部数据"
-
----
-
-## 六、自动化结果通知
-
-“同步后自动化”配置卡中的“自动化结果通知”用于接收自动拉日志、日志拉取后的自动 AI 分析结果。启用后选择已有的推送配置服务，并分别控制成功、失败是否发送。未启用、未选择推送配置或关闭对应结果开关时，不会发送消息。
+“⑦ 同步后自动化”卡片中的“自动化结果通知”用于接收自动拉日志、日志拉取后的自动 AI 分析结果。启用后选择已有的推送配置服务，并分别控制成功、失败是否发送。
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
@@ -142,126 +173,115 @@
 
 自动化开始时会把当前通知配置快照保存到工单和日志拉取记录中。因此，后续修改配置不会改变已经在运行或已创建的自动化任务的投递渠道和模板。
 
-当自动 AI 在提交阶段被服务拒绝时，通知中的 `${reason}` 会显示服务返回的实际 `result.message`（例如指定 Agent 未连接），不会只显示记录 ID；工单时间线也会记录 `auto-ai:failed` 事件及同一原因，便于定位失败发生在创建 AI 任务之前。
+模板使用 `${变量名}` 格式，可用变量：`${ticket_no}`、`${ticket_title}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}`、`${detail}`、`${ticket_url}` 等；未识别的变量会原样保留。
 
-部署注意：`start.sh` 使用 Supervisor 将 FastAPI 与 Celery Worker 分成独立进程。自动 AI 现在会通过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 进行跨进程派发，并按 AI 配置中心中的“Agent 并发数”做排队控制。Agent WebSocket 仍只在 FastAPI 进程内维护，但 Celery Worker 不再直接依赖进程内连接表。
-
-### 6.1 通知模板变量
-
-模板使用 `${变量名}` 格式。模板中未识别的变量会原样保留；格式不合法时系统会回退到默认模板并记录告警日志。
-
-| 变量 | 含义 |
-|------|------|
-| `${ticket_no}` | 工单号 |
-| `${ticket_title}` | 工单标题 |
-| `${merchant_name}` | 商家名称 |
-| `${store_name}` | 门店名称；没有名称时显示日志拉取门店编号 |
-| `${stage}` | 自动化阶段编码，如 `log_pull`、`ai_analysis` |
-| `${stage_label}` | 自动化阶段中文名称，如“日志拉取”“AI 分析” |
-| `${status}` | 结果状态编码，如 `success`、`failed` |
-| `${status_label}` | 结果状态中文名称，如“成功”“失败” |
-| `${message}` | 结果简要说明 |
-| `${reason}` | 失败原因或结果说明，优先使用详细信息 |
-| `${detail}` | 任务 ID、日志记录 ID 或异常详情 |
-| `${ticket_url}` | 工单详情链接 |
-| `${title}` | 通知标题 |
-
-示例：
-
-```text
-【${status_label}】${stage_label}
-工单：${ticket_no} ${ticket_title}
-商家/门店：${merchant_name} / ${store_name}
-原因：${reason}
-```
-
-## 七、通知推送配置
-
-### 7.1 群推送
-
-| 配置项 | 说明 |
-|--------|------|
-| `groupPush.autoPushCondition` | 自动推送条件表达式，手动发送不受此限制 |
-
-### 7.2 个人催办提醒
-
-- 按飞书多维表格中的人员维度统计未处理工单并发送提醒
-- 可手动触发或通过调度任务 `module_task.scheduler_maintenance.ticket_person_overdue_reminder` 定时执行
-- 统计数据源可选 `bitable` 或 `local`
-
-### 7.3 汇总统计通知
-
-- 页面支持手动触发或定时任务执行
-- 统计数据源可选 `local` 或 `bitable`
-- 可选开启 AI 解读生成摘要
-
-### 7.4 自定义统计方案
-
-- 在"自定义统计"页签创建统计方案
-- 手动执行可选"仅预览"或"按方案通知"
-- 定时执行使用 `module_task.scheduler_maintenance.ticket_custom_statistics_report`
+部署注意：`start.sh` 使用 Supervisor 将 FastAPI 与 Celery Worker 分成独立进程。自动 AI 通过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}` 进行跨进程派发，并按 AI 配置中心中的“Agent 并发数”做排队控制。
 
 ---
 
-## 八、AI 分类统一配置
+## 五、AI 配置段通用说明
 
-工单同步配置页提供场景开关 `ticket.sync.automation.aiClassification`：
+以下 AI 配置段均支持独立选择 Provider 和模型（Provider 与提示词正文在系统管理中维护，这里只选编码）：
 
-- 控制外部同步、远端拉取、手动创建场景是否执行分类
-- 选择 Provider 编码和提示词编码（Provider 和提示词正文在 AI Provider 管理和 AI 提示词管理维护）
-- 支持独立选择模型名称，留空则使用 Provider 默认模型
-- 配置状态变更后是否触发重新分类
+| 配置段 | 页签位置 | 说明 |
+|--------|---------|------|
+| `aiSyncExtract` | 入库流程 ③ | 从标题/描述提取门店、POS/SCO、日志日期、版本 |
+| `titleSummaryConfig` | 入库流程 ④ | 缺少标题时自动生成 |
+| `translateConfig` | 入库流程 ⑤ | 工单描述翻译，场景开关见总表 |
+| `aiClassification` | 入库流程 ⑥ | AI 分类统计，场景开关见总表 |
+| `knowledgeConfig` | 入库流程 旁路 | 关闭或手动提炼时执行的知识提炼 |
+| `summaryReport` | 通知任务 | 汇总通知 AI 解读 |
 
-配置项 `ticket.ai.category.classify.provider.code` 和 `ticket.ai.category.classify.prompt.code` 作为当分类配置中 Provider/提示词为空时的兜底。
+每个配置段中的 `modelName` 字段均为可选，留空时自动使用对应 Provider 的默认模型。
 
-## 九、AI 配置段通用说明
-
-同步自动化配置中以下 AI 配置段均支持独立选择 Provider 和模型：
-
-| 配置段 | 说明 |
-|--------|------|
-| `translateConfig` | 工单翻译，支持按场景（外部同步/远端拉取/多维表格拉取/手动创建）开关 |
-| `titleSummaryConfig` | 工单标题总结，缺少标题时自动生成 |
-| `knowledgeConfig` | 工单知识提炼，从工单上下文生成知识库案例 |
-| `aiClassification` | 工单 AI 分类统计 |
-| `aiSyncExtract` | 工单同步统一提取，从标题和描述中提取分类、POS/SCO 编号等 |
-| `summaryReport` | 汇总通知 AI 解读 |
-
-每个配置段中的 `modelName` 字段均为可选，留空时自动使用对应 Provider 的默认模型。模型的可用列表在 Provider 管理页面的"可用模型"中维护。
-
----
-
-### 8.1 `aiSyncExtract` 提取规则与提示词建议
-
-`aiSyncExtract` 用于从工单标题、描述和外部原始入参中提取门店编码、POS/SCO 机台编号、日志日期和版本文本。Provider、模型和提示词编码可在 AI 配置中心维护；系统不会限制自定义提示词的表达方式，但会在请求中补充必要的安全约束。
+### 提取规则与提示词建议（`aiSyncExtract`）
 
 POS/SCO 建议在自定义提示词中明确写成“收银机机台编号”，并要求模型结合字段语义判断，不要对全文数字做简单匹配。推荐加入以下规则：
 
 - `posNo`、`scoNo` 只填写明确属于收银机机台的编号，无法确认时返回 `null`。
 - 金额、货币符号、千分位金额、订单号、日期、时间、门店编号和日志行号不能作为 POS/SCO。
 - 对“`#2 POS, $44,510.00`”应输出 `posNo=2`；`$44,510.00` 是金额，不能输出 `44`、`44510` 或 `510`。
-- 输出 `posNo`、`scoNo` 时使用正整数或 `null`，不要输出带单位、货币符号或解释文字的字符串。
-- 当多个数字候选冲突时，优先采用与 POS/SCO 机台语义直接相邻或明确绑定的编号，并在无法确认时留空。
 
-系统还会对模型结果进行安全归一化，策略为**模型结果优先**：金额或千分位文本不会被截取为编号；模型返回的有效编号若命中原文任一机台候选则直接采信；模型值无效或遗漏时用原文明确机台候选兜底；原文只有一个机台候选且与模型冲突时用该候选纠正；原文出现多个机台候选（例如"检查过 5 号机、故障在 24 号机"）且模型值不在其中时，保留模型值并记录告警供人工复核。所有冲突和兜底都会写入 AI 执行审计（`machineNumberWarnings`）。同步主路径和延后路径使用同一份回填结果，避免 `ai_sync_extract`、`logPullConfig` 和最终自动拉日志参数出现不同编号。
+系统会对模型结果进行安全归一化，策略为**模型结果优先**：金额或千分位文本不会被截取为编号；模型返回的有效编号若命中原文任一机台候选则直接采信；原文出现多个机台候选且模型值不在其中时，保留模型值并记录告警供人工复核。所有冲突和兜底都会写入 AI 执行审计（`machineNumberWarnings`）。
 
-统一提取会保存业务输入指纹 `sourceHash` 和提示词配置指纹 `promptHash`。相同标题、描述、项目/模块、门店、POS/SCO、日期和版本输入重复同步时直接复用成功结果，不重复消耗 Token；描述、标题、门店或其他上述业务字段变化才重新提取。评论、排查过程、记录链接和同步时间暂不参与提取指纹，因此单纯追加评论不会反复触发提取。已有工单标题只影响标题总结，不会阻止字段提取和分类。
+统一提取会保存业务输入指纹 `sourceHash` 和提示词配置指纹 `promptHash`。相同输入重复同步时直接复用成功结果，不重复消耗 Token；描述、标题、门店等业务字段变化才重新提取。
 
-自动拉日志的运行参数以 `extraData.log_pull_hints` 为持久化兜底，并区分外部来源门店编码 `sourceStoreCode` 与日志接口门店 `storeId`。`sourceStoreCode` 只保留外部同步原始值，AI 永远不会反写它。`storeId` 的选择规则如下：
-
-1. 有 `sourceStoreCode` 且 AI 提取值与它相等时，使用 AI 提取值；
-2. 有 `sourceStoreCode` 且 AI 提取值包含在来源编码中时，使用 AI 提取值；
-3. AI 提取为空或不匹配时，回退使用 `sourceStoreCode`；
-4. 没有 `sourceStoreCode` 时，有效 AI 提取值可以替换旧 `storeId`，AI 没有有效值时保留旧值。
-
-因此，同一轮有效 AI 提取到新门店时可以更新 `storeId`，但不会改变 `sourceStoreCode`。如果外部来源值是 SAP 门店编码或其他非 `org_no` 的业务编码，字段识别会先按当前商家门店配置映射为日志接口 `org_no`；自动日志运行参数优先使用这个已映射的 `storeId`，不会再被原始来源编码覆盖。只有最终 `storeId` 会作为日志接口门店参与商家和 `org_no` 校验。若同一商家下同一外部编码匹配到多个不同 `org_no`，系统不会按修改时间或记录顺序静默选择，而是记录全部候选门店并跳过自动日志提交；需要人工确认后再执行。任务级明确参数和当前有效同步字段优先，历史 hints 负责补齐缺失参数；识别审计只记录本次运行，不作为下一次配置来源。
+自动拉日志的运行参数以 `extraData.log_pull_hints` 为持久化兜底，并区分外部来源门店编码 `sourceStoreCode` 与日志接口门店 `storeId`：`sourceStoreCode` 只保留外部同步原始值，AI 永远不会反写它；`storeId` 优先采用有效 AI 提取值，无有效值时回退来源编码。若同一商家下同一外部编码匹配到多个不同 `org_no`，系统会记录全部候选门店并跳过自动日志提交，需要人工确认后再执行。
 
 自动拉日志真正提交前，还会按最终运行参数做一次成功记录去重：如果当前工单已经有“相同拉取参数且状态为成功”的日志记录，则这次自动化只记一条“已复用成功日志”的审计，不会重复向外部平台发起相同申请。
 
-日志下载成功后，自动 AI 会优先从已成功日志正文提取版本号并自动创建或复用版本中心记录，正常情况下不需要人工维护 `affectedVersionId`。只有日志正文没有可识别版本，或版本中心关联失败时，才会记录跳过原因。
+日志下载成功后，自动 AI 会优先从已成功日志正文提取版本号并自动创建或复用版本中心记录。
 
-如果这次同步没有重新拉日志，但工单下已经有最近一次成功日志记录，自动 AI 也会直接复用该成功记录继续执行，不再因为“本轮未新建日志记录”而整体跳过。
+---
 
+## 六、来源与拉取页签
+
+### 6.1 连接配置的继承与覆盖
+
+所有使用飞书多维表格的能力（汇总统计、按人催办、邮箱补全、主动拉取）遵循统一继承顺序：
+
+**模块自身配置 → 多维表格公共配置（`bitableCommon`）→ 统一凭证（`feishuAuth`，仅 appId/appSecret）**
+
+- 模块卡片中的连接字段收在“连接与凭证覆盖（可选）”折叠区内，留空即继承，填写即覆盖；隐藏不清空，展开可恢复。
+- “多维表格公共配置”维护默认 `appToken/tableId/viewId/pageSize/filterFormula`。
+- “飞书统一凭证”维护 appId/appSecret 基座。
+
+### 6.2 连接解析预览
+
+“来源与拉取”页签的“连接解析预览”卡片按上述继承顺序**实时**展示每个使用方（邮箱补全、主动拉取、汇总统计、按人催办）实际生效的 `appId/appToken/tableId` 及其来源（模块覆盖/公共配置/统一凭证/未配置），只读展示，不需要保存。修改请在各模块卡片的折叠区内填写。
+
+### 6.3 远端同步链接
+
+| 配置项 | 说明 |
+|--------|------|
+| `remoteSync.enabled` | 是否允许远端拉取任务执行。**不是启动定时任务的按钮**，只控制任务是否放行。关闭时页面不强制校验 `pullUrl/ackUrl/consumer` 必填 |
+| `remoteSync.pullUrl` / `ackUrl` | 拉取未同步工单的地址 / 回写交付结果的地址 |
+| `remoteSync.consumer` | 消费者标识 |
+| `remoteSync.includeClosed` | 拉取时是否包含已关闭工单 |
+| `remoteSync.credentialBindingId` | 远端同步凭证绑定（必填），在此卡片内选择 |
+| `remoteSync.origin` | 可选非敏感 Origin 请求头 |
+
+### 6.4 飞书多维表格主动拉取
+
+配置定时调度开关、来源系统标识、分页大小、工单号/更新时间/排序字段、强制同步、字段映射；连接与过滤条件收在折叠区内。字段映射支持从飞书读取表格字段元数据。
+
+### 6.5 外部推送多维表格邮箱补全
+
+外部推送传入的 `recordId` 会作为飞书多维表格记录 ID 查询固定字段：`(IT) L1 PIC`、`1.5 当前负责人`、`当前负责人`；连接与凭证收在折叠区内。
+
+---
+
+## 七、通知任务页签
+
+### 7.1 汇总统计通知
+
+- 定时任务或手动触发执行，统计数据源可选 `local` 或 `bitable`
+- 可选开启 AI 解读生成摘要
+- 多维表格连接、字段与凭证收在“多维表格连接与字段覆盖”折叠区内（数据源=多维表格时展开）
+
+### 7.2 按人催办通知
+
+- 按飞书多维表格中的人员维度统计未处理工单并发送提醒，阈值按分钟配置
+- 可手动触发或通过调度任务定时执行
+- 连接与凭证收在“连接与凭证覆盖”折叠区内
+
+### 7.3 自定义统计方案
+
+- 在“统计与分类”页签维护统计方案
+- 手动执行在“操作”页签，可选“仅预览”或“按方案通知”
+
+---
+
+## 八、发布状态
+
+- 外部推送首先写入 `publish_ready=false`，后台 AI/自动化结束后恢复为可发布。
+- `/ticket/sync/pending` 拉取前检查是否有活动 AI 任务；无活动任务时自动恢复 `publish_ready=true`。
+- 拉取时写入 `status=pulled` 和租约，30 分钟内不重复返回；超时未回执允许重试。
+- `/ticket/sync/ack` 只有 `delivered/success/succeeded` 推进交付版本；`failed` 不阻塞下次拉取。
+
+---
+
+## 常见问题
 
 ### Q1: remoteSync.enabled 关闭后有什么影响？
 
@@ -269,27 +289,35 @@ POS/SCO 建议在自定义提示词中明确写成“收银机机台编号”，
 
 ### Q2: 如何只关闭内网拉取的翻译？
 
-修改 `remoteSync.autoTranslateOnPull`，不要改 `autoTranslateOnSync`（影响第三方直推）。
+在“场景 × 步骤 开关总表”中只关闭“⑤ 翻译”行的“远端拉取”列开关。
 
 ### Q3: 手动新增工单的自动化怎么配置？
 
-手动新增/编辑的"创建后拉日志"和"自动翻译"在工单新增页配置，非本页范围。
+手动新增/编辑的"创建后拉日志"和"自动翻译"在工单新增页配置；同时手动创建场景在本页总表的"手动创建"列也有独立开关（AI 提取 `manualCreateEnabled`、翻译 `translateOnManualCreate`、AI 分类 `runOnManualCreate`、自动识别/拉日志/AI 分析 `automationConfig`、群推送 `sendAfterManualCreate`）。
+
+两处的优先级为"任一开启即执行"：表单勾选等价于本次工单的任务级参数，场景开关则是全局默认；例如表单未勾选自动翻译但 `translateOnManualCreate` 开启，保存后仍会自动翻译；反之表单勾选了翻译而场景开关关闭，也会执行翻译。
+
+手动创建保存成功后，后台按"入库流程"页签的相同执行顺序处理：自动化关注范围判定 → AI 同步提取 → 翻译 → AI 分类 → 同步后自动化（自动识别回写、自动拉日志、自动 AI 分析）→ 向量刷新 → 发布状态收敛与自动群推送。表单中填写的日志拉取参数作为任务级参数优先于 AI 提取结果；未填写时若 `autoLogPullOnManualCreate` 开启，会尝试从 AI 提取结果和映射规则解析日志参数。
 
 ### Q4: 如何配置凭证？
 
-远端同步的 `credentialBindingId` 必填。在统一凭证管理中创建 `http_api_key` 或 `http_header` 凭证，再创建 `ticket_remote_sync` 类型的业务绑定。
+远端同步的 `credentialBindingId` 必填（“来源与拉取 → 远端同步链接”卡片内）。在统一凭证管理中创建 `http_api_key` 或 `http_header` 凭证，再创建 `ticket_remote_sync` 类型的业务绑定。
+
+### Q5: 为什么某个开关在卡片里找不到了？
+
+所有场景开关都集中到了“入库流程”页签顶部的“场景 × 步骤 开关总表”，各步骤卡片只保留参数配置；连接类字段收在各卡片“连接与凭证覆盖”折叠区内。
 
 ---
 
 ## 十、指定工单手动自动化
 
-当需要补跑某一张工单的同步后自动化，但不希望或不能开启“飞书多维表格主动拉取”定时任务时，可在本页面的 **飞书多维表格主动拉取** 卡片顶部使用“指定工单手动自动化”。该功能不会修改定时任务配置，也不会触发其他工单。
+当需要补跑某一张工单的同步后自动化，但不希望或不能开启“飞书多维表格主动拉取”定时任务时，可在 **操作** 页签的“指定工单手动自动化”卡片中使用。该功能不会修改定时任务配置，也不会触发其他工单。
 
 ### 10.1 入口与权限
 
-1. 进入 **工单 → 工单同步配置**。
-2. 找到 **飞书多维表格主动拉取** 卡片顶部的“指定工单手动自动化”。
-3. 输入需要补跑的**精确工单号**，选择数据来源后点击 **执行自动化**。
+1. 进入 **工单 → 工单同步配置 → 操作** 页签。
+2. 在“指定工单手动自动化”卡片输入需要补跑的**精确工单号**。
+3. 选择数据来源后点击 **执行自动化**。
 4. 需要具备 `ticket:sync:config:edit` 权限。
 
 ### 10.2 参数说明
@@ -306,39 +334,30 @@ POS/SCO 建议在自定义提示词中明确写成“收银机机台编号”，
 适合希望以飞书多维表格中的最新字段重新模拟一次拉取的场景。
 
 - 本次查询**不受**“启用主动拉取”开关影响；即使定时任务关闭，也可以执行。
-- 本次查询忽略常规的 `filterFormula`、`createdAfter`、`createdBefore` 和自动追加时间窗口，只使用输入工单号构造查询条件。
-- 仍需要正确配置飞书连接和字段映射：`appId`、`appSecret`、`appToken`、`tableId`、`fieldMappings`。
-- 若配置了 `viewId`，飞书视图自身仍可能限制可查询到的记录；找不到记录时请同时检查视图筛选条件。
-- 系统会将查询结果转换后再次校验工单号，只允许**一条**精确匹配记录执行。没有匹配记录或出现重复工单号时会拒绝执行，避免误同步相似工单号。
-- 匹配成功后会按既有 `bitable_pull` 场景同步该工单，并继续执行后处理自动化。
+- 本次查询忽略常规的 `filterFormula`、时间窗口和自动追加时间过滤，只使用输入工单号构造查询条件。
+- 仍需要正确配置飞书连接和字段映射。
+- 只允许**一条**精确匹配记录执行；没有匹配或重复时拒绝执行。
+- 匹配成功后按既有 `bitable_pull` 场景同步该工单并继续执行后处理自动化。
 
 #### 使用数据库快照
 
 适合飞书记录暂时不可访问、只希望使用已经入库的数据重新触发自动化的场景。
 
 - 系统直接读取数据库中的现有工单 ORM 实体。
-- 不会重新调用同步入库，也不会用旧快照覆盖当前工单标题、描述、状态、负责人等字段。
-- 会按既有 `bitable_pull` 场景重放后处理自动化，并在工单扩展数据中记录本次手动重放来源和时间，便于排查。
+- 不会重新调用同步入库，也不会覆盖当前工单字段。
+- 会按既有 `bitable_pull` 场景重放后处理自动化。
 
 ### 10.4 会执行哪些自动化
 
-两种模式都复用现有 `bitable_pull` 场景，因此仍遵循当前同步自动化配置和自动化关注范围。根据已启用的配置，可能执行 AI 字段提取、字段识别、自动拉日志、日志后的自动 AI、自动分类、向量刷新以及通知/群推送等步骤。
-
-手动入口不会绕过以下限制：
-
-- 自动化关注范围不匹配时，AI、日志、向量和自动推送仍会跳过；
-- 各子功能的启用开关、Provider、Agent、日志参数和通知配置仍按当前配置校验；
-- 外部日志和 AI 等既有异步任务会按原有调度方式继续执行，页面提示“执行完成”表示本次同步与后处理编排已完成，不代表所有后台任务都已产生最终结果。
+两种模式都复用现有 `bitable_pull` 场景，因此仍遵循当前同步自动化配置和自动化关注范围。手动入口不会绕过：自动化关注范围、各子功能启用开关、Provider/Agent/日志参数和通知配置。
 
 ### 10.5 常见问题
 
 **Q：提示多维表格中找不到工单？** 先确认工单号完全一致，再检查多维表格连接信息、工单号字段映射和 `viewId` 对应视图的筛选范围。手动模式不会使用常规时间窗口和筛选公式。
 
-**Q：提示找到多条相同工单号？** 请先在多维表格中清理或区分重复记录。系统不会任意选择其中一条，以免把错误数据同步到工单。
+**Q：提示找到多条相同工单号？** 请先在多维表格中清理或区分重复记录。系统不会任意选择其中一条。
 
-**Q：为什么执行后没有拉日志或发起 AI？** 该入口仍服从自动化关注范围及自动日志、自动 AI 等开关；请检查工单所属项目/模块是否在范围内，以及日志参数、AI Provider、Agent 等前置条件。
-
-**Q：数据库快照模式为什么没有更新飞书最新字段？** 此模式的设计是不入库、不覆盖工单字段，只利用本地已有数据重放自动化。需要以飞书最新数据为准时，请选择“查询多维表格”。
+**Q：为什么执行后没有拉日志或发起 AI？** 该入口仍服从自动化关注范围及总表中的场景开关；请检查工单所属项目/模块是否在范围内，以及日志参数、AI Provider、Agent 等前置条件。
 
 ---
 

@@ -247,3 +247,28 @@ class TicketSummaryModel(BaseModel):
     latest_ai_analysis: dict[str, Any] | None = None
     ai_token_summary: TicketAiTokenSummaryModel | None = None
     ai_prompt_layers: dict[str, Any] | None = None
+    # 当前工单自身的相似处理案例摘要；未形成案例时 case_status 为 none，前端据此展示确认入口
+    similarity_case: "TicketSimilarityCaseSummaryModel | None" = None
+
+
+class TicketSimilarityCaseSummaryModel(BaseModel):
+    """当前工单相似处理案例摘要模型，仅透出案例确认所需的最小字段集。"""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    case_status: str = "none"
+    case_source: str | None = None
+    case_revision: int = 1
+    reusable: bool = False
+    root_cause_summary: str | None = None
+    solution_summary: str | None = None
+    evidence_summary: str | None = None
+    investigation_summary: str | None = None
+    verify_summary: str | None = None
+    verified_by: str | None = None
+    verified_at: Any | None = None
+    rejected_by: str | None = None
+    rejected_at: Any | None = None
+    reject_reason: str | None = None
+    last_index_status: str | None = None
+    last_index_error: str | None = None

@@ -8,7 +8,7 @@
   （前端「工单同步配置 → 映射/规则」维护，与 .env.prod 同库）。
 - 匹配语义与运行时 TicketSyncFieldMappingService 保持一致：
   1. 遍历 moduleMappings，映射条目设置了 projectId 时要求工单 project_id 与之相同，否则跳过；
-  2. 关键字采用"包含"匹配（module_name 包含任意 keyword / alias / matchText 即命中），按配置顺序取第一条。
+  2. 关键字采用归一化精确匹配（module_name 小写化后与 keyword / alias / matchText 完全相等即命中），按配置顺序取第一条。
 - 模块解析（hrm_module，仅取 status=2 正常模块）：
   1. 工单有 project_id：优先按 (project_id + module_code) 查询，其次 (project_id + module_id)，
      再其次 (project_id + module_name)，避免跨项目同 module_code 串模块；
@@ -75,19 +75,21 @@ def mapping_project_id(mapping):
 def mapping_keywords(mapping):
     """
     归一化映射条目的匹配关键字：keywords / aliases（逗号分隔字符串或列表）+ matchText。
-    :return: 去空后的关键字列表。
+    与运行时 SyncUtil.normalize_keywords 语义保持一致，统一转小写，
+    避免工单模块文本与配置关键字大小写不一致导致无法命中。
+    :return: 去空、小写后的关键字列表。
     """
     keywords = []
     raw_value = mapping.get("keywords")
     if raw_value is None or raw_value == "":
         raw_value = mapping.get("aliases")
     if isinstance(raw_value, list):
-        keywords.extend(str(item).strip() for item in raw_value if item not in (None, ""))
+        keywords.extend(str(item).strip().lower() for item in raw_value if item not in (None, ""))
     elif isinstance(raw_value, str):
-        keywords.extend(kw.strip() for kw in raw_value.split(",") if kw.strip())
+        keywords.extend(kw.strip().lower() for kw in raw_value.split(",") if kw.strip())
     match_text = str(mapping.get("matchText") or "").strip()
     if match_text:
-        keywords.append(match_text)
+        keywords.append(match_text.lower())
     return [kw for kw in keywords if kw]
 
 
@@ -99,7 +101,8 @@ def match_module_mapping(module_name, mappings, ticket_project_id):
     :param ticket_project_id: 工单项目 ID（可能为空）。
     :return: 命中的映射条目；未命中返回 None。
     """
-    target = str(module_name or "").strip()
+    # 运行时 keywords 统一小写归一化，target 必须同步小写后精确比较
+    target = str(module_name or "").strip().lower()
     if not target or not mappings:
         return None
     for mapping in mappings:

@@ -20,7 +20,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 在同步配置页按工单号手动补跑 bitable_pull 场景自动化
 created: 2026-05-22
-updated: 2026-08-27
+updated: 2026-09-05
 ---
 
 # 工单自动化链路流程
@@ -98,8 +98,8 @@ sequenceDiagram
 | 10 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；日志拉取后的自动 AI 先经过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}`，再按 Redis 队列和 `ticket.ai.agent.maxConcurrentTasks` 控制单 Agent 并发；Provider 下发时服务端先合并 `workerEnv` 扩展项，再写入当前 Provider 的密钥、地址和模型；Codex/Claude Worker 初始化任务级配置时覆盖旧工作区值。Agent 并发由 `ticket.ai.agent.maxConcurrentTasks` 控制，默认 `1`，超出上限进入 Redis 队列。任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
 | 11 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
 | 12 | `TicketNotifyService` 以 `${ticket_no}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}` 等变量渲染通知模板；日志拉取和 AI 分析的成功、失败与因前置条件跳过都会投递到选定的推送配置。 |
-| 13 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。Worker 失败时会回传脱敏的 Provider、模型、实际基础地址、认证来源和 API Key 指纹；仅当 Codex 输出命中 401/Unauthorized/Invalid token 时，才以同一认证信息异步调用 `GET /models`，不调用模型推理，用于区分 token 无效与 Responses 链路异常。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回，任务仍在运行则提示稍后重试。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
-| 13.1 | Token 用量由 Agent 客户端本地统计后仅回传最终汇总值，过程事件流不上传服务端。Codex 以 `--json` JSONL 事件流执行，客户端逐行解析 `turn.completed` 事件并累加所有回合的 `usage`（input/output/cached），得到整个任务总消耗而非最后一次的值；Claude 从 `type=result` 报文的 `modelUsage` 按模型累加（覆盖辅助小模型），无 `modelUsage` 时回退顶层 `usage` 近似值；两者按报文特征双向隔离避免误判。`token_usage` 汇总随成功响应经网关 `AgentResponseWebUI.token_usage` 字段透传，服务端归一化后写入任务记录的 `input_token_count/output_token_count/total_token_count` 和审计执行记录的 `token_usage`。结果本体仍从 `result.json` 读取，用量解析失败不影响任务成功，Token 字段置空。 |
+| 13 | agent 端收到任务后执行本地 Codex Worker，结果再经 WebSocket 回传服务端入库；Worker 由后台线程执行，避免阻塞 WebSocket 事件循环。整包日志按工单、日志记录和来源指纹缓存到 Agent 本地 `log_cache`，相同成功日志再次分析直接复用已下载解压目录；手动分析可选择该工单的成功日志，未选择时使用最新成功记录。任务级 Codex Home 会复制基础配置及 `config.toml` 中相对 `model_catalog_json` 引用的模型目录，避免隔离配置缺文件导致 Worker 启动即失败。Worker 失败时会回传脱敏的 Provider、模型、实际基础地址、认证来源和 API Key 指纹；仅当 Codex 输出命中 401/Unauthorized/Invalid token 时，才以同一认证信息异步调用 `GET /models`，不调用模型推理，用于区分 token 无效与 Responses 链路异常。服务端在同一 Agent 有未完成请求时会跳过离线判定，并在完整响应分片到达后回写 Future；如果重试同一任务 ID，agent 会先检查工作区历史结果，存在可用结果则直接返回（回传 `cache_hit=true`，result 内 command_line 为 `cached:result.json`），任务仍在运行则提示稍后重试；服务端识别缓存命中后按"复用"处理，不把恢复出的历史 token 写入本次任务与审计，任务状态提示"复用 Agent 缓存结果"。AI 结果 schema 只强制核心分析字段，协同增强字段缺省时由服务端补默认值。 |
+| 13.1 | Token 用量由 Agent 客户端本地统计后仅回传最终汇总值，过程事件流不上传服务端。Codex 以 `--json` JSONL 事件流执行，客户端逐行解析 `turn.completed` 事件并累加所有回合的 `usage`（input/output/cached），得到整个任务总消耗而非最后一次的值；Claude 从 `type=result` 报文的 `modelUsage` 按模型累加（覆盖辅助小模型），无 `modelUsage` 时回退顶层 `usage` 近似值；两者按报文特征双向隔离避免误判。`token_usage` 汇总随成功响应经网关 `AgentResponseWebUI.token_usage` 字段透传，服务端归一化后写入任务记录的 `input_token_count/output_token_count/total_token_count` 和审计执行记录的 `token_usage`。结果本体仍从 `result.json` 读取，用量解析失败不影响任务成功，Token 字段置空。缓存命中直接返回的响应同样会尽力恢复历史 token 用于追溯，但服务端按复用处理不重复入库（见步骤 13）。 |
 | 14 | 手工发起日志拉取、手工补录工单和工单详情页中的重新拉取入口仍保留；这些入口复用同一套日志拉取与 AI 分析服务，避免前后端出现两套流程。 |
 | 15 | 工单详情页的日志拉取、工单新增页的日志拉取、独立日志拉取管理页是三个前端页面，但共用同一套后端日志拉取模型、选项接口和重试逻辑。 |
 | 16 | 工单详情页中商家和门店已切换为联动下拉，不再要求手工输入纯文本或数字。 |
@@ -116,6 +116,9 @@ sequenceDiagram
 | 13 | 工单详情页相似推荐优先读取当前工单已保存向量并查询库内向量或 Qdrant；当前工单向量缺失或过期时，会按当前 Provider 配置同步刷新向量后再查询相似工单。 |
 
 | 11 | `POST /ticket/sync/automation/manual-run` 按精确工单号手动重放 `bitable_pull` 场景：飞书模式忽略定时开关、常规筛选和时间窗口，仅查询唯一精确匹配的多维表格记录后入库并执行后处理；数据库模式从现有 ORM 工单构造同步模型，只执行后处理，不重新入库或覆盖工单字段。两种模式仍受自动化关注范围和各自动化子开关约束。 |
+| 12 | 手动创建工单（`POST /ticket`）保存成功后由 `TicketManualCreatePostProcessService` 桥接到统一后处理编排（`execute_deferred_sync_post_process`，场景 `manual_create`）：表单勾选与 `manual_create` 场景开关取"或"后固化为任务级 automation 快照，再依次执行 AI 同步提取、翻译、AI 分类、同步后自动化（相似工单/自动拉日志/自动 AI）、向量刷新与发布状态收敛。分发优先投递 Celery，Worker 不可用时降级本地后台线程。表单日志拉取参数写入任务级 `log_pull_config`，优先于 AI 提取结果；已内联翻译的工单携带 `origin_description` 原文参与查重，避免二次翻译。 |
+| 13 | `manual_create` 场景分类匹配同时识别 `manual_create_auto_category`（统一编排）与 `ticket_manual_create_auto_category`（旧内联路径）两种 source_type 前缀；延后后处理的向量场景映射包含 `manual_create → manualCreate`。当前处理人别名对补齐规则（`ticketAssignee` ↔ `currentAssigneeName`）由 `ticket_person_alias_util.complete_assignee_alias_pair` 统一提供，外部推送与多维表格拉取共用。 |
+| 14 | 远端拉取（`remote_pull`）入库后 automation 保持 None，`run_sync_automation` 与翻译开关解析统一读取 `remote_pull` 场景开关；`autoLogPullOnRemotePull`/`autoAiAnalysisOnRemotePull`/`translateOnRemotePull` 打开后内网即按既有链路自动执行（含成功记录复用、停止条件、自动 AI 前置条件检查），未打开时维持"自动化结果随 pending 从公网同步"的双环境默认语义。 |
 
 ## 错误处理
 

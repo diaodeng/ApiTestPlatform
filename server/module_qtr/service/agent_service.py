@@ -383,6 +383,9 @@ class AgentResponseWebUI(BaseModel):
     # Worker 执行过程消耗的 Token 用量（含多回合累加结果），
     # 由 AI 分析 Agent 客户端回传，服务端据此入库统计。
     token_usage: dict[str, Any] | None = None
+    # 结果来源标记：Agent 命中本地工作区历史 result.json 直接回传时为 True。
+    # 服务端据此把本次记为"复用缓存结果"，不把恢复出的历史 token 计入本次统计。
+    cache_hit: bool = False
 
 
 class HandleResponse(BaseModel):

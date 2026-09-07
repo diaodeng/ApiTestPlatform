@@ -35,6 +35,10 @@ class TicketEmbeddingService:
     MODEL = "local-hash"
     VERSION = "v1"
     DIMENSION = 128
+    # 外部 Embedding 单次请求的最大文本字符数（按字符截断，非 token）。
+    # 以 BAAI/bge-m3 8192 token 上限为基准：中文约 1 字符/token，英文约 1.6 字符/token，
+    # 12000 字符对中英混合文本留有安全余量；0 表示不限制。
+    DEFAULT_MAX_TEXT_CHARS = 12000
     PROVIDER_LOCAL_HASH = "local_hash"
     PROVIDER_EMBEDDING = "embedding"
     PROVIDER_QDRANT = "qdrant"
@@ -115,6 +119,7 @@ class TicketEmbeddingService:
             "endpoint": "",
             "apiKey": "",
             "timeoutSeconds": 15,
+            "maxTextChars": DEFAULT_MAX_TEXT_CHARS,
             "requestParams": {},
         },
         "qdrant": {
@@ -166,6 +171,10 @@ class TicketEmbeddingService:
         embedding_config = config.get("embedding") if isinstance(config.get("embedding"), dict) else {}
         embedding_config["provider"] = cls._normalize_embedding_provider(embedding_config.get("provider"))
         embedding_config["dimension"] = cls._safe_int(embedding_config.get("dimension"), cls.DIMENSION, 1, 16384)
+        # 0 表示不限制，因此下限放宽到 0；其余值限制在 1000~100000，防止误配过小导致全部文本被截没
+        embedding_config["maxTextChars"] = cls._safe_int(
+            embedding_config.get("maxTextChars"), cls.DEFAULT_MAX_TEXT_CHARS, 0, 100000
+        )
         request_params = embedding_config.get("requestParams")
         embedding_config["requestParams"] = dict(request_params) if isinstance(request_params, dict) else {}
         config["embedding"] = embedding_config
@@ -392,6 +401,8 @@ class TicketEmbeddingService:
     ) -> str:
         """
         按索引用途构建工单文本，症状和处理案例不混用。
+        构建后按 embedding.maxTextChars 预算做字段级裁剪：优先保留标题、AI 摘要
+        等高信息密度短字段，超预算时压缩描述类长文本。
         :param ticket: 工单对象
         :param rca: 可选 RCA 对象
         :param config: 相似度配置
@@ -400,6 +411,7 @@ class TicketEmbeddingService:
         """
         normalized_scope = str(scope or cls.SCOPE_SYMPTOM).strip() or cls.SCOPE_SYMPTOM
         ai_payload = ticket.ai_analysis if isinstance(ticket.ai_analysis, dict) else {}
+        max_text_chars = cls._resolve_max_text_chars(config)
         if normalized_scope in cls.CASE_SCOPES:
             rca = rca or TicketRca()
             parts = [
@@ -411,7 +423,8 @@ class TicketEmbeddingService:
                 f"验证方式：{rca.verify_method or ''}",
                 f"预防方案：{rca.prevention_solution or ''}",
             ]
-            return "\n".join(item for item in parts if item.split("：", 1)[1].strip())
+            text = "\n".join(item for item in parts if item.split("：", 1)[1].strip())
+            return cls._shrink_text_within_budget(text, max_text_chars)
         configured_fields = (config or {}).get("fields") or cls.DEFAULT_CONFIG["fields"]
         fields = []
         for field in configured_fields:
@@ -427,7 +440,55 @@ class TicketEmbeddingService:
             if isinstance(ticket.tags, list)
             else "",
         }
-        return "\n".join(str(field_map[key]) for key in fields if key in field_map and field_map[key])
+        text = "\n".join(str(field_map[key]) for key in fields if key in field_map and field_map[key])
+        return cls._shrink_text_within_budget(text, max_text_chars)
+
+    @classmethod
+    def _resolve_max_text_chars(cls, config: dict[str, Any] | None) -> int:
+        """
+        读取向量化文本预算（字符数），配置缺失或非法时使用默认值。
+        :param config: 相似度配置
+        :return: 最大文本字符数，0 表示不限制
+        """
+        embedding_config = (
+            config.get("embedding") if isinstance(config, dict) and isinstance(config.get("embedding"), dict) else {}
+        )
+        return cls._safe_int(embedding_config.get("maxTextChars"), cls.DEFAULT_MAX_TEXT_CHARS, 0, 100000)
+
+    @classmethod
+    def _shrink_text_within_budget(cls, text: str, max_text_chars: int) -> str:
+        """
+        按预算裁剪向量化文本，仅在超限时生效。
+        裁剪策略：整体超预算时先按行权重压缩过长的单行（通常是描述正文），
+        保留行首内容（邮件工单关键信息集中在头部），短行（标题、AI摘要等）不动；
+        单行裁剪后仍超预算时再从尾部整体截断。标题通常只有几十字符且信息密度最高，
+        该策略天然优先保留标题与短字段，不需要单独的删标题降级。
+        :param text: 已拼接的向量化文本
+        :param max_text_chars: 最大文本字符数，0 表示不限制
+        :return: 裁剪后的文本
+        """
+        if max_text_chars <= 0 or len(text) <= max_text_chars:
+            return text
+        original_chars = len(text)
+        # 找出过长的行：超过预算均摊长度的行视为长文本行（描述类），需要压缩
+        lines = text.split("\n")
+        budget_per_line = max(max_text_chars // max(len(lines), 1), 200)
+        shrunk_lines = []
+        for line in lines:
+            if len(line) > budget_per_line:
+                # 长行截到均摊预算，保留头部；追加省略标记提示内容被裁剪
+                shrunk_lines.append(line[:budget_per_line] + "…")
+            else:
+                shrunk_lines.append(line)
+        shrunk = "\n".join(shrunk_lines)
+        if len(shrunk) > max_text_chars:
+            # 行级压缩后仍超预算（长行过多），整体从尾部截断兜底
+            shrunk = shrunk[:max_text_chars]
+        logger.warning(
+            f"向量化文本按预算裁剪: originalChars={original_chars}, budget={max_text_chars}, "
+            f"finalChars={len(shrunk)}"
+        )
+        return shrunk
 
     @classmethod
     def embed_text(
@@ -1488,11 +1549,22 @@ class TicketEmbeddingService:
         endpoint = str(embedding_config.get("endpoint") or "").strip()
         if not endpoint:
             raise ValueError("Embedding endpoint 未配置")
+        # 兜底截断：文本超过配置的 maxTextChars 时按字符数截断，避免上游模型
+        # 超过 token 上限返回参数无效（如 SiliconFlow bge-m3 的 20015）。
+        # 截断只影响本次送入外部接口的内容；内容哈希基于完整文本计算，结果可复现。
+        max_text_chars = cls._safe_int(embedding_config.get("maxTextChars"), cls.DEFAULT_MAX_TEXT_CHARS, 0, 100000)
+        request_text = text
+        if max_text_chars > 0 and len(request_text) > max_text_chars:
+            logger.warning(
+                f"外部Embedding文本超限截断: provider=openai_compatible, model={embedding_config.get('model')}, "
+                f"originalChars={len(request_text)}, maxTextChars={max_text_chars}"
+            )
+            request_text = request_text[:max_text_chars]
         headers = {"Content-Type": "application/json"}
         api_key = str(embedding_config.get("apiKey") or "").strip()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        payload: dict[str, Any] = {"model": embedding_config.get("model"), "input": text}
+        payload: dict[str, Any] = {"model": embedding_config.get("model"), "input": request_text}
         request_params = embedding_config.get("requestParams")
         if isinstance(request_params, dict):
             payload.update(request_params)
@@ -1500,7 +1572,7 @@ class TicketEmbeddingService:
         logger.info(
             f"外部Embedding请求开始: provider=openai_compatible, model={embedding_config.get('model')}, "
             f"configuredDimension={dimension}, requestParamKeys={list(payload.keys())}, "
-            f"textChars={len(text)}, endpoint={endpoint.split('?')[0]}"
+            f"textChars={len(request_text)}, originalChars={len(text)}, endpoint={endpoint.split('?')[0]}"
         )
         response = httpx.post(
             endpoint,
@@ -1685,6 +1757,10 @@ class TicketEmbeddingService:
         embedding_config["endpoint"] = str(embedding_config.get("endpoint") or "").strip()
         embedding_config["apiKey"] = str(embedding_config.get("apiKey") or "").strip()
         embedding_config["timeoutSeconds"] = cls._safe_int(embedding_config.get("timeoutSeconds"), 15, 1, 120)
+        # 0 表示不限制；_safe_int 夹逼范围与读取侧保持一致
+        embedding_config["maxTextChars"] = cls._safe_int(
+            embedding_config.get("maxTextChars"), cls.DEFAULT_MAX_TEXT_CHARS, 0, 100000
+        )
         request_params = embedding_config.get("requestParams")
         embedding_config["requestParams"] = dict(request_params) if isinstance(request_params, dict) else {}
         normalized["embedding"] = embedding_config
