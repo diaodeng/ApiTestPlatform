@@ -10,11 +10,13 @@ from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.metrics.entity.vo.metrics_vo import (
+    MemorySnapshotConfigModel,
     MetricsCollectorResponseModel,
     MetricsCollectorRuntimeResponseModel,
     MetricsCollectorSaveModel,
     MetricsCollectorStatusModel,
 )
+from modules.metrics.service.memory_snapshot_config_service import MemorySnapshotConfigService
 from modules.metrics.service.metrics_collector_config_service import MetricsCollectorConfigService
 from modules.metrics.service.metrics_collector_runtime_service import MetricsCollectorRuntimeService
 from utils.response_util import ResponseUtil
@@ -32,6 +34,35 @@ async def list_metrics_collectors(request: Request, query_db: Session = Depends(
 async def get_metrics_collector_runtime(request: Request):
     """获取当前进程的采集线程运行状态。"""
     return ResponseUtil.success(data=await run_in_threadpool(MetricsCollectorRuntimeService.describe_runtime))
+
+
+@metricsCollectorController.get(
+    "/memory-snapshot/config",
+    response_model=MemorySnapshotConfigModel,
+    dependencies=[Depends(CheckUserInterfaceAuth("monitor:metrics_collector:list"))],
+)
+async def get_memory_snapshot_config(request: Request, query_db: Session = Depends(get_db)):
+    """获取内存诊断快照配置，不存在时初始化默认行。"""
+    return ResponseUtil.success(data=await run_in_threadpool(MemorySnapshotConfigService.get_config, query_db))
+
+
+@metricsCollectorController.put("/memory-snapshot/config", dependencies=[Depends(CheckUserInterfaceAuth("monitor:metrics_collector:edit"))])
+@log_decorator(title="资源采集服务管理", business_type=2)
+async def update_memory_snapshot_config(
+    request: Request,
+    model: MemorySnapshotConfigModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """保存内存诊断快照配置，采集线程将在下一轮轮询（约5秒）内热生效。"""
+    payload = {
+        "enabled": model.enabled,
+        "rssThresholdMb": model.rss_threshold_mb,
+        "topLines": model.top_lines,
+        "cooldownSeconds": model.cooldown_seconds,
+    }
+    result = await run_in_threadpool(MemorySnapshotConfigService.update_config, query_db, payload, current_user.user.user_name)
+    return ResponseUtil.success(msg="保存成功，采集线程将在5秒内生效", data=result)
 
 
 @metricsCollectorController.get("/{profile_id}", response_model=MetricsCollectorResponseModel, dependencies=[Depends(CheckUserInterfaceAuth("monitor:metrics_collector:query"))])

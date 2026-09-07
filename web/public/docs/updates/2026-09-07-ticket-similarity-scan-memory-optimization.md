@@ -45,9 +45,18 @@
 - 生产库只读端到端：新分页逻辑与旧逻辑对同一查询向量结果完全一致（top3 分数一致）；单次检索 GC 后 RSS 增量 11MB（旧逻辑 17-31MB）；带错误码关键词预筛后检索 0.14 秒 / 1MB。
 - 未执行项：未在 dev 环境做完整服务重启回归（本地无法启动完整 dev 栈）；诊断快照仅做关闭状态与单元级验证，未做真实触发验证（需部署后开启开关观察）。
 
+## 追加：诊断快照可视化配置（同日）
+
+- 需求：`QTR_MEMORY_SNAPSHOT_ENABLED` 等环境变量需要登服务器改文件并重启，改为页面可视化配置。
+- 实现：配置存储在 `sys_config`（键 `monitor.memory_snapshot.config`，JSON），新增 `MemorySnapshotConfigService`（读/写/初始化默认行/加载生效值）与 `GET/PUT /monitor/metrics-collectors/memory-snapshot/config` 接口（复用采集服务 list/edit 权限）；`MetricsCollectorRuntimeService.load_active_profiles` 轮询顺带把配置热注入本进程的 `MemorySnapshotWatcher.apply_config`（同一会话，失败只记日志），保存后约 5 秒内全部进程生效，无需重启；`MemorySnapshotWatcher` 配置从实例属性改为加锁 property 支持热更新。环境变量保留为数据库配置缺失时的回退来源，页面保存过一次后数据库值优先。
+- 前端：「资源采集服务」页面（`views/monitor/metrics/index.vue`）底部新增「内存诊断快照」配置表单（开关/阈值/条数/冷却 + 最近更新时间）与说明告警条；`metricsCollector.js` 新增两个 API。
+- 权限：GET 用 `monitor:metrics_collector:list`，PUT 用 `monitor:metrics_collector:edit`（与采集服务相同，不新增菜单权限点，无需同步菜单表）。
+- 验证：新增 3 个测试（payload 钳制转换、watcher 热更新、配置服务读写链路），`test_memory_metrics.py` 16 用例全通过；改动文件 ruff 通过（controller 存量长行告警经 stash 基线对比确认非本次引入）；前端 `npm run build:prod` 构建通过。
+- 注意：接口路由 `memory-snapshot/config` 已注册在 `/{profile_id}` 之前，避免路径参数误匹配。
+
 ## 剩余风险与建议
 
-- fastapi 09:51 +309MB 阶跃仍未归因，建议部署本版本后开启 `QTR_MEMORY_SNAPSHOT_ENABLED=true`（阈值按现状调低，如 700MB）观察；这是下次复发前唯一的归因手段。
+- fastapi 09:51 +309MB 阶跃仍未归因，建议部署本版本后在「资源采集服务」页面开启内存诊断快照（阈值按现状调低，如 700MB）观察；这是下次复发前唯一的归因手段。
 - 容器内存上限 1.4GB 建议提升到 2GB（运维操作，代码外）。
 - 建议在 Grafana 增加 `qtr_cgroup_memory_current_bytes / qtr_cgroup_memory_max_bytes > 0.85` 持续 5 分钟的告警。
 - 分页扫描 OFFSET 深翻页在向量量级达到数万条后会有性能退化，届时应接入 Qdrant（代码已支持）。

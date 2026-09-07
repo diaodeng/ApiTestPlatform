@@ -235,16 +235,22 @@ avg_over_time(qtr_task_memory_after_gc_bytes{machine="home"}[1h])
 - cgroup v1 环境的 `qtr_cgroup_memory_events_oom_total` / `qtr_cgroup_memory_events_oom_kill_total` 指标此前恒为 0（读取缺陷），现已修复为从 `memory.oom_control` 读取真实计数。2026-09-07 之前的 v1 环境历史数据中这两个指标不可信。
 - AI 分析任务的迟到结果缓存查询（服务重启恢复链路）修复了事件循环内调用 `asyncio.run` 报错的问题，重启后 Agent 已回传结果的任务现在能正确恢复写回，不再被误标为失败。
 
-### RSS 阈值诊断快照（默认关闭）
+### RSS 阈值诊断快照（默认关闭，推荐用页面配置）
 
-用于定位"进程 RSS 一次性大幅增长且不回落"却无法从任务日志归因的问题（2026-09-07 生产实际发生过 fastapi 进程 +300MB 阶跃）。通过环境变量开启：
+用于定位"进程 RSS 一次性大幅增长且不回落"却无法从任务日志归因的问题（2026-09-07 生产实际发生过 fastapi 进程 +300MB 阶跃）。
 
-| 环境变量 | 默认值 | 说明 |
+**推荐方式：页面可视化配置**。入口：**系统监控 → 资源采集服务**，页面底部「内存诊断快照」区块：
+
+| 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `QTR_MEMORY_SNAPSHOT_ENABLED` | `false` | 总开关。开启后每个进程的采集线程每 10 秒检查一次自身 RSS |
-| `QTR_MEMORY_SNAPSHOT_RSS_MB` | `900` | 触发阈值（MB），最低 128。RSS 超过该值时采样 |
-| `QTR_MEMORY_SNAPSHOT_TOP_LINES` | `50` | 快照记录的 top 分配源条数，范围 10-500 |
-| `QTR_MEMORY_SNAPSHOT_COOLDOWN_SEC` | `3600` | 冷却时间（秒），期间不重复采样，范围 60-86400 |
+| 启用快照 | 关 | 总开关。开启后每个进程的采集线程每 10 秒检查一次自身 RSS |
+| RSS 阈值 (MB) | 900 | 触发阈值，最低 128。进程 RSS 超过该值时采样；建议设置略高于进程常驻基线（如 700） |
+| Top 分配源条数 | 50 | 快照记录的分配点数量，范围 10-500 |
+| 冷却时间 (秒) | 3600 | 两次采样之间的最小间隔，范围 60-86400 |
+
+保存后约 5 秒内全部进程热生效，无需重启。配置存储在系统参数表（键 `monitor.memory_snapshot.config`），页面显示最近更新时间与操作人。保存需要 `monitor:metrics_collector:edit` 权限（与采集服务编辑权限相同）。
+
+**兼容方式：环境变量**（数据库配置行不存在时生效）。在 `.env.<环境>` 或 `supervisord.conf` 的 `environment=` 中设置 `QTR_MEMORY_SNAPSHOT_ENABLED`（默认 false）、`QTR_MEMORY_SNAPSHOT_RSS_MB`（默认 900）、`QTR_MEMORY_SNAPSHOT_TOP_LINES`（默认 50）、`QTR_MEMORY_SNAPSHOT_COOLDOWN_SEC`（默认 3600），需重启进程生效。一旦页面上保存过配置，数据库值优先，环境变量不再参与。
 
 触发后进程会临时开启 tracemalloc 追踪 5 秒，把 top 分配源（文件:行号 + 累计大小）写入 `logs/<日期>/memory_snapshot_<role>_<时间戳>` 文件并自动关闭追踪。注意：tracemalloc 追踪期间内存分配开销约为 2 倍，且单次采样只能覆盖开启后 5 秒窗口内的分配，适合在内存已长期高位时开启观察，不是长期挂载的监控。
 

@@ -5,26 +5,35 @@
 当前进程 RSS，超过配置阈值时自动开启 tracemalloc、采样 top 分配源并
 写入日志目录，用于事后归因。
 
+配置来源（优先级从高到低）：
+- 可视化配置：sys_config 键 `monitor.memory_snapshot.config`（JSON），
+  由 MetricsCollectorRuntimeService 轮询并通过 apply_config 热注入；
+- 环境变量：QTR_MEMORY_SNAPSHOT_ENABLED 等，仅在未注入数据库配置时生效。
+
 设计约束：
-- 默认完全关闭（QTR_MEMORY_SNAPSHOT_ENABLED=false），不影响现有业务；
+- 默认完全关闭，不影响现有业务；
 - tracemalloc 自身有约 2 倍分配开销，仅在达到阈值后开启、采样完成即关闭，
   不会长期挂载在生产进程上；
-- 每个进程最多采样一次（可配置冷却秒数），避免反复采样放大内存压力；
+- 每个进程采样受冷却秒数限制，避免反复采样放大内存压力；
 - 所有异常就地吞掉并计数，绝不影响采集线程主循环。
 """
 
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass
 
 from loguru import logger
 
+# sys_config 中存放诊断快照配置（JSON）的参数键名。
+MEMORY_SNAPSHOT_CONFIG_KEY = "monitor.memory_snapshot.config"
+
 
 @dataclass(frozen=True)
 class MemorySnapshotConfig:
-    """诊断快照的行为参数，全部来自环境变量，缺省关闭。"""
+    """诊断快照的行为参数，全部来自可视化配置或环境变量，缺省关闭。"""
 
     enabled: bool
     rss_threshold_mb: int
@@ -32,9 +41,37 @@ class MemorySnapshotConfig:
     cooldown_seconds: int
 
 
+def config_from_payload(payload: dict) -> MemorySnapshotConfig:
+    """
+    把可视化配置的 JSON dict 转换为配置对象，非法值回退默认并钳制范围。
+
+    :param payload: 页面保存的配置字段（enabled/rssThresholdMb/topLines/cooldownSeconds）
+    :return: 钳制后的配置对象
+    """
+    enabled = bool(payload.get("enabled", False))
+    try:
+        threshold = max(int(payload.get("rssThresholdMb") or 900), 128)
+    except (TypeError, ValueError):
+        threshold = 900
+    try:
+        top_lines = min(max(int(payload.get("topLines") or 50), 10), 500)
+    except (TypeError, ValueError):
+        top_lines = 50
+    try:
+        cooldown = min(max(int(payload.get("cooldownSeconds") or 3600), 60), 86400)
+    except (TypeError, ValueError):
+        cooldown = 3600
+    return MemorySnapshotConfig(
+        enabled=enabled,
+        rss_threshold_mb=threshold,
+        top_lines=top_lines,
+        cooldown_seconds=cooldown,
+    )
+
+
 def load_memory_snapshot_config() -> MemorySnapshotConfig:
     """
-    从环境变量读取诊断快照配置。
+    从环境变量读取诊断快照配置（数据库可视化配置缺失时的回退来源）。
 
     :return: 配置对象；未设置或非法时 enabled=False
     """
@@ -65,14 +102,31 @@ class MemorySnapshotWatcher:
     RSS 阈值触发的 tracemalloc 采样器，由采集线程按秒驱动 check()。
 
     只在单进程内生效（tracemalloc 是进程级 API），每个进程的采集线程
-    各持有一个实例，互不干扰。
+    各持有一个实例，互不干扰。配置可通过 apply_config 热更新。
     """
 
     def __init__(self, role: str, config: MemorySnapshotConfig | None = None):
         self.role = role
-        self.config = config or load_memory_snapshot_config()
+        self._config_lock = threading.Lock()
+        self._config = config or load_memory_snapshot_config()
         self._last_snapshot_at = 0.0
         self._check_count = 0
+
+    @property
+    def config(self) -> MemorySnapshotConfig:
+        """返回当前生效的配置快照。"""
+        with self._config_lock:
+            return self._config
+
+    def apply_config(self, config: MemorySnapshotConfig) -> None:
+        """
+        热更新诊断快照配置，供运行时服务从数据库配置注入。
+
+        :param config: 新配置对象
+        :return: 无
+        """
+        with self._config_lock:
+            self._config = config
 
     def check(self) -> None:
         """

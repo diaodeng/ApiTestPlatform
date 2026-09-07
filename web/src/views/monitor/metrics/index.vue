@@ -58,6 +58,40 @@
       </el-descriptions-item>
     </el-descriptions>
 
+    <el-divider content-position="left">内存诊断快照（RSS 阈值触发 tracemalloc）</el-divider>
+    <el-form label-width="150px" size="small" class="snapshot-form">
+      <el-form-item label="启用快照">
+        <el-switch v-model="snapshotConfig.enabled" />
+        <span class="unit-text">开启后每个进程的采集线程每 10 秒检查一次自身 RSS</span>
+      </el-form-item>
+      <el-form-item label="RSS 阈值 (MB)">
+        <el-input-number v-model="snapshotConfig.rssThresholdMb" :min="128" :max="65536" :step="50" />
+        <span class="unit-text">进程 RSS 超过该值时采样，建议略高于常驻基线</span>
+      </el-form-item>
+      <el-form-item label="Top 分配源条数">
+        <el-input-number v-model="snapshotConfig.topLines" :min="10" :max="500" :step="10" />
+        <span class="unit-text">快照记录的分配点数量（10-500）</span>
+      </el-form-item>
+      <el-form-item label="冷却时间 (秒)">
+        <el-input-number v-model="snapshotConfig.cooldownSeconds" :min="60" :max="86400" :step="60" />
+        <span class="unit-text">两次采样之间的最小间隔（60-86400）</span>
+      </el-form-item>
+      <el-form-item>
+        <el-button v-hasPermi="['monitor:metrics_collector:edit']" type="primary" :loading="snapshotSaving" @click="saveSnapshotConfig">
+          保存配置
+        </el-button>
+        <span v-if="snapshotConfig.updateTime" class="unit-text">
+          最近更新：{{ formatTime(snapshotConfig.updateTime) }}{{ snapshotConfig.updateBy ? ` (${snapshotConfig.updateBy})` : '' }}
+        </span>
+      </el-form-item>
+    </el-form>
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      title="快照文件写入日志目录 logs/<日期>/memory_snapshot_<角色>_<时间戳>，用于事后归因。tracemalloc 追踪期间内存分配开销约 2 倍，诊断完成后建议关闭开关。"
+    />
+
     <MetricsCollectorDialog ref="dialogRef" @saved="loadAll" />
   </div>
 </template>
@@ -66,8 +100,10 @@
 import {
   changeMetricsCollectorStatus,
   delMetricsCollector,
+  getMemorySnapshotConfig,
   getMetricsCollectorRuntime,
   listMetricsCollectors,
+  updateMemorySnapshotConfig,
 } from '@/api/system/metricsCollector'
 import MetricsCollectorDialog from './components/MetricsCollectorDialog.vue'
 
@@ -77,6 +113,15 @@ const collectors = ref([])
 const runtime = ref([])
 const dialogRef = ref()
 const statusChanging = reactive({})
+const snapshotConfig = reactive({
+  enabled: false,
+  rssThresholdMb: 900,
+  topLines: 50,
+  cooldownSeconds: 3600,
+  updateTime: null,
+  updateBy: '',
+})
+const snapshotSaving = ref(false)
 let statusTimer = null
 
 const roleLabels = { api: 'API 服务', celery_worker: 'Celery Worker', celery_beat: 'Celery Beat' }
@@ -97,7 +142,37 @@ function loadRuntime() {
 }
 
 function loadAll() {
-  return Promise.all([loadCollectors(), loadRuntime()])
+  return Promise.all([loadCollectors(), loadRuntime(), loadSnapshotConfig()])
+}
+
+function loadSnapshotConfig() {
+  return getMemorySnapshotConfig()
+    .then(response => {
+      const data = response.data || {}
+      snapshotConfig.enabled = !!data.enabled
+      snapshotConfig.rssThresholdMb = data.rssThresholdMb ?? 900
+      snapshotConfig.topLines = data.topLines ?? 50
+      snapshotConfig.cooldownSeconds = data.cooldownSeconds ?? 3600
+      snapshotConfig.updateTime = data.updateTime || null
+      snapshotConfig.updateBy = data.updateBy || ''
+    })
+    .catch(() => {})
+}
+
+function saveSnapshotConfig() {
+  snapshotSaving.value = true
+  updateMemorySnapshotConfig({
+    enabled: snapshotConfig.enabled,
+    rssThresholdMb: snapshotConfig.rssThresholdMb,
+    topLines: snapshotConfig.topLines,
+    cooldownSeconds: snapshotConfig.cooldownSeconds,
+  })
+    .then(response => {
+      proxy.$modal.msgSuccess(response.msg || '保存成功')
+      return loadSnapshotConfig()
+    })
+    .catch(() => {})
+    .finally(() => { snapshotSaving.value = false })
 }
 
 function openDialog(row) {
@@ -133,4 +208,5 @@ onBeforeUnmount(() => { if (statusTimer) clearInterval(statusTimer) })
 .push-time { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .runtime-desc { margin-top: 4px; }
 .unit-text { color: var(--el-text-color-secondary); font-size: 12px; margin-left: 8px; }
+.snapshot-form { max-width: 720px; margin-top: 4px; }
 </style>

@@ -32,7 +32,7 @@
 
 ## RSS 阈值诊断快照（2026-09-07 起，默认关闭）
 
-用于归因"进程 RSS 一次性大幅阶跃且任务日志无法解释"的问题。`QTR_MEMORY_SNAPSHOT_ENABLED=true` 开启后，各进程采集线程每 10 秒检查自身 RSS，超过 `QTR_MEMORY_SNAPSHOT_RSS_MB`（默认 900）时临时开启 tracemalloc 追踪 5 秒，top 分配源写入 `logs/<日期>/memory_snapshot_<role>_<时间戳>` 后自动关闭，冷却 1 小时（`QTR_MEMORY_SNAPSHOT_COOLDOWN_SEC` 可调）。实现在 `utils/metrics/memory_snapshot.py`，挂在采集线程主循环节拍，不新增线程。tracemalloc 追踪期分配开销约 2 倍，只作临时诊断用，不长期开启。
+用于归因"进程 RSS 一次性大幅阶跃且任务日志无法解释"的问题。配置以可视化方式管理：`sys_config` 键 `monitor.memory_snapshot.config`（JSON：enabled/rssThresholdMb/topLines/cooldownSeconds），页面入口「系统监控 → 资源采集服务」底部「内存诊断快照」区块，接口 `GET/PUT /monitor/metrics-collectors/memory-snapshot/config`（权限复用 `monitor:metrics_collector:list/edit`）。`MetricsCollectorRuntimeService.load_active_profiles` 轮询（5 秒）顺带把配置经 `MemorySnapshotWatcher.apply_config` 热注入本进程，保存后约 5 秒全部进程生效；环境变量 `QTR_MEMORY_SNAPSHOT_*` 仅在数据库配置行缺失时作为回退来源。配置服务在 `modules/metrics/service/memory_snapshot_config_service.py`，采样执行在 `utils/metrics/memory_snapshot.py`（挂在采集线程主循环节拍，不新增线程；tracemalloc 追踪期分配开销约 2 倍，只作临时诊断用）。
 
 ## 已覆盖的业务边界
 

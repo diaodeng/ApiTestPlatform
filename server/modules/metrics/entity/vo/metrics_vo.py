@@ -21,7 +21,8 @@ class MetricsCollectorSaveModel(MetricsCollectorBaseModel):
     enabled: bool = False
     push_url: str = Field(default="", max_length=255)
     auth_user: str = Field(default="", max_length=64)
-    auth_password: str = Field(default="", max_length=128, description="认证密码明文，仅写入时接收；为空表示不修改旧密码")
+    # 认证密码明文，仅写入时接收；为空表示不修改旧密码
+    auth_password: str = Field(default="", max_length=128)
     job_label: str = Field(default="QTR", max_length=64)
     instance_label: str = Field(default="TEST_ENV", max_length=64)
     machine_label: str = Field(default="", max_length=64)
@@ -100,3 +101,14 @@ class MetricsCollectorRuntimeResponseModel(MetricsCollectorBaseModel):
     """采集运行时状态响应体：按进程角色汇总。"""
 
     processes: list[MetricsCollectorRuntimeProcessModel] = Field(default_factory=list)
+
+
+class MemorySnapshotConfigModel(MetricsCollectorBaseModel):
+    """内存诊断快照配置的请求/响应体。"""
+
+    enabled: bool = Field(default=False, description="总开关，开启后采集线程每10秒检查一次进程RSS")
+    rss_threshold_mb: int = Field(default=900, ge=128, le=65536, description="触发阈值（MB）")
+    top_lines: int = Field(default=50, ge=10, le=500, description="快照记录的top分配源条数")
+    cooldown_seconds: int = Field(default=3600, ge=60, le=86400, description="两次采样之间的冷却秒数")
+    update_time: datetime | None = None
+    update_by: str | None = None
