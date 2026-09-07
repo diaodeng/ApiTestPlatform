@@ -409,7 +409,7 @@ async def run_by_async(
     start_time = datetime.fromtimestamp(test_start_time, timezone.utc).astimezone(timezone(timedelta(hours=8)))
     report_id = None
     report_name = run_info.report_name or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    task_memory_observer = get_task_memory_observer("api")
+    task_memory_observer = get_task_memory_observer()
     task_memory_context = {
         "task_id": int((run_info.global_vars or {}).get("_task_id") or 0),
         "task_key": "case_execution",

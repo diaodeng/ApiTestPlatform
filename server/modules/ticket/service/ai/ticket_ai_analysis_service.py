@@ -3829,13 +3829,18 @@ class TicketAiAnalysisService:
         """
         检查 Redis 结果缓存中是否存在指定请求的迟到结果（只查询不消费）。
 
-        在后台线程中执行（无运行中事件循环），因此用 asyncio.run 驱动短生命周期
-        异步查询；缓存后端可能是 redis 或 memory，统一走 RedisUtil 创建。
+        同步上下文驱动短生命周期异步查询，兼容两种调用环境：
+        - 后台线程（无运行中事件循环）：直接 asyncio.run；
+        - 事件循环内（如 FastAPI lifespan 启动恢复）：asyncio.run 会抛
+          "cannot be called from a running event loop"，改用独立线程 +
+          run_coroutine_threadsafe 串行等待结果。
+        缓存后端可能是 redis 或 memory，统一走 RedisUtil 创建。
         :param request_id: Agent 请求ID
         :return: 是否存在缓存结果
         """
         try:
             import asyncio
+            import concurrent.futures
 
             from config.get_redis import RedisUtil
 
@@ -3846,7 +3851,14 @@ class TicketAiAnalysisService:
                 finally:
                     await redis.close()
 
-            return asyncio.run(_exists())
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(_exists())
+
+            # 事件循环已运行：借独立线程驱动协程，避免在循环内嵌套 asyncio.run。
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(lambda: asyncio.run(_exists())).result(timeout=10)
         except Exception as exc:
             logger.warning(f"查询迟到结果缓存失败，按无缓存处理: request_id={request_id}, error={exc}")
             return False
@@ -3858,7 +3870,7 @@ class TicketAiAnalysisService:
         :param task_id: 任务ID
         :return: 无
         """
-        observation = get_task_memory_observer("api").start(
+        observation = get_task_memory_observer().start(
             {
                 "task_id": task_id,
                 "task_key": "ticket_ai_analysis",
@@ -3879,7 +3891,7 @@ class TicketAiAnalysisService:
         finally:
             with cls._executor_lock:
                 cls._active_task_ids.discard(task_id)
-            get_task_memory_observer("api").finish(
+            get_task_memory_observer().finish(
                 {
                     "task_id": task_id,
                     "task_key": "ticket_ai_analysis",

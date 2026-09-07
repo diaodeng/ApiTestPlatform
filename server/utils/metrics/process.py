@@ -127,6 +127,21 @@ class CgroupMemoryCollector:
             return {}
         return values
 
+    @classmethod
+    def _read_v1_oom_kill(cls, root: str) -> int:
+        """
+        读取 cgroup v1 的 oom_kill 计数。
+
+        memory.oom_control 每行是 "key value" 形式（oom_kill_disable /
+        under_oom / oom_kill），其中 oom_kill 为累计 OOM 杀进程次数；
+        读取失败返回 0，不中断采集。
+
+        :param root: cgroup v1 memory 根目录
+        :return: 累计 oom_kill 次数
+        """
+        oom_control = cls._read_stat(os.path.join(root, "memory.oom_control"))
+        return int(oom_control.get("oom_kill", 0))
+
     def _read_v2(self) -> dict[str, int]:
         root = self.V2_ROOT
         stat = self._read_stat(os.path.join(root, "memory.stat"))
@@ -148,6 +163,7 @@ class CgroupMemoryCollector:
     def _read_v1(self) -> dict[str, int]:
         root = self.V1_ROOT
         stat = self._read_stat(os.path.join(root, "memory.stat"))
+        oom_kill_total = self._read_v1_oom_kill(root)
         return {
             "qtr_cgroup_memory_current_bytes": self._read_number(os.path.join(root, "memory.usage_in_bytes")) or 0,
             "qtr_cgroup_memory_max_bytes": self._read_number(os.path.join(root, "memory.limit_in_bytes")) or 0,
@@ -155,8 +171,8 @@ class CgroupMemoryCollector:
             "qtr_cgroup_memory_file_bytes": stat.get("cache", 0),
             "qtr_cgroup_memory_kernel_bytes": stat.get("slab", 0),
             "qtr_cgroup_memory_slab_bytes": stat.get("slab", 0),
-            "qtr_cgroup_memory_swap_bytes": 0,
+            "qtr_cgroup_memory_swap_bytes": stat.get("swap", 0),
             "qtr_cgroup_memory_events_high_total": 0,
-            "qtr_cgroup_memory_events_oom_total": 0,
-            "qtr_cgroup_memory_events_oom_kill_total": 0,
+            "qtr_cgroup_memory_events_oom_total": oom_kill_total,
+            "qtr_cgroup_memory_events_oom_kill_total": oom_kill_total,
         }

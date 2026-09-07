@@ -2462,7 +2462,7 @@ class TicketLogPullService:
         :param record_id: 记录ID
         :return: 无
         """
-        observation = get_task_memory_observer("api").start(
+        observation = get_task_memory_observer().start(
             {
                 "task_id": record_id,
                 "task_key": "ticket_log_pull",
@@ -2496,7 +2496,7 @@ class TicketLogPullService:
         finally:
             with cls._executor_lock:
                 cls._active_record_ids.discard(record_id)
-            get_task_memory_observer("api").finish(
+            get_task_memory_observer().finish(
                 {
                     "task_id": record_id,
                     "task_key": "ticket_log_pull",

@@ -149,7 +149,14 @@ _default_observer = TaskMemoryObserver(role=os.environ.get("QTR_METRICS_ROLE", "
 
 
 def get_task_memory_observer(role: str | None = None) -> TaskMemoryObserver:
-    """返回当前进程共享的任务观测器，并按进程角色更新标签。"""
+    """返回当前进程共享的任务观测器。
+
+    :param role: 可选角色覆盖。业务代码不应传值——角色由部署环境
+        （supervisord 的 QTR_METRICS_ROLE）决定；只有测试或确需显式
+        切换角色的采集组件才传入。历史上有调用方硬编码传 "api"，
+        导致 celery worker 进程的任务日志/指标被错误标记为 role=api，
+        污染内存归因，已全部移除。
+    """
     if role:
         _default_observer.role = role
     return _default_observer

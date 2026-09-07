@@ -30,6 +30,28 @@ class TicketSimilarityProfileService:
     ENVIRONMENT_PATTERN = re.compile(r"(?:环境|env|environment)\s*[:：=]\s*([\w.-]+)", re.IGNORECASE)
 
     @classmethod
+    def extract_signal_values(cls, text: str) -> dict[str, list[str]]:
+        """
+        从任意检索文本提取归一化精确信号值，供检索前的候选预筛使用。
+
+        与 _extract_values 的区别：不依赖工单对象，只用 SIGNAL_PATTERNS
+        对纯文本做正则提取，返回按信号类型分组的归一化值列表。
+
+        :param text: 检索关键词或工单文本
+        :return: 信号类型到归一化值列表的映射，无命中时为空字典
+        """
+        result: dict[str, list[str]] = {}
+        seen: set[tuple[str, str]] = set()
+        for signal_type, pattern in cls.SIGNAL_PATTERNS.items():
+            for match in pattern.finditer(text or ""):
+                value = (match.group(1) if match.lastindex else match.group(0)).strip().casefold()
+                if not value or len(value) > 512 or (signal_type, value) in seen:
+                    continue
+                seen.add((signal_type, value))
+                result.setdefault(signal_type, []).append(value)
+        return result
+
+    @classmethod
     def _source_text(cls, ticket: Ticket) -> str:
         """组合可用于规则提取的工单事实文本，不包含评论全文。"""
         extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}

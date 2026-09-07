@@ -228,6 +228,26 @@ avg_over_time(qtr_task_memory_after_gc_bytes{machine="home"}[1h])
 - 工单 AI 分析的任务摘要不再回读提示词/原始输出/任务上下文大字段；AI 执行审计的响应文本与请求响应载荷写入前会做集中截断，截断处标注 `审计载荷长文本已截断` 或 `审计文本超长已截断`。
 - API、Celery Beat、Celery Worker 进程注入 `MALLOC_ARENA_MAX=2`：RSS 高位横盘但 USS/对象数稳定时优先怀疑堆碎片而非泄漏，该配置可显著缓解多线程场景下空闲内存无法归还 OS 的问题。
 
+## 已落地的内存治理（2026-09-07）
+
+- 相似工单检索（embedding/local_hash Provider）改为信号预筛 + 分页扫描：检索文本带错误码等精确信号时先按索引筛候选再做向量比对，无信号时按 500 条/页分页扫描并逐页释放会话实体。详见 `ticket_similarity.md`。
+- 任务内存观测的角色标签修正：AI 分析、日志拉取、用例执行等链路不再把观测器硬编码为 `role=api`，Worker 进程内执行的任务日志/指标现在正确标记为 `role=celery_worker`。注意：2026-09-07 之前的历史数据中 Worker 进程的任务指标可能被误标为 `role=api`，做历史归因时以 `pid` 为准。
+- cgroup v1 环境的 `qtr_cgroup_memory_events_oom_total` / `qtr_cgroup_memory_events_oom_kill_total` 指标此前恒为 0（读取缺陷），现已修复为从 `memory.oom_control` 读取真实计数。2026-09-07 之前的 v1 环境历史数据中这两个指标不可信。
+- AI 分析任务的迟到结果缓存查询（服务重启恢复链路）修复了事件循环内调用 `asyncio.run` 报错的问题，重启后 Agent 已回传结果的任务现在能正确恢复写回，不再被误标为失败。
+
+### RSS 阈值诊断快照（默认关闭）
+
+用于定位"进程 RSS 一次性大幅增长且不回落"却无法从任务日志归因的问题（2026-09-07 生产实际发生过 fastapi 进程 +300MB 阶跃）。通过环境变量开启：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `QTR_MEMORY_SNAPSHOT_ENABLED` | `false` | 总开关。开启后每个进程的采集线程每 10 秒检查一次自身 RSS |
+| `QTR_MEMORY_SNAPSHOT_RSS_MB` | `900` | 触发阈值（MB），最低 128。RSS 超过该值时采样 |
+| `QTR_MEMORY_SNAPSHOT_TOP_LINES` | `50` | 快照记录的 top 分配源条数，范围 10-500 |
+| `QTR_MEMORY_SNAPSHOT_COOLDOWN_SEC` | `3600` | 冷却时间（秒），期间不重复采样，范围 60-86400 |
+
+触发后进程会临时开启 tracemalloc 追踪 5 秒，把 top 分配源（文件:行号 + 累计大小）写入 `logs/<日期>/memory_snapshot_<role>_<时间戳>` 文件并自动关闭追踪。注意：tracemalloc 追踪期间内存分配开销约为 2 倍，且单次采样只能覆盖开启后 5 秒窗口内的分配，适合在内存已长期高位时开启观察，不是长期挂载的监控。
+
 ## 注意事项
 
 `gc.collect()` 只用于结束快照对比，不是泄漏修复。指标标签不包含任务 ID，以避免高基数时间序列；任务 ID 只出现在日志中。监控接入完成后仍需要结合实际运行曲线和任务日志进行归因，不能仅凭单次快照判定根因。

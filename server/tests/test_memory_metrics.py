@@ -257,3 +257,72 @@ def test_runtime_service_injects_profile_provider():
         runtime._threads.clear()
         runtime._threads.update(original)
 
+
+
+def test_memory_snapshot_watcher_disabled_by_default():
+    """诊断快照默认关闭时 check 不做任何事。"""
+    from utils.metrics.memory_snapshot import MemorySnapshotConfig, MemorySnapshotWatcher
+
+    watcher = MemorySnapshotWatcher(
+        role="api",
+        config=MemorySnapshotConfig(enabled=False, rss_threshold_mb=900, top_lines=50, cooldown_seconds=3600),
+    )
+    # 未启用时应直接返回，不递增检查计数、不触碰 psutil。
+    with patch("psutil.Process") as process_mock:
+        watcher.check()
+    process_mock.assert_not_called()
+    assert watcher._check_count == 0
+
+
+def test_memory_snapshot_watcher_respects_cooldown_and_threshold():
+    """低于阈值不采样，且冷却期内不重复采样。"""
+    from utils.metrics.memory_snapshot import MemorySnapshotConfig, MemorySnapshotWatcher
+
+    watcher = MemorySnapshotWatcher(
+        role="api",
+        config=MemorySnapshotConfig(enabled=True, rss_threshold_mb=900, top_lines=50, cooldown_seconds=3600),
+    )
+    snapshots = []
+    with patch.object(watcher, "_take_snapshot") as take_mock, patch("psutil.Process") as process_mock:
+        process_mock.return_value.memory_info.return_value.rss = 100 * 1024 * 1024  # 100MB，低于阈值
+        # 跑满 20 个节拍（每 10 拍检查一次）
+        for _ in range(20):
+            watcher.check()
+        take_mock.assert_not_called()
+
+        # 抬高 RSS 越过阈值，应触发采样
+        process_mock.return_value.memory_info.return_value.rss = 1000 * 1024 * 1024
+        for _ in range(10):
+            watcher.check()
+        take_mock.assert_called_once()
+        snapshots.append(1)
+
+        # 冷却期内再次越界不应重复采样
+        for _ in range(30):
+            watcher.check()
+        take_mock.assert_called_once()
+    assert snapshots == [1]
+
+
+def test_cgroup_v1_oom_kill_reads_oom_control_third_field():
+    """cgroup v1 的 oom_kill 计数取 memory.oom_control 第三个数值字段。"""
+    from utils.metrics.process import CgroupMemoryCollector
+
+    collector = CgroupMemoryCollector()
+    oom_control_content = "oom_kill_disable 0\nunder_oom 0\noom_kill 2\n"
+    with (
+        patch("os.path.exists", return_value=False),
+        patch("builtins.open") as open_mock,
+    ):
+        # _read_v1 遍历读取多个文件，按路径分发内容
+        def _fake_open(path, encoding="utf-8"):
+            from io import StringIO
+
+            if path.endswith("memory.oom_control"):
+                return StringIO(oom_control_content)
+            return StringIO("")
+
+        open_mock.side_effect = _fake_open
+        result = collector._read_v1()
+    assert result["qtr_cgroup_memory_events_oom_kill_total"] == 2
+    assert result["qtr_cgroup_memory_events_oom_total"] == 2
