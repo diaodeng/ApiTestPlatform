@@ -56,7 +56,7 @@ def register_request_log_middleware(app):
                 if process_time > 1000:
                     logger.warning(log_msg)
                 else:
-                    logger.info(log_msg)
+                    logger.debug(log_msg)
 
                 if response:
                     response.headers["X-Request-Id"] = trace_id
