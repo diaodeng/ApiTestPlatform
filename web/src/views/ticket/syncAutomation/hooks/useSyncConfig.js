@@ -247,6 +247,10 @@ export function useSyncConfig(proxy) {
         sendAfterExternalSync: false, sendAfterRemotePull: false,
         sendAfterBitablePull: false, sendAfterManualCreate: false,
         template: '', manualTemplate: '',
+        aiResultFollowUp: {
+          enabled: false, sendOn: 'none', replyInThread: true, template: '',
+          noAnchorStrategy: 'skip',
+        },
       },
       messageSync: {
         enabled: false, feishuEventEnabled: false, feishuWsEnabled: false,
@@ -687,6 +691,13 @@ export function useSyncConfig(proxy) {
       autoPushCondition: groupPush.autoPushCondition || '',
       template: groupPush.template || '',
       manualTemplate: groupPush.manualTemplate || '',
+      aiResultFollowUp: {
+        enabled: Boolean(groupPush.aiResultFollowUp?.enabled),
+        sendOn: groupPush.aiResultFollowUp?.sendOn || 'none',
+        replyInThread: groupPush.aiResultFollowUp?.replyInThread !== false,
+        template: groupPush.aiResultFollowUp?.template || '',
+        noAnchorStrategy: groupPush.aiResultFollowUp?.noAnchorStrategy || 'skip',
+      },
     }
     if (!form.groupPush.priorityRoutes.length) {
       form.groupPush.priorityRoutes = [
@@ -1013,6 +1024,13 @@ export function useSyncConfig(proxy) {
         ? payload.groupPush.appChatIds.map((item) => String(item || '').trim()).filter(Boolean)
         : []
       payload.groupPush.autoPushCondition = (payload.groupPush?.autoPushCondition || '').trim()
+      payload.groupPush.aiResultFollowUp = {
+        enabled: Boolean(payload.groupPush?.aiResultFollowUp?.enabled),
+        sendOn: payload.groupPush?.aiResultFollowUp?.sendOn || 'none',
+        replyInThread: payload.groupPush?.aiResultFollowUp?.replyInThread !== false,
+        template: (payload.groupPush?.aiResultFollowUp?.template || '').trim(),
+        noAnchorStrategy: payload.groupPush?.aiResultFollowUp?.noAnchorStrategy || 'skip',
+      }
       payload.groupPush.priorityRoutes = Array.isArray(payload.groupPush?.priorityRoutes)
         ? payload.groupPush.priorityRoutes
             .map((route) => ({

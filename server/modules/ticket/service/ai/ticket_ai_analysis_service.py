@@ -1852,6 +1852,12 @@ class TicketAiAnalysisService:
             "selectedAgentCode": selected_agent_code,
             "selectedPromptTemplateCodes": selected_prompt_template_codes,
             "extraInstruction": extra_instruction,
+            # 手动触发时用户对"分析完成后回帖工单群话题"的三态选择，终态回帖时读取。
+            "aiResultFollowUpOverride": (
+                str(request.ai_result_follow_up or "").strip().lower()
+                if request
+                else str(context_payload.get("aiResultFollowUpOverride") or "").strip().lower()
+            ),
         }
         selected_provider_code = (
             str(request.ai_provider_code or "").strip()
@@ -4081,14 +4087,28 @@ class TicketAiAnalysisService:
         TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)
 
     @classmethod
-    def _finalize_sync_publish_after_ai(cls, db: Session, *, ticket_id: int, status: str) -> None:
+    def _finalize_sync_publish_after_ai(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        status: str,
+        task_id: int | None = None,
+        result_payload: dict[str, Any] | None = None,
+        error_message: str = "",
+        follow_up_override: str = "",
+    ) -> None:
         """
-        AI 任务终态后回写工单同步发布状态。
+        AI 任务终态后回写工单同步发布状态并按配置回帖 AI 结果。
         不再硬编码同步场景：由 finalize_sync_after_ai 从工单同步元数据解析最近一次入库场景，
         避免多维表格拉取等场景的工单被 external_sync 场景开关误拦截。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param status: AI任务状态
+        :param task_id: AI任务ID，用于结果回帖幂等
+        :param result_payload: AI分析结果载荷（成功时供回帖渲染）
+        :param error_message: AI失败原因（失败时供回帖渲染）
+        :param follow_up_override: 结果回帖覆盖意图（follow/on/off，手动触发时使用）
         :return: 无
         """
         try:
@@ -4098,6 +4118,10 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket_id,
                 ai_task_status=status,
+                ai_task_id=task_id,
+                ai_result_payload=result_payload,
+                ai_error_message=error_message,
+                follow_up_override=follow_up_override,
             )
         except Exception as exc:
             logger.warning(f"AI任务终态回写同步发布状态失败: ticket_id={ticket_id}, status={status}, error={exc}")
@@ -4115,6 +4139,9 @@ class TicketAiAnalysisService:
         if not task or task.status == TicketAiAnalysisStatus.SUCCESS.value:
             cls._log_task_step(task_id, "LOAD", "任务不存在或已成功，跳过")
             return
+        # 手动触发时快照在任务上下文里的"结果回帖"三态选择；自动触发快照缺失时按跟随全局处理。
+        task_context = task.analysis_context if isinstance(task.analysis_context, dict) else {}
+        follow_up_override = str(task_context.get("aiResultFollowUpOverride") or "").strip().lower()
         # 执行入口状态白名单：只允许新建和重试后的任务进入执行，
         # 防止并发失败者（canceled）或其它终态任务被误排队后再次执行、重复消耗模型调用。
         if task.status not in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
@@ -4195,6 +4222,9 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket.ticket_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
+                task_id=task_id,
+                error_message='未找到可用的项目版本仓库映射',
+                follow_up_override=follow_up_override,
             )
             return
 
@@ -4328,6 +4358,9 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket.ticket_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
+                task_id=task_id,
+                error_message='未找到可用的 Agent，请先启动本地 Agent 并连接到服务端',
+                follow_up_override=follow_up_override,
             )
             return
         started_at = datetime.now()
@@ -4461,6 +4494,8 @@ class TicketAiAnalysisService:
                     db,
                     ticket_id=ticket.ticket_id,
                     status=TicketAiAnalysisStatus.CANCELED.value,
+                    task_id=task_id,
+                    follow_up_override=follow_up_override,
                 )
                 return
 
@@ -4647,6 +4682,9 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket.ticket_id,
                 status=TicketAiAnalysisStatus.SUCCESS.value,
+                task_id=task_id,
+                result_payload=normalized,
+                follow_up_override=follow_up_override,
             )
             TicketNotifyService.send_ticket_notification(
                 db,
@@ -4709,6 +4747,9 @@ class TicketAiAnalysisService:
                     db,
                     ticket_id=ticket.ticket_id,
                     status=TicketAiAnalysisStatus.FAILED.value,
+                    task_id=task_id,
+                    error_message=failure_message,
+                    follow_up_override=follow_up_override,
                 )
             if "ticket" in locals() and ticket:
                 TicketNotifyService.send_ticket_notification(
