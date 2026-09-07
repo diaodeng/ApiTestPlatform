@@ -62,6 +62,8 @@ class TicketSyncGroupPushService:
             "group_push_processing_at": sync_state.get("group_push_processing_at"),
             "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
             "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
+            # 最近一次入库同步场景，AI 终态回调据此还原真实触发场景。
+            "sync_scene": str(sync_state.get("sync_scene") or "").strip(),
         }
         return meta
 
@@ -207,6 +209,31 @@ class TicketSyncGroupPushService:
             update_by=_user_name(current_user),
         )
         return ticket, meta, True
+
+    @classmethod
+    def resolve_sync_scene_from_meta(cls, meta: dict[str, Any]) -> str:
+        """
+        从同步元数据解析工单最近一次入库的同步场景。
+        优先读取入库时持久化的 sync_state.sync_scene；历史工单没有该字段时按来源系统推断：
+        feishu_bitable_pull -> bitable_pull，manual_create -> manual_create，
+        其余保持 external_sync（远端拉取的来源系统可配置，无法与外部推送稳定区分）。
+        :param meta: 同步元数据
+        :return: 同步场景编码
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        persisted_scene = str(sync_state.get("sync_scene") or "").strip()
+        if persisted_scene in {"external_sync", "remote_pull", "bitable_pull", "manual_create"}:
+            return persisted_scene
+        source_system = str(
+            meta.get("sourceSystem")
+            or (meta.get("source") or {}).get("system")
+            or ""
+        ).strip()
+        if source_system == "feishu_bitable_pull":
+            return "bitable_pull"
+        if source_system == "manual_create":
+            return "manual_create"
+        return "external_sync"
 
     @classmethod
     def is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
@@ -734,14 +761,14 @@ class TicketSyncGroupPushService:
         *,
         ticket_id: int,
         ai_task_status: str,
-        sync_scene: str = "external_sync",
+        sync_scene: str = "",
     ) -> None:
         """
         在 AI 任务终态后收敛同步发布状态并补发一次自动群推送。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param ai_task_status: AI任务状态
-        :param sync_scene: 触发场景
+        :param sync_scene: 显式指定的同步场景；为空时从工单同步元数据解析最近一次入库场景
         :return: 无
         """
         try:
@@ -750,6 +777,12 @@ class TicketSyncGroupPushService:
                 return
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             meta = cls.build_meta(extra_data)
+            if not str(sync_scene or "").strip():
+                sync_scene = cls.resolve_sync_scene_from_meta(meta)
+            logger.info(
+                f"AI任务完成后群推送场景解析: ticket_no={ticket.ticket_no}, ticket_id={ticket_id}, "
+                f"resolved_scene={sync_scene}"
+            )
             normalized_status = str(ai_task_status or "").strip().lower()
             if normalized_status in cls.AI_PENDING_TASK_STATUSES:
                 meta = cls.set_publish_state(
@@ -774,6 +807,7 @@ class TicketSyncGroupPushService:
                 reason=reason,
                 ai_task_status=normalized_status,
             )
+            meta = cls._apply_ai_terminal_status_to_automation_step(meta, normalized_status)
             ticket = cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
             config = TicketSyncConfigService.load_sync_config(db)
             scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
@@ -799,6 +833,48 @@ class TicketSyncGroupPushService:
                 f"AI任务完成后同步发布状态回写失败: "
                 f"ticket_id={ticket_id}, ai_task_status={ai_task_status}, error={exc}"
             )
+
+    @classmethod
+    def _apply_ai_terminal_status_to_automation_step(cls, meta: dict[str, Any], ai_task_status: str) -> dict[str, Any]:
+        """
+        AI 任务到达终态后同步更新自动化步骤里的 ai_analysis 状态。
+        自动化链路提交 AI 任务时只写入 queued，此前终态从不回写导致步骤状态永久停留在 queued；
+        这里补齐回写，避免详情页和后续判断把已完成的 AI 当作处理中。
+        :param meta: 同步元数据
+        :param ai_task_status: AI任务终态状态
+        :return: 更新后的同步元数据
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        automation = sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {}
+        steps = automation.get("steps") if isinstance(automation.get("steps"), dict) else {}
+        ai_step = steps.get("ai_analysis") if isinstance(steps.get("ai_analysis"), dict) else {}
+        if not ai_step:
+            return meta
+        status_map = {
+            TicketAiAnalysisStatus.SUCCESS.value: "success",
+            TicketAiAnalysisStatus.FAILED.value: "failed",
+            TicketAiAnalysisStatus.CANCELED.value: "canceled",
+        }
+        step_status = status_map.get(str(ai_task_status or "").strip().lower())
+        if not step_status:
+            return meta
+        ai_step["status"] = step_status
+        ai_step["updated_at"] = SyncUtil.now_iso()
+        steps["ai_analysis"] = ai_step
+        automation["steps"] = steps
+        if step_status == "failed":
+            automation["status"] = "failed"
+        elif all(
+            (item or {}).get("status") not in {"queued", "running", "submitted"}
+            for item in steps.values()
+        ):
+            automation["status"] = "completed"
+        else:
+            # 其他步骤仍在执行中，自动化整体保持 running。
+            automation["status"] = "running"
+        sync_state["automation"] = automation
+        meta["sync_state"] = sync_state
+        return meta
 
     @classmethod
     def should_skip_auto_group_push_by_condition(

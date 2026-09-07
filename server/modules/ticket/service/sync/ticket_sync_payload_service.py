@@ -69,6 +69,9 @@ class TicketSyncPayloadService:
             "group_push_processing_at": sync_state.get("group_push_processing_at"),
             "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
             "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
+            # 最近一次入库同步场景（external_sync/remote_pull/bitable_pull/manual_create），
+            # 供 AI 终态等异步回调还原触发场景，历史数据为空由调用方按来源推断。
+            "sync_scene": str(sync_state.get("sync_scene") or "").strip(),
         }
         return meta
 
@@ -284,6 +287,8 @@ class TicketSyncPayloadService:
         sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
         sync_state.setdefault("status", "pending")
         sync_state.setdefault("automation", {})
+        # 记录本次入库的同步场景，供 AI 终态等异步回调读取真实场景而不是默认值。
+        sync_state["sync_scene"] = str(sync_scene or "external_sync").strip() or "external_sync"
         meta["sync_state"] = sync_state
 
         is_remote_pull = sync_scene == "remote_pull"

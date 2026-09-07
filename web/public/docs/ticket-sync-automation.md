@@ -275,9 +275,11 @@ POS/SCO 建议在自定义提示词中明确写成“收银机机台编号”，
 ## 八、发布状态
 
 - 外部推送首先写入 `publish_ready=false`，后台 AI/自动化结束后恢复为可发布。
+- AI 分析任务到达终态（成功/失败/取消）后会立即回写发布状态并按工单的真实入库场景尝试自动群推送：场景取自工单同步元数据中最近一次入库记录的 `sync_state.sync_scene`（外部推送/远端拉取/多维表格拉取/手动创建），历史工单没有该字段时按来源系统推断（`feishu_bitable_pull` 推断为多维表格拉取、`manual_create` 推断为手动创建、其余按外部推送处理）。因此多维表格拉取的工单在 AI 完成后会按 `sendAfterBitablePull` 开关决定是否发群消息，不再受 `sendAfterExternalSync` 影响。
 - `/ticket/sync/pending` 拉取前检查是否有活动 AI 任务；无活动任务时自动恢复 `publish_ready=true`。
 - 拉取时写入 `status=pulled` 和租约，30 分钟内不重复返回；超时未回执允许重试。
 - `/ticket/sync/ack` 只有 `delivered/success/succeeded` 推进交付版本；`failed` 不阻塞下次拉取。
+- AI 任务终态同时会把工单同步元数据中自动化步骤 `ai_analysis` 的状态从 `queued/running` 收敛为 `success/failed/canceled`，避免已完成的分析在工单详情中一直显示为处理中。
 
 ---
 
@@ -306,6 +308,16 @@ POS/SCO 建议在自定义提示词中明确写成“收银机机台编号”，
 ### Q5: 为什么某个开关在卡片里找不到了？
 
 所有场景开关都集中到了“入库流程”页签顶部的“场景 × 步骤 开关总表”，各步骤卡片只保留参数配置；连接类字段收在各卡片“连接与凭证覆盖”折叠区内。
+
+### Q6: AI 分析完成后没有发群消息，怎么排查？
+
+按以下顺序检查，对应日志均包含工单号：
+
+1. 服务端日志搜工单号，找 `AI任务完成后群推送场景解析`——确认 AI 终态回调解析出的场景是否正确（例如多维表格拉取应为 `bitable_pull`）。
+2. 找 `自动群推送跳过` 日志——关注跳过原因：范围判定不通过、群推送场景开关未启用（如 `sendAfterExternalSync=false`）、推送条件表达式不满足、或已发送过（去重）。
+3. 群推送场景开关按解析出的场景检查：多维表格拉取看 `sendAfterBitablePull`，外部推送看 `sendAfterExternalSync`。
+4. 确认工单未被 `group_push_sent_once` 去重（详情同步元数据中 `sync_state.group_push_sent_once`）。
+5. 若确认是历史遗漏（修复前 AI 完成被误拦截），可在“操作”页签按工单号手动发送群消息补推，无需改配置。
 
 ---
 

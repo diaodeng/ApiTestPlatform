@@ -4072,6 +4072,8 @@ class TicketAiAnalysisService:
     def _finalize_sync_publish_after_ai(cls, db: Session, *, ticket_id: int, status: str) -> None:
         """
         AI 任务终态后回写工单同步发布状态。
+        不再硬编码同步场景：由 finalize_sync_after_ai 从工单同步元数据解析最近一次入库场景，
+        避免多维表格拉取等场景的工单被 external_sync 场景开关误拦截。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param status: AI任务状态
@@ -4084,7 +4086,6 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket_id,
                 ai_task_status=status,
-                sync_scene="external_sync",
             )
         except Exception as exc:
             logger.warning(f"AI任务终态回写同步发布状态失败: ticket_id={ticket_id}, status={status}, error={exc}")

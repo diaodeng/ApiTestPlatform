@@ -2821,15 +2821,20 @@ class TicketSyncNotifyService:
         """
         enabled = bool(group_config.get("enabled"))
         if not enabled:
-            logger.info(f"群推送跳过: enabled=false, scene={scene}")
+            logger.info(f"群推送跳过: enabled=false, scene={scene}, ticket_no={ticket.ticket_no}")
             return {"skipped": True, "skipReason": "群推送开关未启用", "scene": scene}
 
         if not manual_trigger:
+            # 场景开关拦截必须打工单号：AI 终态等异步回调链路只有这里的日志可定位跳过原因。
             if scene == "external_sync" and not bool(group_config.get("sendAfterExternalSync")):
-                logger.info("群推送跳过: sendAfterExternalSync=false")
+                logger.info(
+                    f"群推送跳过: sendAfterExternalSync=false, scene={scene}, ticket_no={ticket.ticket_no}"
+                )
                 return {"skipped": True, "skipReason": "外部同步后群推送未启用", "scene": scene}
             if scene == "remote_pull" and not bool(group_config.get("sendAfterRemotePull")):
-                logger.info("群推送跳过: sendAfterRemotePull=false")
+                logger.info(
+                    f"群推送跳过: sendAfterRemotePull=false, scene={scene}, ticket_no={ticket.ticket_no}"
+                )
                 return {"skipped": True, "skipReason": "远端拉取后群推送未启用", "scene": scene}
         send_mode = cls._normalize_send_mode(group_config.get("sendMode"))
         app_id, app_secret = cls._resolve_feishu_auth(group_config)
