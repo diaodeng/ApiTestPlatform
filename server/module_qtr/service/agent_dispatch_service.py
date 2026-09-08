@@ -155,7 +155,7 @@ class AgentDispatchService:
     async def _cleanup_expired_active_requests(cls, redis, agent_code: str) -> None:
         """
         清理已过期的运行中租约，避免异常断开后并发槽位被永久占用。
-        :param redis: Redis 连接
+        :param redis: 连接
         :param agent_code: Agent 编码
         :return: 无
         """
@@ -167,6 +167,62 @@ class AgentDispatchService:
         ]
         if expired_request_ids:
             await redis.hdel(active_key, *expired_request_ids)
+
+    @classmethod
+    async def cleanup_orphan_active_leases(cls, redis) -> int:
+        """
+        服务重启后清理所有 Agent 的遗留运行租约（孤儿租约）。
+
+        背景：进程被 OOM Kill 时，等待 Agent 响应的协程随进程死亡，但
+        active 租约（最长 3900 秒）仍留在 Redis 中占满并发槽位，导致重启后
+        的重试请求排队等待直到旧租约自然过期（实测阻塞 24 分钟）。
+        服务启动阶段调用本方法：此刻不可能存在真正在运行的请求（Agent
+        请求只由本进程发出且进程刚启动），因此直接清空全部租约是安全的；
+        Agent 若在重启期间完成执行，其结果由迟到结果缓存机制恢复，不依赖
+        该租约。
+
+        :param redis: Redis 连接
+        :return: 清理的租约数量
+        """
+        removed = 0
+        pattern = f"{AGENT_AI_ANALYSIS_ACTIVE_PREFIX}:*"
+        try:
+            # 用 SCAN 游标循环而非 scan_iter：MemoryRedis（测试后端）只实现 scan。
+            cursor: int | str = 0
+            agent_keys: list[str] = []
+            while True:
+                cursor, keys = await redis.scan(cursor=cursor, match=pattern, count=100)
+                agent_keys.extend(str(key) for key in keys)
+                if int(cursor) == 0:
+                    break
+            for agent_key in agent_keys:
+                active_items = await redis.hgetall(agent_key)
+                if not active_items:
+                    continue
+                agent_code = agent_key.rsplit(":", 1)[-1]
+                # 按请求粒度删除并记录状态，保证观测性；重启场景下全部视为孤儿。
+                request_ids = list(active_items.keys())
+                await redis.hdel(agent_key, *request_ids)
+                removed += len(request_ids)
+                for request_id in request_ids:
+                    await cls._mark_state(
+                        redis,
+                        request_id=request_id,
+                        agent_code=agent_code,
+                        status="failed",
+                        message={
+                            "extra": {
+                                "reason": "orphan-lease-cleanup-on-restart",
+                            },
+                        },
+                    )
+                logger.warning(
+                    f"服务重启清理遗留 Agent 运行租约 | agent={agent_code}, "
+                    f"count={len(request_ids)}, request_ids={[str(r) for r in request_ids]}"
+                )
+        except Exception as exc:
+            logger.warning(f"清理遗留 Agent 运行租约失败（不影响启动）: error={exc}")
+        return removed
 
     @classmethod
     async def _load_json_cache(cls, redis, cache_key: str) -> dict[str, Any] | None:
@@ -322,6 +378,12 @@ class AgentDispatchService:
         }
         if queued_lease_until is not None:
             payload["queueLeaseUntil"] = queued_lease_until
+        # 扩展说明字段：message 中的 reason 等诊断信息透传到状态缓存。
+        extra = message.get("extra")
+        if isinstance(extra, dict):
+            for key, value in extra.items():
+                if key not in payload:
+                    payload[key] = value
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod

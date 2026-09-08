@@ -1235,6 +1235,44 @@ class TicketAiAnalysisService:
             return result
         return {}
 
+    # 旧版 Agent 兜底截断长度：与新版 Agent 回传摘要长度（RAW_OUTPUT_SUMMARY_CHARS=8000）
+    # 保持同量级，超长部分就地丢弃；完整内容以 Agent 本地 stdout_path 文件为准。
+    RESPONSE_RAW_OUTPUT_MAX_CHARS = 8000
+
+    @classmethod
+    def _truncate_response_raw_output(cls, response_object: Any) -> None:
+        """
+        就地截断 Agent 响应 result 内的超大 raw_output 字段。
+
+        背景：raw_output 曾整包回传完整 stdout（实测单次 8MB），WebSocket 分片
+        接收 + JSON 序列化 + 响应模型驻留会叠加出百 MB 级内存峰值，是两次容器
+        OOM 的直接诱因。新版 Agent 已在回传前截断；本方法兜底旧版 Agent。截断
+        只影响响应在服务端的驻留与审计摘要，不影响 analysis_result 的解析与写回。
+
+        :param response_object: Agent 内层响应对象（dict 或 pydantic 模型）
+        :return: 无
+        """
+        if response_object is None:
+            return
+        try:
+            result: Any
+            if isinstance(response_object, dict):
+                result = response_object.get("result")
+            else:
+                result = getattr(response_object, "result", None)
+            if not isinstance(result, dict):
+                return
+            raw_output = result.get("raw_output")
+            if isinstance(raw_output, str) and len(raw_output) > cls.RESPONSE_RAW_OUTPUT_MAX_CHARS:
+                result["raw_output"] = raw_output[: cls.RESPONSE_RAW_OUTPUT_MAX_CHARS]
+                logger.warning(
+                    f"Agent响应raw_output超长已截断: originalChars={len(raw_output)}, "
+                    f"truncatedTo={cls.RESPONSE_RAW_OUTPUT_MAX_CHARS}"
+                )
+        except Exception as exc:
+            # 截断失败不影响响应解析主流程。
+            logger.debug(f"截断Agent响应raw_output失败: error={exc}")
+
     @staticmethod
     def _resolve_agent_failure_message(
         response_object: Any,
@@ -4453,6 +4491,10 @@ class TicketAiAnalysisService:
                 response_dump = response_object.model_dump()
             else:
                 response_dump = {}
+            # 响应瘦身兜底：新版 Agent 已把 raw_output 截断为头部摘要，但旧版
+            # Agent 仍可能回传数 MB 的完整 stdout（历史 OOM 诱因）。在内存驻留
+            # 之前就地截断，完整内容以 Agent 本地 stdout_path 文件为准。
+            cls._truncate_response_raw_output(response_object)
             raw_stdout = cls._dumps(cls._json_safe_value(response_dump))
             raw_stderr = ""
             response_result_preview = None
