@@ -427,11 +427,30 @@ async def background_task():
 
 
 # 应用启动事件处理器
-async def startup_handler():
+async def startup_handler(app):
     # 在启动时创建一个后台任务
     # asyncio.create_task(background_task())
+    await cleanup_orphan_agent_leases(app)
     asyncio.create_task(manager.send_heartbeat())
     logger.info("Agent manager background task started.")
+
+
+async def cleanup_orphan_agent_leases(app):
+    """服务启动时清理上次进程遗留的 Agent 运行租约（孤儿租约）。
+
+    背景：进程被 OOM Kill 后 active 租约（最长 3900 秒）滞留 Redis 占满
+    并发槽位，重启后的重试请求被迫排队等待旧租约自然过期（实测 24 分钟）。
+    启动阶段不存在真正运行中的请求，直接清空是安全的；清理异常只记日志，
+    不阻塞启动流程。
+    """
+    try:
+        from module_qtr.service.agent_dispatch_service import AgentDispatchService
+
+        redis = app.state.redis
+        removed = await AgentDispatchService.cleanup_orphan_active_leases(redis)
+        logger.info(f"Agent 孤儿租约启动清理完成: removed={removed}")
+    except Exception as exc:
+        logger.warning(f"Agent 孤儿租约启动清理失败（不影响启动）: error={exc}")
 
 
 @agentController.get("/bootstrap/pos-config")

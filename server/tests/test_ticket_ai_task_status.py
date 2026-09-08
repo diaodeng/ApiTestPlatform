@@ -63,3 +63,33 @@ class TicketAiTaskStatusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RawOutputTruncateTests(unittest.TestCase):
+    """Agent 响应 raw_output 兜底截断的回归测试。"""
+
+    def test_truncate_dict_response_raw_output(self):
+        """dict 形态响应的超长 raw_output 应被就地截断。"""
+        response = {"result": {"analysis_result": {"root_cause": "x"}, "raw_output": "A" * 90000}}
+        TicketAiAnalysisService._truncate_response_raw_output(response)
+        result = response["result"]
+        self.assertEqual(len(result["raw_output"]), TicketAiAnalysisService.RESPONSE_RAW_OUTPUT_MAX_CHARS)
+        self.assertEqual(result["analysis_result"], {"root_cause": "x"})
+
+    def test_truncate_model_response_raw_output(self):
+        """pydantic 模型形态响应的超长 raw_output 应被就地截断。"""
+        response = Mock()
+        response.result = {"raw_output": "B" * 90000}
+        TicketAiAnalysisService._truncate_response_raw_output(response)
+        self.assertEqual(len(response.result["raw_output"]), TicketAiAnalysisService.RESPONSE_RAW_OUTPUT_MAX_CHARS)
+
+    def test_truncate_keeps_short_raw_output(self):
+        """未超长的 raw_output 保持原样。"""
+        response = {"result": {"raw_output": "short output"}}
+        TicketAiAnalysisService._truncate_response_raw_output(response)
+        self.assertEqual(response["result"]["raw_output"], "short output")
+
+    def test_truncate_tolerates_missing_or_invalid_fields(self):
+        """缺 result / 非法字段时不抛异常。"""
+        for response in (None, {}, {"result": None}, {"result": {"raw_output": None}}, {"other": 1}):
+            TicketAiAnalysisService._truncate_response_raw_output(response)

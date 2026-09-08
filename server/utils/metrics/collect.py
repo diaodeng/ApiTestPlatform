@@ -96,6 +96,10 @@ class PushDataToServer(threading.Thread):
         self.process_info = None
         self.cgroup_memory_info = None
         self.task_observer = None
+        # RSS 阈值诊断快照（默认关闭，环境变量开启），与采集线程同节拍。
+        from .memory_snapshot import MemorySnapshotWatcher
+
+        self.memory_snapshot_watcher = MemorySnapshotWatcher(role=self.role)
 
         # 按通道（profile_id）持有各自的待推送样本与上次推送时间。
         self._profiles: list[CollectorProfileSnapshot] = []
@@ -174,6 +178,7 @@ class PushDataToServer(threading.Thread):
             try:
                 self._refresh_profiles_if_due()
                 self._collect_tick()
+                self.memory_snapshot_watcher.check()
             except Exception as exc:
                 self.push_failures += 1
                 logger.exception(f"指标采集失败: role={self.role}, failures={self.push_failures}, error={exc}")

@@ -93,7 +93,7 @@ sequenceDiagram
 | 5 | 日志拉取下载解析阶段（`TicketLogPullService._process_download`）成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 6 | 自动拉日志正式创建记录前，会先按工单、环境、商家、门店、POS、数据类型和实际日志范围等关键参数检查是否已有成功记录；若命中则跳过重复拉取并复用该成功记录。 |
 | 7 | 自动拉日志创建前还会检查 `logPullDefaults.autoLogPullStopCondition`；该配置使用内部工作流状态编码多选，命中任一状态时，本次自动拉日志直接记为 `skipped`，不再创建新的自动日志任务，也不会继续发送无意义的“拉不动日志”失败通知。 |
-| 8 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；若未找到版本号则发送通知并跳过后续 AI 分析。 |
+| 8 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；提取正则来自日志拉取存储配置 `versionExtractPatterns`（可视化位置：同步自动化页「来源与拉取」→「存储与资源限制」），默认锚定 `ms_h/ms_l/ls_h/ls_l` 特征行，只取 `x.y.z` 起步版本号，避免误提取 `launcher_version`（启动器版本）与 OpenGL 解析版本；配置为空或全部非法时回退内置默认正则。若未找到版本号则发送通知并跳过后续 AI 分析。 |
 | 9 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。若自动拉日志因为停止条件被跳过，则同链路自动 AI 也一并跳过。 |
 | 10 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；日志拉取后的自动 AI 先经过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}`，再按 Redis 队列和 `ticket.ai.agent.maxConcurrentTasks` 控制单 Agent 并发；Provider 下发时服务端先合并 `workerEnv` 扩展项，再写入当前 Provider 的密钥、地址和模型；Codex/Claude Worker 初始化任务级配置时覆盖旧工作区值。Agent 并发由 `ticket.ai.agent.maxConcurrentTasks` 控制，默认 `1`，超出上限进入 Redis 队列。任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
 | 11 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
@@ -109,7 +109,7 @@ sequenceDiagram
 | 16 | 翻译、标题总结、分类、参数提取和知识提炼统一由 `TicketSyncAiConfigService` 从 `ticket.sync.automation` 读取开关、Provider 和提示词；旧 `ticket.ai.*` 配置不再参与运行。同步前会先由 `TicketAutomationScopeService` 对已映射系统模块判定关注范围，范围外只保留基础同步和规则映射，跳过所有自动 AI、日志、向量和自动群推送。 |
 | 17 | 多维表格主动拉取任务显式提供 `automation` 时使用任务级配置；未提供时按 `ticket.sync.automation` 的 `bitable_pull` 场景开关执行。 |
 | 8 | 工单详情页中的时间线、评论、日志拉取和 AI 分析改为按需加载，评论作为详情一级 tab 独立请求，避免打开详情或历史页时一次性拉取所有数据。 |
-| 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；相似工单由 `ticket.similarity.config` 选择 `local_hash`、`embedding` 或 `qdrant` Provider，严格按配置查询，失败直接报错或记录日志，不再回退其他 Provider；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。 |
+| 9 | 协同追问会先写入 `ticket_message`，再复用 AI 分析任务入口读取消息流、快照和相似历史工单做增量分析；相似工单由 `ticket.similarity.config` 选择 `local_hash`、`embedding` 或 `qdrant` Provider，严格按配置查询，失败直接报错或记录日志，不再回退其他 Provider；下发给 Agent 的日志正文会按首尾保留策略截断，避免超大上下文导致上游模型接口失败。数据库向量比对（2026-09-07 起）走 `_score_embedding_pages`：检索文本可提取错误码/Trace ID/Request ID 时先按 `ticket_similarity_signal` 信号索引预筛候选（配置 `signalPrescreenEnabled` 可关），再对候选或全量按 500 条/页分页扫描（`TicketDao.iter_ticket_embedding_pages`）并逐页释放会话实体，替代旧 `yield_per` 全量迭代。 |
 | 10 | AI 分析成功后写回 `ticket.ai_analysis`、RCA、AI 消息和 `ticket_snapshot`；工单关闭时自动提炼 `knowledge_article` 供后续相似工单检索。 |
 | 11 | 历史工单可通过 `POST /ticket/similarity/rebuild` 批量重建向量，重建文本包含标题、描述、AI 摘要和 RCA；手动指定范围使用 `ticketNos` 传业务工单号，服务端解析为系统 `ticket_id` 后复用重建流程。当前是一条工单一次外部 Embedding 请求，不合并多工单请求。`provider=local_hash` 只写数据库 `embedding_record` 的本地 hash，`provider=embedding` 只写数据库 `embedding_record` 的外部向量，`provider=qdrant` 只同步 Qdrant。同步 Qdrant 前会校验本次实际向量维度与 collection 维度，失败日志会带 Qdrant 响应体；开启 `recreateCollectionOnDimensionMismatch` 时，写入链路会删除旧 collection 并重建。外部异常会熔断后续批量请求。默认 `forceRebuild=false`，同一模型、版本、维度、字段列表和最终文本未变化时会复用本地向量；只有手动开启强制重建才重新请求外部接口。 |
 | 12 | 相似工单配置页面可保存 `sceneTriggers`；外部同步、远端拉取、手动新增、手动编辑、Excel 导入和关闭知识沉淀链路会按开关决定是否自动调用向量化。 |

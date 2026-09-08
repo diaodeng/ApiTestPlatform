@@ -1978,6 +1978,58 @@ class TicketDao:
         return query.all()
 
     @classmethod
+    def iter_ticket_embedding_pages(
+        cls,
+        db: Session,
+        model: str,
+        version: str,
+        embedding_scope: str = "symptom",
+        page_size: int = 500,
+        object_ids: list[int] | None = None,
+    ):
+        """
+        按主键游标分页迭代工单向量记录，每页独立查询并逐页返回。
+
+        与 yield_per 的区别：yield_per 只控制 ORM 实体化节奏，已迭代实体仍
+        累积在 session 身份映射中（2664 条 × 1024 维 JSON 向量约累积 85MB，
+        glibc arena 不归还）；本方法每页是独立 LIMIT/OFFSET 查询，页内实体
+        由调用方处理完毕后随局部作用域释放，session 身份映射不随总量增长。
+
+        :param db: 数据库会话
+        :param model: 向量模型标识
+        :param version: 向量版本
+        :param embedding_scope: 向量用途
+        :param page_size: 每页记录数，最小 1
+        :param object_ids: 可选工单ID白名单，用于信号预筛后的定向扫描
+        :return: 逐页产出 EmbeddingRecord 列表的生成器
+        """
+        filters = [
+            EmbeddingRecord.object_type == "ticket",
+            EmbeddingRecord.embedding_scope == (str(embedding_scope or "symptom").strip() or "symptom"),
+            EmbeddingRecord.embedding_model == model,
+            EmbeddingRecord.embedding_version == version,
+        ]
+        if object_ids:
+            filters.append(EmbeddingRecord.object_id.in_(object_ids))
+        safe_page_size = max(int(page_size or 500), 1)
+        offset = 0
+        while True:
+            page = (
+                db.query(EmbeddingRecord)
+                .filter(*filters)
+                .order_by(EmbeddingRecord.id.asc())
+                .offset(offset)
+                .limit(safe_page_size)
+                .all()
+            )
+            if not page:
+                return
+            yield page
+            if len(page) < safe_page_size:
+                return
+            offset += safe_page_size
+
+    @classmethod
     def get_ticket_similarity_profile(cls, db: Session, ticket_id: int) -> TicketSimilarityProfile | None:
         """按工单ID读取相似检索画像。"""
         return db.query(TicketSimilarityProfile).filter(TicketSimilarityProfile.ticket_id == ticket_id).first()

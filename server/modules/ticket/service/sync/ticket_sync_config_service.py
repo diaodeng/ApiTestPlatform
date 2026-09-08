@@ -401,6 +401,40 @@ class TicketSyncConfigService:
             "sendAfterManualCreate": False,
             "template": "",
             "manualTemplate": "",
+            "aiResultFollowUp": {
+                # AI 分析完成后向工单群话题回帖分析结果；默认整体关闭，上线零行为变化。
+                "enabled": False,
+                # none 不推送 / success 仅成功 / failed 仅失败 / always 成功失败都推；取消态永不推送。
+                "sendOn": "none",
+                "replyInThread": True,
+                "template": "",
+                # 无话题锚点时的处理策略：skip 记日志跳过（默认，防止对已有群消息的工单重复发送）；
+                # send_then_reply 先补发一条工单信息消息建立话题再回帖。
+                "noAnchorStrategy": "skip",
+            },
+        }
+
+    @classmethod
+    def _normalize_ai_result_follow_up_config(cls, value: Any) -> dict[str, Any]:
+        """
+        归一化 AI 分析结果话题回帖配置。
+
+        :param value: 原始配置（可能为空或结构不完整）。
+        :return: 归一化后的 aiResultFollowUp 配置。
+        """
+        config = value if isinstance(value, dict) else {}
+        send_on = str(config.get("sendOn") or "none").strip().lower()
+        if send_on not in {"none", "success", "failed", "always"}:
+            send_on = "none"
+        no_anchor_strategy = str(config.get("noAnchorStrategy") or "skip").strip().lower()
+        if no_anchor_strategy not in {"skip", "send_then_reply"}:
+            no_anchor_strategy = "skip"
+        return {
+            "enabled": bool(config.get("enabled")),
+            "sendOn": send_on,
+            "replyInThread": bool(config.get("replyInThread", True)),
+            "template": str(config.get("template") or "").strip(),
+            "noAnchorStrategy": no_anchor_strategy,
         }
 
     # --- migrated from TicketSyncService._default_message_sync_config ---
@@ -1434,6 +1468,7 @@ class TicketSyncConfigService:
         group_push["autoPushCondition"] = str(group_push.get("autoPushCondition") or "").strip()
         group_push["appId"] = str(group_push.get("appId") or "").strip()
         group_push["appSecret"] = str(group_push.get("appSecret") or "").strip()
+        group_push["aiResultFollowUp"] = cls._normalize_ai_result_follow_up_config(group_push.get("aiResultFollowUp"))
         priority_routes = group_push.get("priorityRoutes") if isinstance(group_push.get("priorityRoutes"), list) else []
         normalized_priority_routes: list[dict[str, Any]] = []
         for route in priority_routes:

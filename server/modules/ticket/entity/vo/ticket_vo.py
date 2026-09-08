@@ -525,6 +525,13 @@ class TicketAiAnalysisRequestModel(BaseModel):
         default=False,
         description="是否跳过写入用户追问消息；协同消息链路已提前写入 question 消息时置为 True，避免重复记录",
     )
+    ai_result_follow_up: str = Field(
+        default="follow",
+        description=(
+            "分析完成后是否回帖 AI 结果到工单群话题："
+            "follow 跟随群推送 aiResultFollowUp 配置（默认）、on 本次回帖、off 本次不回帖"
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -550,6 +557,10 @@ class TicketAiAnalysisRequestModel(BaseModel):
             if value is None:
                 continue
             setattr(self, attr_name, max(int(value), 0))
+        normalized_follow_up = str(self.ai_result_follow_up or "").strip().lower()
+        if normalized_follow_up not in {"follow", "on", "off"}:
+            normalized_follow_up = "follow"
+        self.ai_result_follow_up = normalized_follow_up
         return self
 
 

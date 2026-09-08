@@ -81,15 +81,46 @@ class MetricsCollectorRuntimeService:
         默认使用独立数据库会话；传入 db 时使用该会话（测试或调用方已持有
         会话的场景）。数据库异常时向上抛出，由调用方决定保留或清空通道：
         采集线程捕获异常后保留现有通道继续推送，不会误把加载失败当作无通道。
+
+        轮询顺带把内存诊断快照的可视化配置热注入当前线程（同一会话，
+        失败只记日志，不影响通道加载）。
         """
         try:
             if db is not None:
+                cls._refresh_memory_snapshot_config(db)
                 return [cls._to_snapshot(row) for row in MetricsCollectorConfigService.load_push_profiles(db)]
             with SessionLocal() as session:
+                cls._refresh_memory_snapshot_config(session)
                 return [cls._to_snapshot(row) for row in MetricsCollectorConfigService.load_push_profiles(session)]
         except Exception as exc:
             logger.warning(f"加载采集服务配置失败: role={role}, error={exc}")
             raise
+
+    @staticmethod
+    def _refresh_memory_snapshot_config(db: Session) -> None:
+        """把数据库中的诊断快照配置热注入当前进程的采集线程。
+
+        异常只记日志，绝不影响采集通道加载与主业务。
+        """
+        try:
+            from modules.metrics.service.memory_snapshot_config_service import MemorySnapshotConfigService
+
+            thread = cls.get_thread_any()
+            if thread is None:
+                return
+            config = MemorySnapshotConfigService.load_runtime_config(db)
+            thread.memory_snapshot_watcher.apply_config(config)
+        except Exception as exc:
+            logger.debug(f"刷新内存诊断快照配置失败: error={exc}")
+
+    @classmethod
+    def get_thread_any(cls) -> PushDataToServer | None:
+        """返回当前进程任意一个采集线程（单进程只启动一个角色）。"""
+        with _threads_lock:
+            for thread in _threads.values():
+                if thread.is_alive():
+                    return thread
+            return None
 
     @classmethod
     def poll_and_apply(cls, role: str):

@@ -1235,6 +1235,44 @@ class TicketAiAnalysisService:
             return result
         return {}
 
+    # 旧版 Agent 兜底截断长度：与新版 Agent 回传摘要长度（RAW_OUTPUT_SUMMARY_CHARS=8000）
+    # 保持同量级，超长部分就地丢弃；完整内容以 Agent 本地 stdout_path 文件为准。
+    RESPONSE_RAW_OUTPUT_MAX_CHARS = 8000
+
+    @classmethod
+    def _truncate_response_raw_output(cls, response_object: Any) -> None:
+        """
+        就地截断 Agent 响应 result 内的超大 raw_output 字段。
+
+        背景：raw_output 曾整包回传完整 stdout（实测单次 8MB），WebSocket 分片
+        接收 + JSON 序列化 + 响应模型驻留会叠加出百 MB 级内存峰值，是两次容器
+        OOM 的直接诱因。新版 Agent 已在回传前截断；本方法兜底旧版 Agent。截断
+        只影响响应在服务端的驻留与审计摘要，不影响 analysis_result 的解析与写回。
+
+        :param response_object: Agent 内层响应对象（dict 或 pydantic 模型）
+        :return: 无
+        """
+        if response_object is None:
+            return
+        try:
+            result: Any
+            if isinstance(response_object, dict):
+                result = response_object.get("result")
+            else:
+                result = getattr(response_object, "result", None)
+            if not isinstance(result, dict):
+                return
+            raw_output = result.get("raw_output")
+            if isinstance(raw_output, str) and len(raw_output) > cls.RESPONSE_RAW_OUTPUT_MAX_CHARS:
+                result["raw_output"] = raw_output[: cls.RESPONSE_RAW_OUTPUT_MAX_CHARS]
+                logger.warning(
+                    f"Agent响应raw_output超长已截断: originalChars={len(raw_output)}, "
+                    f"truncatedTo={cls.RESPONSE_RAW_OUTPUT_MAX_CHARS}"
+                )
+        except Exception as exc:
+            # 截断失败不影响响应解析主流程。
+            logger.debug(f"截断Agent响应raw_output失败: error={exc}")
+
     @staticmethod
     def _resolve_agent_failure_message(
         response_object: Any,
@@ -1852,6 +1890,12 @@ class TicketAiAnalysisService:
             "selectedAgentCode": selected_agent_code,
             "selectedPromptTemplateCodes": selected_prompt_template_codes,
             "extraInstruction": extra_instruction,
+            # 手动触发时用户对"分析完成后回帖工单群话题"的三态选择，终态回帖时读取。
+            "aiResultFollowUpOverride": (
+                str(request.ai_result_follow_up or "").strip().lower()
+                if request
+                else str(context_payload.get("aiResultFollowUpOverride") or "").strip().lower()
+            ),
         }
         selected_provider_code = (
             str(request.ai_provider_code or "").strip()
@@ -3829,13 +3873,18 @@ class TicketAiAnalysisService:
         """
         检查 Redis 结果缓存中是否存在指定请求的迟到结果（只查询不消费）。
 
-        在后台线程中执行（无运行中事件循环），因此用 asyncio.run 驱动短生命周期
-        异步查询；缓存后端可能是 redis 或 memory，统一走 RedisUtil 创建。
+        同步上下文驱动短生命周期异步查询，兼容两种调用环境：
+        - 后台线程（无运行中事件循环）：直接 asyncio.run；
+        - 事件循环内（如 FastAPI lifespan 启动恢复）：asyncio.run 会抛
+          "cannot be called from a running event loop"，改用独立线程 +
+          run_coroutine_threadsafe 串行等待结果。
+        缓存后端可能是 redis 或 memory，统一走 RedisUtil 创建。
         :param request_id: Agent 请求ID
         :return: 是否存在缓存结果
         """
         try:
             import asyncio
+            import concurrent.futures
 
             from config.get_redis import RedisUtil
 
@@ -3846,7 +3895,14 @@ class TicketAiAnalysisService:
                 finally:
                     await redis.close()
 
-            return asyncio.run(_exists())
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(_exists())
+
+            # 事件循环已运行：借独立线程驱动协程，避免在循环内嵌套 asyncio.run。
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(lambda: asyncio.run(_exists())).result(timeout=10)
         except Exception as exc:
             logger.warning(f"查询迟到结果缓存失败，按无缓存处理: request_id={request_id}, error={exc}")
             return False
@@ -3858,7 +3914,7 @@ class TicketAiAnalysisService:
         :param task_id: 任务ID
         :return: 无
         """
-        observation = get_task_memory_observer("api").start(
+        observation = get_task_memory_observer().start(
             {
                 "task_id": task_id,
                 "task_key": "ticket_ai_analysis",
@@ -3879,7 +3935,7 @@ class TicketAiAnalysisService:
         finally:
             with cls._executor_lock:
                 cls._active_task_ids.discard(task_id)
-            get_task_memory_observer("api").finish(
+            get_task_memory_observer().finish(
                 {
                     "task_id": task_id,
                     "task_key": "ticket_ai_analysis",
@@ -4069,12 +4125,28 @@ class TicketAiAnalysisService:
         TicketSimilarityCaseService.enqueue_index_for_ticket(ticket.ticket_id)
 
     @classmethod
-    def _finalize_sync_publish_after_ai(cls, db: Session, *, ticket_id: int, status: str) -> None:
+    def _finalize_sync_publish_after_ai(
+        cls,
+        db: Session,
+        *,
+        ticket_id: int,
+        status: str,
+        task_id: int | None = None,
+        result_payload: dict[str, Any] | None = None,
+        error_message: str = "",
+        follow_up_override: str = "",
+    ) -> None:
         """
-        AI 任务终态后回写工单同步发布状态。
+        AI 任务终态后回写工单同步发布状态并按配置回帖 AI 结果。
+        不再硬编码同步场景：由 finalize_sync_after_ai 从工单同步元数据解析最近一次入库场景，
+        避免多维表格拉取等场景的工单被 external_sync 场景开关误拦截。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param status: AI任务状态
+        :param task_id: AI任务ID，用于结果回帖幂等
+        :param result_payload: AI分析结果载荷（成功时供回帖渲染）
+        :param error_message: AI失败原因（失败时供回帖渲染）
+        :param follow_up_override: 结果回帖覆盖意图（follow/on/off，手动触发时使用）
         :return: 无
         """
         try:
@@ -4084,7 +4156,10 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket_id,
                 ai_task_status=status,
-                sync_scene="external_sync",
+                ai_task_id=task_id,
+                ai_result_payload=result_payload,
+                ai_error_message=error_message,
+                follow_up_override=follow_up_override,
             )
         except Exception as exc:
             logger.warning(f"AI任务终态回写同步发布状态失败: ticket_id={ticket_id}, status={status}, error={exc}")
@@ -4102,6 +4177,9 @@ class TicketAiAnalysisService:
         if not task or task.status == TicketAiAnalysisStatus.SUCCESS.value:
             cls._log_task_step(task_id, "LOAD", "任务不存在或已成功，跳过")
             return
+        # 手动触发时快照在任务上下文里的"结果回帖"三态选择；自动触发快照缺失时按跟随全局处理。
+        task_context = task.analysis_context if isinstance(task.analysis_context, dict) else {}
+        follow_up_override = str(task_context.get("aiResultFollowUpOverride") or "").strip().lower()
         # 执行入口状态白名单：只允许新建和重试后的任务进入执行，
         # 防止并发失败者（canceled）或其它终态任务被误排队后再次执行、重复消耗模型调用。
         if task.status not in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
@@ -4182,6 +4260,9 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket.ticket_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
+                task_id=task_id,
+                error_message='未找到可用的项目版本仓库映射',
+                follow_up_override=follow_up_override,
             )
             return
 
@@ -4315,6 +4396,9 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket.ticket_id,
                 status=TicketAiAnalysisStatus.FAILED.value,
+                task_id=task_id,
+                error_message='未找到可用的 Agent，请先启动本地 Agent 并连接到服务端',
+                follow_up_override=follow_up_override,
             )
             return
         started_at = datetime.now()
@@ -4407,6 +4491,10 @@ class TicketAiAnalysisService:
                 response_dump = response_object.model_dump()
             else:
                 response_dump = {}
+            # 响应瘦身兜底：新版 Agent 已把 raw_output 截断为头部摘要，但旧版
+            # Agent 仍可能回传数 MB 的完整 stdout（历史 OOM 诱因）。在内存驻留
+            # 之前就地截断，完整内容以 Agent 本地 stdout_path 文件为准。
+            cls._truncate_response_raw_output(response_object)
             raw_stdout = cls._dumps(cls._json_safe_value(response_dump))
             raw_stderr = ""
             response_result_preview = None
@@ -4448,6 +4536,8 @@ class TicketAiAnalysisService:
                     db,
                     ticket_id=ticket.ticket_id,
                     status=TicketAiAnalysisStatus.CANCELED.value,
+                    task_id=task_id,
+                    follow_up_override=follow_up_override,
                 )
                 return
 
@@ -4634,6 +4724,9 @@ class TicketAiAnalysisService:
                 db,
                 ticket_id=ticket.ticket_id,
                 status=TicketAiAnalysisStatus.SUCCESS.value,
+                task_id=task_id,
+                result_payload=normalized,
+                follow_up_override=follow_up_override,
             )
             TicketNotifyService.send_ticket_notification(
                 db,
@@ -4696,6 +4789,9 @@ class TicketAiAnalysisService:
                     db,
                     ticket_id=ticket.ticket_id,
                     status=TicketAiAnalysisStatus.FAILED.value,
+                    task_id=task_id,
+                    error_message=failure_message,
+                    follow_up_override=follow_up_override,
                 )
             if "ticket" in locals() and ticket:
                 TicketNotifyService.send_ticket_notification(

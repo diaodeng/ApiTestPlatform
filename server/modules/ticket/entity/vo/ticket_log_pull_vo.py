@@ -62,6 +62,10 @@ class TicketLogPullStorageConfigModel(TicketLogPullBaseModel):
         default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
     )
     post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
+    version_extract_patterns: list[str] | None = Field(
+        default=None,
+        description="日志版本提取正则列表，空值或全部非法时回退内置默认正则；每个正则的第一个分组作为版本号",
+    )
 
 
 class TicketLogPullPostProcessConfigModel(TicketLogPullBaseModel):
@@ -74,6 +78,10 @@ class TicketLogPullPostProcessConfigModel(TicketLogPullBaseModel):
         default=False, description="日志下载完成并自动解压后是否从日志文件提取版本号"
     )
     post_download_index_enabled: bool = Field(default=False, description="日志下载完成并自动解压后是否生成日志行索引")
+    version_extract_patterns: list[str] | None = Field(
+        default=None,
+        description="日志版本提取正则列表，空值或全部非法时回退内置默认正则；每个正则的第一个分组作为版本号",
+    )
 
 
 class TicketLogPullEnvItemModel(TicketLogPullBaseModel):

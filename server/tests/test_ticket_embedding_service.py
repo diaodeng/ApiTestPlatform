@@ -420,8 +420,8 @@ class TicketEmbeddingServiceTests(unittest.TestCase):
         with (
             patch.object(TicketEmbeddingService, "_embed_text_openai_compatible") as embed_mock,
             patch(
-                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.list_ticket_embedding_records",
-                return_value=records,
+                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.iter_ticket_embedding_pages",
+                return_value=iter([records]),
             ),
             patch(
                 "modules.ticket.service.ai.ticket_embedding_service.TicketEmbeddingService._build_ticket_search_result",
@@ -636,6 +636,96 @@ class TicketHybridSimilarityServiceTests(unittest.TestCase):
         result_ids = [item["ticketId"] for item in result]
         self.assertNotIn(1, result_ids)
         self.assertIn(2, result_ids)
+
+
+class TicketEmbeddingPagedScanTests(unittest.TestCase):
+    """相似工单检索分页扫描与信号预筛的回归测试。"""
+
+    def _make_records(self, count: int, start_id: int = 1):
+        """构造指定数量的向量记录桩对象，object_id 从 start_id 起避免跨页重复。"""
+        return [
+            type("Record", (), {"object_id": start_id + i, "embedding": [1.0, 0.0, 0.0]})()
+            for i in range(count)
+        ]
+
+    def test_paged_scan_processes_all_pages_and_releases_session(self):
+        """分页扫描应消费所有页并对每页调用会话失效。"""
+        config = {"provider": "embedding", "threshold": 0}
+        pages = [self._make_records(2), self._make_records(1, start_id=10)]
+        expire_calls = []
+
+        class FakeDb:
+            def expire_all(self):
+                expire_calls.append(1)
+
+        with (
+            patch.object(TicketEmbeddingService, "_embed_text_openai_compatible"),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.iter_ticket_embedding_pages",
+                return_value=iter(pages),
+            ) as pages_mock,
+        ):
+            scored = TicketEmbeddingService._score_embedding_pages(
+                FakeDb(),
+                [1.0, 0.0, 0.0],
+                5,
+                "BAAI/bge-m3",
+                "v1",
+                config,
+            )
+
+        self.assertEqual(len(scored), 3)
+        self.assertEqual(len(expire_calls), 2)
+        pages_mock.assert_called_once()
+        # 分页参数校验：页大小来自类常量，未启用预筛时不传 object_ids。
+        self.assertIsNone(pages_mock.call_args.kwargs.get("object_ids"))
+
+    def test_paged_scan_without_keyword_skips_prescreen(self):
+        """无关键词时不做信号预筛，直接全量分页扫描。"""
+        config = {"provider": "embedding", "threshold": 0}
+        with (
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketDao.iter_ticket_embedding_pages",
+                return_value=iter([self._make_records(1)]),
+            ),
+            patch(
+                "modules.ticket.service.ai.ticket_embedding_service.TicketSimilarityProfileService.extract_signal_values",
+            ) as extract_mock,
+        ):
+            TicketEmbeddingService._resolve_signal_prescreen_ids(object(), "", config)
+        extract_mock.assert_called_once_with("")
+
+    def test_signal_prescreen_resolves_ticket_ids(self):
+        """关键词命中信号时应按信号索引预筛出候选工单ID。"""
+        config = {"provider": "embedding", "threshold": 0}
+        keyword = "错误码: SG7E-3242 支付失败"
+        with patch(
+            "modules.ticket.service.ai.ticket_embedding_service.TicketDao.list_ticket_ids_by_similarity_signals",
+            return_value={101: {"sg7e-3242"}},
+        ) as signals_mock:
+            result = TicketEmbeddingService._resolve_signal_prescreen_ids(object(), keyword, config)
+        self.assertEqual(result, [101])
+        signals_mock.assert_called_once()
+        self.assertEqual(signals_mock.call_args.args[1], "error_code")
+
+    def test_signal_prescreen_disabled_by_config(self):
+        """配置关闭 signalPrescreenEnabled 时不做预筛。"""
+        config = {"provider": "embedding", "threshold": 0, "signalPrescreenEnabled": False}
+        with patch(
+            "modules.ticket.service.ai.ticket_embedding_service.TicketSimilarityProfileService.extract_signal_values",
+        ) as extract_mock:
+            result = TicketEmbeddingService._resolve_signal_prescreen_ids(object(), "错误码: X100", config)
+        extract_mock.assert_not_called()
+        self.assertIsNone(result)
+
+    def test_extract_signal_values_from_plain_text(self):
+        """信号提取服务应从纯文本提取错误码和 Trace ID。"""
+        from modules.ticket.service.ai.ticket_similarity_profile_service import TicketSimilarityProfileService
+
+        values = TicketSimilarityProfileService.extract_signal_values("支付失败 error: SG7E-3242, trace_id: abc12345de")
+        self.assertEqual(values.get("error_code"), ["sg7e-3242"])
+        self.assertEqual(values.get("trace_id"), ["abc12345de"])
+        self.assertEqual(TicketSimilarityProfileService.extract_signal_values("普通业务描述"), {})
 
 
 if __name__ == "__main__":

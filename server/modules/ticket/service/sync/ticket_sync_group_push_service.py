@@ -62,6 +62,8 @@ class TicketSyncGroupPushService:
             "group_push_processing_at": sync_state.get("group_push_processing_at"),
             "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
             "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
+            # 最近一次入库同步场景，AI 终态回调据此还原真实触发场景。
+            "sync_scene": str(sync_state.get("sync_scene") or "").strip(),
         }
         return meta
 
@@ -207,6 +209,31 @@ class TicketSyncGroupPushService:
             update_by=_user_name(current_user),
         )
         return ticket, meta, True
+
+    @classmethod
+    def resolve_sync_scene_from_meta(cls, meta: dict[str, Any]) -> str:
+        """
+        从同步元数据解析工单最近一次入库的同步场景。
+        优先读取入库时持久化的 sync_state.sync_scene；历史工单没有该字段时按来源系统推断：
+        feishu_bitable_pull -> bitable_pull，manual_create -> manual_create，
+        其余保持 external_sync（远端拉取的来源系统可配置，无法与外部推送稳定区分）。
+        :param meta: 同步元数据
+        :return: 同步场景编码
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        persisted_scene = str(sync_state.get("sync_scene") or "").strip()
+        if persisted_scene in {"external_sync", "remote_pull", "bitable_pull", "manual_create"}:
+            return persisted_scene
+        source_system = str(
+            meta.get("sourceSystem")
+            or (meta.get("source") or {}).get("system")
+            or ""
+        ).strip()
+        if source_system == "feishu_bitable_pull":
+            return "bitable_pull"
+        if source_system == "manual_create":
+            return "manual_create"
+        return "external_sync"
 
     @classmethod
     def is_group_push_sent_once(cls, meta: dict[str, Any]) -> bool:
@@ -734,14 +761,23 @@ class TicketSyncGroupPushService:
         *,
         ticket_id: int,
         ai_task_status: str,
-        sync_scene: str = "external_sync",
+        sync_scene: str = "",
+        ai_task_id: int | None = None,
+        ai_result_payload: dict[str, Any] | None = None,
+        ai_error_message: str = "",
+        follow_up_override: str = "",
     ) -> None:
         """
-        在 AI 任务终态后收敛同步发布状态并补发一次自动群推送。
+        在 AI 任务终态后收敛同步发布状态并补发一次自动群推送，
+        随后按 aiResultFollowUp 配置把 AI 分析结果回帖到工单群话题。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param ai_task_status: AI任务状态
-        :param sync_scene: 触发场景
+        :param sync_scene: 显式指定的同步场景；为空时从工单同步元数据解析最近一次入库场景
+        :param ai_task_id: AI任务ID，用于结果回帖幂等
+        :param ai_result_payload: AI分析结果载荷（成功时供回帖渲染）
+        :param ai_error_message: AI失败原因（失败时供回帖渲染）
+        :param follow_up_override: 结果回帖覆盖意图（follow 跟随全局 / on / off，手动触发时使用）
         :return: 无
         """
         try:
@@ -750,6 +786,12 @@ class TicketSyncGroupPushService:
                 return
             extra_data = dict(ticket.extra_data or {}) if isinstance(ticket.extra_data, dict) else {}
             meta = cls.build_meta(extra_data)
+            if not str(sync_scene or "").strip():
+                sync_scene = cls.resolve_sync_scene_from_meta(meta)
+            logger.info(
+                f"AI任务完成后群推送场景解析: ticket_no={ticket.ticket_no}, ticket_id={ticket_id}, "
+                f"resolved_scene={sync_scene}"
+            )
             normalized_status = str(ai_task_status or "").strip().lower()
             if normalized_status in cls.AI_PENDING_TASK_STATUSES:
                 meta = cls.set_publish_state(
@@ -774,24 +816,46 @@ class TicketSyncGroupPushService:
                 reason=reason,
                 ai_task_status=normalized_status,
             )
+            meta = cls._apply_ai_terminal_status_to_automation_step(meta, normalized_status)
             ticket = cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
             config = TicketSyncConfigService.load_sync_config(db)
             scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
+            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+            follow_up_config = (
+                group_config.get("aiResultFollowUp")
+                if isinstance(group_config.get("aiResultFollowUp"), dict)
+                else {}
+            )
             if not scope_decision.eligible:
                 logger.info(
                     f"AI任务完成后自动群推送跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, "
                     f"reason={scope_decision.reason}, module_id={scope_decision.module_id}, "
                     f"module_name={scope_decision.module_name!r}"
                 )
-                return
-            group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
-            cls.send_auto_group_message_once(
+            else:
+                # 先补发工单信息群消息（未发送过则发送并记录话题锚点），结果回帖依赖锚点。
+                _, ticket, meta = cls.send_auto_group_message_once(
+                    db,
+                    ticket=ticket,
+                    meta=meta,
+                    group_config=group_config,
+                    scene=sync_scene,
+                    update_by="system",
+                )
+            # AI 结果话题回帖：不受自动化范围限制（结果回帖面向已在群里跟进的工单）；
+            # 无锚点时按 noAnchorStrategy 处理：skip 跳过，send_then_reply 先补发工单信息再回帖
+            #（补发自身带范围/场景/条件/去重全套判定，不会对历史已推送工单重复发送）。
+            cls.send_ai_result_thread_reply(
                 db,
                 ticket=ticket,
                 meta=meta,
-                group_config=group_config,
-                scene=sync_scene,
-                update_by="system",
+                follow_up_config=follow_up_config,
+                ai_task_status=normalized_status,
+                ai_task_id=ai_task_id,
+                ai_result_payload=ai_result_payload,
+                ai_error_message=ai_error_message,
+                override=follow_up_override,
+                sync_scene=sync_scene,
             )
         except Exception as exc:
             db.rollback()
@@ -799,6 +863,429 @@ class TicketSyncGroupPushService:
                 f"AI任务完成后同步发布状态回写失败: "
                 f"ticket_id={ticket_id}, ai_task_status={ai_task_status}, error={exc}"
             )
+
+    @classmethod
+    def _apply_ai_terminal_status_to_automation_step(cls, meta: dict[str, Any], ai_task_status: str) -> dict[str, Any]:
+        """
+        AI 任务到达终态后同步更新自动化步骤里的 ai_analysis 状态。
+        自动化链路提交 AI 任务时只写入 queued，此前终态从不回写导致步骤状态永久停留在 queued；
+        这里补齐回写，避免详情页和后续判断把已完成的 AI 当作处理中。
+        :param meta: 同步元数据
+        :param ai_task_status: AI任务终态状态
+        :return: 更新后的同步元数据
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        automation = sync_state.get("automation") if isinstance(sync_state.get("automation"), dict) else {}
+        steps = automation.get("steps") if isinstance(automation.get("steps"), dict) else {}
+        ai_step = steps.get("ai_analysis") if isinstance(steps.get("ai_analysis"), dict) else {}
+        if not ai_step:
+            return meta
+        status_map = {
+            TicketAiAnalysisStatus.SUCCESS.value: "success",
+            TicketAiAnalysisStatus.FAILED.value: "failed",
+            TicketAiAnalysisStatus.CANCELED.value: "canceled",
+        }
+        step_status = status_map.get(str(ai_task_status or "").strip().lower())
+        if not step_status:
+            return meta
+        ai_step["status"] = step_status
+        ai_step["updated_at"] = SyncUtil.now_iso()
+        steps["ai_analysis"] = ai_step
+        automation["steps"] = steps
+        if step_status == "failed":
+            automation["status"] = "failed"
+        elif all(
+            (item or {}).get("status") not in {"queued", "running", "submitted"}
+            for item in steps.values()
+        ):
+            automation["status"] = "completed"
+        else:
+            # 其他步骤仍在执行中，自动化整体保持 running。
+            automation["status"] = "running"
+        sync_state["automation"] = automation
+        meta["sync_state"] = sync_state
+        return meta
+
+    # ---- AI 分析结果话题回帖（aiResultFollowUp）----
+
+    AI_RESULT_SEND_ON_CHOICES = {"none", "success", "failed", "always"}
+
+    @classmethod
+    def should_send_ai_result_follow_up(
+        cls,
+        follow_up_config: dict[str, Any] | None,
+        *,
+        ai_task_status: str,
+        override: str = "",
+    ) -> tuple[bool, str]:
+        """
+        判断 AI 分析结果是否需要回帖到工单群话题。
+        :param follow_up_config: aiResultFollowUp 配置
+        :param ai_task_status: AI任务终态状态
+        :param override: 手动触发时的覆盖意图（follow 跟随全局 / on 本次回帖 / off 本次不回帖）
+        :return: (是否回帖, 判定原因)
+        """
+        config = follow_up_config if isinstance(follow_up_config, dict) else {}
+        status = str(ai_task_status or "").strip().lower()
+        override_mode = str(override or "").strip().lower()
+        if override_mode in {"on", "off"}:
+            if override_mode == "off":
+                return False, "手动触发指定本次不回帖"
+            # 手动指定本次回帖仍要求全局配置结构有效（sendOn 语义保留），仅跳过 enabled 总开关。
+            send_on = str(config.get("sendOn") or "none").strip().lower()
+            matched = cls._match_ai_result_send_on(send_on, status)
+            return matched, f"手动触发指定本次回帖, sendOn={send_on}"
+        if not bool(config.get("enabled")):
+            return False, "AI结果回帖开关未启用"
+        send_on = str(config.get("sendOn") or "none").strip().lower()
+        if send_on not in cls.AI_RESULT_SEND_ON_CHOICES:
+            send_on = "none"
+        matched = cls._match_ai_result_send_on(send_on, status)
+        return matched, f"sendOn={send_on}" if matched else f"sendOn={send_on} 不匹配当前终态"
+
+    @classmethod
+    def _match_ai_result_send_on(cls, send_on: str, ai_task_status: str) -> bool:
+        """
+        判断 sendOn 取值是否匹配 AI 任务终态；取消态任何取值都不推送。
+        :param send_on: sendOn 配置取值
+        :param ai_task_status: AI任务终态状态
+        :return: 是否匹配
+        """
+        if send_on == "none":
+            return False
+        if ai_task_status == TicketAiAnalysisStatus.SUCCESS.value:
+            return send_on in {"success", "always"}
+        if ai_task_status == TicketAiAnalysisStatus.FAILED.value:
+            return send_on in {"failed", "always"}
+        # canceled 及未知状态一律不推送。
+        return False
+
+    @classmethod
+    def is_ai_result_replied(
+        cls,
+        meta: dict[str, Any],
+        *,
+        task_id: int | None,
+    ) -> bool:
+        """
+        判断指定 AI 任务是否已回帖过分析结果（按 task_id 幂等）。
+        :param meta: 同步元数据
+        :param task_id: AI任务ID
+        :return: 是否已回帖
+        """
+        if not task_id:
+            return False
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        replied_ids = sync_state.get("ai_result_reply_task_ids")
+        if not isinstance(replied_ids, list):
+            return False
+        replied_keys = {str(item) for item in replied_ids}
+        return str(task_id) in replied_keys
+
+    @classmethod
+    def mark_ai_result_replied(
+        cls,
+        meta: dict[str, Any],
+        *,
+        task_id: int | None,
+    ) -> dict[str, Any]:
+        """
+        标记 AI 任务已回帖分析结果（按 task_id 幂等，保留最近 50 条防止元数据无限增长）。
+        :param meta: 同步元数据
+        :param task_id: AI任务ID
+        :return: 更新后的同步元数据
+        """
+        if not task_id:
+            return meta
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        replied_ids = sync_state.get("ai_result_reply_task_ids")
+        if not isinstance(replied_ids, list):
+            replied_ids = []
+        task_key = str(task_id)
+        if task_key not in {str(item) for item in replied_ids}:
+            replied_ids.append(task_key)
+        sync_state["ai_result_reply_task_ids"] = replied_ids[-50:]
+        meta["sync_state"] = sync_state
+        return meta
+
+    @classmethod
+    def _collect_ai_result_reply_targets(cls, meta: dict[str, Any]) -> list[dict[str, Any]]:
+        """
+        从群推送锚点收集回帖目标（按 chatId 去重，工单信息发到几个群就回几个群）。
+        :param meta: 同步元数据
+        :return: 去重后的锚点列表
+        """
+        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
+        refs = sync_state.get("group_push_message_refs")
+        if not isinstance(refs, list):
+            return []
+        targets: list[dict[str, Any]] = []
+        seen_chat_ids: set[str] = set()
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            message_id = str(ref.get("messageId") or "").strip()
+            if not message_id:
+                continue
+            chat_id = str(ref.get("chatId") or ref.get("receiveId") or "").strip()
+            if chat_id and chat_id in seen_chat_ids:
+                continue
+            if chat_id:
+                seen_chat_ids.add(chat_id)
+            targets.append(
+                {
+                    "messageId": message_id,
+                    "rootId": str(ref.get("rootId") or message_id).strip() or message_id,
+                    "threadId": str(ref.get("threadId") or "").strip(),
+                    "chatId": chat_id,
+                }
+            )
+        return targets
+
+    @classmethod
+    def send_group_message_for_ai_reply(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        meta: dict[str, Any],
+        sync_scene: str = "",
+    ) -> tuple[bool, Ticket, dict[str, Any], str]:
+        """
+        AI 结果回帖缺锚点时，先补发一条工单信息群消息建立话题。
+        复用自动群推送的全套判定（自动化范围、场景开关、推送条件、仅一次去重、并发锁），
+        只有真实发送成功才返回 True；被任何条件拦截或发送失败都返回 False 并带原因。
+        注意：工单历史上已发送过（group_push_sent_once=true）时不会重复发送，
+        适用于"从未推送过、想在群里建立话题"的工单。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param meta: 同步元数据
+        :param sync_scene: 同步场景，为空时从元数据解析
+        :return: (是否发送成功, 刷新后的工单, 最新元数据, 未发送原因)
+        """
+        if not str(sync_scene or "").strip():
+            sync_scene = cls.resolve_sync_scene_from_meta(meta)
+        config = TicketSyncConfigService.load_sync_config(db)
+        scope_decision = TicketAutomationScopeService.evaluate_ticket(db, config, ticket)
+        if not scope_decision.eligible:
+            reason = f"自动化范围不匹配: {scope_decision.reason}"
+            logger.info(
+                f"AI结果回帖补发群消息跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, reason={reason}"
+            )
+            return False, ticket, meta, reason
+        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        if not cls._should_send_group_push_for_scene(group_config, sync_scene):
+            reason = f"群推送未对场景 {sync_scene} 启用"
+            logger.info(
+                f"AI结果回帖补发群消息跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, reason={reason}"
+            )
+            return False, ticket, meta, reason
+        if cls.is_group_push_sent_once(meta):
+            reason = "工单已发送过群推送（历史已有群消息，不重复发送）"
+            logger.info(
+                f"AI结果回帖补发群消息跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, reason={reason}"
+            )
+            return False, ticket, meta, reason
+        if not cls.is_publish_ready(meta):
+            reason = "同步数据未发布就绪"
+            logger.info(
+                f"AI结果回帖补发群消息跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, reason={reason}"
+            )
+            return False, ticket, meta, reason
+        result, ticket, meta = cls.send_auto_group_message_once(
+            db,
+            ticket=ticket,
+            meta=meta,
+            group_config=group_config,
+            scene=sync_scene,
+            update_by="system",
+        )
+        if bool(result.get("skipped")):
+            reason = str(result.get("skipReason") or "群推送被条件拦截")
+            logger.info(
+                f"AI结果回帖补发群消息跳过: ticket_no={ticket.ticket_no}, scene={sync_scene}, reason={reason}"
+            )
+            return False, ticket, meta, reason
+        push_success_count = int(result.get("pushSuccessCount") or 0)
+        app_success_count = int(result.get("chatSuccessCount") or 0)
+        if push_success_count <= 0 and app_success_count <= 0:
+            reason = "群推送未产生成功发送"
+            logger.warning(
+                f"AI结果回帖补发群消息未成功: ticket_no={ticket.ticket_no}, scene={sync_scene}, "
+                f"push_success_count={push_success_count}, app_success_count={app_success_count}"
+            )
+            return False, ticket, meta, reason
+        return True, ticket, meta, ""
+
+    @classmethod
+    def send_ai_result_thread_reply(
+        cls,
+        db: Session,
+        *,
+        ticket: Ticket,
+        meta: dict[str, Any],
+        follow_up_config: dict[str, Any] | None,
+        ai_task_status: str,
+        ai_task_id: int | None = None,
+        ai_result_payload: dict[str, Any] | None = None,
+        ai_error_message: str = "",
+        override: str = "",
+        sync_scene: str = "",
+    ) -> tuple[dict[str, Any], Ticket, dict[str, Any]]:
+        """
+        AI 分析完成后，把分析结果回帖到工单群对应话题。
+        回帖目标复用工单群推送锚点（与工单信息发送同一应用、同一优先级路由群）；
+        无锚点时按 noAnchorStrategy 处理：skip 记日志跳过（默认），
+        send_then_reply 先补发一条工单信息消息建立话题再回帖。
+        :param db: 数据库会话
+        :param ticket: 工单对象
+        :param meta: 同步元数据
+        :param follow_up_config: aiResultFollowUp 配置
+        :param ai_task_status: AI任务终态状态
+        :param ai_task_id: AI任务ID，用于幂等标记
+        :param ai_result_payload: AI分析结果（成功时）
+        :param ai_error_message: AI失败原因（失败时）
+        :param override: 手动触发覆盖意图（follow 跟随全局 / on 本次回帖 / off 本次不回帖）
+        :param sync_scene: 同步场景，noAnchorStrategy=send_then_reply 补发时用于范围与场景开关判定
+        :return: (回帖结果, 刷新后的工单, 最新元数据)
+        """
+        should_reply, decision_reason = cls.should_send_ai_result_follow_up(
+            follow_up_config,
+            ai_task_status=ai_task_status,
+            override=override,
+        )
+        if not should_reply:
+            logger.info(
+                f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"ai_task_status={ai_task_status}, reason={decision_reason}"
+            )
+            return ({"skipped": True, "skipReason": decision_reason, "taskId": ai_task_id}, ticket, meta)
+
+        if cls.is_ai_result_replied(meta, task_id=ai_task_id):
+            logger.info(
+                f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id}, "
+                f"reason=该AI任务已回帖过"
+            )
+            return ({"skipped": True, "skipReason": "该AI任务已回帖过", "taskId": ai_task_id}, ticket, meta)
+
+        config = follow_up_config if isinstance(follow_up_config, dict) else {}
+        targets = cls._collect_ai_result_reply_targets(meta)
+        if not targets:
+            no_anchor_strategy = str(config.get("noAnchorStrategy") or "skip").strip().lower()
+            if no_anchor_strategy != "send_then_reply":
+                # 默认策略 skip：无锚点（工单未发过群消息或锚点缺失）不新建话题，跳过并留痕，
+                # 防止对历史已在群里跟进过的工单重复发送工单信息。
+                logger.warning(
+                    f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                    f"reason=工单无群消息锚点，无话题可回帖（noAnchorStrategy=skip）"
+                )
+                return (
+                    {"skipped": True, "skipReason": "工单无群消息锚点，无话题可回帖", "taskId": ai_task_id},
+                    ticket,
+                    meta,
+                )
+            # 策略 send_then_reply：先补发工单信息消息建立话题（含范围/场景/条件/去重全套判定），
+            # 补发成功后再回帖；补发被拦截或失败时回帖跳过，不留孤立结果消息。
+            pushed, ticket, meta, push_reason = cls.send_group_message_for_ai_reply(
+                db,
+                ticket=ticket,
+                meta=meta,
+                sync_scene=sync_scene,
+            )
+            if not pushed:
+                logger.warning(
+                    f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                    f"reason=无锚点且补发工单信息未成功({push_reason or '-'})，不回帖"
+                )
+                return (
+                    {
+                        "skipped": True,
+                        "skipReason": f"无锚点且补发工单信息未成功: {push_reason or '-'}",
+                        "taskId": ai_task_id,
+                    },
+                    ticket,
+                    meta,
+                )
+            targets = cls._collect_ai_result_reply_targets(meta)
+            if not targets:
+                logger.warning(
+                    f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                    f"reason=补发后仍未取得话题锚点（发送成功但响应缺失message_id），不回帖"
+                )
+                return (
+                    {"skipped": True, "skipReason": "补发后仍未取得话题锚点", "taskId": ai_task_id},
+                    ticket,
+                    meta,
+                )
+            logger.info(
+                f"AI结果话题回帖补发完成: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"补发工单信息成功后继续回帖"
+            )
+
+        # 回帖凭证与工单信息推送一致：从群推送配置解析应用凭证。
+        full_config = TicketSyncConfigService.load_sync_config(db)
+        push_config = full_config.get("groupPush") if isinstance(full_config.get("groupPush"), dict) else {}
+        app_id, app_secret = TicketSyncNotifyService.resolve_feishu_auth(push_config)
+        if not app_id or not app_secret:
+            logger.warning(
+                f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"reason=飞书应用凭证未配置"
+            )
+            return (
+                {"skipped": True, "skipReason": "飞书应用凭证未配置", "taskId": ai_task_id},
+                ticket,
+                meta,
+            )
+
+        content = TicketSyncNotifyService.build_ai_result_reply_content(
+            ticket=ticket,
+            follow_up_config=config,
+            ai_task_status=ai_task_status,
+            ai_result_payload=ai_result_payload,
+            ai_error_message=ai_error_message,
+        )
+        reply_in_thread = bool(config.get("replyInThread", True))
+        success_count = 0
+        reply_refs: list[dict[str, Any]] = []
+        for target in targets:
+            try:
+                reply_result = TicketSyncNotifyService.send_feishu_thread_reply(
+                    app_id=app_id,
+                    app_secret=app_secret,
+                    message_id=target["messageId"],
+                    content=content,
+                    reply_in_thread=reply_in_thread,
+                )
+                success_count += 1
+                reply_refs.append(
+                    {
+                        "chatId": target.get("chatId") or "",
+                        "messageId": str(reply_result.get("messageId") or "").strip(),
+                        "threadId": str(reply_result.get("threadId") or target.get("threadId") or "").strip(),
+                    }
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"AI结果话题回帖发送失败: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                    f"chat_id={target.get('chatId') or '-'}, message_id={target['messageId']}, error={exc}"
+                )
+        logger.info(
+            f"AI结果话题回帖完成: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+            f"ai_task_status={ai_task_status}, target_count={len(targets)}, success_count={success_count}"
+        )
+        meta = cls.mark_ai_result_replied(meta, task_id=ai_task_id)
+        ticket = cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
+        return (
+            {
+                "skipped": False,
+                "taskId": ai_task_id,
+                "targetCount": len(targets),
+                "successCount": success_count,
+                "replyRefs": reply_refs,
+            },
+            ticket,
+            meta,
+        )
 
     @classmethod
     def should_skip_auto_group_push_by_condition(

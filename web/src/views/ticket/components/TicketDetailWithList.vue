@@ -168,6 +168,8 @@
     rangeAfterMinutes: 10,
     extraInstruction: '',
     promptTemplateCodes: [],
+    // 分析完成后是否回帖 AI 结果到工单群话题：follow 跟随全局配置（默认）、on 本次回帖、off 本次不回帖。
+    aiResultFollowUp: 'follow',
   });
 
   /**
@@ -1047,6 +1049,7 @@
       applyAiAnalysisProviderExecutor(aiAnalysisTaskForm.value.aiProviderCode);
     }
     aiAnalysisTaskForm.value.forceRefresh = false;
+    aiAnalysisTaskForm.value.aiResultFollowUp = 'follow';
     aiAnalysisTaskForm.value.logAnalysisMode =
       logPullConfig.logAnalysisMode || logPullConfig.log_analysis_mode || 'hybrid';
     aiAnalysisTaskForm.value.logTimeMode = 'none';
@@ -1163,6 +1166,7 @@
           ? aiAnalysisTaskForm.value.promptTemplateCodes
           : undefined,
         resume: shouldResumeAiAnalysis(),
+        aiResultFollowUp: aiAnalysisTaskForm.value.aiResultFollowUp || 'follow',
       };
       if (aiAnalysisTaskForm.value.logTimeMode !== 'none') {
         payload.logWindowMissingStrategy =
@@ -1769,6 +1773,20 @@
       </el-form-item>
       <el-form-item label="强制刷新">
         <el-switch v-model="aiAnalysisTaskForm.forceRefresh" />
+      </el-form-item>
+      <el-form-item label="结果回帖工单群">
+        <el-select
+          v-model="aiAnalysisTaskForm.aiResultFollowUp"
+          placeholder="分析完成后是否回帖工单群话题"
+          style="width: 100%"
+        >
+          <el-option label="跟随全局配置（同步自动化 · 群推送）" value="follow" />
+          <el-option label="本次回帖" value="on" />
+          <el-option label="本次不回帖" value="off" />
+        </el-select>
+        <div class="form-item-tip">
+          分析完成后把 AI 结果回帖到该工单在工单群的话题；需在同步自动化群推送中启用并按推送时机发送。
+        </div>
       </el-form-item>
       <el-form-item label="日志模式">
         <el-select

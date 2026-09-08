@@ -54,6 +54,23 @@ class TicketSyncNotifyService:
         "链接：${ticket_url}\n"
         "说明：${description}"
     )
+    DEFAULT_AI_RESULT_REPLY_TEMPLATE = (
+        "【AI 分析${ai_status_label}】\n"
+        "工单：${ticket_no}\n"
+        "标题：${ticket_title}\n"
+        "结论：${analysis_summary}\n"
+        "根因：${root_cause}\n"
+        "修复建议：${fix_suggestion}\n"
+        "置信度：${confidence}\n"
+        "详情：${ticket_url}"
+    )
+    DEFAULT_AI_RESULT_REPLY_FAILED_TEMPLATE = (
+        "【AI 分析${ai_status_label}】\n"
+        "工单：${ticket_no}\n"
+        "标题：${ticket_title}\n"
+        "失败原因：${ai_error_message}\n"
+        "详情：${ticket_url}"
+    )
     DEFAULT_SUMMARY_TEMPLATE = (
         "【工单汇总统计】\n"
         "统计范围：${start_time} ~ ${end_time}\n"
@@ -574,12 +591,22 @@ class TicketSyncNotifyService:
                     },
                 )
                 message_data = response_data.get("data") if isinstance(response_data.get("data"), dict) else {}
+                message_id = str(message_data.get("message_id") or message_data.get("messageId") or "").strip()
+                if not message_id:
+                    # 发送成功但响应缺失 message_id 属于异常：消息无法回帖定位，不计入成功数，
+                    # 避免上层把"发送成功但无锚点"误判为完整成功（历史 refs=null 问题的防御层）。
+                    logger.error(
+                        f"飞书应用消息发送成功但响应缺失 message_id，不计入成功: "
+                        f"receive_id_type={receive_id_type}, receive_id={receive_id}, "
+                        f"response={json.dumps(response_data, ensure_ascii=False)[:500]}"
+                    )
+                    continue
                 sent_messages.append(
                     {
                         "receiveId": receive_id,
                         "receiveIdType": receive_id_type,
-                        "messageId": str(message_data.get("message_id") or message_data.get("messageId") or "").strip(),
-                        "rootId": str(message_data.get("root_id") or message_data.get("rootId") or "").strip(),
+                        "messageId": message_id,
+                        "rootId": str(message_data.get("root_id") or message_data.get("rootId") or message_id).strip(),
                         "threadId": str(message_data.get("thread_id") or message_data.get("threadId") or "").strip(),
                         "chatId": str(message_data.get("chat_id") or message_data.get("chatId") or "").strip(),
                     }
@@ -635,6 +662,74 @@ class TicketSyncNotifyService:
             "threadId": str(message_data.get("thread_id") or message_data.get("threadId") or "").strip(),
             "chatId": str(message_data.get("chat_id") or message_data.get("chatId") or "").strip(),
         }
+
+    @classmethod
+    def _join_list_fields(cls, value: Any, *, max_items: int = 5) -> str:
+        """
+        把 AI 结果中的列表字段转为可读行文本（超出条数截断）。
+        :param value: 列表或字符串
+        :param max_items: 最多展示条数
+        :return: 拼接文本；空返回空字符串
+        """
+        if isinstance(value, str):
+            return value.strip()
+        if not isinstance(value, list):
+            return ""
+        items = [str(item).strip() for item in value if str(item or "").strip()]
+        if not items:
+            return ""
+        if len(items) > max_items:
+            items = items[:max_items] + [f"...等共 {len(value)} 条"]
+        return "\n".join(f"- {item}" for item in items)
+
+    @classmethod
+    def build_ai_result_reply_content(
+        cls,
+        *,
+        ticket: Ticket,
+        follow_up_config: dict[str, Any] | None,
+        ai_task_status: str,
+        ai_result_payload: dict[str, Any] | None = None,
+        ai_error_message: str = "",
+    ) -> str:
+        """
+        构造 AI 分析结果话题回帖内容。
+        工单基础变量复用群推送变量体系，AI 变量来自分析结果载荷；
+        失败终态使用失败默认模板（除非用户模板可用）。
+        :param ticket: 工单对象
+        :param follow_up_config: aiResultFollowUp 配置
+        :param ai_task_status: AI任务终态状态
+        :param ai_result_payload: AI分析结果载荷
+        :param ai_error_message: AI失败原因
+        :return: 渲染后的回帖文本
+        """
+        config = follow_up_config if isinstance(follow_up_config, dict) else {}
+        status = str(ai_task_status or "").strip().lower()
+        payload = ai_result_payload if isinstance(ai_result_payload, dict) else {}
+        is_failed = status != "success"
+        variables = {
+            "ticket_no": str(getattr(ticket, "ticket_no", "") or "-"),
+            "ticket_title": str(getattr(ticket, "title", "") or "-"),
+            "ticket_url": str(getattr(ticket, "ticket_url", "") or "-"),
+            "module_name": str(getattr(ticket, "module_name", "") or "-"),
+            "merchant_name": str(getattr(ticket, "merchant_name", "") or "-"),
+            "ai_status_label": "失败" if is_failed else "成功",
+            "analysis_summary": str(payload.get("analysis_summary") or "").strip(),
+            "root_cause": str(payload.get("root_cause") or "").strip(),
+            "fix_suggestion": str(payload.get("fix_suggestion") or "").strip(),
+            "confidence": payload.get("confidence") if payload.get("confidence") is not None else "-",
+            "related_files": cls._join_list_fields(payload.get("related_files")),
+            "evidence": cls._join_list_fields(payload.get("evidence")),
+            "risk_items": cls._join_list_fields(payload.get("risk_items")),
+            "next_steps": cls._join_list_fields(payload.get("next_steps")),
+            "ai_error_message": str(ai_error_message or payload.get("error_message") or "").strip() or "-",
+        }
+        default_template = (
+            cls.DEFAULT_AI_RESULT_REPLY_FAILED_TEMPLATE
+            if is_failed
+            else cls.DEFAULT_AI_RESULT_REPLY_TEMPLATE
+        )
+        return cls._render_template(config.get("template"), variables, default_template)
 
     @classmethod
     def update_bitable_record_fields(
@@ -2821,15 +2916,20 @@ class TicketSyncNotifyService:
         """
         enabled = bool(group_config.get("enabled"))
         if not enabled:
-            logger.info(f"群推送跳过: enabled=false, scene={scene}")
+            logger.info(f"群推送跳过: enabled=false, scene={scene}, ticket_no={ticket.ticket_no}")
             return {"skipped": True, "skipReason": "群推送开关未启用", "scene": scene}
 
         if not manual_trigger:
+            # 场景开关拦截必须打工单号：AI 终态等异步回调链路只有这里的日志可定位跳过原因。
             if scene == "external_sync" and not bool(group_config.get("sendAfterExternalSync")):
-                logger.info("群推送跳过: sendAfterExternalSync=false")
+                logger.info(
+                    f"群推送跳过: sendAfterExternalSync=false, scene={scene}, ticket_no={ticket.ticket_no}"
+                )
                 return {"skipped": True, "skipReason": "外部同步后群推送未启用", "scene": scene}
             if scene == "remote_pull" and not bool(group_config.get("sendAfterRemotePull")):
-                logger.info("群推送跳过: sendAfterRemotePull=false")
+                logger.info(
+                    f"群推送跳过: sendAfterRemotePull=false, scene={scene}, ticket_no={ticket.ticket_no}"
+                )
                 return {"skipped": True, "skipReason": "远端拉取后群推送未启用", "scene": scene}
         send_mode = cls._normalize_send_mode(group_config.get("sendMode"))
         app_id, app_secret = cls._resolve_feishu_auth(group_config)

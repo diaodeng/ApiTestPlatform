@@ -1068,6 +1068,88 @@
                   </el-form-item>
                 </el-col>
               </el-row>
+
+              <el-divider content-position="left">AI 分析结果话题回帖</el-divider>
+              <div class="mapping-desc">
+                AI 分析完成后，把分析结果回帖到该工单在工单群的话题中（复用工单信息推送的群消息锚点）。
+                仅在发送模式为 feishu_app / hybrid 时生效；工单未发过群消息（无锚点）时自动跳过，不新建话题。
+                手动触发分析时可在提交页选择本次是否回帖。
+              </div>
+              <el-row :gutter="16">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="启用回帖">
+                    <el-switch
+                      v-model="form.groupPush.aiResultFollowUp.enabled"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="推送时机">
+                    <el-select
+                      v-model="form.groupPush.aiResultFollowUp.sendOn"
+                      style="width: 100%"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    >
+                      <el-option label="不推送" value="none" />
+                      <el-option label="仅分析成功" value="success" />
+                      <el-option label="仅分析失败" value="failed" />
+                      <el-option label="成功和失败都推送" value="always" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="话题内回复">
+                    <el-switch
+                      v-model="form.groupPush.aiResultFollowUp.replyInThread"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    />
+                    <div class="mapping-desc">
+                      开启后回复挂在工作单信息话题下；关闭则以普通引用回复形式发送。
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="无锚点处理">
+                    <el-select
+                      v-model="form.groupPush.aiResultFollowUp.noAnchorStrategy"
+                      style="width: 100%"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    >
+                      <el-option
+                        label="跳过并记录日志（默认，防止重复发送）"
+                        value="skip"
+                      />
+                      <el-option
+                        label="先补发工单信息消息建立话题，再回帖"
+                        value="send_then_reply"
+                      />
+                    </el-select>
+                    <div class="mapping-desc">
+                      工单此前未发过群消息（无话题锚点）时的处理。历史已在群里跟进过的工单建议保持"跳过"，
+                      避免重复发送工单信息；补发会走完整推送判定（范围/场景开关/推送条件/去重），
+                      已发送过的工单不会重复发。
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="24">
+                  <el-form-item label="回帖模板">
+                    <el-input
+                      v-model="form.groupPush.aiResultFollowUp.template"
+                      type="textarea"
+                      :rows="5"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                      placeholder="留空使用默认模板。可用变量：${ticket_no} ${ticket_title} ${ticket_url} ${ai_status_label} ${analysis_summary} ${root_cause} ${fix_suggestion} ${confidence} ${related_files} ${evidence} ${risk_items} ${next_steps} ${ai_error_message}"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
             </el-form>
           </el-card>
 
@@ -4109,6 +4191,21 @@
                 />
               </el-form-item>
             </el-col>
+            <el-col :span="24">
+              <el-form-item label="版本提取正则">
+                <el-input
+                  v-model="logPullVersionExtractPatternsText"
+                  type="textarea"
+                  :rows="4"
+                  placeholder='请输入 JSON 数组，例如 ["ms_h\\s*:\\s*\\d+\\s*,\\s*ms_l\\s*:\\s*\\d+[^,\\n]*,\\s*version\\s*[:=]\\s*(\\d+(?:\\.\\d+){2,3})"]'
+                />
+                <div class="form-help-text">
+                  用于日志拉取成功后从日志正文提取应用版本号，按顺序取第一个命中；每个正则的第一个分组作为版本号。
+                  默认锚定"ms_h:...version:"特征行，避免误提取 launcher_version（启动器版本）和 OpenGL
+                  解析版本。清空数组或全部非法时回退内置默认正则；非法正则会被自动忽略。
+                </div>
+              </el-form-item>
+            </el-col>
           </el-row>
         </el-form>
         <div class="mt16">
@@ -4436,6 +4533,7 @@
     loading: logPullStorageLoading,
     saving: logPullStorageSaving,
     storage: logPullStorage,
+    versionExtractPatternsText: logPullVersionExtractPatternsText,
     loadConfig: logPullStorageLoadConfig,
     handleSave: logPullStorageHandleSave,
   } = useLogPullStorageConfig(proxy);

@@ -1,4 +1,34 @@
-## [2026-09-06] FIX | 资源采集通道配置轮询缺失（Grafana 无数据根因）
+## [2026-09-08] FIX | Agent 孤儿租约启动清理 + AI 回传协议瘦身（第三次 OOM 与"一直分析中"修复）
+
+- 触发：2026-09-08 10:35 生产 fastapi 第三次被 cgroup OOM Kill（前日修复的 cgroup v1 oom_kill 采集首次实录 =1）。同日用户反馈 INC00001934853 / INC00001933577 "已分析完成，重试一直显示 AI 分析中"。
+- 排查：① 自动取证脚本（`incident_capture.py`，部署平台 API + xterm WebSocket 终端 + VM，已随排查产物一并提交 `master_params_oom` 分支）5 分钟拿到 supervisord SIGKILL 记录与 oom_kill=1；② 容器内 python 直查 Redis 发现 `agent:ai_analysis:active` 残留被杀请求的租约（expires_at=10:59:36，lease 3900s），占满 max_concurrent=1 的槽位，10:38 的重试请求排队等到租约过期才自愈（阻塞 24 分钟）；③ 量化 Redis 结果缓存：回传体 8086KB 中 `result.raw_output`（完整 worker stdout）占 8068KB（99.7%），`analysis_result` 仅 17KB——OOM 直接诱因。
+- 修复①（孤儿租约）：`AgentDispatchService.cleanup_orphan_active_leases(redis)` 清空全部 Agent 的 active 租约并标记 `status=failed, reason=orphan-lease-cleanup-on-restart`（SCAN 游标循环兼容 MemoryRedis；`_serialize_state` 新增 `message.extra` 透传）；启动钩子 `startup_handler(app)` → `cleanup_orphan_agent_leases(app)` 在 `app.state.redis` 就绪后调用，异常不阻塞启动。重启后重试从"等租约过期（最长 65 分钟）"变为秒级准入。
+- 修复②（回传瘦身）：Agent 客户端（`client_new/services/ticket_ai_analysis_service.py`）两处回传点（真实执行 + 缓存命中）的 `raw_output` 截断为头部 `RAW_OUTPUT_SUMMARY_CHARS=8000` 字符，完整内容留在本地 `worker.stdout.txt`（`stdout_path` 已回传路径），回传体 4-8MB → 约 30KB；服务端（`ticket_ai_analysis_service.py`）新增 `_truncate_response_raw_output` 在响应接收入口就地截断（`RESPONSE_RAW_OUTPUT_MAX_CHARS=8000`），兜底旧版 Agent。失败诊断不受影响（结构化 error_message 优先 + 8KB 摘要足够 `_summarize_worker_error`）。
+- 文档：更新记录 `web/public/docs/updates/2026-09-08-agent-lease-cleanup-and-response-slim.md`（history.md 已加条目）。
+- 验证：新增 7 测试（孤儿租约清理/空场景/OOM 重启队列立即恢复回归、dict/模型截断/短文本保留/容错），`test_agent_dispatch_service.py` 8 用例 + 相关套件共 87 用例全通过；ruff 通过（client_new 17 个存量告警经 stash 基线对比非本次引入）。未做真实 OOM 演练（需部署后观察下一次重启恢复日志）。
+- 遗留：容器内存 1.4GB→2GB 运维操作仍未落地（第三次 OOM 后最紧迫）；双端需同时发版完整生效（仅发服务端也有兜底）。
+
+## [2026-09-07] FIX | 相似工单检索内存优化与监控缺陷修复（生产 OOM 重启排查落地）
+
+- 触发：2026-09-07 12:31 生产 fastapi 进程被 cgroup 内存上限（1400MB）内核 OOM Kill，supervisor 自动拉起。VM 指标 + 日志 + 数据库交叉排查确认：直接诱因为 12:31:49 Agent 返回工单 AI 分析结果（raw_output 约 7.5MB）处理时瞬时越限；内存放大点包括相似工单检索全量加载向量（2664 条 × 1024 维 JSON，yield_per 迭代下 session 身份映射累积、GC 后单次 +31MB 不回落）、fastapi 09:51 一次 +309MB 未归因阶跃；排查过程还暴露三个观测缺陷（详见下）。
+- P1 修复（相似检索内存）：`ticket_embedding_service` 三处向量扫描入口（`_search_embedding`、`search_embedding_records_by_vector`、`_search_local_hash`）统一收敛到新方法 `_score_embedding_pages`——按 `EMBEDDING_SCAN_PAGE_SIZE=500` 分页（`TicketDao.iter_ticket_embedding_pages`，独立 LIMIT/OFFSET 查询 + `object_ids` 白名单），每页处理完 `expire_all` 释放 session 实体；新增信号预筛 `_resolve_signal_prescreen_ids`：检索文本提取到错误码/Trace ID/Request ID（复用画像服务新增的 `TicketSimilarityProfileService.extract_signal_values`）时按 `ticket_similarity_signal` 索引筛候选，仅对候选做向量比对，可通过相似度配置 `signalPrescreenEnabled: false` 关闭（默认开启），无信号自动退回全量分页扫描。生产库只读实测：结果与旧逻辑完全一致；全量分页 11.45s / GC 后 +11MB（旧 yield_per 10.82s / +17MB，历史多次累积至 +31MB）；带错误码预筛 0.14s / +1MB。
+- P2 修复（观测缺陷）：① `utils/metrics/process.py` cgroup v1 分支 `oom/oom_kill` 事件计数此前硬编码 0（本次排查无法用指标证明 OOM 的原因），现从 `memory.oom_control` 读真实 `oom_kill`（新增 `_read_v1_oom_kill`）；② `ticket_ai_analysis_service`/`ticket_log_pull_service`/`runner_service` 三处 `get_task_memory_observer("api")` 硬编码把 Worker 进程任务观测器改成 role=api，导致 `qtr_task_*` 指标与 fastapi 进程混在同一序列、`event=task_memory_*` 日志 pid 与 role 不符，全部改为无参调用按 `QTR_METRICS_ROLE` 环境变量判定（`task_memory.get_task_memory_observer` 文档注明业务代码不得传值）；③ `_peek_agent_result_cache` 在 lifespan 事件循环内调用 `asyncio.run` 必然报错（after 日志 12:31:59 可见），重启后 Agent 已回传结果的 AI 任务被误标失败——改为检测到运行中循环时借独立线程驱动协程。
+- 新增（诊断能力）：`utils/metrics/memory_snapshot.py` RSS 阈值诊断快照——采集线程每 10 秒检查自身 RSS，超过阈值时临时开启 tracemalloc 追踪 5 秒、top 分配源写入 `logs/<日期>/memory_snapshot_<role>_<时间戳>` 后自动关闭。挂在 `collect.PushDataToServer` 主循环节拍上，不新增线程。用于归因 09:51 那类未解释的内存阶跃。
+- 追加（同日，可视化配置）：诊断快照配置从纯环境变量升级为页面可视化——`sys_config` 键 `monitor.memory_snapshot.config`（JSON），新增 `modules/metrics/service/memory_snapshot_config_service.py` 与 `GET/PUT /monitor/metrics-collectors/memory-snapshot/config`（权限复用 `monitor:metrics_collector:list/edit`，路由注册在 `/{profile_id}` 之前避免误匹配）；`load_active_profiles` 轮询顺带经 `MemorySnapshotWatcher.apply_config` 热注入（配置改加锁 property），保存后约 5 秒全进程生效；环境变量 `QTR_MEMORY_SNAPSHOT_*` 保留为数据库行缺失时的回退来源。前端 `views/monitor/metrics/index.vue` 底部新增配置表单 + 说明告警条。
+- 文档：`web/public/docs/ticket_similarity.md`（性能章节补两项优化）、`web/public/docs/memory-monitoring.md`（新增 2026-09-07 治理小节 + 诊断快照配置表 + v1 oom 计数/role 历史数据不可信提示）、更新记录 `web/public/docs/updates/2026-09-07-ticket-similarity-scan-memory-optimization.md`（history.md 已加条目）、wiki 本流程文档同步。
+- 验证：新增测试 8 个（分页扫描/会话释放/预筛启用关闭/信号提取/cgroup v1 oom 读取/快照开关与冷却），更新 1 个旧 mock（`list_ticket_embedding_records` → `iter_ticket_embedding_pages`）；相关 6 个测试文件 66 用例全通过，`test_ticket_processing_metrics.py` 3 失败经 git stash 基线对比确认为存量问题；改动文件 ruff 通过；生产库只读端到端验证见上。可视化配置追加 3 个测试（payload 钳制/watcher 热更新/配置服务读写），`test_memory_metrics.py` 16 用例全通过；前端 `npm run build:prod` 通过。
+- 遗留：fastapi 09:51 +309MB 阶跃未归因（建议部署后在「资源采集服务」页面开启诊断快照观察）；容器内存 1.4GB→2GB 与 Grafana `memory_pressure>0.85` 告警为运维操作未落地；分页 OFFSET 深翻页在向量数万条后退化，届时接入 Qdrant（代码已支持）。
+
+## [2026-09-07] FEAT | 日志版本号提取正则收紧并支持可视化配置
+
+- 触发：用户反馈日志中 `launcher_version:1.0.6.8`（启动器版本）被误提取为工单版本，正确版本应为 `ms_h:1, ms_l:1, ls_h:6, ls_l:8, version:1.1.6.8` 行的 `1.1.6.8`；`OpenGL parsed version: 4, 6` 也存在误提取风险。
+- 根因：原正则 `(?:版本号|版本|version|...)\s*[:：=]\s*(...)` 对 `version` 无左边界（`launcher_version` 子串命中）、版本值无形态约束（单数字 `4` 命中），且"首个命中即返回"，误报行先出现即抢占结果；该正则在 3 个服务文件中重复硬编码，不可配置。
+- 修复：新增 `modules/ticket/util/ticket_log_version_extract_util.py` 收敛全部版本提取逻辑——日志链路默认正则锚定 `ms_h/ms_l/ls_h/ls_l` 特征行并要求 `x.y.z` 起步版本形态；工单标题/描述文本链路用独立兜底正则（`version` 前禁止字母/下划线 + 同样版本形态约束）。正则列表接入日志拉取存储配置 `versionExtractPatterns`（`TicketLogPullStorageConfigModel`/`TicketLogPullPostProcessConfigModel` 新增字段，归一化时非法项过滤、全空回退默认），两条日志链路（正文回填 `ensure_ticket_version_id_from_log`、下载后处理 `extract_and_update_version_key`）均按配置读取；3 处旧 `VERSION_PATTERN` 类属性全部删除，调用方改走 util 公开函数。
+- 前端：同步自动化页「来源与拉取」→「存储与资源限制」卡片「下载完成后处理」区块下方新增「版本提取正则」JSON 数组 textarea，随存储配置一起保存；`useLogPullStorageConfig.js` 负责 JSON 校验（非法时阻断保存并提示）。
+- 效果：三行混合日志（OpenGL 行、launcher 行在前，ms_h 行在后）整段与逐行提取均只返回 `1.1.6.8`；自定义正则（如改提取 launcher 版本）与回退默认正则路径均验证可用。
+- 文档：`web/public/docs/ticket_log_pull.md` 存储配置表新增 `versionExtractPatterns` 行及专节说明；更新记录 `web/public/docs/updates/2026-09-07-log-version-extract-pattern-config.md`；wiki `flows/ticket-automation-flow.md` 第 8 步已更新。
+- 验证：新增 `tests/test_ticket_log_version_extract.py` 7 个用例 + 更新 `tests/test_ticket_version_key_normalization.py` 1 个用例，9 个全通过；改动文件 ruff 通过；`test_ticket_sync_mapping_boundary.py` 13 个失败经 git stash 基线对比确认为存量问题（`detected_version_key` 属性缺失，与本次无关）；前端 `vite build` 通过。
+
 
 - 触发：用户反馈 `.env.dev` 环境部署最新代码、已在「资源采集服务」页面配置启用采集服务后，Grafana 仍搜不到 `memory_pressure{instance="TEST_ENV", machine="home", job="QTR"}` 等任何当前链路指标。
 - 根因：采集线程 `PushDataToServer` 启动时 `_profiles` 为空，`_collect_tick` 无通道直接 return；而本应周期注入配置的 `replace_profiles` 全仓库无任何调用方——`PROFILE_POLL_SECONDS = 5` 只有定义无使用，`poll_and_apply()` 无调用方，三个进程（server.py role=api、celery_app.py role=celery_worker、celery_scheduler.py role=celery_beat）启动后无人喂配置。数据库配置行本身正确（machine=home），只是从未进入线程；wiki 此前描述"周期加载"与实际代码不符。

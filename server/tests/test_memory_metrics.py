@@ -257,3 +257,172 @@ def test_runtime_service_injects_profile_provider():
         runtime._threads.clear()
         runtime._threads.update(original)
 
+
+
+def test_memory_snapshot_watcher_disabled_by_default():
+    """诊断快照默认关闭时 check 不做任何事。"""
+    from utils.metrics.memory_snapshot import MemorySnapshotConfig, MemorySnapshotWatcher
+
+    watcher = MemorySnapshotWatcher(
+        role="api",
+        config=MemorySnapshotConfig(enabled=False, rss_threshold_mb=900, top_lines=50, cooldown_seconds=3600),
+    )
+    # 未启用时应直接返回，不递增检查计数、不触碰 psutil。
+    with patch("psutil.Process") as process_mock:
+        watcher.check()
+    process_mock.assert_not_called()
+    assert watcher._check_count == 0
+
+
+def test_memory_snapshot_watcher_respects_cooldown_and_threshold():
+    """低于阈值不采样，且冷却期内不重复采样。"""
+    from utils.metrics.memory_snapshot import MemorySnapshotConfig, MemorySnapshotWatcher
+
+    watcher = MemorySnapshotWatcher(
+        role="api",
+        config=MemorySnapshotConfig(enabled=True, rss_threshold_mb=900, top_lines=50, cooldown_seconds=3600),
+    )
+    snapshots = []
+    with patch.object(watcher, "_take_snapshot") as take_mock, patch("psutil.Process") as process_mock:
+        process_mock.return_value.memory_info.return_value.rss = 100 * 1024 * 1024  # 100MB，低于阈值
+        # 跑满 20 个节拍（每 10 拍检查一次）
+        for _ in range(20):
+            watcher.check()
+        take_mock.assert_not_called()
+
+        # 抬高 RSS 越过阈值，应触发采样
+        process_mock.return_value.memory_info.return_value.rss = 1000 * 1024 * 1024
+        for _ in range(10):
+            watcher.check()
+        take_mock.assert_called_once()
+        snapshots.append(1)
+
+        # 冷却期内再次越界不应重复采样
+        for _ in range(30):
+            watcher.check()
+        take_mock.assert_called_once()
+    assert snapshots == [1]
+
+
+def test_cgroup_v1_oom_kill_reads_oom_control_third_field():
+    """cgroup v1 的 oom_kill 计数取 memory.oom_control 第三个数值字段。"""
+    from utils.metrics.process import CgroupMemoryCollector
+
+    collector = CgroupMemoryCollector()
+    oom_control_content = "oom_kill_disable 0\nunder_oom 0\noom_kill 2\n"
+    with (
+        patch("os.path.exists", return_value=False),
+        patch("builtins.open") as open_mock,
+    ):
+        # _read_v1 遍历读取多个文件，按路径分发内容
+        def _fake_open(path, encoding="utf-8"):
+            from io import StringIO
+
+            if path.endswith("memory.oom_control"):
+                return StringIO(oom_control_content)
+            return StringIO("")
+
+        open_mock.side_effect = _fake_open
+        result = collector._read_v1()
+    assert result["qtr_cgroup_memory_events_oom_kill_total"] == 2
+    assert result["qtr_cgroup_memory_events_oom_total"] == 2
+
+
+def test_memory_snapshot_config_from_payload_clamps_ranges():
+    """可视化配置 payload 转换应钳制非法范围并回退默认。"""
+    from utils.metrics.memory_snapshot import config_from_payload
+
+    cfg = config_from_payload({"enabled": True, "rssThresholdMb": 700, "topLines": 30, "cooldownSeconds": 1800})
+    assert cfg.enabled is True
+    assert cfg.rss_threshold_mb == 700
+    assert cfg.top_lines == 30
+    assert cfg.cooldown_seconds == 1800
+
+    # 非法值回退默认 + 范围钳制
+    cfg = config_from_payload({"enabled": "yes", "rssThresholdMb": 0, "topLines": 999999, "cooldownSeconds": 1})
+    assert cfg.enabled is True
+    assert cfg.rss_threshold_mb == 900
+    assert cfg.top_lines == 500
+    assert cfg.cooldown_seconds == 60
+
+
+def test_memory_snapshot_watcher_apply_config_hot_reload():
+    """watcher 支持热更新配置，更新后立即按新配置生效。"""
+    from utils.metrics.memory_snapshot import MemorySnapshotConfig, MemorySnapshotWatcher
+
+    watcher = MemorySnapshotWatcher(
+        role="api",
+        config=MemorySnapshotConfig(enabled=False, rss_threshold_mb=900, top_lines=50, cooldown_seconds=3600),
+    )
+    assert watcher.config.enabled is False
+
+    watcher.apply_config(MemorySnapshotConfig(enabled=True, rss_threshold_mb=700, top_lines=30, cooldown_seconds=120))
+    assert watcher.config.enabled is True
+    assert watcher.config.rss_threshold_mb == 700
+    assert watcher.config.top_lines == 30
+    assert watcher.config.cooldown_seconds == 120
+
+
+def test_memory_snapshot_config_service_roundtrip(tmp_path, monkeypatch):
+    """sys_config 配置服务的读写链路：初始化默认行 → 更新 → 读回生效值。"""
+    import json as json_mod
+
+    from modules.metrics.service.memory_snapshot_config_service import MemorySnapshotConfigService
+    from utils.metrics.memory_snapshot import MEMORY_SNAPSHOT_CONFIG_KEY
+
+    stored = {}
+
+    class FakeRow:
+        config_value = ""
+        _saved = False
+
+        def __init__(self):
+            self.update_time = "2026-09-07 13:00:00"
+            self.update_by = "tester"
+
+    class FakeDb:
+        def add(self, row):
+            stored["row"] = row
+
+        def commit(self):
+            stored["committed"] = True
+
+        def refresh(self, row):
+            pass
+
+    fake_row = FakeRow()
+
+    def fake_get_config(db, key):
+        assert key == MEMORY_SNAPSHOT_CONFIG_KEY
+        # update_config 提交后 config_value 才被赋值，模拟真实行为
+        if getattr(fake_row, "_saved", False):
+            fake_row.config_value = stored.get("value", "")
+        return fake_row if fake_row._saved else None
+
+    monkeypatch.setattr(
+        "modules.metrics.service.memory_snapshot_config_service.ConfigDao.get_config_detail_by_key",
+        classmethod(lambda cls, db, key: fake_get_config(db, key)),
+    )
+
+    # 首次读取：无配置行 → 落默认行
+    result = MemorySnapshotConfigService.get_config(FakeDb())
+    assert result["enabled"] is False
+    assert result["rssThresholdMb"] == 900
+
+    # 更新配置 → 读回生效值
+    fake_row._saved = True
+    updated = MemorySnapshotConfigService.update_config(
+        FakeDb(),
+        {"enabled": True, "rssThresholdMb": 700, "topLines": 30, "cooldownSeconds": 1800},
+        "tester",
+    )
+    stored["value"] = json_mod.dumps(
+        {"enabled": True, "rssThresholdMb": 700, "topLines": 30, "cooldownSeconds": 1800}, ensure_ascii=False
+    )
+    assert updated["enabled"] is True
+    assert updated["rssThresholdMb"] == 700
+
+    # load_runtime_config 返回数据库生效配置
+    runtime_cfg = MemorySnapshotConfigService.load_runtime_config(FakeDb())
+    assert runtime_cfg.enabled is True
+    assert runtime_cfg.rss_threshold_mb == 700

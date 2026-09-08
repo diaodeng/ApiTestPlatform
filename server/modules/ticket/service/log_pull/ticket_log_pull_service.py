@@ -69,6 +69,11 @@ from modules.ticket.service.notification.ticket_notify_service import TicketNoti
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
 from modules.ticket.util.ticket_log_archive_util import TicketLogArchiveUtil
+from modules.ticket.util.ticket_log_version_extract_util import (
+    DEFAULT_LOG_VERSION_PATTERNS,
+    extract_version_key_by_patterns,
+    parse_log_version_patterns,
+)
 from utils.common_util import CamelCaseUtil
 from utils.log_util import logger
 from utils.metrics.task_memory import get_task_memory_observer
@@ -101,10 +106,6 @@ class TicketLogPullService:
     _executor_max_workers = 2
     _executor_lock = threading.Lock()
     _active_record_ids: set[int] = set()
-    VERSION_PATTERN = re.compile(
-        r"(?:版本号|版本|version|app[_\s-]*version)\s*[:：=]\s*([A-Za-z0-9._/-]+)",
-        re.IGNORECASE,
-    )
     STORE_IMPORT_HEADERS = [
         "集团编号",
         "商户编号",
@@ -378,6 +379,7 @@ class TicketLogPullService:
             "postDownloadExtractEnabled": False,
             "postDownloadVersionExtractEnabled": False,
             "postDownloadIndexEnabled": False,
+            "versionExtractPatterns": list(DEFAULT_LOG_VERSION_PATTERNS),
         }
 
     @classmethod
@@ -469,6 +471,10 @@ class TicketLogPullService:
         normalized["postDownloadExtractEnabled"] = bool(normalized.get("postDownloadExtractEnabled"))
         normalized["postDownloadVersionExtractEnabled"] = bool(normalized.get("postDownloadVersionExtractEnabled"))
         normalized["postDownloadIndexEnabled"] = bool(normalized.get("postDownloadIndexEnabled"))
+        # 版本提取正则：解析失败或全部非法时回退默认正则，保证提取链路始终有可用规则。
+        normalized["versionExtractPatterns"] = parse_log_version_patterns(
+            normalized.get("versionExtractPatterns")
+        ) or list(DEFAULT_LOG_VERSION_PATTERNS)
         normalized["effectiveLocalDirectory"] = str(cls._resolve_local_dir(normalized.get("localDirectory")))
         return normalized
 
@@ -1241,6 +1247,7 @@ class TicketLogPullService:
                 "postDownloadExtractEnabled": storage_config.get("postDownloadExtractEnabled"),
                 "postDownloadVersionExtractEnabled": storage_config.get("postDownloadVersionExtractEnabled"),
                 "postDownloadIndexEnabled": storage_config.get("postDownloadIndexEnabled"),
+                "versionExtractPatterns": storage_config.get("versionExtractPatterns"),
             }
         )
 
@@ -1249,7 +1256,7 @@ class TicketLogPullService:
         cls, query_db: Session, config_model: TicketLogPullPostProcessConfigModel, current_user: CurrentUserModel
     ) -> CrudResponseModel:
         """
-        保存日志下载完成后处理配置，只覆盖后处理开关并保留存储目录、FTP 和资源保护参数。
+        保存日志下载完成后处理配置，只覆盖后处理开关与版本提取正则，并保留存储目录、FTP 和资源保护参数。
         :param query_db: 数据库会话
         :param config_model: 日志后处理配置模型
         :param current_user: 当前登录用户
@@ -1257,6 +1264,9 @@ class TicketLogPullService:
         """
         current_config = cls._get_storage_config_dict(query_db)
         post_process_payload = config_model.model_dump(by_alias=True)
+        # 版本提取正则允许显式清空（回退默认正则），需从当前配置中剔除旧值避免被合并回来。
+        if "versionExtractPatterns" in post_process_payload:
+            current_config.pop("versionExtractPatterns", None)
         payload = cls._normalize_storage_config({**current_config, **post_process_payload})
         payload.pop("effectiveLocalDirectory", None)
         try:
@@ -1335,19 +1345,18 @@ class TicketLogPullService:
         return cls.create_log_pull_services(query_db, record.ticket_id, payload, current_user)
 
     @classmethod
-    def _extract_version_key_from_text(cls, text: str | None) -> str:
+    def _extract_version_key_from_text_with_session(cls, db: Session, text: str | None) -> str:
         """
-        从日志文本中提取版本号。
+        从日志文本中按存储配置的版本提取正则提取版本号（复用调用方数据库会话）。
 
+        :param db: 调用方数据库会话。
         :param text: 日志文本。
         :return: 版本号，失败返回空字符串。
         """
         if not text:
             return ""
-        match = cls.VERSION_PATTERN.search(text)
-        if not match:
-            return ""
-        return normalize_ticket_version_key(match.group(1))
+        patterns = cls._get_storage_config_dict(db).get("versionExtractPatterns")
+        return extract_version_key_by_patterns(text, patterns)
 
     @staticmethod
     def _update_ticket_version_id(query_db: Session, ticket_id: int, version_key: str) -> int | None:
@@ -1400,7 +1409,7 @@ class TicketLogPullService:
             log_text = log_content_model.text if log_content_model else ""
         except Exception as exc:
             logger.warning(f"日志拉取记录[{record_id}] 提取版本号前读取日志失败: {exc}")
-        version_key = cls._extract_version_key_from_text(log_text)
+        version_key = cls._extract_version_key_from_text_with_session(query_db, log_text)
         if not version_key:
             cls._log_chain_step(
                 query_db,
@@ -2453,7 +2462,7 @@ class TicketLogPullService:
         :param record_id: 记录ID
         :return: 无
         """
-        observation = get_task_memory_observer("api").start(
+        observation = get_task_memory_observer().start(
             {
                 "task_id": record_id,
                 "task_key": "ticket_log_pull",
@@ -2487,7 +2496,7 @@ class TicketLogPullService:
         finally:
             with cls._executor_lock:
                 cls._active_record_ids.discard(record_id)
-            get_task_memory_observer("api").finish(
+            get_task_memory_observer().finish(
                 {
                     "task_id": record_id,
                     "task_key": "ticket_log_pull",

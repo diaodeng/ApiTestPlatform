@@ -15,7 +15,7 @@ from module_admin.service.ai_provider_protocol_service import AiProviderProtocol
 from module_admin.service.ai_task_execution_service import AiTaskExecutionService
 from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.service.sync.ticket_sync_extract_state_service import TicketSyncExtractStateService
-from modules.ticket.util.ticket_common_util import normalize_ticket_version_key
+from modules.ticket.util.ticket_log_version_extract_util import extract_version_key_by_patterns
 from utils.log_util import logger
 
 
@@ -25,10 +25,6 @@ class TicketLightAiService:
     """
 
     DEFAULT_TIMEOUT_SEC = 60
-    VERSION_PATTERN = re.compile(
-        r"(?:版本号|版本|version|app[_\s-]*version)\s*[:：=]\s*([A-Za-z0-9._/-]+)",
-        re.IGNORECASE,
-    )
     JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
     TICKET_CATEGORY_CANDIDATES = (
         "促销",
@@ -173,16 +169,13 @@ class TicketLightAiService:
     @classmethod
     def extract_version_key_from_text(cls, text: str | None) -> str:
         """
-        从文本中提取版本号。
+        从文本中提取版本号，使用工单文本专用兜底正则：
+        version 前不允许字母/下划线（排除 launcher_version 等带前缀字段），
+        版本形态要求 x.y.z 起步（排除 OpenGL parsed version: 4 这类单数字片段）。
         :param text: 待分析文本
         :return: 版本号，未命中返回空字符串
         """
-        if not text:
-            return ""
-        match = cls.VERSION_PATTERN.search(text)
-        if not match:
-            return ""
-        return normalize_ticket_version_key(match.group(1))
+        return extract_version_key_by_patterns(text, None)
 
     @staticmethod
     def _build_translation_prompt(title: str, content: str) -> str:

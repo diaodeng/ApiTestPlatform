@@ -46,6 +46,10 @@ class TicketEmbeddingService:
     SCOPE_CASE_DRAFT = "case_draft"
     SCOPE_CASE_VERIFIED = "case_verified"
     CASE_SCOPES = {SCOPE_CASE_DRAFT, SCOPE_CASE_VERIFIED}
+    # 相似工单检索的向量扫描页大小：每页独立 LIMIT/OFFSET 查询并逐页释放，
+    # 页内实体含 1024 维 JSON 向量约 32KB，500 条一页的瞬时内存约 16MB，
+    # 远小于 yield_per 全量迭代在 session 身份映射中累积的 85MB+。
+    EMBEDDING_SCAN_PAGE_SIZE = 500
 
     @classmethod
     def _write_embedding_execution_record(
@@ -1037,16 +1041,14 @@ class TicketEmbeddingService:
         embedding_config = vector_config.get("embedding") if isinstance(vector_config.get("embedding"), dict) else {}
         model = str(embedding_config.get("model") or cls.MODEL)
         version = str(embedding_config.get("version") or cls.VERSION)
-        scored: dict[int, float] = {}
-        for record in TicketDao.list_ticket_embedding_records(
-            query_db, model, version, embedding_scope=cls.SCOPE_SYMPTOM, batch_size=500
-        ):
-            if not isinstance(record.embedding, list):
-                continue
-            score = cls._cosine(query_vector, record.embedding)
-            if score > config.get("threshold", 0.05):
-                scored[record.object_id] = max(scored.get(record.object_id, 0.0), score)
-        return dict(sorted(scored.items(), key=lambda item: item[1], reverse=True)[:limit])
+        return cls._score_embedding_pages(
+            query_db,
+            query_vector,
+            limit,
+            model,
+            version,
+            config,
+        )
 
     @classmethod
     def search_qdrant_by_vector(
@@ -1107,16 +1109,15 @@ class TicketEmbeddingService:
         query_vector = cls.embed_text(keyword, local_config)
         model = cls.MODEL
         version = cls.VERSION
-        scored: dict[int, float] = {}
-        for record in TicketDao.list_ticket_embedding_records(
-            query_db, model, version, embedding_scope=cls.SCOPE_SYMPTOM, batch_size=500
-        ):
-            if not isinstance(record.embedding, list):
-                continue
-            score = cls._cosine(query_vector, record.embedding)
-            if score > config.get("threshold", 0.05):
-                scored[record.object_id] = max(scored.get(record.object_id, 0.0), score)
-        return dict(sorted(scored.items(), key=lambda item: item[1], reverse=True)[:limit])
+        return cls._score_embedding_pages(
+            query_db,
+            query_vector,
+            limit,
+            model,
+            version,
+            config,
+            keyword=keyword,
+        )
 
     @classmethod
     def _search_embedding(
@@ -1141,16 +1142,106 @@ class TicketEmbeddingService:
         version = str(embedding_config.get("version") or cls.VERSION)
         vector_config = cls._config_for_vector_provider(config, cls.PROVIDER_EMBEDDING)
         query_vector = cls.embed_text(keyword, vector_config)
-        scored: dict[int, float] = {}
-        for record in TicketDao.list_ticket_embedding_records(
-            query_db, model, version, embedding_scope=cls.SCOPE_SYMPTOM, batch_size=500
-        ):
-            if not isinstance(record.embedding, list):
+        return cls._score_embedding_pages(
+            query_db,
+            query_vector,
+            limit,
+            model,
+            version,
+            config,
+            keyword=keyword,
+        )
+
+    @classmethod
+    def _resolve_signal_prescreen_ids(
+        cls,
+        query_db: Session,
+        keyword: str,
+        config: dict[str, Any],
+    ) -> list[int] | None:
+        """
+        从检索关键词提取精确信号（错误码/Trace ID/Request ID），按信号索引预筛候选工单。
+
+        :param query_db: 数据库会话
+        :param keyword: 原始检索文本
+        :param config: 相似度配置
+        :return: 命中信号的工单ID列表；提取不到信号时返回 None（表示不预筛、全量扫描）
+        """
+        if not config.get("signalPrescreenEnabled", True):
+            return None
+        signal_values = TicketSimilarityProfileService.extract_signal_values(keyword or "")
+        if not signal_values:
+            return None
+        ticket_ids: set[int] = set()
+        for signal_type in ("error_code", "trace_id", "request_id"):
+            values = signal_values.get(signal_type) or []
+            if not values:
                 continue
-            score = cls._cosine(query_vector, record.embedding)
-            if score > config.get("threshold", 0.05):
-                scored[record.object_id] = max(scored.get(record.object_id, 0.0), score)
+            for tid in TicketDao.list_ticket_ids_by_similarity_signals(query_db, signal_type, values):
+                ticket_ids.add(tid)
+        return sorted(ticket_ids) if ticket_ids else None
+
+    @classmethod
+    def _score_embedding_pages(
+        cls,
+        query_db: Session,
+        query_vector: list[float],
+        limit: int,
+        model: str,
+        version: str,
+        config: dict[str, Any],
+        keyword: str = "",
+    ) -> dict[int, float]:
+        """
+        分页扫描向量记录计算余弦相似度，替代 yield_per 全量迭代。
+
+        内存背景：2664 条 × 1024 维向量 JSON 反序列化约 85MB Python 对象，
+        yield_per 模式下已迭代实体累积在 session 身份映射中且 glibc arena
+        不归还，单次检索实测 +45MB、GC 后仍 +31MB 不回落；分页查询每页
+        实体在页处理完毕后即可释放，峰值稳定在页大小级别。
+
+        :param query_db: 数据库会话
+        :param query_vector: 查询向量
+        :param limit: 返回数量
+        :param model: 向量模型标识
+        :param version: 向量版本
+        :param config: 相似度配置
+        :param keyword: 可选原始检索文本，用于提取信号做候选预筛
+        :return: 工单ID到分数的映射
+        """
+        threshold = cls._safe_float(config.get("threshold"), 0.05, -1.0, 1.0)
+        prescreen_ids = cls._resolve_signal_prescreen_ids(query_db, keyword, config)
+        scored: dict[int, float] = {}
+        for page in TicketDao.iter_ticket_embedding_pages(
+            query_db,
+            model,
+            version,
+            embedding_scope=cls.SCOPE_SYMPTOM,
+            page_size=cls.EMBEDDING_SCAN_PAGE_SIZE,
+            object_ids=prescreen_ids,
+        ):
+            for record in page:
+                if not isinstance(record.embedding, list):
+                    continue
+                score = cls._cosine(query_vector, record.embedding)
+                if score > threshold:
+                    scored[record.object_id] = max(scored.get(record.object_id, 0.0), score)
+            # 页处理完毕立即失效页内实体，防止 session 身份映射跨页累积。
+            cls._expire_session_objects(query_db)
         return dict(sorted(scored.items(), key=lambda item: item[1], reverse=True)[:limit])
+
+    @staticmethod
+    def _expire_session_objects(query_db: Session) -> None:
+        """
+        失效当前会话已加载的实体，异常时静默跳过（测试中可能是 mock 会话）。
+
+        :param query_db: 数据库会话
+        :return: 无
+        """
+        try:
+            query_db.expire_all()
+        except AttributeError:
+            pass
 
     @classmethod
     def _search_qdrant(
