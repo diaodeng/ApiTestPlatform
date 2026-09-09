@@ -41,6 +41,10 @@ class TicketAiAnalysisService:
     DEFAULT_WORKER_SANDBOX = "workspace-write"
     DEFAULT_LOG_DIGEST_MAX_CHARS = 300000
     DEFAULT_LOG_DIGEST_MAX_MATCHES_PER_FILE = 80
+    # 回传 raw_output 的摘要长度（字符）：完整 stdout 可达数 MB，整包回传会造成
+    # WebSocket 分片传输与服务端 JSON 解析的百 MB 级内存峰值（历史 OOM 诱因）。
+    # 头部摘要足以诊断失败原因；完整内容留在本地 worker.stdout.txt。
+    RAW_OUTPUT_SUMMARY_CHARS = 8000
 
     # --- Provider 运行时配置映射 ---
     # 每种 provider_type 对应一组 CLI 行为，新增 AI 工具时只需在此追加条目。
@@ -3139,7 +3143,8 @@ class TicketAiAnalysisService:
                     "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": cached_result,
-                        "raw_output": result_text,
+                        # 同真实执行链路：只回传摘要，完整内容留在本地工作区文件。
+                        "raw_output": (result_text or "")[:cls.RAW_OUTPUT_SUMMARY_CHARS],
                         "workspace_path": str(workspace_dir),
                         "result_path": str(result_file),
                         "command_line": "cached:result.json",
@@ -3735,7 +3740,11 @@ class TicketAiAnalysisService:
                     "token_usage": token_usage_payload,
                     "result": {
                         "analysis_result": normalized_result,
-                        "raw_output": raw_stdout or raw_stderr,
+                        # raw_output 只回传头部摘要：完整 stdout 可达数 MB（曾实测单次 8MB），
+                        # 经 WebSocket 分片回传并在服务端 JSON 解析会造成百 MB 级内存峰值
+                        # （2026-09-07/09-08 两次 OOM 的直接诱因）。完整内容已留在本地
+                        # worker.stdout.txt（stdout_path 字段），服务端可按需获取。
+                        "raw_output": (raw_stdout or raw_stderr or "")[:cls.RAW_OUTPUT_SUMMARY_CHARS],
                         "workspace_path": str(workspace_dir),
                         "result_path": str(result_file),
                         "command_line": " ".join(command),

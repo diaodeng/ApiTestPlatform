@@ -1,3 +1,13 @@
+## [2026-09-08] FIX | Agent 孤儿租约启动清理 + AI 回传协议瘦身（第三次 OOM 与"一直分析中"修复）
+
+- 触发：2026-09-08 10:35 生产 fastapi 第三次被 cgroup OOM Kill（前日修复的 cgroup v1 oom_kill 采集首次实录 =1）。同日用户反馈 INC00001934853 / INC00001933577 "已分析完成，重试一直显示 AI 分析中"。
+- 排查：① 自动取证脚本（`incident_capture.py`，部署平台 API + xterm WebSocket 终端 + VM，已随排查产物一并提交 `master_params_oom` 分支）5 分钟拿到 supervisord SIGKILL 记录与 oom_kill=1；② 容器内 python 直查 Redis 发现 `agent:ai_analysis:active` 残留被杀请求的租约（expires_at=10:59:36，lease 3900s），占满 max_concurrent=1 的槽位，10:38 的重试请求排队等到租约过期才自愈（阻塞 24 分钟）；③ 量化 Redis 结果缓存：回传体 8086KB 中 `result.raw_output`（完整 worker stdout）占 8068KB（99.7%），`analysis_result` 仅 17KB——OOM 直接诱因。
+- 修复①（孤儿租约）：`AgentDispatchService.cleanup_orphan_active_leases(redis)` 清空全部 Agent 的 active 租约并标记 `status=failed, reason=orphan-lease-cleanup-on-restart`（SCAN 游标循环兼容 MemoryRedis；`_serialize_state` 新增 `message.extra` 透传）；启动钩子 `startup_handler(app)` → `cleanup_orphan_agent_leases(app)` 在 `app.state.redis` 就绪后调用，异常不阻塞启动。重启后重试从"等租约过期（最长 65 分钟）"变为秒级准入。
+- 修复②（回传瘦身）：Agent 客户端（`client_new/services/ticket_ai_analysis_service.py`）两处回传点（真实执行 + 缓存命中）的 `raw_output` 截断为头部 `RAW_OUTPUT_SUMMARY_CHARS=8000` 字符，完整内容留在本地 `worker.stdout.txt`（`stdout_path` 已回传路径），回传体 4-8MB → 约 30KB；服务端（`ticket_ai_analysis_service.py`）新增 `_truncate_response_raw_output` 在响应接收入口就地截断（`RESPONSE_RAW_OUTPUT_MAX_CHARS=8000`），兜底旧版 Agent。失败诊断不受影响（结构化 error_message 优先 + 8KB 摘要足够 `_summarize_worker_error`）。
+- 文档：更新记录 `web/public/docs/updates/2026-09-08-agent-lease-cleanup-and-response-slim.md`（history.md 已加条目）。
+- 验证：新增 7 测试（孤儿租约清理/空场景/OOM 重启队列立即恢复回归、dict/模型截断/短文本保留/容错），`test_agent_dispatch_service.py` 8 用例 + 相关套件共 87 用例全通过；ruff 通过（client_new 17 个存量告警经 stash 基线对比非本次引入）。未做真实 OOM 演练（需部署后观察下一次重启恢复日志）。
+- 遗留：容器内存 1.4GB→2GB 运维操作仍未落地（第三次 OOM 后最紧迫）；双端需同时发版完整生效（仅发服务端也有兜底）。
+
 ## [2026-09-07] FIX | 相似工单检索内存优化与监控缺陷修复（生产 OOM 重启排查落地）
 
 - 触发：2026-09-07 12:31 生产 fastapi 进程被 cgroup 内存上限（1400MB）内核 OOM Kill，supervisor 自动拉起。VM 指标 + 日志 + 数据库交叉排查确认：直接诱因为 12:31:49 Agent 返回工单 AI 分析结果（raw_output 约 7.5MB）处理时瞬时越限；内存放大点包括相似工单检索全量加载向量（2664 条 × 1024 维 JSON，yield_per 迭代下 session 身份映射累积、GC 后单次 +31MB 不回落）、fastapi 09:51 一次 +309MB 未归因阶跃；排查过程还暴露三个观测缺陷（详见下）。

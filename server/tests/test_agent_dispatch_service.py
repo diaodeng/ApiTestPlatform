@@ -374,3 +374,85 @@ def test_ai_analysis_dispatch_reloads_cached_message_after_queue_wait():
             dispatch_module.connected_agents = {}
 
     asyncio.run(scenario())
+
+
+def test_cleanup_orphan_active_leases_clears_all_agents_and_marks_state():
+    """
+    服务重启清理孤儿租约：应清空全部 Agent 的 active 租约并标记请求状态为失败。
+    """
+    import asyncio
+
+    async def scenario():
+        redis = MemoryRedis()
+        # 模拟上次进程被杀遗留的两个 Agent 各自的租约
+        await redis.hset("agent:ai_analysis:active:agent-1", "req-legacy-1", str(int(time.time()) + 3600))
+        await redis.hset("agent:ai_analysis:active:agent-1", "req-legacy-2", str(int(time.time()) - 10))
+        await redis.hset("agent:ai_analysis:active:agent-2", "req-legacy-3", str(int(time.time()) + 7200))
+
+        removed = await AgentDispatchService.cleanup_orphan_active_leases(redis)
+
+        assert removed == 3
+        assert await redis.hgetall("agent:ai_analysis:active:agent-1") == {}
+        assert await redis.hgetall("agent:ai_analysis:active:agent-2") == {}
+        # 请求状态应被标记为 failed（reason=orphan-lease-cleanup-on-restart）
+        state = await AgentDispatchService._load_json_cache(redis, AgentDispatchService._state_key("req-legacy-1"))
+        assert state is not None
+        assert state["status"] == "failed"
+        assert state["reason"] == "orphan-lease-cleanup-on-restart"
+        # 队列不受影响（清理只动 active 租约）
+        assert await redis.lrange("agent:ai_analysis:queue:agent-1", 0, -1) == []
+
+    asyncio.run(scenario())
+
+
+def test_cleanup_orphan_active_leases_noop_when_empty():
+    """无遗留租约时清理应返回 0 且不报错。"""
+    import asyncio
+
+    async def scenario():
+        redis = MemoryRedis()
+        removed = await AgentDispatchService.cleanup_orphan_active_leases(redis)
+        assert removed == 0
+
+    asyncio.run(scenario())
+
+
+def test_cleanup_orphan_active_leases_recovers_queue_immediately():
+    """
+    回归场景（2026-09-08 10:35 OOM 重启）：重启后遗留租约占满槽位，重试请求被阻塞
+    到旧租约自然过期。清理后重试请求应立即获得槽位。
+    """
+
+    async def scenario():
+        redis = MemoryRedis()
+        agent = "agent-1"
+        # 重启前遗留的租约（远未过期）
+        await redis.hset(f"agent:ai_analysis:active:{agent}", "req-old", str(int(time.time()) + 3600))
+        # 重启后重试请求排在队列头（真实链路中 _cache_request 会先写入请求缓存）
+        await redis.lpush(f"agent:ai_analysis:queue:{agent}", "req-new")
+        await redis.set(
+            AgentDispatchService._request_key("req-new"),
+            json.dumps(
+                {"message": {"requestType": 6, "command": "run_ticket_ai_analysis"}, "createdAt": int(time.time())}
+            ),
+            ex=86400,
+        )
+
+        # 清理遗留租约
+        removed = await AgentDispatchService.cleanup_orphan_active_leases(redis)
+        assert removed == 1
+
+        # 清理后队列头请求应能立即准入
+        admitted = await AgentDispatchService._try_admit_request(
+            redis,
+            agent_code=agent,
+            request_id="req-new",
+            message={"requestType": 6},
+            max_concurrent_tasks=1,
+            lease_seconds=3900,
+        )
+        assert admitted is True
+        active = await redis.hgetall(f"agent:ai_analysis:active:{agent}")
+        assert set(active.keys()) == {"req-new"}
+
+    asyncio.run(scenario())
