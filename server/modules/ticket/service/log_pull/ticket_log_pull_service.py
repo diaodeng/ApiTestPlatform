@@ -1952,14 +1952,35 @@ class TicketLogPullService:
         return None
 
     @classmethod
-    def trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> dict[str, Any]:
+    def trigger_auto_ai_analysis(
+        cls,
+        db: Session,
+        record_id: int,
+        *,
+        force_enabled: bool | None = None,
+        condition_override: dict[str, Any] | None = None,
+        agent_code_override: str | None = None,
+        provider_code_override: str | None = None,
+    ) -> dict[str, Any]:
         """
         触发指定日志记录的自动 AI 分析，并返回结构化结果。
         :param db: 数据库会话
         :param record_id: 日志拉取记录ID
+        :param force_enabled: 自动化链路传入的场景级自动AI开关；传入时覆盖记录快照中的
+            autoAiEnabled（用于复用他人手工创建且未勾选自动AI的成功记录的场景）
+        :param condition_override: 自动化链路传入的自动AI条件；传入时覆盖记录快照中的条件
+        :param agent_code_override: 自动化链路传入的 Agent 编码；传入时覆盖记录快照中的编码
+        :param provider_code_override: 自动化链路传入的 Provider 编码；传入时覆盖记录快照中的编码
         :return: 自动 AI 处理结果摘要
         """
-        return cls._trigger_auto_ai_analysis(db, record_id)
+        return cls._trigger_auto_ai_analysis(
+            db,
+            record_id,
+            force_enabled=force_enabled,
+            condition_override=condition_override,
+            agent_code_override=agent_code_override,
+            provider_code_override=provider_code_override,
+        )
 
     @classmethod
     def create_log_pull_services(
@@ -3232,11 +3253,24 @@ class TicketLogPullService:
 
 
     @classmethod
-    def _trigger_auto_ai_analysis(cls, db: Session, record_id: int) -> dict[str, Any]:
+    def _trigger_auto_ai_analysis(
+        cls,
+        db: Session,
+        record_id: int,
+        *,
+        force_enabled: bool | None = None,
+        condition_override: dict[str, Any] | None = None,
+        agent_code_override: str | None = None,
+        provider_code_override: str | None = None,
+    ) -> dict[str, Any]:
         """
         根据日志拉取记录中的自动化配置触发 AI 分析，并返回结构化结果。
         :param db: 数据库会话
         :param record_id: 日志拉取记录ID
+        :param force_enabled: 自动化链路传入的场景级自动AI开关；传入时覆盖记录快照中的 autoAiEnabled
+        :param condition_override: 自动化链路传入的自动AI条件；传入时覆盖记录快照中的条件
+        :param agent_code_override: 自动化链路传入的 Agent 编码；传入时覆盖记录快照中的编码
+        :param provider_code_override: 自动化链路传入的 Provider 编码；传入时覆盖记录快照中的编码
         :return: 自动 AI 处理结果摘要
         """
         record = TicketLogPullDao.get_record_meta_by_id(db, record_id)
@@ -3291,6 +3325,12 @@ class TicketLogPullService:
             auto_ai_enabled = bool(record.command_content.get("autoAiEnabled"))
             agent_code = str(record.command_content.get("aiAgentCode") or "").strip()
             provider_code = str(record.command_content.get("aiProviderCode") or "").strip()
+        # 自动化链路传入的覆盖值优先：复用他人手工创建的成功记录时，
+        # 开关与 Agent/Provider 以触发本次自动化的场景配置为准，而不是被复用记录自身的快照。
+        if force_enabled is not None:
+            auto_ai_enabled = bool(force_enabled)
+        agent_code = str(agent_code_override or "").strip() or agent_code
+        provider_code = str(provider_code_override or "").strip() or provider_code
         if not auto_ai_enabled:
             reason = "未启用自动AI"
             cls._log_chain_step(
@@ -3307,7 +3347,12 @@ class TicketLogPullService:
                 "recordId": str(record.id),
                 "ticketId": str(record.ticket_id),
             }
-        auto_ai_condition = TicketAutoAiAnalysisConditionService.resolve_condition(record.command_content)
+        # 条件覆盖值优先：自动化链路复用记录时使用创建本次自动化时固化的条件，而非被复用记录快照的条件。
+        auto_ai_condition = (
+            TicketAutoAiAnalysisConditionService.normalize_condition(condition_override)
+            if condition_override is not None
+            else TicketAutoAiAnalysisConditionService.resolve_condition(record.command_content)
+        )
         condition_skip = TicketAutoAiAnalysisConditionService.check_conditions(db, ticket, auto_ai_condition)
         if condition_skip:
             skip_reason, skip_detail = condition_skip

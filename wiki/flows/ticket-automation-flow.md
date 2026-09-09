@@ -94,7 +94,7 @@ sequenceDiagram
 | 6 | 自动拉日志正式创建记录前，会先按工单、环境、商家、门店、POS、数据类型和实际日志范围等关键参数检查是否已有成功记录；若命中则跳过重复拉取并复用该成功记录。 |
 | 7 | 自动拉日志创建前还会检查 `logPullDefaults.autoLogPullStopCondition`；该配置使用内部工作流状态编码多选，命中任一状态时，本次自动拉日志直接记为 `skipped`，不再创建新的自动日志任务，也不会继续发送无意义的“拉不动日志”失败通知。 |
 | 8 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；提取正则来自日志拉取存储配置 `versionExtractPatterns`（可视化位置：同步自动化页「来源与拉取」→「存储与资源限制」），默认锚定 `ms_h/ms_l/ls_h/ls_l` 特征行，只取 `x.y.z` 起步版本号，避免误提取 `launcher_version`（启动器版本）与 OpenGL 解析版本；配置为空或全部非法时回退内置默认正则。若未找到版本号则发送通知并跳过后续 AI 分析。 |
-| 9 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。若自动拉日志因为停止条件被跳过，则同链路自动 AI 也一并跳过。 |
+| 9 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。复用触发时以本次自动化的场景级开关、分析条件与 Agent/Provider 为准覆盖被复用记录自身的快照（`trigger_auto_ai_analysis` 覆盖参数），避免复用他人手工创建且未勾选自动AI的成功记录时被记录快照误跳过（回归场景 INC00001939452）。若自动拉日志因为停止条件被跳过，则同链路自动 AI 也一并跳过。 |
 | 10 | `TicketAiAnalysisService.create_analysis_task_services` 将请求里的 `agentCode` 写入任务上下文，后续由服务端编排到对应 agent；日志拉取后的自动 AI 先经过 FastAPI 内部网关 `/qtr/agent/ai-analysis/send/{agent_code}`，再按 Redis 队列和 `ticket.ai.agent.maxConcurrentTasks` 控制单 Agent 并发；Provider 下发时服务端先合并 `workerEnv` 扩展项，再写入当前 Provider 的密钥、地址和模型；Codex/Claude Worker 初始化任务级配置时覆盖旧工作区值。Agent 并发由 `ticket.ai.agent.maxConcurrentTasks` 控制，默认 `1`，超出上限进入 Redis 队列。任务成功或失败结束时都会按通知配置发送消息。若提交在创建任务前被拒绝，返回的 `result.message` 会同时写入 `auto-ai:failed` 工单事件和通知的“原因”变量。 |
 | 11 | 同步自动化从 `ticket.sync.automation.automationNotification` 读取结果通知配置，并在开始时快照写入 `ticket.extra_data.ticket_automation.notifyConfig`；自动创建的日志拉取任务同时保存该快照，避免后续配置改动影响已启动任务。 |
 | 12 | `TicketNotifyService` 以 `${ticket_no}`、`${merchant_name}`、`${store_name}`、`${stage_label}`、`${status_label}`、`${reason}` 等变量渲染通知模板；日志拉取和 AI 分析的成功、失败与因前置条件跳过都会投递到选定的推送配置。 |

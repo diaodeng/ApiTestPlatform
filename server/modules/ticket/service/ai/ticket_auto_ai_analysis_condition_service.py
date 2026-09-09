@@ -22,6 +22,15 @@ class TicketAutoAiAnalysisConditionService:
         """
         automation = command_content.get("_automation") if isinstance(command_content.get("_automation"), dict) else {}
         raw_condition = automation.get("autoAiAnalysisCondition") or command_content.get("autoAiAnalysisCondition")
+        return cls.normalize_condition(raw_condition)
+
+    @classmethod
+    def normalize_condition(cls, raw_condition: Any) -> dict[str, Any]:
+        """
+        归一化自动 AI 条件（分析模式、状态过滤开关与状态编码列表）。
+        :param raw_condition: 自动 AI 条件原始字典，可能为 None 或结构不完整
+        :return: 归一化后的自动 AI 条件
+        """
         raw_condition = raw_condition if isinstance(raw_condition, dict) else {}
         analysis_mode = str(raw_condition.get("analysisMode") or "always").strip()
         if analysis_mode not in {"always", "not_successful"}:

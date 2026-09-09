@@ -1,3 +1,13 @@
+## [2026-09-09] FIX | 自动AI分析复用记录开关语义修复（INC00001939452 未自动分析）
+
+- 触发：用户反馈 INC00001939452（ticket_id=2048348852915200）日志已拉取成功但未自动执行 AI 分析，分析为手动触发。用 `incident_capture.py --skip-vm` 拉取服务端日志 + 生产库直查 `ticket_event`/`ticket_log_pull_record`/`sys_config`/工单 `extra_data.sync_state.automation.steps` 定位。
+- 时间线还原：10:18/10:21 jiqing.shi 手工提交日志拉取（记录快照 `autoAiEnabled=false`）成功；10:22:03 bitable_pull 自动化执行，场景开关 `autoAiAnalysisOnBitablePull=true`、`logPullDefaults.autoAiEnabled=true`、条件 `not_successful+processing_two` 全部满足，但 log_pull 步骤命中"已存在相同拉取参数且成功的日志记录，跳过自动拉取并复用记录[2048350213553152]"，复用分支调用 `trigger_auto_ai_analysis` 时按被复用记录自身快照判断开关（false）→ 返回"未启用自动AI"跳过。`.env.prod` 与本问题无关（无自动 AI 开关，开关全部在 `sys_config` `ticket.sync.automation`）。
+- 根因：场景级配置（自动化是否自动分析）与记录级快照（该记录创建时是否勾选自动AI）在"复用他人手工成功记录"场景下语义冲突，复用分支以记录快照为准导致场景配置失效。
+- 修复：`TicketLogPullService.trigger_auto_ai_analysis/_trigger_auto_ai_analysis` 新增可选覆盖参数 `force_enabled/condition_override/agent_code_override/provider_code_override`（不传时行为不变，日志拉取自身链路仍按记录快照）；`ticket_sync_automation_service` 两处复用分支（命中相同参数成功记录 `:876`、仅自动AI复用最近成功记录 `:949`）传入本次自动化的场景配置覆盖值；`TicketAutoAiAnalysisConditionService` 抽出 `normalize_condition` 供覆盖条件归一化。
+- 文档：`web/public/docs/ticket-sync-automation.md`（自动AI条件段落补复用记录语义说明）、更新记录 `web/public/docs/updates/2026-09-09-auto-ai-reuse-record-switch-override.md`（history.md 已加条目）。
+- 验证：新增 2 个回归测试（复用分支透传覆盖参数、触发服务按覆盖开关对未勾选自动AI的手工记录正常提交），连同既有同步自动化复用/日志拉取守卫/AI finalize 场景测试共 33 用例全通过；改动文件 ruff 通过。测试公共打桩补 `get_similarity_config`/`build_ticket_text`（前日新增的相似检索链路使旧测试缺桩，属配套修复）。
+- 遗留：本次改动涉及 `ticket_sync_automation_service.py:673` 附近的相似检索调用为工作区既有未提交改动，测试失败经确认与本次无关后仅在测试桩层修复，该未提交改动需随本分支一并交付。
+
 ## [2026-09-08] FIX | Agent 孤儿租约启动清理 + AI 回传协议瘦身（第三次 OOM 与"一直分析中"修复）
 
 - 触发：2026-09-08 10:35 生产 fastapi 第三次被 cgroup OOM Kill（前日修复的 cgroup v1 oom_kill 采集首次实录 =1）。同日用户反馈 INC00001934853 / INC00001933577 "已分析完成，重试一直显示 AI 分析中"。

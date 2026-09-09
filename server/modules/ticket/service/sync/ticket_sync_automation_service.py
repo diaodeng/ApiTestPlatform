@@ -873,8 +873,15 @@ class TicketSyncAutomationService:
                                     },
                                 )
                                 if auto_ai_analysis:
+                                    # 复用记录可能是他人手工创建且未勾选自动AI的记录，
+                                    # 开关/条件/Agent/Provider 以本次自动化场景配置为准，避免被复用记录快照误跳过。
                                     ai_result = TicketLogPullService.trigger_auto_ai_analysis(
-                                        db, existing_success_record.id
+                                        db,
+                                        existing_success_record.id,
+                                        force_enabled=auto_ai_analysis,
+                                        condition_override=auto_ai_analysis_condition,
+                                        agent_code_override=ai_agent_code,
+                                        provider_code_override=ai_provider_code,
                                     )
                                     cls.apply_auto_ai_result(meta, summary, ai_result)
                             else:
@@ -946,7 +953,15 @@ class TicketSyncAutomationService:
                 else:
                     latest_success_record = TicketLogPullDao.get_latest_success_record_by_ticket_id(db, ticket_id)
                     if latest_success_record:
-                        ai_result = TicketLogPullService.trigger_auto_ai_analysis(db, latest_success_record.id)
+                        # 最近成功记录同样可能是手工创建且未勾选自动AI的记录，覆盖参数保证自动化场景配置生效。
+                        ai_result = TicketLogPullService.trigger_auto_ai_analysis(
+                            db,
+                            latest_success_record.id,
+                            force_enabled=auto_ai_analysis,
+                            condition_override=auto_ai_analysis_condition,
+                            agent_code_override=ai_agent_code,
+                            provider_code_override=ai_provider_code,
+                        )
                         cls.apply_auto_ai_result(meta, summary, ai_result)
                     else:
                         reason = "缺少成功日志记录，跳过自动 AI"
