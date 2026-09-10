@@ -155,6 +155,64 @@ class TicketLogPullDao:
         return query.order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc()).all()
 
     @classmethod
+    def list_recent_records_by_pull_identity(
+        cls,
+        db: Session,
+        ticket_id: int,
+        environment: str | None,
+        vendor_id: int,
+        store_id: str,
+        pos_no: int,
+        command_data_type: int,
+        limit: int = 20,
+    ) -> list[TicketLogPullRecord]:
+        """
+        按工单与基础拉取维度查询不限状态的最近记录，供自动化决策矩阵使用。
+
+        与 list_success_records_by_pull_identity 的差异：不过滤 status，
+        决策矩阵需要看到同参数下最新一条记录（无论成功、失败还是进行中）。
+
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param environment: 环境标识
+        :param vendor_id: 商家 vendorId
+        :param store_id: 门店 org_no
+        :param pos_no: POS 编号
+        :param command_data_type: 数据类型
+        :param limit: 返回条数上限
+        :return: 倒序排列的最近记录列表
+        """
+        query = (
+            db.query(TicketLogPullRecord)
+            .options(
+                defer(TicketLogPullRecord.compressed_content),
+                defer(TicketLogPullRecord.exception_detail),
+            )
+            .filter(
+                TicketLogPullRecord.ticket_id == ticket_id,
+                TicketLogPullRecord.vendor_id == vendor_id,
+                TicketLogPullRecord.store_id == store_id,
+                TicketLogPullRecord.pos_no == pos_no,
+                TicketLogPullRecord.command_data_type == command_data_type,
+            )
+        )
+        normalized_environment = str(environment or "").strip()
+        if normalized_environment:
+            query = query.filter(TicketLogPullRecord.environment == normalized_environment)
+        else:
+            query = query.filter(
+                or_(
+                    TicketLogPullRecord.environment.is_(None),
+                    TicketLogPullRecord.environment == "",
+                )
+            )
+        return (
+            query.order_by(TicketLogPullRecord.create_time.desc(), TicketLogPullRecord.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @classmethod
     def update_record(cls, db: Session, record_id: int, data: dict) -> None:
         """
         更新日志拉取记录字段。

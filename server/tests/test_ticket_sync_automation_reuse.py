@@ -4,6 +4,12 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.log_pull.ticket_log_pull_automation_decision_service import (
+    AutoLogPullDecision as DecisionResult,
+)
+from modules.ticket.service.log_pull.ticket_log_pull_automation_decision_service import (
+    TicketLogPullAutomationDecisionService,
+)
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_sync_automation_input_service import TicketSyncAutomationInputService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
@@ -63,6 +69,12 @@ def _patch_common_dependencies(monkeypatch, ticket):
     )
     monkeypatch.setattr(TicketSyncPayloadService, "build_meta", lambda extra_data: {})
     monkeypatch.setattr(TicketSyncPayloadService, "attach_meta", lambda extra_data, meta: extra_data)
+    monkeypatch.setattr(TicketEmbeddingService, "get_similarity_config", lambda db: {"enabled": True})
+    monkeypatch.setattr(
+        TicketEmbeddingService,
+        "build_ticket_text",
+        lambda ticket, config=None, scope=None: "ticket-context",
+    )
     monkeypatch.setattr(TicketEmbeddingService, "search_tickets", lambda *args, **kwargs: [])
     monkeypatch.setattr(TicketSyncAutomationService, "collect_text", lambda payload: "ticket-context")
 
@@ -104,7 +116,17 @@ def test_run_sync_automation_reuses_matching_success_log_record(monkeypatch):
         "mark_automation_step",
         lambda meta, **kwargs: steps.append(kwargs) or meta,
     )
-    monkeypatch.setattr(TicketLogPullService, "find_matching_success_record", lambda *args, **kwargs: existing_record)
+    monkeypatch.setattr(
+        TicketLogPullAutomationDecisionService,
+        "decide",
+        lambda db, ticket_id, payload, **kwargs: DecisionResult(
+            action="reuse",
+            reason=f"复用相同拉取参数的成功记录[{existing_record.id}]",
+            record_id=existing_record.id,
+            record_status="success",
+            analyze_existing=True,
+        ),
+    )
     monkeypatch.setattr(
         TicketLogPullService,
         "trigger_auto_ai_analysis",
@@ -128,6 +150,108 @@ def test_run_sync_automation_reuses_matching_success_log_record(monkeypatch):
     assert result["logPull"]["recordId"] == str(existing_record.id)
     assert result["aiAnalysis"]["taskId"] == "301"
     assert any(item["step"] == "log_pull" and item["status"] == "skipped" for item in steps)
+    assert any(item["step"] == "ai_analysis" and item["status"] == "submitted" for item in steps)
+
+
+def test_run_sync_automation_reuse_passes_auto_ai_overrides(monkeypatch):
+    """复用他人手工创建且未勾选自动AI的成功记录时，应以自动化场景配置触发自动AI。
+
+    回归场景：INC00001939452 手工提前拉取日志成功（记录快照 autoAiEnabled=false），
+    bitable_pull 自动化复用该记录后按记录快照判断"未启用自动AI"而跳过分析。
+    """
+    db = DummyDb()
+    ticket = _build_ticket()
+    sync_object = SimpleNamespace(
+        ticket_no="INC-REUSE-RESET",
+        automation=SimpleNamespace(
+            auto_log_pull=True,
+            auto_ai_analysis=True,
+            ai_agent_code="agent-prod",
+            ai_provider_code="provider-prod",
+            extra_instruction="",
+        ),
+    )
+    # 模拟手工创建的成功记录：快照未开启自动AI，Agent/Provider 为空
+    existing_record = SimpleNamespace(id=2043149749595140, status="success", status_desc="拉取成功")
+    steps: list[dict] = []
+    captured_kwargs: dict = {}
+
+    def fake_trigger(db, record_id, **kwargs):
+        captured_kwargs["record_id"] = record_id
+        captured_kwargs.update(kwargs)
+        return {"status": "submitted", "recordId": str(record_id), "taskId": "303"}
+
+    _patch_common_dependencies(monkeypatch, ticket)
+    monkeypatch.setattr(
+        TicketSyncConfigService,
+        "load_sync_config",
+        lambda db: {
+            "automationNotification": {},
+            "logPullDefaults": {
+                "autoAiAnalysisCondition": {
+                    "analysisMode": "not_successful",
+                    "statusFilterEnabled": True,
+                    "statusCodes": ["processing_two"],
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        TicketSyncAutomationService,
+        "mark_automation_step",
+        lambda meta, **kwargs: steps.append(kwargs) or meta,
+    )
+    monkeypatch.setattr(
+        TicketSyncAutomationInputService,
+        "resolve_runtime_config",
+        lambda **kwargs: {
+            "environment": "prod",
+            "vendorId": 11,
+            "storeId": "552283",
+            "posNo": 2,
+            "commandDataType": 1,
+            "modifyTime": "2026-08-20",
+        },
+    )
+    monkeypatch.setattr(TicketSyncAutomationInputService, "resolve_modify_time", lambda **kwargs: "2026-08-20")
+    monkeypatch.setattr(TicketLogPullDao, "verify_store_by_org_no", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        TicketLogPullAutomationDecisionService,
+        "decide",
+        lambda db, ticket_id, payload, **kwargs: DecisionResult(
+            action="reuse",
+            reason=f"复用相同拉取参数的成功记录[{existing_record.id}]",
+            record_id=existing_record.id,
+            record_status="success",
+            analyze_existing=True,
+        ),
+    )
+    monkeypatch.setattr(TicketLogPullService, "trigger_auto_ai_analysis", fake_trigger)
+    monkeypatch.setattr(
+        TicketLogPullService,
+        "create_log_pull_services",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("命中重复成功记录后不应再次创建日志拉取任务")),
+    )
+
+    result = TicketSyncAutomationService.run_sync_automation(
+        db,
+        ticket_id=1001,
+        sync_object=sync_object,
+        detected={},
+        current_user=_build_current_user(),
+    )
+
+    # 复用分支应透传自动化场景配置，而不是依赖被复用记录的快照
+    assert result["aiAnalysis"]["taskId"] == "303"
+    assert captured_kwargs["record_id"] == existing_record.id
+    assert captured_kwargs["force_enabled"] is True
+    assert captured_kwargs["condition_override"] == {
+        "analysisMode": "not_successful",
+        "statusFilterEnabled": True,
+        "statusCodes": ["processing_two"],
+    }
+    assert captured_kwargs["agent_code_override"] == "agent-prod"
+    assert captured_kwargs["provider_code_override"] == "provider-prod"
     assert any(item["step"] == "ai_analysis" and item["status"] == "submitted" for item in steps)
 
 

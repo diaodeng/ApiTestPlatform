@@ -733,6 +733,10 @@ class TicketLogPullListItemModel(TicketLogPullSummaryModel):
     content_truncated: bool = False
     content_summary: str | None = None
     has_content: bool = Field(default=False, description="是否有可展示的日志内容")
+    pull_source: str | None = Field(default=None, description="拉取来源：manual人工，automation自动化")
+    pull_source_scene: str | None = Field(default=None, description="自动拉取触发场景")
+    create_by: str | None = Field(default=None, description="创建人（人工拉取时即拉取人）")
+    puller: str | None = Field(default=None, description="拉取人展示值：自动拉取 或 创建人姓名")
     finished_at: datetime | None = None
     update_time: datetime | None = None
 

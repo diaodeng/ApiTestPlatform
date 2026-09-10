@@ -74,6 +74,77 @@ def test_build_external_request_headers_wraps_credential_errors(monkeypatch):
         )
 
 
+def test_trigger_auto_ai_with_overrides_reuses_manual_record(monkeypatch):
+    """自动化链路复用手工记录时，覆盖开关/条件应生效并提交 AI 分析。
+
+    回归场景：INC00001939452 手工记录快照 autoAiEnabled=false，自动化复用后
+    需按场景配置的 force_enabled 与条件触发分析，而不是按记录快照跳过。
+    """
+
+    class DummyDb:
+        """模拟仅记录提交次数的数据库会话。"""
+
+        def __init__(self):
+            self.commit_count = 0
+
+        def commit(self):
+            """记录提交次数。"""
+            self.commit_count += 1
+
+    db = DummyDb()
+    # 手工创建的记录：未勾选自动AI、无 Agent/Provider、条件为空
+    record = SimpleNamespace(
+        id=2043149749595141,
+        ticket_id=2043147524033536,
+        command_content={"_automation": {"autoAiEnabled": False}},
+    )
+    ticket = SimpleNamespace(ticket_id=record.ticket_id, affected_version_id=174076259444195366)
+    chain_steps: list[dict] = []
+
+    monkeypatch.setattr(TicketLogPullDao, "get_record_meta_by_id", lambda db, record_id: record)
+    monkeypatch.setattr(
+        "modules.ticket.service.log_pull.ticket_log_pull_service.TicketDao.get_ticket_by_id",
+        lambda db, ticket_id: ticket,
+    )
+    monkeypatch.setattr(TicketLogPullService, "_extract_record_notify_config", lambda record: {})
+    # 状态过滤：工单状态在允许列表内，条件检查通过
+    monkeypatch.setattr(TicketAutoAiAnalysisConditionService, "check_conditions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(TicketLogPullService, "_log_chain_step", lambda *args, **kwargs: chain_steps.append(kwargs))
+
+    from modules.ticket.entity.vo.ticket_vo import TicketAiAnalysisRequestModel
+    from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysisService
+
+    captured_request: dict = {}
+
+    def fake_create_task(db, ticket_id, request, user):
+        captured_request["request"] = request
+        return SimpleNamespace(is_success=True, result=SimpleNamespace(task_id=3051))
+
+    monkeypatch.setattr(TicketAiAnalysisService, "create_analysis_task_services", fake_create_task)
+
+    result = TicketLogPullService.trigger_auto_ai_analysis(
+        db,
+        record.id,
+        force_enabled=True,
+        condition_override={
+            "analysisMode": "not_successful",
+            "statusFilterEnabled": True,
+            "statusCodes": ["processing_two"],
+        },
+        agent_code_override="agent-prod",
+        provider_code_override="provider-prod",
+    )
+
+    assert result["status"] == "submitted"
+    assert result["taskId"] == "3051"
+    request: TicketAiAnalysisRequestModel = captured_request["request"]
+    assert request.agent_code == "agent-prod"
+    assert request.ai_provider_code == "provider-prod"
+    assert request.log_pull_record_id == record.id
+    assert chain_steps[-1]["step"] == "auto-ai"
+    assert chain_steps[-1]["status"] == "submitted"
+
+
 def test_auto_ai_submit_failure_records_reason_in_event_and_notification(monkeypatch):
     """自动 AI 提交被拒绝时，应将服务返回原因同时写入时间线和通知原因。"""
 

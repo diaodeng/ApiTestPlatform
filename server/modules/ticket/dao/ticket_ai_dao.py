@@ -224,6 +224,26 @@ class TicketAiDao:
         )
 
     @classmethod
+    def get_latest_task_by_log_pull_record_id(
+        cls, db: Session, log_pull_record_id: int
+    ) -> TicketAiAnalysisTask | None:
+        """
+        按来源日志拉取记录ID查询最新 AI 分析任务。
+        用于自动链路判断某条成功日志记录是否已经执行过 AI 分析。
+        :param db: 数据库会话
+        :param log_pull_record_id: 日志拉取记录ID
+        :return: 最新 AI 分析任务，无匹配时返回 None
+        """
+        if not log_pull_record_id:
+            return None
+        return (
+            db.query(TicketAiAnalysisTask)
+            .filter(TicketAiAnalysisTask.source_log_pull_record_id == log_pull_record_id)
+            .order_by(TicketAiAnalysisTask.create_time.desc(), TicketAiAnalysisTask.task_id.desc())
+            .first()
+        )
+
+    @classmethod
     def get_successful_task_by_request_fingerprint(
         cls, db: Session, request_fingerprint: str
     ) -> TicketAiAnalysisTask | None:
