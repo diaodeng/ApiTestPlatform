@@ -139,6 +139,18 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="拉取人" width="120" align="center" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tooltip
+            v-if="scope.row.pullSource === 'automation'"
+            :content="`自动拉取（场景：${getPullSourceSceneLabel(scope.row.pullSourceScene)}）`"
+            placement="top"
+          >
+            <el-tag type="primary" effect="plain">自动</el-tag>
+          </el-tooltip>
+          <span v-else>{{ scope.row.puller || scope.row.createBy || '-' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="数据类型" width="110" align="center">
         <template #default="scope">{{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}</template>
       </el-table-column>
@@ -529,7 +541,7 @@ import LogPullConfigFields from '@/components/ticket/LogPullConfigFields.vue'
 import LogPullNotifyConfigFields from '@/components/ticket/LogPullNotifyConfigFields.vue'
 import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue'
 import LogResourceCurveDialog from '@/components/ticket/LogResourceCurveDialog.vue'
-import { getLogPullStatusTagType, getOptionLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
+import { getLogPullStatusTagType, getOptionLabel, getLogPullSourceSceneLabel, logPullDataTypeOptions, logPullStatusOptions, logPullStorageModeOptions } from '../constants'
 import {
   applyLogPullRecordToForm,
   buildOptionalLogPullTimeRangePayload,

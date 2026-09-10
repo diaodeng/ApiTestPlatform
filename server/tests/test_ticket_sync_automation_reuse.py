@@ -4,6 +4,12 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_log_pull_dao import TicketLogPullDao
 from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.log_pull.ticket_log_pull_automation_decision_service import (
+    AutoLogPullDecision as DecisionResult,
+)
+from modules.ticket.service.log_pull.ticket_log_pull_automation_decision_service import (
+    TicketLogPullAutomationDecisionService,
+)
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.sync.ticket_sync_automation_input_service import TicketSyncAutomationInputService
 from modules.ticket.service.sync.ticket_sync_automation_service import TicketSyncAutomationService
@@ -110,7 +116,17 @@ def test_run_sync_automation_reuses_matching_success_log_record(monkeypatch):
         "mark_automation_step",
         lambda meta, **kwargs: steps.append(kwargs) or meta,
     )
-    monkeypatch.setattr(TicketLogPullService, "find_matching_success_record", lambda *args, **kwargs: existing_record)
+    monkeypatch.setattr(
+        TicketLogPullAutomationDecisionService,
+        "decide",
+        lambda db, ticket_id, payload, **kwargs: DecisionResult(
+            action="reuse",
+            reason=f"复用相同拉取参数的成功记录[{existing_record.id}]",
+            record_id=existing_record.id,
+            record_status="success",
+            analyze_existing=True,
+        ),
+    )
     monkeypatch.setattr(
         TicketLogPullService,
         "trigger_auto_ai_analysis",
@@ -199,7 +215,17 @@ def test_run_sync_automation_reuse_passes_auto_ai_overrides(monkeypatch):
     )
     monkeypatch.setattr(TicketSyncAutomationInputService, "resolve_modify_time", lambda **kwargs: "2026-08-20")
     monkeypatch.setattr(TicketLogPullDao, "verify_store_by_org_no", lambda *args, **kwargs: True)
-    monkeypatch.setattr(TicketLogPullService, "find_matching_success_record", lambda *args, **kwargs: existing_record)
+    monkeypatch.setattr(
+        TicketLogPullAutomationDecisionService,
+        "decide",
+        lambda db, ticket_id, payload, **kwargs: DecisionResult(
+            action="reuse",
+            reason=f"复用相同拉取参数的成功记录[{existing_record.id}]",
+            record_id=existing_record.id,
+            record_status="success",
+            analyze_existing=True,
+        ),
+    )
     monkeypatch.setattr(TicketLogPullService, "trigger_auto_ai_analysis", fake_trigger)
     monkeypatch.setattr(
         TicketLogPullService,

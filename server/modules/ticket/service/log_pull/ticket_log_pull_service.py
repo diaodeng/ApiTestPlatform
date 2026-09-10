@@ -1984,7 +1984,14 @@ class TicketLogPullService:
 
     @classmethod
     def create_log_pull_services(
-        cls, query_db: Session, ticket_id: int | None, payload: TicketLogPullCreateModel, current_user: CurrentUserModel
+        cls,
+        query_db: Session,
+        ticket_id: int | None,
+        payload: TicketLogPullCreateModel,
+        current_user: CurrentUserModel,
+        *,
+        pull_source: str = "manual",
+        pull_source_scene: str | None = None,
     ) -> CrudResponseModel:
         """
         创建日志拉取记录并触发后台执行。
@@ -1992,6 +1999,8 @@ class TicketLogPullService:
         :param ticket_id: 工单ID，允许为空表示独立管理记录
         :param payload: 日志拉取参数
         :param current_user: 当前登录用户
+        :param pull_source: 拉取来源，manual 人工创建（默认），automation 自动化链路创建
+        :param pull_source_scene: 自动拉取触发场景（external_sync/remote_pull/bitable_pull/manual_create）
         :return: 创建结果
         """
         resolved_ticket_id = ticket_id if ticket_id is not None else payload.ticket_id
@@ -2066,6 +2075,8 @@ class TicketLogPullService:
                     storage_mode=storage_mode,
                     status=TicketLogPullStatus.CREATED.value,
                     status_desc="已创建，等待后台执行",
+                    pull_source=str(pull_source or "manual").strip() or "manual",
+                    pull_source_scene=str(pull_source_scene or "").strip() or None,
                     is_error=False,
                     create_by=cls._user_name(current_user),
                     update_by=cls._user_name(current_user),
@@ -3119,40 +3130,54 @@ class TicketLogPullService:
                     success_desc = "DB 拉取完成"
                 elif content_result["matched_entry_count"] == 0:
                     success_desc = "日志拉取完成，未匹配到时间范围内日志"
-                cls._update_status(
+                # 条件写入：记录在下载/解析期间被人工置为 CANCELLED 时放弃覆盖，不再触发 AI
+                status_written = cls._update_record_if_not_terminal(
                     db,
                     record_id,
-                    status=TicketLogPullStatus.SUCCESS.value,
-                    status_desc=success_desc,
-                    is_error=False,
-                    update_by="system",
-                    archive_entry_count=content_result["archive_entry_count"],
-                    matched_entry_count=content_result["matched_entry_count"],
-                    content_char_count=content_result["content_char_count"],
-                    content_truncated=content_result["content_truncated"],
-                    compressed_content=content_result["compressed_content"],
-                    content_summary=content_result["content_summary"],
-                    finished_at=datetime.now(),
-                    **update_kwargs,
+                    {
+                        "status": TicketLogPullStatus.SUCCESS.value,
+                        "status_desc": success_desc,
+                        "is_error": False,
+                        "update_by": "system",
+                        "update_time": datetime.now(),
+                        "archive_entry_count": content_result["archive_entry_count"],
+                        "matched_entry_count": content_result["matched_entry_count"],
+                        "content_char_count": content_result["content_char_count"],
+                        "content_truncated": content_result["content_truncated"],
+                        "compressed_content": content_result["compressed_content"],
+                        "content_summary": content_result["content_summary"],
+                        "finished_at": datetime.now(),
+                        **update_kwargs,
+                    },
                 )
+                if not status_written:
+                    logger.info(f"日志拉取记录[{record_id}] 已被终止，放弃写成功状态")
+                    return
             else:
                 archive_entry_count = cls._count_archive_entries(temp_file_path)
-                cls._update_status(
+                # 条件写入：记录在下载期间被人工置为 CANCELLED 时放弃覆盖
+                status_written = cls._update_record_if_not_terminal(
                     db,
                     record_id,
-                    status=TicketLogPullStatus.SUCCESS.value,
-                    status_desc="日志已下载，未截取内容",
-                    is_error=False,
-                    update_by="system",
-                    archive_entry_count=archive_entry_count,
-                    matched_entry_count=0,
-                    content_char_count=0,
-                    content_truncated=False,
-                    compressed_content=None,
-                    content_summary="日志已下载完成，未截取入库，AI 分析将使用整包压缩文件。",
-                    finished_at=datetime.now(),
-                    **update_kwargs,
+                    {
+                        "status": TicketLogPullStatus.SUCCESS.value,
+                        "status_desc": "日志已下载，未截取内容",
+                        "is_error": False,
+                        "update_by": "system",
+                        "update_time": datetime.now(),
+                        "archive_entry_count": archive_entry_count,
+                        "matched_entry_count": 0,
+                        "content_char_count": 0,
+                        "content_truncated": False,
+                        "compressed_content": None,
+                        "content_summary": "日志已下载完成，未截取入库，AI 分析将使用整包压缩文件。",
+                        "finished_at": datetime.now(),
+                        **update_kwargs,
+                    },
                 )
+                if not status_written:
+                    logger.info(f"日志拉取记录[{record_id}] 已被终止，放弃写成功状态")
+                    return
             cls._log_chain_step(
                 db,
                 ticket_id=record.ticket_id,
@@ -4948,14 +4973,56 @@ class TicketLogPullService:
     def _update_status(cls, db: Session, record_id: int, **kwargs) -> None:
         """
         更新日志拉取记录状态字段并提交。
+
+        条件更新防护：仅当记录不处于终态（success/failed/exception/cancelled）时才写入，
+        避免人工停止（置 cancelled）后后台线程把状态覆盖回 success/failed 的竞态。
+        终态写入请通过传递 status 的更新配合此防护语义，恢复链路使用 DAO 直改。
         :param db: 数据库会话
         :param record_id: 记录ID
         :param kwargs: 更新字段
         :return: 无
         """
         kwargs["update_time"] = kwargs.get("update_time") or datetime.now()
-        TicketLogPullDao.update_record(db, record_id, kwargs)
+        target_status = str(kwargs.get("status") or "").strip()
+        terminal_statuses = {
+            TicketLogPullStatus.SUCCESS.value,
+            TicketLogPullStatus.FAILED.value,
+            TicketLogPullStatus.EXCEPTION.value,
+            TicketLogPullStatus.CANCELLED.value,
+        }
+        if target_status in terminal_statuses:
+            # 终态无条件写入（本链路终态只在正常流程尾部或失败处理时写入）
+            TicketLogPullDao.update_record(db, record_id, kwargs)
+            db.commit()
+            return
+        # 非终态及无 status 的更新：只允许在记录仍非终态时生效，防止覆盖已停止/已完成的记录
+        cls._update_record_if_not_terminal(db, record_id, kwargs)
+
+    @classmethod
+    def _update_record_if_not_terminal(cls, db: Session, record_id: int, data: dict) -> None:
+        """
+        仅当记录不处于终态时执行字段更新，返回是否发生更新。
+        :param db: 数据库会话
+        :param record_id: 记录ID
+        :param data: 更新字段
+        :return: 是否更新
+        """
+        terminal_statuses = {
+            TicketLogPullStatus.SUCCESS.value,
+            TicketLogPullStatus.FAILED.value,
+            TicketLogPullStatus.EXCEPTION.value,
+            TicketLogPullStatus.CANCELLED.value,
+        }
+        updated = (
+            db.query(TicketLogPullRecord)
+            .filter(
+                TicketLogPullRecord.id == record_id,
+                TicketLogPullRecord.status.notin_(terminal_statuses),
+            )
+            .update(data)
+        )
         db.commit()
+        return bool(updated)
 
     @classmethod
     def _fail_record(cls, db: Session, record_id: int, *, status: str, status_desc: str, error_message: str) -> None:
@@ -5268,6 +5335,22 @@ class TicketLogPullService:
         if not payload.get("path") and not payload.get("pullMethod"):
             payload["pullMethod"] = "time"
         payload["hasContent"] = bool(payload.get("compressedContent"))
+        # 拉取人归一化：自动化记录展示"自动"标记；存量数据缺 pull_source 列时按
+        # command_content._automation.autoCreated 兜底识别，人工记录展示 create_by。
+        pull_source = str(payload.get("pullSource") or "").strip()
+        automation_snapshot = (
+            command_content.get("_automation") if isinstance(command_content, dict) else None
+        )
+        if not pull_source:
+            is_auto_created = isinstance(automation_snapshot, dict) and automation_snapshot.get("autoCreated")
+            pull_source = "automation" if is_auto_created else "manual"
+        payload["pullSource"] = pull_source
+        if not payload.get("pullSourceScene") and isinstance(automation_snapshot, dict):
+            payload["pullSourceScene"] = automation_snapshot.get("scene")
+        if pull_source == "automation":
+            payload["puller"] = "自动拉取"
+        else:
+            payload["puller"] = str(payload.get("createBy") or "").strip() or "未知"
         payload.pop("compressedContent", None)
         payload.pop("exceptionDetail", None)
         return TicketLogPullListItemModel.model_validate(payload).model_dump(by_alias=True)

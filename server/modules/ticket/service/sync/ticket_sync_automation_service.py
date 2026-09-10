@@ -23,6 +23,9 @@ from modules.ticket.entity.vo.ticket_log_pull_vo import TicketLogPullCreateModel
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
 from modules.ticket.service.ai.ticket_auto_ai_analysis_condition_service import TicketAutoAiAnalysisConditionService
 from modules.ticket.service.ai.ticket_embedding_service import TicketEmbeddingService
+from modules.ticket.service.log_pull.ticket_log_pull_automation_decision_service import (
+    TicketLogPullAutomationDecisionService,
+)
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
 from modules.ticket.service.notification.ticket_notify_service import TicketNotifyService
 from modules.ticket.service.sync.ticket_sync_automation_input_service import TicketSyncAutomationInputService
@@ -848,45 +851,22 @@ class TicketSyncAutomationService:
                     else:
                         try:
                             create_model = TicketLogPullCreateModel.model_validate(runtime_config)
-                            existing_success_record = TicketLogPullService.find_matching_success_record(
-                                db, ticket_id, create_model
+                            # 同参数决策矩阵：按同参数最新记录状态决定创建/等待/复用/静默跳过，
+                            # 失败记录不再反复创建拉取与重复通知，进行中记录等待完成后由既有链路驱动。
+                            decision = TicketLogPullAutomationDecisionService.decide(
+                                db,
+                                ticket_id,
+                                create_model,
+                                auto_ai_enabled=auto_ai_analysis,
                             )
-                            if existing_success_record:
-                                reuse_reason = (
-                                    f"已存在相同拉取参数且成功的日志记录，跳过自动拉取并复用记录[{existing_success_record.id}]"
-                                )
-                                summary["logPull"] = {
-                                    "recordId": str(existing_success_record.id),
-                                    "status": str(existing_success_record.status or ""),
-                                    "statusDesc": str(existing_success_record.status_desc or ""),
-                                    "reused": True,
-                                }
-                                summary["logPullSkipReason"] = reuse_reason
-                                cls.mark_automation_step(
-                                    meta,
-                                    step="log_pull",
-                                    status="skipped",
-                                    detail={
-                                        "reason": reuse_reason,
-                                        "runtimeConfig": runtime_config,
-                                        "existingRecordId": str(existing_success_record.id),
-                                    },
-                                )
-                                if auto_ai_analysis:
-                                    # 复用记录可能是他人手工创建且未勾选自动AI的记录，
-                                    # 开关/条件/Agent/Provider 以本次自动化场景配置为准，避免被复用记录快照误跳过。
-                                    ai_result = TicketLogPullService.trigger_auto_ai_analysis(
-                                        db,
-                                        existing_success_record.id,
-                                        force_enabled=auto_ai_analysis,
-                                        condition_override=auto_ai_analysis_condition,
-                                        agent_code_override=ai_agent_code,
-                                        provider_code_override=ai_provider_code,
-                                    )
-                                    cls.apply_auto_ai_result(meta, summary, ai_result)
-                            else:
+                            if decision.action == "create":
                                 log_result = TicketLogPullService.create_log_pull_services(
-                                    db, ticket_id, create_model, current_user
+                                    db,
+                                    ticket_id,
+                                    create_model,
+                                    current_user,
+                                    pull_source="automation",
+                                    pull_source_scene=sync_scene,
                                 )
                                 if log_result.is_success:
                                     summary["logPull"] = log_result.result
@@ -921,6 +901,87 @@ class TicketSyncAutomationService:
                                         notify_config=notification_config,
                                         stage="log_pull",
                                     )
+                            elif decision.action == "wait":
+                                # 同参数记录拉取中：不创建、不通知，留痕后等待既有链路完成
+                                summary["logPullSkipReason"] = decision.reason
+                                cls.mark_automation_step(
+                                    meta,
+                                    step="log_pull",
+                                    status="skipped",
+                                    detail={"reason": decision.reason, **decision.detail},
+                                )
+                                TicketLogPullAutomationDecisionService.record_skip_event(
+                                    db,
+                                    ticket_id=ticket_id,
+                                    decision=decision,
+                                    sync_scene=sync_scene,
+                                )
+                                if auto_ai_analysis:
+                                    summary["aiAnalysisSkipReason"] = "同参数日志拉取仍在进行中，完成后自动触发AI分析"
+                                    cls.mark_automation_step(
+                                        meta,
+                                        step="ai_analysis",
+                                        status="skipped",
+                                        detail={"reason": "同参数日志拉取仍在进行中，等待完成后由拉取链路触发"},
+                                    )
+                            elif decision.action == "reuse":
+                                # 复用成功记录：不重复拉取，按记录级 AI 任务决定是否触发分析
+                                summary["logPull"] = {
+                                    "recordId": str(decision.record_id),
+                                    "status": decision.record_status or "success",
+                                    "reused": True,
+                                }
+                                summary["logPullSkipReason"] = decision.reason
+                                cls.mark_automation_step(
+                                    meta,
+                                    step="log_pull",
+                                    status="skipped",
+                                    detail={"reason": decision.reason, **decision.detail},
+                                )
+                                if decision.analyze_existing:
+                                    # 复用记录可能是他人手工创建且未勾选自动AI的记录，
+                                    # 开关/条件/Agent/Provider 以本次自动化场景配置为准，避免被复用记录快照误跳过。
+                                    ai_result = TicketLogPullService.trigger_auto_ai_analysis(
+                                        db,
+                                        decision.record_id,
+                                        force_enabled=True,
+                                        condition_override=auto_ai_analysis_condition,
+                                        agent_code_override=ai_agent_code,
+                                        provider_code_override=ai_provider_code,
+                                    )
+                                    cls.apply_auto_ai_result(meta, summary, ai_result)
+                                elif auto_ai_analysis:
+                                    skip_reason = "复用的成功记录已有AI分析任务，跳过重复分析"
+                                    summary["aiAnalysisSkipReason"] = skip_reason
+                                    cls.mark_automation_step(
+                                        meta,
+                                        step="ai_analysis",
+                                        status="skipped",
+                                        detail={"reason": skip_reason, **decision.detail},
+                                    )
+                            else:
+                                # skip_failed：同参数最新记录已失败，静默跳过（不创建、不AI、不通知）
+                                summary["logPullSkipReason"] = decision.reason
+                                cls.mark_automation_step(
+                                    meta,
+                                    step="log_pull",
+                                    status="skipped",
+                                    detail={"reason": decision.reason, **decision.detail},
+                                )
+                                if auto_ai_analysis:
+                                    summary["aiAnalysisSkipReason"] = "同参数日志拉取记录已失败，自动AI分析跳过"
+                                    cls.mark_automation_step(
+                                        meta,
+                                        step="ai_analysis",
+                                        status="skipped",
+                                        detail={"reason": "同参数拉取记录已失败，不触发AI分析", **decision.detail},
+                                    )
+                                TicketLogPullAutomationDecisionService.record_skip_event(
+                                    db,
+                                    ticket_id=ticket_id,
+                                    decision=decision,
+                                    sync_scene=sync_scene,
+                                )
                         except Exception as exc:
                             summary["logPullError"] = str(exc)
                             cls.mark_automation_step(meta, step="log_pull", status="failed", error=str(exc))

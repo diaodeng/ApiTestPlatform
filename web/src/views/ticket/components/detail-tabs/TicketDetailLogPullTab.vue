@@ -14,6 +14,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
   import { getTicketSummary } from '@/api/ticket/ticket';
   import {
     getLogPullStatusTagType,
+    getLogPullSourceSceneLabel,
     getOptionLabel,
     logPullDataTypeOptions,
     logPullStatusOptions,
@@ -575,6 +576,18 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         <el-tag :type="getLogPullStatusTagType(scope.row.status)">
           {{ scope.row.statusDesc || getOptionLabel(logPullStatusOptions, scope.row.status) }}
         </el-tag>
+      </template>
+    </el-table-column>
+    <el-table-column label="拉取人" width="110" align="center" show-overflow-tooltip>
+      <template #default="scope">
+        <el-tooltip
+          v-if="scope.row.pullSource === 'automation'"
+          :content="`自动拉取（场景：${getLogPullSourceSceneLabel(scope.row.pullSourceScene)}）`"
+          placement="top"
+        >
+          <el-tag type="primary" effect="plain">自动</el-tag>
+        </el-tooltip>
+        <span v-else>{{ scope.row.puller || scope.row.createBy || '-' }}</span>
       </template>
     </el-table-column>
     <el-table-column label="保存方式" width="90" align="center">

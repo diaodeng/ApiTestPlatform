@@ -91,6 +91,26 @@ export function getOptionLabel(options, value) {
   return options.find(item => item.value === value)?.label || value || '-'
 }
 
+/**
+ * 自动日志拉取触发场景选项，用于"拉取人"列 tooltip 展示。
+ */
+export const logPullSourceSceneOptions = [
+  { label: '外部同步', value: 'external_sync' },
+  { label: '远端拉取', value: 'remote_pull' },
+  { label: '多维表格拉取', value: 'bitable_pull' },
+  { label: '手工创建', value: 'manual_create' }
+]
+
+/**
+ * 获取自动拉取场景的中文标签。
+ * @param {string} value 场景编码（external_sync 等）
+ * @returns {string} 中文标签，未知或为空时返回原值或"未知场景"
+ */
+export function getLogPullSourceSceneLabel(value) {
+  if (!value) return '未知场景'
+  return logPullSourceSceneOptions.find(item => item.value === value)?.label || value
+}
+
 export function getStatusTagType(value) {
   return ticketStatusOptions.find(item => item.value === value)?.type || 'info'
 }
