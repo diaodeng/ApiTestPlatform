@@ -5,14 +5,32 @@ export PATH="/usr/local/bin:/app/.venv/bin:$PATH"
 # 统一 supervisor 子进程的运行环境，避免 Celery 退回默认 dev 配置。
 export APP_ENV="${APP_ENV:-prod}"
 
-# bullseye 已结束 LTS，镜像站 bullseye-security 池中部分依赖包（如 python3-pkg-resources）
-# 文件已被清理但索引仍在，apt 安装 supervisor 会 404 失败；故运行时只装运行库，
-# supervisor 为纯 Python 包，改由 pip 安装（版本较新且不依赖系统 apt 包）。
+# bullseye 已于 2026-08-31 结束 LTS，USTC 镜像站的 bullseye-security 池 .deb 文件被渐进清理
+# （索引仍在、下载 404），apt 事务中任一包 404 会导致整体安装失败（ripgrep 因此一直装不上，
+# 日志搜索被迫降级 Python 慢速模式）。改用阿里云 debian-archive 冻结归档：仅保留 main 池，
+# libcairo2/ripgrep 所需包实测完整，归档快照承诺永不清理，且 Release 无 Valid-Until 不会过期。
 echo "开始安装系统依赖。。。"
-sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
-    sed -i 's|security.debian.org/debian-security|mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list && \
-    apt-get update && apt-get install --no-install-recommends -y libcairo2 ripgrep && \
-    rm -rf /var/lib/apt/lists/*
+# 注意：security 源必须删除而不是改指向（归档源没有 bullseye-security，指向 404 会让 apt-get update 整体失败）。
+# 兼容传统 sources.list 与 deb822（debian.sources）两种格式，deb822 的 security 段按空行分块整体删除。
+sed -i 's|deb.debian.org/debian|mirrors.aliyun.com/debian-archive/debian|g' /etc/apt/sources.list
+sed -i '/security.debian.org/d; /bullseye-security/d' /etc/apt/sources.list 2>/dev/null || true
+if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+    sed -i 's|URIs: http://security.debian.org/debian-security|URIs: REMOVED|' /etc/apt/sources.list.d/debian.sources
+    sed -i '/^URIs: REMOVED$/,/^$/d' /etc/apt/sources.list.d/debian.sources
+    sed -i 's|URIs: http://deb.debian.org/debian|URIs: http://mirrors.aliyun.com/debian-archive/debian|' /etc/apt/sources.list.d/debian.sources
+fi
+# rm 不放在 && 链尾：set -e 对 && 列表中非最后命令的失败不触发退出，会让 apt 失败被静默跳过
+apt-get update && apt-get install --no-install-recommends -y libcairo2 ripgrep
+rm -rf /var/lib/apt/lists/*
+# 安装结果必须显式可见，避免 rg 缺失后日志搜索静默降级难排查
+if command -v rg >/dev/null 2>&1; then
+    echo "ripgrep 安装成功：$(command -v rg)"
+else
+    echo "ERROR: ripgrep 安装失败，日志搜索将降级为 Python 慢速模式，大日志工单搜索会报保护阈值错误" >&2
+fi
+if ! ldconfig -p | grep -q libcairo; then
+    echo "ERROR: libcairo2 安装失败，matplotlib 相关功能可能不可用" >&2
+fi
 
 echo "系统依赖安装完成。。。"
 
