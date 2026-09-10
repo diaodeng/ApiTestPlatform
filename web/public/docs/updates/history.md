@@ -6,6 +6,7 @@ title: 更新历史
 
 
 ## 2026-09-10
+- 群推送话题锚点擦除修复（AI 分析结果不回帖工单群，生产工单 INC00001934853 / INC00001934853R 实测定位）：两处 `build_meta` 白名单重建 `sync_state` 时未包含 `group_push_message_refs`（话题锚点）与 `ai_result_reply_task_ids`（回帖幂等记录），外部同步更新/多维表格拉取等任何读改写工单扩展字段的链路都会把锚点静默擦除，AI 终态回帖因"无群消息锚点"被 skip；现两处白名单补齐字段并补默认空列表，新增 6 个回归测试；`.env.prod` 与该问题无关，回帖开关全部在 `sys_config('ticket.sync.automation')` 且生产配置正确。存量被擦除锚点的工单需按用户文档手动补发。详见：[群推送锚点擦除修复](2026-09-10-group-push-anchor-erasure-fix.md)。
 - 启动脚本 apt 源切换归档修复 ripgrep 缺失（背景：工单 INC00001941655 日志搜索报"保护阈值"错误，实测生产容器没有 rg）：bullseye EOL 后 USTC 镜像站 security 池清理范围扩大到 libfreetype6（libcairo2 的依赖），apt 事务任一包 404 即整体失败导致 ripgrep 一直装不上，日志搜索被迫走 Python 降级并触发 256MB 保护阈值；另 start.sh 的 set -e 因 && 链写法豁免了 apt 失败，应用带着缺失依赖静默启动。现 apt 源切换阿里云 debian-archive 永久冻结归档（国内可达、承诺不清理、无 Valid-Until）、删除 security 源、兼容传统与 deb822 两种源格式、拆散 && 链让失败可被捕获、安装后自检 rg/libcairo 显式报错。详见：[启动脚本apt归档修复ripgrep缺失](2026-09-10-start-sh-apt-archive-ripgrep-fix.md)。
 
 ## 2026-09-09
