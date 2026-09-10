@@ -97,6 +97,68 @@ class TestBuildMetaSyncScenePassthrough(unittest.TestCase):
         self.assertEqual(meta["sync_state"]["sync_scene"], "")
 
 
+class TestBuildMetaKeepsGroupPushRefs(unittest.TestCase):
+    """
+    两处 build_meta 白名单重建后必须保留群消息话题锚点与回帖幂等记录。
+
+    背景（INC00001934853 / INC00001934853R）：群推送发送成功并记录了
+    group_push_message_refs（话题锚点），但外部同步更新等链路经
+    build_meta -> attach_meta 读改写 extra_data 时白名单未包含锚点字段，
+    锚点被静默擦除，AI 终态回帖因"无群消息锚点"被 skip 且不留下幂等痕迹。
+    """
+
+    def test_payload_build_meta_keeps_message_refs(self):
+        """TicketSyncPayloadService.build_meta 保留已有话题锚点。"""
+        refs = [{"messageId": "om_1", "chatId": "oc_a"}]
+        extra_data = {"external_sync": {"sync_state": {"group_push_message_refs": refs}}}
+        meta = TicketSyncPayloadService.build_meta(extra_data)
+        self.assertEqual(meta["sync_state"]["group_push_message_refs"], refs)
+
+    def test_group_push_build_meta_keeps_message_refs(self):
+        """TicketSyncGroupPushService.build_meta 保留已有话题锚点。"""
+        refs = [{"messageId": "om_1", "chatId": "oc_a"}]
+        extra_data = {"external_sync": {"sync_state": {"group_push_message_refs": refs}}}
+        meta = TicketSyncGroupPushService.build_meta(extra_data)
+        self.assertEqual(meta["sync_state"]["group_push_message_refs"], refs)
+
+    def test_payload_build_meta_keeps_replied_task_ids(self):
+        """TicketSyncPayloadService.build_meta 保留回帖幂等任务 ID 列表。"""
+        extra_data = {"external_sync": {"sync_state": {"ai_result_reply_task_ids": ["123", "456"]}}}
+        meta = TicketSyncPayloadService.build_meta(extra_data)
+        self.assertEqual(meta["sync_state"]["ai_result_reply_task_ids"], ["123", "456"])
+
+    def test_group_push_build_meta_keeps_replied_task_ids(self):
+        """TicketSyncGroupPushService.build_meta 保留回帖幂等任务 ID 列表。"""
+        extra_data = {"external_sync": {"sync_state": {"ai_result_reply_task_ids": ["123"]}}}
+        meta = TicketSyncGroupPushService.build_meta(extra_data)
+        self.assertEqual(meta["sync_state"]["ai_result_reply_task_ids"], ["123"])
+
+    def test_build_meta_defaults_refs_empty_list(self):
+        """历史元数据没有锚点时补空列表（不是 None），不抛异常。"""
+        for build_meta in (TicketSyncPayloadService.build_meta, TicketSyncGroupPushService.build_meta):
+            meta = build_meta({"external_sync": {"sync_state": {}}})
+            self.assertEqual(meta["sync_state"]["group_push_message_refs"], [])
+            self.assertEqual(meta["sync_state"]["ai_result_reply_task_ids"], [])
+
+    def test_build_meta_refs_roundtrip_preserves_sent_once(self):
+        """锚点 + 幂等 + 去重标记一起经 build_meta 往返后全部保留（模拟同步更新后的回帖前置检查）。"""
+        refs = [{"messageId": "om_1", "chatId": "oc_a", "rootId": "om_1"}]
+        extra_data = {
+            "external_sync": {
+                "sync_state": {
+                    "group_push_sent_once": True,
+                    "group_push_message_refs": refs,
+                    "ai_result_reply_task_ids": ["2048452915620864"],
+                }
+            }
+        }
+        # 模拟外部同步更新链路：build_meta 读出 -> attach_meta 写回（隐含往返）。
+        meta = TicketSyncPayloadService.build_meta(extra_data)
+        self.assertTrue(meta["sync_state"]["group_push_sent_once"])
+        self.assertEqual(meta["sync_state"]["group_push_message_refs"], refs)
+        self.assertEqual(meta["sync_state"]["ai_result_reply_task_ids"], ["2048452915620864"])
+
+
 class TestFinalizeSyncAfterAiSceneResolution(unittest.TestCase):
     """finalize_sync_after_ai 必须用工单元数据里的真实场景触发群推送。"""
 
