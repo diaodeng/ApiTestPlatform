@@ -120,7 +120,7 @@
       scrollbar-always-on
     >
       <el-table-column label="记录ID" prop="id" width="180" show-overflow-tooltip />
-      <el-table-column label="环境" width="100" align="center">
+      <el-table-column label="环境" width="110" align="center" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.environment || '-' }}</template>
       </el-table-column>
       <el-table-column label="关联工单" min-width="220" show-overflow-tooltip>
@@ -151,10 +151,10 @@
           <span v-else>{{ scope.row.puller || scope.row.createBy || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="数据类型" width="110" align="center">
+      <el-table-column label="数据类型" width="90" align="center">
         <template #default="scope">{{ getOptionLabel(logPullDataTypeOptions, scope.row.commandDataType) }}</template>
       </el-table-column>
-      <el-table-column label="vendor/store/pos" min-width="160" show-overflow-tooltip>
+      <el-table-column label="vendor/store/pos" width="150" show-overflow-tooltip>
         <template #default="scope">
           {{ scope.row.vendorId || '-' }}/{{ scope.row.storeId || '-' }}/{{ scope.row.posNo || '-' }}
         </template>
@@ -165,7 +165,7 @@
       <el-table-column label="拉取参数" min-width="180" show-overflow-tooltip>
         <template #default="scope">{{ formatLogPullParameter(scope.row) }}</template>
       </el-table-column>
-      <el-table-column label="归档地址" min-width="220" show-overflow-tooltip>
+      <el-table-column label="归档地址" min-width="180" show-overflow-tooltip>
         <template #default="scope">
           <el-link
             v-if="getLogPullArchiveDownloadUrl(scope.row)"
@@ -180,7 +180,7 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="原始压缩包" min-width="220" show-overflow-tooltip>
+      <el-table-column label="原始压缩包" min-width="180" show-overflow-tooltip>
         <template #default="scope">
           <el-link
             v-if="getLogPullOriginalDownloadUrl(scope.row)"
