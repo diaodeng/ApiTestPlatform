@@ -1,3 +1,12 @@
+## [2026-09-11] FIX | 机台编号提取正则修复与唯一候选覆盖策略取消（INC00001952225 提示词修正不生效）
+
+- 触发：用户修正 `aiSyncExtract` 提示词后模型已正确返回 `posNo=2`，但重新提取落库仍为 56，告警"模型POS=2与原文唯一机台候选POS=56不一致，已采用原文值"，`identify`/`log_pull_hints`/自动拉日志全部使用错误机台。生产库直查工单 `extra_data.ai_sync_extract`（cacheHit=False 证明提示词已生效）+ 本机复现正则定位。
+- 根因（两点叠加）：① `_extract_all_explicit_machine_nos` 的"数字在前 POS 在后"分支匹配到标题 `[08/09 23:56 POS#2 ]` 中时间 23:56 的分钟（`:56 POS`），且消耗掉 POS token 使 finditer 无法再匹配紧随其后的 `POS#2`，唯一候选变成 56；② `_reconcile_machine_no_with_source` 的"原文唯一候选与模型冲突时硬覆盖模型值"分支把正则候选当真值，而正则每次提取重新执行，提示词修正的结果到不了落库层。
+- 修复（配套两项）：① 正则三处调整——编号数字排除时间语境（后跟 `数字+冒号+数字` 含回溯绕过防护、前置紧邻冒号）、前置分支 POS 后加负向前瞻不吞后跟编号的 POS token、顺带修复 `N号POS` 分支数字组未捕获的存量缺陷；② 策略改为模型优先、正则仅兜底——模型值有效但不在候选中（不论数量）统一保留模型值并告警，仅模型值无效/未填写时用候选兜底，两个冲突分支合并。
+- 文档：`web/public/docs/ticket-sync-automation.md`（归一化策略段落重写）、更新记录 `web/public/docs/updates/2026-09-11-ticket-ai-extract-machine-regex-and-priority-fix.md`（history.md 已加条目）。
+- 验证：`tests/test_ticket_sync_ai_extract_safety.py` 16 用例全过（新增 INC00001952225 时间劫持回归、纯时间语境、`N号POS` 捕获 3 用例，原"唯一候选纠正"用例改写）；正则 11 场景脚本验证全符合预期；ruff 通过；全量 25 failed + 11 errors 经 stash 对比确认为分支存量问题。
+- 遗留：存量已写错 posNo 的工单（如 INC00001952225 的 56）需等下次外部同步事件重提取或人工修正；提示词变更会使提取缓存（sourceHash+promptHash）自然失效。"手动设置不覆盖自动提取"的字段级 provenance/manual_overrides 机制未在本次实施，为后续独立需求。
+
 ## [2026-09-09] FIX | 自动AI分析复用记录开关语义修复（INC00001939452 未自动分析）
 
 - 触发：用户反馈 INC00001939452（ticket_id=2048348852915200）日志已拉取成功但未自动执行 AI 分析，分析为手动触发。用 `incident_capture.py --skip-vm` 拉取服务端日志 + 生产库直查 `ticket_event`/`ticket_log_pull_record`/`sys_config`/工单 `extra_data.sync_state.automation.steps` 定位。
