@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, defer
 
@@ -349,3 +351,52 @@ class TicketAiDao:
             .order_by(TicketAiAnalysisTask.create_time.asc(), TicketAiAnalysisTask.task_id.asc())
             .all()
         )
+
+    @classmethod
+    def is_result_replied(cls, db: Session, task_id: int | None) -> bool:
+        """
+        判断 AI 分析任务的结果是否已回帖到工单群话题（任务级幂等判定）。
+        替代原 extra_data.external_sync.sync_state.ai_result_reply_task_ids JSON 列表（2026-09 拆表）。
+        :param db: 数据库会话
+        :param task_id: AI任务ID
+        :return: 是否已回帖
+        """
+        if not task_id:
+            return False
+        row = (
+            db.query(TicketAiAnalysisTask.result_replied_at)
+            .filter(TicketAiAnalysisTask.task_id == task_id)
+            .first()
+        )
+        if not row:
+            return False
+        return row[0] is not None
+
+    @classmethod
+    def mark_result_replied(cls, db: Session, task_id: int | None, chat_ids: list[str] | None = None) -> bool:
+        """
+        标记 AI 分析任务结果已回帖（条件更新保证并发下只有一个写者生效）。
+        由调用方事务边界统一提交；任务不存在或已标记时返回 False。
+        :param db: 数据库会话
+        :param task_id: AI任务ID
+        :param chat_ids: 本次回帖覆盖的群 chat_id 列表（审计用）
+        :return: 是否本次标记成功
+        """
+        if not task_id:
+            return False
+        chat_text = ",".join(str(item or "").strip() for item in (chat_ids or []) if str(item or "").strip())[:512]
+        updated = (
+            db.query(TicketAiAnalysisTask)
+            .filter(
+                TicketAiAnalysisTask.task_id == task_id,
+                TicketAiAnalysisTask.result_replied_at.is_(None),
+            )
+            .update(
+                {
+                    TicketAiAnalysisTask.result_replied_at: datetime.now(),
+                    TicketAiAnalysisTask.result_replied_chat_ids: chat_text or None,
+                },
+                synchronize_session=False,
+            )
+        )
+        return int(updated or 0) > 0

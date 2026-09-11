@@ -549,6 +549,14 @@ class TicketAiAnalysisTask(Base):
     active_lock: Mapped[str | None] = mapped_column(
         String(64), nullable=True, comment="活跃任务指纹锁（created/running 时等于请求指纹，终态置空）"
     )
+    # AI 结果回帖幂等列：result_replied_at IS NULL 即未回帖；
+    # 替代原 extra_data.external_sync.sync_state.ai_result_reply_task_ids JSON 列表（2026-09 拆表）。
+    result_replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, comment="AI结果回帖成功时间，NULL表示未回帖"
+    )
+    result_replied_chat_ids: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, comment="本次回帖覆盖的群chat_id列表，逗号分隔（审计用）"
+    )
     source_log_pull_record_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源日志记录ID")
     source_log_view_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="stored", comment="日志来源模式"

@@ -69,15 +69,9 @@ class TicketSyncPayloadService:
             "group_push_processing_at": sync_state.get("group_push_processing_at"),
             "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
             "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
-            # 群消息话题锚点与回帖幂等记录必须随 build_meta 往返保留，
-            # 否则外部同步更新等读改写 extra_data 的链路会把锚点静默擦除，
-            # 导致 AI 终态回帖因"无话题锚点"被 skip（INC00001934853/R 案例）。
-            "group_push_message_refs": sync_state.get("group_push_message_refs")
-            if isinstance(sync_state.get("group_push_message_refs"), list)
-            else [],
-            "ai_result_reply_task_ids": sync_state.get("ai_result_reply_task_ids")
-            if isinstance(sync_state.get("ai_result_reply_task_ids"), list)
-            else [],
+            # 2026-09 拆表说明：话题锚点已迁移到独立表 ticket_group_push_anchor，
+            # 回帖幂等已迁移到 ticket_ai_analysis_task.result_replied_at 列，
+            # 不再存于 sync_state，避免同步更新链路读改写时被白名单重建静默擦除。
             # 最近一次入库同步场景（external_sync/remote_pull/bitable_pull/manual_create），
             # 供 AI 终态等异步回调还原触发场景，历史数据为空由调用方按来源推断。
             "sync_scene": str(sync_state.get("sync_scene") or "").strip(),

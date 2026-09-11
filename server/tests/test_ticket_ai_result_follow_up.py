@@ -1,15 +1,35 @@
 """
 AI 分析结果话题回帖（aiResultFollowUp）的单元测试。
 
-覆盖：sendOn 四枚举匹配、手动三态覆盖、task_id 幂等、无锚点降级跳过（策略B）、
+覆盖：sendOn 四枚举匹配、手动三态覆盖、任务表列幂等、无锚点降级跳过（策略B）、
 多群去重回帖、配置归一化、模板渲染。
+2026-09 拆表：锚点改查 ticket_group_push_anchor 表、幂等改用
+ticket_ai_analysis_task.result_replied_at 列，测试按 DAO 打桩。
 """
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
+
+GROUP_PUSH_MODULE = "modules.ticket.service.sync.ticket_sync_group_push_service"
+
+
+def _make_anchor(message_id: str, chat_id: str, root_id: str = "", thread_id: str = "") -> SimpleNamespace:
+    """构造锚点表 ORM 行的测试替身。"""
+    return SimpleNamespace(
+        message_id=message_id,
+        root_id=root_id or message_id,
+        thread_id=thread_id,
+        chat_id=chat_id,
+    )
+
+
+def _make_db() -> SimpleNamespace:
+    """构造带 commit/rollback 的数据库会话替身。"""
+    return SimpleNamespace(commit=lambda: None, rollback=lambda: None)
 
 
 class TestMatchAiResultSendOn(unittest.TestCase):
@@ -96,60 +116,64 @@ class TestShouldSendAiResultFollowUp(unittest.TestCase):
 
 
 class TestAiResultReplyIdempotency(unittest.TestCase):
-    """task_id 幂等标记。"""
+    """任务表列幂等：TicketAiDao.is_result_replied / mark_result_replied（2026-09 拆表后）。"""
 
     def test_mark_and_check(self):
-        """标记后同 task_id 命中、不同 task_id 不命中。"""
-        meta = {"sync_state": {}}
-        self.assertFalse(TicketSyncGroupPushService.is_ai_result_replied(meta, task_id=1))
-        meta = TicketSyncGroupPushService.mark_ai_result_replied(meta, task_id=1)
-        self.assertTrue(TicketSyncGroupPushService.is_ai_result_replied(meta, task_id=1))
-        self.assertFalse(TicketSyncGroupPushService.is_ai_result_replied(meta, task_id=2))
-        self.assertIsNone(TicketSyncGroupPushService.is_ai_result_replied({}, task_id=None) is not None and None)
+        """result_replied_at 非 NULL 即已回帖；无任务行或 task_id 为空视为未回帖。"""
+        from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 
-    def test_mark_keeps_recent_50(self):
-        """幂等列表保留最近 50 条防止元数据无限增长。"""
-        meta = {"sync_state": {}}
-        for task_id in range(1, 61):
-            meta = TicketSyncGroupPushService.mark_ai_result_replied(meta, task_id=task_id)
-        replied = meta["sync_state"]["ai_result_reply_task_ids"]
-        self.assertEqual(len(replied), 50)
-        self.assertFalse(TicketSyncGroupPushService.is_ai_result_replied(meta, task_id=1))
-        self.assertTrue(TicketSyncGroupPushService.is_ai_result_replied(meta, task_id=60))
+        db = MagicMock()
+        db.query.return_value.filter.return_value.first.return_value = (datetime.now(),)
+        self.assertTrue(TicketAiDao.is_result_replied(db, 1))
+        db.query.return_value.filter.return_value.first.return_value = (None,)
+        self.assertFalse(TicketAiDao.is_result_replied(db, 1))
+        db.query.return_value.filter.return_value.first.return_value = None
+        self.assertFalse(TicketAiDao.is_result_replied(db, 1))
+        self.assertFalse(TicketAiDao.is_result_replied(db, None))
+
+    def test_mark_returns_updated_only_once(self):
+        """条件更新（result_replied_at IS NULL）保证并发下只有第一个写者生效。"""
+        from modules.ticket.dao.ticket_ai_dao import TicketAiDao
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.update.return_value = 1
+        self.assertTrue(TicketAiDao.mark_result_replied(db, 100, chat_ids=["oc_1"]))
+        db.query.return_value.filter.return_value.update.return_value = 0
+        self.assertFalse(TicketAiDao.mark_result_replied(db, 100))
+        self.assertFalse(TicketAiDao.mark_result_replied(db, None))
 
 
 class TestCollectAiResultReplyTargets(unittest.TestCase):
-    """回帖目标收集：空锚点过滤与按群去重。"""
+    """回帖目标收集：空锚点过滤与按群去重（2026-09 拆表后查锚点表）。"""
 
     def test_dedup_by_chat_and_skip_empty(self):
         """同群多条锚点只回一次；空 messageId 锚点跳过。"""
-        meta = {
-            "sync_state": {
-                "group_push_message_refs": [
-                    {"messageId": "om_a", "rootId": "om_a", "chatId": "oc_1"},
-                    {"messageId": "om_b", "rootId": "om_b", "chatId": "oc_1"},
-                    {"messageId": "om_c", "rootId": "om_c", "chatId": "oc_2"},
-                    {"messageId": "", "rootId": "", "chatId": "oc_3"},
-                ]
-            }
-        }
-        targets = TicketSyncGroupPushService._collect_ai_result_reply_targets(meta)
+        anchors = [
+            _make_anchor("om_a", "oc_1"),
+            _make_anchor("om_b", "oc_1"),
+            _make_anchor("om_c", "oc_2"),
+            _make_anchor("", "oc_3"),
+        ]
+        with patch(
+            "modules.ticket.service.sync.ticket_sync_group_push_service.TicketGroupPushAnchorDao.list_anchors_by_ticket_id",
+            return_value=anchors,
+        ):
+            targets = TicketSyncGroupPushService._collect_ai_result_reply_targets(MagicMock(), 1)
         self.assertEqual([t["messageId"] for t in targets], ["om_a", "om_c"])
 
     def test_no_refs_returns_empty(self):
         """无锚点返回空列表。"""
-        self.assertEqual(TicketSyncGroupPushService._collect_ai_result_reply_targets({"sync_state": {}}), [])
+        with patch(
+            "modules.ticket.service.sync.ticket_sync_group_push_service.TicketGroupPushAnchorDao.list_anchors_by_ticket_id",
+            return_value=[],
+        ):
+            self.assertEqual(TicketSyncGroupPushService._collect_ai_result_reply_targets(MagicMock(), 1), [])
 
 
 class TestSendAiResultThreadReply(unittest.TestCase):
     """send_ai_result_thread_reply 主流程。"""
 
-    def _ticket(self, refs=None, replied_ids=None):
-        sync_state = {}
-        if refs is not None:
-            sync_state["group_push_message_refs"] = refs
-        if replied_ids is not None:
-            sync_state["ai_result_reply_task_ids"] = replied_ids
+    def _ticket(self):
         return SimpleNamespace(
             ticket_id=1,
             ticket_no="INC-R-1",
@@ -157,10 +181,11 @@ class TestSendAiResultThreadReply(unittest.TestCase):
             ticket_url="http://t",
             module_name="M",
             merchant_name="P",
-            extra_data={"external_sync": {"sync_state": sync_state}},
+            extra_data={"external_sync": {"sync_state": {}}},
         )
 
-    def _run(self, ticket, follow_up_config, status="success", task_id=100):
+    def _run(self, ticket, follow_up_config, status="success", task_id=100, anchors=None, replied=False):
+        anchors = anchors or []
         with (
             patch(
                 "modules.ticket.service.sync.ticket_sync_group_push_service.TicketSyncConfigService.load_sync_config",
@@ -168,12 +193,14 @@ class TestSendAiResultThreadReply(unittest.TestCase):
             ),
             patch.object(TicketSyncNotifyService, "resolve_feishu_auth", return_value=("app", "secret")),
             patch.object(TicketSyncNotifyService, "send_feishu_thread_reply") as send_reply,
-            patch.object(TicketSyncGroupPushService, "persist_sync_meta", side_effect=lambda db, **kw: kw["ticket"]),
+            patch(f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id", return_value=anchors),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=replied),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
         ):
             result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
-                SimpleNamespace(),
+                _make_db(),
                 ticket=ticket,
-                meta={"sync_state": ticket.extra_data["external_sync"]["sync_state"]},
+                meta={"sync_state": {}},
                 follow_up_config=follow_up_config,
                 ai_task_status=status,
                 ai_task_id=task_id,
@@ -184,8 +211,9 @@ class TestSendAiResultThreadReply(unittest.TestCase):
     def test_reply_skipped_when_send_on_none(self):
         """sendOn=none 时跳过且不发送。"""
         result, send_reply = self._run(
-            self._ticket(refs=[{"messageId": "om_a", "rootId": "om_a", "chatId": "oc_1"}]),
+            self._ticket(),
             {"enabled": True, "sendOn": "none", "replyInThread": True, "template": ""},
+            anchors=[_make_anchor("om_a", "oc_1")],
         )
         self.assertTrue(result["skipped"])
         send_reply.assert_not_called()
@@ -193,35 +221,36 @@ class TestSendAiResultThreadReply(unittest.TestCase):
     def test_reply_skipped_when_no_anchor(self):
         """无锚点且策略为 skip（默认）：跳过，不新建话题。"""
         result, send_reply = self._run(
-            self._ticket(refs=[]),
+            self._ticket(),
             {"enabled": True, "sendOn": "always", "replyInThread": True, "template": ""},
+            anchors=[],
         )
         self.assertTrue(result["skipped"])
         self.assertIn("锚点", result["skipReason"])
         send_reply.assert_not_called()
 
     def test_reply_skipped_when_task_replied(self):
-        """同 task_id 已回帖过：幂等跳过。"""
+        """同 task_id 已回帖过（任务表 result_replied_at 非空）：幂等跳过。"""
         result, send_reply = self._run(
-            self._ticket(refs=[{"messageId": "om_a", "rootId": "om_a", "chatId": "oc_1"}], replied_ids=["100"]),
+            self._ticket(),
             {"enabled": True, "sendOn": "always", "replyInThread": True, "template": ""},
+            anchors=[_make_anchor("om_a", "oc_1")],
+            replied=True,
         )
         self.assertTrue(result["skipped"])
         self.assertIn("已回帖", result["skipReason"])
         send_reply.assert_not_called()
 
     def test_reply_sends_to_each_deduped_group(self):
-        """正常回帖：按去重后的目标群逐个发送并标记 task_id。"""
-        ticket = self._ticket(
-            refs=[
-                {"messageId": "om_a", "rootId": "om_a", "chatId": "oc_1"},
-                {"messageId": "om_b", "rootId": "om_b", "chatId": "oc_1"},
-                {"messageId": "om_c", "rootId": "om_c", "chatId": "oc_2"},
-            ]
-        )
+        """正常回帖：按去重后的目标群逐个发送并标记任务表幂等列。"""
         result, send_reply = self._run(
-            ticket,
+            self._ticket(),
             {"enabled": True, "sendOn": "always", "replyInThread": True, "template": ""},
+            anchors=[
+                _make_anchor("om_a", "oc_1"),
+                _make_anchor("om_b", "oc_1"),
+                _make_anchor("om_c", "oc_2"),
+            ],
         )
         self.assertFalse(result["skipped"])
         self.assertEqual(result["targetCount"], 2)
@@ -247,26 +276,17 @@ class TestSendAiResultThreadReply(unittest.TestCase):
                     return_value={"groupPush": {"appId": "app", "appSecret": "secret"}},
                 ),
                 patch.object(TicketSyncNotifyService, "resolve_feishu_auth", return_value=("app", "secret")),
-                patch.object(
-                    TicketSyncGroupPushService, "persist_sync_meta", side_effect=lambda db, **kw: kw["ticket"]
+                patch(
+                    f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id",
+                    return_value=[_make_anchor("om_a", "oc_1"), _make_anchor("om_c", "oc_2")],
                 ),
+                patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
+                patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
             ):
                 result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
-                    SimpleNamespace(),
-                    ticket=self._ticket(
-                        refs=[
-                            {"messageId": "om_a", "rootId": "om_a", "chatId": "oc_1"},
-                            {"messageId": "om_c", "rootId": "om_c", "chatId": "oc_2"},
-                        ]
-                    ),
-                    meta={
-                        "sync_state": {
-                            "group_push_message_refs": [
-                                {"messageId": "om_a", "rootId": "om_a", "chatId": "oc_1"},
-                                {"messageId": "om_c", "rootId": "om_c", "chatId": "oc_2"},
-                            ]
-                        }
-                    },
+                    _make_db(),
+                    ticket=self._ticket(),
+                    meta={"sync_state": {}},
                     follow_up_config={"enabled": True, "sendOn": "always", "replyInThread": True, "template": ""},
                     ai_task_status="success",
                     ai_task_id=200,
@@ -279,10 +299,7 @@ class TestSendAiResultThreadReply(unittest.TestCase):
 class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
     """无锚点策略：skip 跳过 / send_then_reply 先补发再回帖。"""
 
-    def _ticket(self, refs=None):
-        sync_state = {}
-        if refs is not None:
-            sync_state["group_push_message_refs"] = refs
+    def _ticket(self):
         return SimpleNamespace(
             ticket_id=1,
             ticket_no="INC-NA-1",
@@ -290,7 +307,7 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
             ticket_url="http://t",
             module_name="M",
             merchant_name="P",
-            extra_data={"external_sync": {"sync_state": sync_state}},
+            extra_data={"external_sync": {"sync_state": {}}},
         )
 
     def _config(self, strategy):
@@ -302,8 +319,13 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
             "noAnchorStrategy": strategy,
         }
 
-    def _run_with_push(self, ticket, meta, follow_up_config, push_result=None):
-        """打桩补发方法与回帖发送，执行回帖主流程。"""
+    def _run_with_push(self, ticket, meta, follow_up_config, push_result=None, anchors_after_push=None):
+        """打桩补发方法与回帖发送，执行回帖主流程。
+
+        anchors_after_push：补发成功后锚点表应返回的行（send_then_reply 分支二次收集目标）；
+        默认无补发场景下锚点表恒返回空。
+        """
+        anchor_calls = [[], anchors_after_push] if anchors_after_push is not None else [[]]
         with (
             patch.object(
                 TicketSyncGroupPushService,
@@ -316,12 +338,15 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
             ),
             patch.object(TicketSyncNotifyService, "resolve_feishu_auth", return_value=("app", "secret")),
             patch.object(TicketSyncNotifyService, "send_feishu_thread_reply") as send_reply,
-            patch.object(
-                TicketSyncGroupPushService, "persist_sync_meta", side_effect=lambda db, **kw: kw["ticket"]
+            patch(
+                f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id",
+                side_effect=anchor_calls,
             ),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
         ):
             result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
-                SimpleNamespace(),
+                _make_db(),
                 ticket=ticket,
                 meta=meta,
                 follow_up_config=follow_up_config,
@@ -334,7 +359,7 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
 
     def test_skip_strategy_skips_without_push(self):
         """策略 skip：不调用补发，直接跳过。"""
-        ticket = self._ticket(refs=[])
+        ticket = self._ticket()
         meta = {"sync_state": {}}
         result, send_push, send_reply = self._run_with_push(ticket, meta, self._config("skip"))
         self.assertTrue(result["skipped"])
@@ -343,21 +368,15 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
         send_reply.assert_not_called()
 
     def test_send_then_reply_pushes_and_replies(self):
-        """策略 send_then_reply：补发成功（返回带锚点的 meta）后继续回帖。"""
-        ticket = self._ticket(refs=[])
+        """策略 send_then_reply：补发成功（锚点表出现新锚点）后继续回帖。"""
+        ticket = self._ticket()
         meta = {"sync_state": {}}
-        pushed_meta = {
-            "sync_state": {
-                "group_push_message_refs": [
-                    {"messageId": "om_new", "rootId": "om_new", "chatId": "oc_new"}
-                ]
-            }
-        }
         result, send_push, send_reply = self._run_with_push(
             ticket,
             meta,
             self._config("send_then_reply"),
-            push_result=(True, ticket, pushed_meta, ""),
+            push_result=(True, ticket, {"sync_state": {}}, ""),
+            anchors_after_push=[_make_anchor("om_new", "oc_new")],
         )
         send_push.assert_called_once()
         self.assertFalse(result["skipped"])
@@ -367,7 +386,7 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
 
     def test_send_then_reply_skips_when_push_blocked(self):
         """策略 send_then_reply：补发被拦截（范围/条件/已发送过）时跳过回帖。"""
-        ticket = self._ticket(refs=[])
+        ticket = self._ticket()
         meta = {"sync_state": {}}
         result, send_push, send_reply = self._run_with_push(
             ticket,
@@ -381,14 +400,15 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
         send_reply.assert_not_called()
 
     def test_send_then_reply_skips_when_no_anchor_after_push(self):
-        """策略 send_then_reply：补发返回成功但元数据仍无锚点时跳过（防御分支）。"""
-        ticket = self._ticket(refs=[])
+        """策略 send_then_reply：补发返回成功但锚点表仍无锚点时跳过（防御分支）。"""
+        ticket = self._ticket()
         meta = {"sync_state": {}}
         result, send_push, send_reply = self._run_with_push(
             ticket,
             meta,
             self._config("send_then_reply"),
             push_result=(True, ticket, {"sync_state": {}}, ""),
+            anchors_after_push=[],
         )
         send_push.assert_called_once()
         self.assertTrue(result["skipped"])
