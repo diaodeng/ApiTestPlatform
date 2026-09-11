@@ -89,7 +89,7 @@ ON DUPLICATE KEY UPDATE id = ticket_group_push_anchor.id;
 -- 非数字任务 ID 元素 CAST 后为 0，JOIN 不中任何任务行，自动忽略。
 UPDATE /*+ query_timeout(600000000) */ ticket_ai_analysis_task t
 JOIN (
-    SELECT jt.ticket_id, CAST(jt.task_id_text AS UNSIGNED) AS task_id_num
+    SELECT s.ticket_id, CAST(jt.task_id_text AS UNSIGNED) AS task_id_num
     FROM (
         SELECT ticket_id, CAST(extra_data AS JSON) AS j
         FROM ticket
