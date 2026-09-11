@@ -411,6 +411,9 @@ class TicketSyncConfigService:
                 # 无话题锚点时的处理策略：skip 记日志跳过（默认，防止对已有群消息的工单重复发送）；
                 # send_then_reply 先补发一条工单信息消息建立话题再回帖。
                 "noAnchorStrategy": "skip",
+                # 幂等粒度：false 任务级（默认，同一任务只回一次，多次分析多次回帖）；
+                # true 工单级（该工单只要回帖成功过一次，后续分析不再回帖）。
+                "oncePerTicket": False,
             },
         }
 
@@ -435,6 +438,7 @@ class TicketSyncConfigService:
             "replyInThread": bool(config.get("replyInThread", True)),
             "template": str(config.get("template") or "").strip(),
             "noAnchorStrategy": no_anchor_strategy,
+            "oncePerTicket": bool(config.get("oncePerTicket", False)),
         }
 
     # --- migrated from TicketSyncService._default_message_sync_config ---

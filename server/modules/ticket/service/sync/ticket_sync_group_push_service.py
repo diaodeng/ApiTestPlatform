@@ -1086,6 +1086,23 @@ class TicketSyncGroupPushService:
             return ({"skipped": True, "skipReason": "该AI任务已回帖过", "taskId": ai_task_id}, ticket, meta)
 
         config = follow_up_config if isinstance(follow_up_config, dict) else {}
+        # 工单级幂等（oncePerTicket）：该工单回帖成功过一次后不再回帖；
+        # 手动指定"本次回帖"（override=on）是明确意图，跳过该限制。
+        if (
+            str(override or "").strip().lower() != "on"
+            and bool(config.get("oncePerTicket"))
+            and TicketAiDao.has_any_result_replied(db, ticket.ticket_id)
+        ):
+            logger.info(
+                f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"reason=该工单已回帖过（oncePerTicket）"
+            )
+            return (
+                {"skipped": True, "skipReason": "该工单已回帖过（oncePerTicket）", "taskId": ai_task_id},
+                ticket,
+                meta,
+            )
+
         targets = cls._collect_ai_result_reply_targets(db, ticket.ticket_id)
         if not targets:
             no_anchor_strategy = str(config.get("noAnchorStrategy") or "skip").strip().lower()
@@ -1154,6 +1171,22 @@ class TicketSyncGroupPushService:
                 meta,
             )
 
+        # 抢占式幂等：发送前先占坑（条件 UPDATE，并发下只有一个写者能标记成功）并立即提交，
+        # 防止两个终态回调并发判定"未回帖"后重复发送；占坑失败说明已被并发处理，跳过。
+        if ai_task_id:
+            if not TicketAiDao.mark_result_replied(db, ai_task_id):
+                db.rollback()
+                logger.info(
+                    f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id}, "
+                    f"reason=占坑失败（该AI任务已被并发回帖处理）"
+                )
+                return (
+                    {"skipped": True, "skipReason": "该AI任务已回帖过", "taskId": ai_task_id},
+                    ticket,
+                    meta,
+                )
+            db.commit()
+
         content = TicketSyncNotifyService.build_ai_result_reply_content(
             ticket=ticket,
             follow_up_config=config,
@@ -1190,17 +1223,36 @@ class TicketSyncGroupPushService:
             f"AI结果话题回帖完成: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
             f"ai_task_status={ai_task_status}, target_count={len(targets)}, success_count={success_count}"
         )
-        # 幂等标记写任务表列（result_replied_at，条件更新防并发重复标记），
-        # 不再进 sync_state JSON；标记成功即提交，任务不存在或已标记时回滚本次会话残留。
-        marked = TicketAiDao.mark_result_replied(
-            db,
-            ai_task_id,
-            chat_ids=[str(item.get("chatId") or "") for item in reply_refs],
-        )
-        if marked:
+        if not ai_task_id:
+            # 无任务ID（历史调用路径）没有占坑，直接返回结果。
+            return (
+                {
+                    "skipped": False,
+                    "taskId": ai_task_id,
+                    "targetCount": len(targets),
+                    "successCount": success_count,
+                    "replyRefs": reply_refs,
+                },
+                ticket,
+                meta,
+            )
+        if success_count > 0:
+            # 占坑成功且至少一个群发送成功：补写覆盖群审计列后提交。
+            replied_chat_ids = ",".join(
+                str(item.get("chatId") or "").strip()
+                for item in reply_refs
+                if str(item.get("chatId") or "").strip()
+            )[:512]
+            TicketAiDao.update_result_replied_chat_ids(db, ai_task_id, replied_chat_ids)
             db.commit()
         else:
-            db.rollback()
+            # 全部群发送失败：释放占坑，允许后续重试或手动补发再次回帖。
+            TicketAiDao.release_result_replied(db, ai_task_id)
+            db.commit()
+            logger.warning(
+                f"AI结果话题回帖全部发送失败已释放幂等占坑: ticket_no={ticket.ticket_no}, "
+                f"task_id={ai_task_id}, target_count={len(targets)}"
+            )
         return (
             {
                 "skipped": False,

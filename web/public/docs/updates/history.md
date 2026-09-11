@@ -6,6 +6,8 @@ title: 更新历史
 
 
 ## 2026-09-11
+- 同步过程状态宽表阶段 2b 存储地基：`ticket_sync_process_state` 建表（一工单一行，发布域+群推送执行域）+ DO + 带行锁 DAO（按域更新白名单、处理锁抢占/超时/幂等释放、批量拉取查询）+ 13 个 DAO 单测，纯增量零行为影响，DDL 可随阶段一窗口执行；服务层切换蓝图（group_push_service 状态方法改表、delivery/notify/payload 读方适配、回填脚本、R 单并发场景回归）已写入文档供下会话实施。automation 步骤状态明确保留 JSON 不列化。详见：[同步过程状态宽表 2b](2026-09-11-sync-process-state-foundation.md)。
+- AI 结果回帖阶段二第一批（oncePerTicket / 抢占式幂等 / 手动补发）：`aiResultFollowUp` 新增 `oncePerTicket` 幂等粒度开关（默认关保持任务级，开启后工单回帖成功一次即不再回）；回帖幂等升级抢占式标记（发送前条件 UPDATE 占坑防并发重复发送，全部失败自动释放允许重试）；新增手动补发接口 `POST /ticket/{ticket_id}/ai-analysis/tasks/{task_id}/reply-resend`——不重跑分析直接读取任务持久化结果补发到群话题，存量锚点丢失工单先手动发群消息建锚点再补发即可。编排状态宽表（`ticket_sync_process_state`）为阶段 2b 待实施。详见：[AI结果回帖阶段二](2026-09-11-ai-reply-phase2.md)。
 - 群推送锚点与回帖幂等拆表（INC00001934853/R 回帖丢失的根治方案阶段一）：话题锚点从 `extra_data` JSON 拆到独立表 `ticket_group_push_anchor`（message_id 唯一约束、单工单保留 20 条），回帖幂等改用 `ticket_ai_analysis_task.result_replied_at` 列（条件 UPDATE 防并发重复标记），两处 `build_meta` 白名单移除已拆字段，表为唯一事实源；飞书评论入站匹配从"全表扫描工单解析 JSON"改为锚点表索引查询。需按顺序执行：`sql/20260911_ticket_group_push_anchor.sql` → `scripts/migrate_group_push_anchor.py apply` → 部署（生产 preview 实测 23 单存量、4 单有锚点）。详见：[群推送锚点拆表迁移](2026-09-11-group-push-anchor-table-migration.md)。
 
 ## 2026-09-10

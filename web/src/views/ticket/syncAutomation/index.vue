@@ -1138,6 +1138,21 @@
                     </div>
                   </el-form-item>
                 </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="每工单仅回帖一次">
+                    <el-switch
+                      v-model="form.groupPush.aiResultFollowUp.oncePerTicket"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    />
+                    <div class="mapping-desc">
+                      幂等粒度：默认关闭（任务级，同一分析任务只回一次，多次分析会多次回帖）；
+                      开启后为工单级——该工单回帖成功过一次，后续分析结果不再回帖。
+                    </div>
+                  </el-form-item>
+                </el-col>
                 <el-col :span="24">
                   <el-form-item label="回帖模板">
                     <el-input

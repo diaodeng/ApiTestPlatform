@@ -4805,3 +4805,105 @@ class TicketAiAnalysisService:
                     stage="ai_analysis",
                 )
             return
+
+    # ---- AI 结果回帖手动补发（2026-09 阶段二）----
+
+    REPLY_RESEND_ALLOWED_STATUSES = {
+        TicketAiAnalysisStatus.SUCCESS.value,
+        TicketAiAnalysisStatus.FAILED.value,
+    }
+
+    @classmethod
+    def resend_result_reply_services(
+        cls,
+        db: Session,
+        ticket_id: int,
+        task_id: int,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        手动补发 AI 分析结果回帖到工单群话题。
+
+        面向"分析已完成但结果未回帖"的任务（锚点丢失的历史工单、回帖发送失败、
+        当时配置未开启等场景）；不重新执行分析，直接读取任务持久化结果渲染发送。
+        补发视为明确手动意图：跳过回帖总开关与 sendOn 时机匹配、跳过工单级幂等，
+        但保留任务级幂等（已回帖过的任务拒绝重复补发）与无锚点策略判定。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param task_id: AI任务ID
+        :param current_user: 当前登录用户
+        :return: 补发结果
+        """
+        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+        from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
+
+        task = TicketAiDao.get_task_by_id(db, task_id)
+        if not task or task.ticket_id != ticket_id:
+            return CrudResponseModel(is_success=False, message="AI分析任务不存在")
+        ticket = TicketDao.get_ticket_by_id(db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在或已删除")
+        if task.status not in cls.REPLY_RESEND_ALLOWED_STATUSES:
+            return CrudResponseModel(
+                is_success=False,
+                message=f"任务状态为 {task.status}，仅分析成功或失败的任务支持补发回帖",
+            )
+        if TicketAiDao.is_result_replied(db, task_id):
+            return CrudResponseModel(
+                is_success=False,
+                message="该任务结果已回帖过，无需补发；如需再次通知请重新提交分析",
+            )
+        config = TicketSyncConfigService.load_sync_config(db)
+        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        raw_follow_up = (
+            group_config.get("aiResultFollowUp")
+            if isinstance(group_config.get("aiResultFollowUp"), dict)
+            else {}
+        )
+        # 手动补发为明确意图：强制 enabled+sendOn=always（终态非取消即匹配），
+        # 保留 replyInThread/template/noAnchorStrategy 等形式配置跟随当前全局配置。
+        follow_up_config = {**raw_follow_up, "enabled": True, "sendOn": "always"}
+        meta = TicketSyncGroupPushService.build_meta(
+            ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+        )
+        result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
+            db,
+            ticket=ticket,
+            meta=meta,
+            follow_up_config=follow_up_config,
+            ai_task_status=str(task.status or ""),
+            ai_task_id=task_id,
+            ai_result_payload=task.analysis_result if isinstance(task.analysis_result, dict) else None,
+            ai_error_message=str(getattr(task, "error_message", "") or ""),
+            override="on",
+            sync_scene=TicketSyncGroupPushService.resolve_sync_scene_from_meta(meta),
+        )
+        operator = cls._user_name(current_user) if current_user else "system"
+        TicketDao.add_event(
+            db,
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=TicketEventType.AI_ANALYZED.value,
+                operator_id=cls._user_id(current_user) if current_user else None,
+                operator_name=operator,
+                content=(
+                    f"手动补发AI结果回帖: task_id={task_id}, "
+                    f"{'成功' if result.get('successCount') else '未成功'}"
+                    + (f", 原因={result.get('skipReason')}" if result.get("skipped") else "")
+                ),
+                create_time=datetime.now(),
+            ),
+        )
+        db.commit()
+        if bool(result.get("skipped")):
+            return CrudResponseModel(
+                is_success=False,
+                message=f"回帖未发送: {result.get('skipReason') or '-'}",
+            )
+        success_count = int(result.get("successCount") or 0)
+        if success_count <= 0:
+            return CrudResponseModel(is_success=False, message="回帖发送失败，请检查群锚点与飞书凭证后重试")
+        return CrudResponseModel(
+            is_success=True,
+            message=f"回帖已补发到 {success_count} 个群",
+        )

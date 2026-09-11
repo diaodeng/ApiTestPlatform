@@ -400,3 +400,74 @@ class TicketAiDao:
             )
         )
         return int(updated or 0) > 0
+
+    @classmethod
+    def has_any_result_replied(cls, db: Session, ticket_id: int) -> bool:
+        """
+        判断工单是否有过任意一次成功回帖（工单级幂等判定，oncePerTicket 配置使用）。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 是否回帖过
+        """
+        if not ticket_id:
+            return False
+        row = (
+            db.query(TicketAiAnalysisTask.task_id)
+            .filter(
+                TicketAiAnalysisTask.ticket_id == ticket_id,
+                TicketAiAnalysisTask.result_replied_at.isnot(None),
+            )
+            .first()
+        )
+        return row is not None
+
+    @classmethod
+    def release_result_replied(cls, db: Session, task_id: int | None) -> bool:
+        """
+        释放回帖幂等占坑（置回 result_replied_at 为 NULL）。
+        抢占式标记的失败补偿：占坑后全部群发送失败时调用，允许后续重试再次回帖。
+        :param db: 数据库会话
+        :param task_id: AI任务ID
+        :return: 是否释放成功
+        """
+        if not task_id:
+            return False
+        updated = (
+            db.query(TicketAiAnalysisTask)
+            .filter(
+                TicketAiAnalysisTask.task_id == task_id,
+                TicketAiAnalysisTask.result_replied_at.isnot(None),
+            )
+            .update(
+                {
+                    TicketAiAnalysisTask.result_replied_at: None,
+                    TicketAiAnalysisTask.result_replied_chat_ids: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        return int(updated or 0) > 0
+
+    @classmethod
+    def update_result_replied_chat_ids(cls, db: Session, task_id: int | None, chat_ids: str) -> bool:
+        """
+        回帖成功后补写覆盖群审计列（配合抢占式占坑：占坑时未知覆盖群，发送成功后回填）。
+        :param db: 数据库会话
+        :param task_id: AI任务ID
+        :param chat_ids: 逗号分隔的群 chat_id 文本
+        :return: 是否更新成功
+        """
+        if not task_id:
+            return False
+        updated = (
+            db.query(TicketAiAnalysisTask)
+            .filter(
+                TicketAiAnalysisTask.task_id == task_id,
+                TicketAiAnalysisTask.result_replied_at.isnot(None),
+            )
+            .update(
+                {TicketAiAnalysisTask.result_replied_chat_ids: (chat_ids or None)},
+                synchronize_session=False,
+            )
+        )
+        return int(updated or 0) > 0

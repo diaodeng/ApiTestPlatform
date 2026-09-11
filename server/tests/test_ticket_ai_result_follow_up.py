@@ -196,6 +196,9 @@ class TestSendAiResultThreadReply(unittest.TestCase):
             patch(f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id", return_value=anchors),
             patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=replied),
             patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.update_result_replied_chat_ids", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.release_result_replied", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.has_any_result_replied", return_value=False),
         ):
             result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
                 _make_db(),
@@ -259,6 +262,59 @@ class TestSendAiResultThreadReply(unittest.TestCase):
         called_message_ids = [call.kwargs["message_id"] for call in send_reply.call_args_list]
         self.assertEqual(called_message_ids, ["om_a", "om_c"])
 
+    def test_reply_skipped_when_once_per_ticket(self):
+        """oncePerTicket 开启且该工单回帖过：工单级幂等跳过。"""
+        with (
+            patch(
+                "modules.ticket.service.sync.ticket_sync_group_push_service.TicketSyncConfigService.load_sync_config",
+                return_value={"groupPush": {"appId": "app", "appSecret": "secret"}},
+            ),
+            patch.object(TicketSyncNotifyService, "resolve_feishu_auth", return_value=("app", "secret")),
+            patch.object(TicketSyncNotifyService, "send_feishu_thread_reply") as send_reply2,
+            patch(f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id", return_value=[]),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.has_any_result_replied", return_value=True),
+        ):
+            result2, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
+                _make_db(),
+                ticket=self._ticket(),
+                meta={"sync_state": {}},
+                follow_up_config={"enabled": True, "sendOn": "always", "oncePerTicket": True},
+                ai_task_status="success",
+                ai_task_id=400,
+            )
+        self.assertTrue(result2["skipped"])
+        self.assertIn("oncePerTicket", result2["skipReason"])
+        send_reply2.assert_not_called()
+
+    def test_reply_skipped_when_prewrite_fails(self):
+        """抢占式占坑失败（并发已被处理）：跳过发送。"""
+        with (
+            patch(
+                "modules.ticket.service.sync.ticket_sync_group_push_service.TicketSyncConfigService.load_sync_config",
+                return_value={"groupPush": {"appId": "app", "appSecret": "secret"}},
+            ),
+            patch.object(TicketSyncNotifyService, "resolve_feishu_auth", return_value=("app", "secret")),
+            patch.object(TicketSyncNotifyService, "send_feishu_thread_reply") as send_reply,
+            patch(
+                f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id",
+                return_value=[_make_anchor("om_a", "oc_1")],
+            ),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=False),
+        ):
+            result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
+                _make_db(),
+                ticket=self._ticket(),
+                meta={"sync_state": {}},
+                follow_up_config={"enabled": True, "sendOn": "always", "replyInThread": True, "template": ""},
+                ai_task_status="success",
+                ai_task_id=500,
+            )
+        self.assertTrue(result["skipped"])
+        self.assertIn("已回帖", result["skipReason"])
+        send_reply.assert_not_called()
+
     def test_reply_continues_on_single_failure(self):
         """单个群回帖失败不中断其他群。"""
         reply_side_effect = [
@@ -282,6 +338,9 @@ class TestSendAiResultThreadReply(unittest.TestCase):
                 ),
                 patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
                 patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
+                patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.update_result_replied_chat_ids", return_value=True),
+                patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.release_result_replied", return_value=True),
+                patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.has_any_result_replied", return_value=False),
             ):
                 result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
                     _make_db(),
@@ -344,6 +403,9 @@ class TestSendAiResultReplyNoAnchorStrategy(unittest.TestCase):
             ),
             patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
             patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.update_result_replied_chat_ids", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.release_result_replied", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.has_any_result_replied", return_value=False),
         ):
             result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
                 _make_db(),
