@@ -1,3 +1,21 @@
+## [2026-09-11] FEATURE | AI 结果回帖消息形态开关与卡片字段白名单
+
+- 需求：卡片化落地后补充两项配置——①显式开关控制回帖用文本还是卡片（模板留空时不再固定卡片）；②卡片模式下按配置字段裁剪区块。
+- 实现：`aiResultFollowUp` 新增 `messageStyle`（card 默认 / text，仅 `template` 留空时生效；配置自定义模板始终纯文本，非法值回退 card）与 `cardFields`（白名单取值对齐 `TicketAiResultReplyCardService.CARD_FIELD_KEYS` 九项，留空全量展示、无效字段剔除、全无效回退全量、字段已配置但载荷为空不渲染、失败卡片「失败原因」始终保留）。归一化在 `TicketSyncConfigService._normalize_ai_result_follow_up_config`，白名单校验复用卡片服务 `normalize_card_fields`（该服务为纯格式化，无循环依赖）。`send_ai_result_thread_reply` 按形态判定并透传白名单，回帖日志增加 message_style 便于排查。
+- 前端：`syncAutomation` 配置页「AI 分析结果话题回帖」组新增「消息形态」单选与「卡片展示字段」多选；字段多选仅形态为卡片时显示（v-if 隐藏不清空，符合配置页联动显示规范）；push_config 模式随组禁用；`useSyncConfig.js` 默认值/加载/保存三处同步。
+- 文档：`web/public/docs/ticket-sync-automation.md` 配置表新增两行并重写消息形态说明、更新记录 `web/public/docs/updates/2026-09-11-ai-reply-style-switch.md`（history.md 已加条目）、wiki flows 11.2 行同步。
+- 验证：新增 10 测试（形态判定 4 + 卡片白名单 6），`tests/test_ticket_ai_result_follow_up.py` 42 用例 + 12 子测试全过；`scripts/test_ai_result_card_push.py` 新增 trimmed 场景并经 `.env.dev` 群机器人 webhook 真实发送字段裁剪卡片（仅结论/根因/建议），飞书 `code=0`；改动文件 ruff 通过（config_service 11 处 E501 为存量基线）。
+- 遗留：卡片字段白名单与卡片新区块（如后续新增展示字段）需保持 `CARD_FIELD_KEYS` 与前端选项同步，暂无单一事实源联动机制。
+
+## [2026-09-11] FEATURE | AI 分析结果回帖卡片化（结论/根因/修复建议分区块展示）
+
+- 需求：AI 结果话题回帖（`groupPush.aiResultFollowUp`）原为一条纯文本，工单号/标题/结论/根因/修复建议/置信度/链接挤在一块，群内阅读不友好，要求改为卡片式区分展示。
+- 实现：新增纯格式化子服务 `modules/ticket/service/sync/ticket_ai_result_reply_card_service.py`（`TicketAiResultReplyCardService`，无 DB/无网络副作用）——成功卡片绿头：工单信息（两列字段、工单号带链接）+「结论/根因分析/修复建议」独立区块 + 可选「依据/风险项/后续动作」（载荷中存在才渲染，空字段不出 `-` 占位）+ 置信度备注（小数转百分比）+「查看工单」按钮；失败卡片红头：工单信息 +「失败原因」；单区块超 3000 字符截断防撑爆 30k 卡片上限。`TicketSyncNotifyService.send_feishu_thread_reply` 新增可选 `card` 参数（interactive 回帖），评论同步等既有调用方不传、行为不变。
+- 形态判定：`aiResultFollowUp.template` 留空（内置默认）→ 卡片；配置自定义模板 → 保持纯文本（自定义模板依赖文本变量拼装，卡片无法表达，零兼容性破坏）。sendOn/幂等占坑/锚点/无锚点策略/replyInThread 全部不变。
+- 文档：`web/public/docs/ticket-sync-automation.md`（消息形态说明段落）、更新记录 `web/public/docs/updates/2026-09-11-ai-reply-card-message.md`（history.md 已加条目）、wiki flows 11.2 行补消息形态语义。
+- 验证：新增 `scripts/test_ai_result_card_push.py` 经 `.env.dev` 群机器人 webhook 真实发送成功/失败样例卡片，飞书返回 `code=0` 渲染正常（webhook 关键词校验需命中 `TRunner`，脚本已内置；正式链路走应用身份回帖无该限制）；`tests/test_ticket_ai_result_follow_up.py` 32 用例 + 12 子测试全过；改动文件 ruff 通过。webhook 渠道验证卡片结构渲染，正式回帖卡片 JSON 与其完全一致（reply 接口对 interactive 为飞书标准能力）。
+- 遗留：卡片形态无配置项开关（模板留空即卡片）；如需"默认也走文本"的回退，配置任意自定义模板即可。
+
 ## [2026-09-11] FIX | 机台编号提取正则修复与唯一候选覆盖策略取消（INC00001952225 提示词修正不生效）
 
 - 触发：用户修正 `aiSyncExtract` 提示词后模型已正确返回 `posNo=2`，但重新提取落库仍为 56，告警"模型POS=2与原文唯一机台候选POS=56不一致，已采用原文值"，`identify`/`log_pull_hints`/自动拉日志全部使用错误机台。生产库直查工单 `extra_data.ai_sync_extract`（cacheHit=False 证明提示词已生效）+ 本机复现正则定位。

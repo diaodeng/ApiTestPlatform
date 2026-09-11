@@ -11,6 +11,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from modules.ticket.service.sync.ticket_ai_result_reply_card_service import TicketAiResultReplyCardService
 from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
 
@@ -633,6 +634,212 @@ class TestAiResultReplyContent(unittest.TestCase):
             ai_result_payload={"next_steps": ["步骤一", "步骤二"]},
         )
         self.assertEqual(content, "- 步骤一\n- 步骤二")
+
+
+class TestAiResultReplyMessageStyle(unittest.TestCase):
+    """消息形态开关：模板留空时按 messageStyle 决定卡片/纯文本，配置模板时始终纯文本。"""
+
+    def _ticket(self):
+        return SimpleNamespace(
+            ticket_id=9001,
+            ticket_no="INC-STYLE-1",
+            title="形态开关测试",
+            ticket_url="http://t",
+            module_name="M",
+            merchant_name="P",
+            extra_data={"external_sync": {"sync_state": {}}},
+        )
+
+    def _run(self, follow_up_config):
+        with (
+            patch(
+                "modules.ticket.service.sync.ticket_sync_group_push_service.TicketSyncConfigService.load_sync_config",
+                return_value={"groupPush": {"appId": "app", "appSecret": "secret"}},
+            ),
+            patch.object(TicketSyncNotifyService, "resolve_feishu_auth", return_value=("app", "secret")),
+            patch.object(TicketSyncNotifyService, "send_feishu_thread_reply") as send_reply,
+            patch(
+                f"{GROUP_PUSH_MODULE}.TicketGroupPushAnchorDao.list_anchors_by_ticket_id",
+                return_value=[_make_anchor("om_a", "oc_1")],
+            ),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.is_result_replied", return_value=False),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.mark_result_replied", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.update_result_replied_chat_ids", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.release_result_replied", return_value=True),
+            patch(f"{GROUP_PUSH_MODULE}.TicketAiDao.has_any_result_replied", return_value=False),
+        ):
+            result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
+                _make_db(),
+                ticket=self._ticket(),
+                meta={"sync_state": {}},
+                follow_up_config=follow_up_config,
+                ai_task_status="success",
+                ai_task_id=500,
+                ai_result_payload={"analysis_summary": "结论A", "root_cause": "根因B"},
+            )
+        self.assertFalse(result["skipped"])
+        return send_reply
+
+    def test_default_style_is_card(self):
+        """模板留空且未配置 messageStyle：默认发卡片（card 参数为卡片字典）。"""
+        send_reply = self._run({"enabled": True, "sendOn": "always", "template": ""})
+        self.assertEqual(send_reply.call_count, 1)
+        self.assertIsInstance(send_reply.call_args.kwargs["card"], dict)
+
+    def test_message_style_text_sends_plain_text(self):
+        """模板留空且 messageStyle=text：发纯文本（card 参数为 None）。"""
+        send_reply = self._run({"enabled": True, "sendOn": "always", "template": "", "messageStyle": "text"})
+        self.assertEqual(send_reply.call_count, 1)
+        self.assertIsNone(send_reply.call_args.kwargs["card"])
+        self.assertIn("AI 分析成功", send_reply.call_args.kwargs["content"])
+
+    def test_custom_template_forces_plain_text(self):
+        """配置了自定义回帖模板：即使 messageStyle=card 也按模板发纯文本。"""
+        send_reply = self._run(
+            {"enabled": True, "sendOn": "always", "template": "T:${analysis_summary}", "messageStyle": "card"}
+        )
+        self.assertEqual(send_reply.call_count, 1)
+        self.assertIsNone(send_reply.call_args.kwargs["card"])
+        self.assertEqual(send_reply.call_args.kwargs["content"], "T:结论A")
+
+    def test_card_fields_passed_to_builder(self):
+        """卡片模式下 cardFields 白名单透传给卡片构造，未配置区块不渲染。"""
+        send_reply = self._run(
+            {
+                "enabled": True, "sendOn": "always", "template": "",
+                "messageStyle": "card", "cardFields": ["analysis_summary"],
+            }
+        )
+        card = send_reply.call_args.kwargs["card"]
+        # 提取文本时包含 fields 两列字段，确保"工单号"等区块确实未渲染。
+        parts = []
+        for element in card["elements"]:
+            text = element.get("text")
+            if isinstance(text, dict):
+                parts.append(str(text.get("content", "")))
+            for field in element.get("fields") or []:
+                field_text = field.get("text") if isinstance(field, dict) else None
+                if isinstance(field_text, dict):
+                    parts.append(str(field_text.get("content", "")))
+        joined = "\n".join(parts)
+        self.assertIn("结论", joined)
+        self.assertNotIn("工单号", joined)
+        self.assertNotIn("置信度", joined)
+        self.assertFalse(any(element.get("tag") == "action" for element in card["elements"]))
+
+
+class TestAiResultReplyCardService(unittest.TestCase):
+    """AI 结果回帖卡片构造与字段白名单。"""
+
+    def _ticket(self):
+        return SimpleNamespace(
+            ticket_no="INC-CARD-1",
+            title="卡片测试",
+            ticket_url="http://t",
+            module_name="POS",
+            merchant_name="商家",
+        )
+
+    _PAYLOAD = {
+        "analysis_summary": "结论A",
+        "root_cause": "根因B",
+        "fix_suggestion": "建议C",
+        "evidence": ["证据1"],
+        "risk_items": ["风险1"],
+        "next_steps": ["步骤1"],
+        "confidence": 0.8,
+    }
+
+    @staticmethod
+    def _card_text(card) -> str:
+        """把卡片 elements 的文本内容（含 fields 两列字段）拼成一段便于断言的文本。"""
+        parts: list[str] = []
+        for element in card["elements"]:
+            text = element.get("text")
+            if isinstance(text, dict):
+                parts.append(str(text.get("content", "")))
+            for field in element.get("fields") or []:
+                field_text = field.get("text") if isinstance(field, dict) else None
+                if isinstance(field_text, dict):
+                    parts.append(str(field_text.get("content", "")))
+        return "\n".join(parts)
+
+    def test_normalize_card_fields(self):
+        """字段白名单归一化：剔除未知字段、去重、留空返回空列表。"""
+        service = TicketAiResultReplyCardService
+        self.assertEqual(service.normalize_card_fields(None), [])
+        self.assertEqual(service.normalize_card_fields(""), [])
+        self.assertEqual(
+            service.normalize_card_fields(["analysis_summary", "bad_key", "analysis_summary"]),
+            ["analysis_summary"],
+        )
+        self.assertEqual(service.normalize_card_fields("root_cause, fix_suggestion"), ["root_cause", "fix_suggestion"])
+
+    def test_default_card_contains_all_sections(self):
+        """未配置字段时默认全量展示：工单信息/结论/根因/建议/依据/风险/后续/置信度/按钮。"""
+        card = TicketAiResultReplyCardService.build_ai_result_reply_card(
+            ticket=self._ticket(),
+            ai_task_status="success",
+            ai_result_payload=self._PAYLOAD,
+        )
+        joined = self._card_text(card)
+        for keyword in ("工单号", "结论", "根因分析", "修复建议", "依据", "风险项", "后续动作"):
+            self.assertIn(keyword, joined)
+        self.assertTrue(any(element.get("tag") == "note" for element in card["elements"]))
+        self.assertTrue(any(element.get("tag") == "action" for element in card["elements"]))
+
+    def test_card_fields_subset_only_renders_selected(self):
+        """配置字段白名单后只渲染对应区块，未配置区块不出现。"""
+        card = TicketAiResultReplyCardService.build_ai_result_reply_card(
+            ticket=self._ticket(),
+            ai_task_status="success",
+            ai_result_payload=self._PAYLOAD,
+            card_fields=["root_cause", "ticket_link"],
+        )
+        joined = self._card_text(card)
+        self.assertIn("根因分析", joined)
+        for keyword in ("工单号", "结论", "修复建议", "依据", "风险项", "后续动作", "置信度"):
+            self.assertNotIn(keyword, joined)
+        self.assertTrue(any(element.get("tag") == "action" for element in card["elements"]))
+
+    def test_invalid_card_fields_fallback_to_all(self):
+        """字段配置全部无效时回退全量展示。"""
+        card = TicketAiResultReplyCardService.build_ai_result_reply_card(
+            ticket=self._ticket(),
+            ai_task_status="success",
+            ai_result_payload=self._PAYLOAD,
+            card_fields=["bad_key"],
+        )
+        joined = self._card_text(card)
+        self.assertIn("工单号", joined)
+        self.assertIn("结论", joined)
+
+    def test_failed_card_keeps_error_section(self):
+        """失败卡片始终展示失败原因区块。"""
+        card = TicketAiResultReplyCardService.build_ai_result_reply_card(
+            ticket=self._ticket(),
+            ai_task_status="failed",
+            ai_error_message="超时",
+            card_fields=["analysis_summary"],
+        )
+        joined = self._card_text(card)
+        self.assertIn("失败原因", joined)
+        self.assertIn("超时", joined)
+
+    def test_config_normalization_message_style(self):
+        """配置归一化：messageStyle 合法值校验、cardFields 剔除无效字段。"""
+        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+
+        normalized = TicketSyncConfigService._normalize_ai_result_follow_up_config(
+            {"messageStyle": "TEXT", "cardFields": ["ticket_info", "bad"]}
+        )
+        self.assertEqual(normalized["messageStyle"], "text")
+        self.assertEqual(normalized["cardFields"], ["ticket_info"])
+        normalized_default = TicketSyncConfigService._normalize_ai_result_follow_up_config(
+            {"messageStyle": "unknown"}
+        )
+        self.assertEqual(normalized_default["messageStyle"], "card")
+        self.assertEqual(normalized_default["cardFields"], [])
 
 
 if __name__ == "__main__":

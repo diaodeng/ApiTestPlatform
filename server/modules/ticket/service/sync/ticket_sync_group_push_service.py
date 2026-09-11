@@ -13,6 +13,7 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_group_push_anchor_dao import TicketGroupPushAnchorDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
+from modules.ticket.service.sync.ticket_ai_result_reply_card_service import TicketAiResultReplyCardService
 from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_condition_evaluator import evaluate_ticket_condition
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
@@ -1194,6 +1195,23 @@ class TicketSyncGroupPushService:
             ai_result_payload=ai_result_payload,
             ai_error_message=ai_error_message,
         )
+        # 消息形态：用户配置了自定义回帖模板时保持纯文本（尊重既有自定义行为）；
+        # 模板留空时按 messageStyle 开关决定——card（默认）发飞书卡片，text 发默认纯文本模板。
+        reply_card: dict[str, Any] | None = None
+        if not str(config.get("template") or "").strip():
+            message_style = str(config.get("messageStyle") or "card").strip().lower()
+            if message_style == "card":
+                reply_card = TicketAiResultReplyCardService.build_ai_result_reply_card(
+                    ticket=ticket,
+                    ai_task_status=ai_task_status,
+                    ai_result_payload=ai_result_payload,
+                    ai_error_message=ai_error_message,
+                    card_fields=config.get("cardFields") if isinstance(config.get("cardFields"), list) else None,
+                )
+            logger.info(
+                f"AI结果话题回帖消息形态: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"ai_task_status={ai_task_status}, message_style={message_style}"
+            )
         reply_in_thread = bool(config.get("replyInThread", True))
         success_count = 0
         reply_refs: list[dict[str, Any]] = []
@@ -1205,6 +1223,7 @@ class TicketSyncGroupPushService:
                     message_id=target["messageId"],
                     content=content,
                     reply_in_thread=reply_in_thread,
+                    card=reply_card,
                 )
                 success_count += 1
                 reply_refs.append(
