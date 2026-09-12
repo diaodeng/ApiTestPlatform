@@ -1,3 +1,11 @@
+## [2026-09-12] FEATURE | client_new Agent 页面信息精简（连接设置弹窗/去掉冗余地址行）
+
+- 背景：mitmproxy 页信息栏精简后用户指出其他页面有同类初始显示冗余；离屏截图逐页核查 6 页，问题集中在 Agent 页——①地址下拉框下方整行重复展示 MAC/连接地址/状态信息；②地址后平铺最大发送/自动重试/重试次数/重试间隔/断线重连/低频间隔 6 个控件，1200px 宽度下顶栏溢出。
+- 实现：①agent_page 移除 mac_value_label/ws_url_value_label/_build_ws_url，MAC 改内部字段 `_local_mac`（set_local_mac 接口不变），状态信息保留独立一行；②新增 ui/dialogs/agent_connection_setting_dialog.py（QFormLayout 两组：发送/断线重连，主开关未勾选时子项禁用联动），页面操作栏加「连接设置」按钮，保存后回写页面值副本并走既有 _save_quick_settings 链路；③配置行仅留 状态/地址/别名/显示日志；apply_config 与 _collect_data 输出键完全一致（无配置契约变化）；弹窗打开期间 apply_config 经 _sync_connection_setting_dialog_state 同步值（与浏览器设置弹窗同模式）；默认发送上限兜底 5KB 与配置模型对齐。
+- 文档：新增用户说明 `web/public/docs/client/agent.md`（此前 Agent 页无用户文档）、更新记录 `2026-09-12-client-new-agent-page-declutter.md`（history.md 已加条目）。
+- 验证：离屏截图顶栏单行无溢出、弹窗渲染正常；联动与保存回读断言通过；apply_config→_collect_data 回环一致；已移除控件无残留引用；py_compile 通过；ruff 与基线一致（4 处存量，新文件零新增）；tests/test_agent_start_nonblocking.py 通过（FakeWidget 接口未变）。
+- 遗留：重连参数下次连接/重连时生效（与改动前一致，文档已注明）；其余 5 页核查无同类问题，未做改动。
+
 ## [2026-09-12] FEATURE | client_new 插件安装目录支持用户自定义（默认程序目录）
 
 - 背景：上一版把插件运行数据固定到 %LOCALAPPDATA% 规避构建产物污染；用户希望恢复"绿色便携"默认（exe 所在目录），同时支持自定义安装路径并在修改时给出影响提示。

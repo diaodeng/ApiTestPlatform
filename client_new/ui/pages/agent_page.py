@@ -3,19 +3,18 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from model.config import AgentBrowserConfigModel
+from ui.dialogs.agent_connection_setting_dialog import AgentConnectionSettingDialog
 
 class AgentLogPane(QWidget):
     def __init__(self, title: str, parent=None):
@@ -110,7 +109,16 @@ class AgentPage(QWidget):
         self._sync_in_progress = False
         self._server_manage_dialog = None
         self._browser_setting_dialog = None
+        self._connection_setting_dialog = None
         self._manual_download_in_progress = False
+        # 发送/重连配置收敛到“连接设置”弹窗维护，页面只保留值副本参与配置保存
+        self._local_mac = ""
+        self._max_send_size_kb = 5
+        self._retry = False
+        self._retry_times = 0
+        self._retry_interval = 5.0
+        self._retry_forever = False
+        self._retry_forever_interval = 300.0
         self.controller = None
         self._runtime_initialized = False
         self._runtime_init_scheduled = False
@@ -130,6 +138,7 @@ class AgentPage(QWidget):
         self.stop_btn = QPushButton("停止")
         self.clear_all_btn = QPushButton("清空日志")
         self.add_server_btn = QPushButton("服务器管理")
+        self.connection_settings_btn = QPushButton("连接设置")
         self.browser_settings_btn = QPushButton("浏览器设置")
         self.stop_btn.setEnabled(False)
 
@@ -140,6 +149,7 @@ class AgentPage(QWidget):
         action_layout.addSpacing(12)
         action_layout.addWidget(self.clear_all_btn)
         action_layout.addWidget(self.add_server_btn)
+        action_layout.addWidget(self.connection_settings_btn)
         action_layout.addWidget(self.browser_settings_btn)
         action_layout.addWidget(self.start_btn)
         action_layout.addWidget(self.stop_btn)
@@ -160,33 +170,7 @@ class AgentPage(QWidget):
         self.server_alias_label = QLabel("-")
         self.server_alias_label.setMinimumWidth(120)
 
-        self.max_send_size_input = QSpinBox()
-        self.max_send_size_input.setRange(1, 1024 * 1024)
-        self.max_send_size_input.setSuffix(" KB")
-        self.max_send_size_input.setFixedWidth(110)
-
         self.show_log_checkbox = QCheckBox("显示日志")
-        self.retry_checkbox = QCheckBox("自动重试")
-
-        self.retry_times_input = QSpinBox()
-        self.retry_times_input.setRange(0, 999)
-        self.retry_times_input.setFixedWidth(90)
-
-        self.retry_interval_input = QDoubleSpinBox()
-        self.retry_interval_input.setRange(0.1, 3600.0)
-        self.retry_interval_input.setDecimals(1)
-        self.retry_interval_input.setSingleStep(0.5)
-        self.retry_interval_input.setSuffix(" s")
-        self.retry_interval_input.setFixedWidth(100)
-
-        # 断线低频永续重连：高频窗口次数用尽后按低频间隔继续重连，直到手动停止。
-        self.retry_forever_checkbox = QCheckBox("断线重连")
-        self.retry_forever_interval_input = QDoubleSpinBox()
-        self.retry_forever_interval_input.setRange(1.0, 86400.0)
-        self.retry_forever_interval_input.setDecimals(0)
-        self.retry_forever_interval_input.setSingleStep(30.0)
-        self.retry_forever_interval_input.setSuffix(" s")
-        self.retry_forever_interval_input.setFixedWidth(100)
 
         self.ai_workspace_root_input = QLineEdit()
         self.ai_workspace_root_input.setPlaceholderText("AI 工作区根目录，留空则使用默认值")
@@ -196,6 +180,7 @@ class AgentPage(QWidget):
         self.ai_local_repo_path_input.setPlaceholderText("AI 本地仓库路径，留空则回退到映射配置")
         self.ai_local_repo_path_input.setMinimumWidth(260)
 
+        # 顶栏只保留地址选择等高频项；发送上限与重连策略收敛到“连接设置”弹窗
         config_layout = QHBoxLayout()
         config_layout.setContentsMargins(0, 0, 0, 0)
         config_layout.setSpacing(10)
@@ -205,17 +190,7 @@ class AgentPage(QWidget):
         config_layout.addWidget(self.server_combo)
         config_layout.addWidget(QLabel("别名"))
         config_layout.addWidget(self.server_alias_label)
-        config_layout.addWidget(QLabel("最大发送"))
-        config_layout.addWidget(self.max_send_size_input)
         config_layout.addWidget(self.show_log_checkbox)
-        config_layout.addWidget(self.retry_checkbox)
-        config_layout.addWidget(QLabel("重试次数"))
-        config_layout.addWidget(self.retry_times_input)
-        config_layout.addWidget(QLabel("重试间隔"))
-        config_layout.addWidget(self.retry_interval_input)
-        config_layout.addWidget(self.retry_forever_checkbox)
-        config_layout.addWidget(QLabel("低频间隔"))
-        config_layout.addWidget(self.retry_forever_interval_input)
         config_layout.addStretch()
 
         ai_config_layout = QHBoxLayout()
@@ -227,27 +202,16 @@ class AgentPage(QWidget):
         ai_config_layout.addWidget(self.ai_local_repo_path_input)
         ai_config_layout.addStretch()
 
-        self.mac_value_label = QLabel("-")
-        self.mac_value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.mac_value_label.setMinimumWidth(160)
-
-        self.ws_url_value_label = QLabel("-")
-        self.ws_url_value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.ws_url_value_label.setWordWrap(True)
-
+        # 连接过程的状态反馈（正在连接/错误/下载进度等），MAC 与完整连接地址不再展示
         self.status_detail_label = QLabel("就绪")
         self.status_detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.status_detail_label.setWordWrap(True)
 
-        info_layout = QHBoxLayout()
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(10)
-        info_layout.addWidget(QLabel("MAC"))
-        info_layout.addWidget(self.mac_value_label)
-        info_layout.addWidget(QLabel("连接地址"))
-        info_layout.addWidget(self.ws_url_value_label, 1)
-        info_layout.addWidget(QLabel("状态信息"))
-        info_layout.addWidget(self.status_detail_label, 1)
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(10)
+        status_layout.addWidget(QLabel("状态信息"))
+        status_layout.addWidget(self.status_detail_label, 1)
 
         self.request_log = AgentLogPane("请求参数")
         self.response_log = AgentLogPane("响应信息")
@@ -263,7 +227,7 @@ class AgentPage(QWidget):
         main_layout.addLayout(action_layout)
         main_layout.addLayout(config_layout)
         main_layout.addLayout(ai_config_layout)
-        main_layout.addLayout(info_layout)
+        main_layout.addLayout(status_layout)
         main_layout.addWidget(self.log_splitter, 1)
 
     def _bind(self):
@@ -271,18 +235,13 @@ class AgentPage(QWidget):
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
         self.clear_all_btn.clicked.connect(self.clear_logs)
         self.add_server_btn.clicked.connect(self._open_server_manage_dialog)
+        self.connection_settings_btn.clicked.connect(self._open_connection_setting_dialog)
         self.browser_settings_btn.clicked.connect(self._open_browser_setting_dialog)
 
         self.server_combo.currentTextChanged.connect(self._on_server_text_changed)
         self.server_combo.currentIndexChanged.connect(self._save_quick_settings)
         self.server_combo.lineEdit().editingFinished.connect(self._save_quick_settings)
-        self.max_send_size_input.valueChanged.connect(self._save_quick_settings)
         self.show_log_checkbox.toggled.connect(self._save_quick_settings)
-        self.retry_checkbox.toggled.connect(self._save_quick_settings)
-        self.retry_times_input.valueChanged.connect(self._save_quick_settings)
-        self.retry_interval_input.valueChanged.connect(self._save_quick_settings)
-        self.retry_forever_checkbox.toggled.connect(self._save_quick_settings)
-        self.retry_forever_interval_input.valueChanged.connect(self._save_quick_settings)
         self.ai_workspace_root_input.editingFinished.connect(self._save_quick_settings)
         self.ai_local_repo_path_input.editingFinished.connect(self._save_quick_settings)
 
@@ -316,6 +275,39 @@ class AgentPage(QWidget):
         finally:
             if self._server_manage_dialog is dialog:
                 self._server_manage_dialog = None
+
+    def _open_connection_setting_dialog(self):
+        """
+        打开连接设置弹窗，保存后回写发送/重连配置。
+        """
+        dialog_values = {
+            "max_send_size_kb": self._max_send_size_kb,
+            "retry": self._retry,
+            "retry_times": self._retry_times,
+            "retry_interval": self._retry_interval,
+            "retry_forever": self._retry_forever,
+            "retry_forever_interval": self._retry_forever_interval,
+        }
+        dialog = AgentConnectionSettingDialog(dialog_values, self)
+        self._connection_setting_dialog = dialog
+        try:
+            if not dialog.exec():
+                return
+
+            data = dialog.get_data()
+            if data is None:
+                return
+
+            self._max_send_size_kb = int(data["max_send_size_kb"])
+            self._retry = bool(data["retry"])
+            self._retry_times = int(data["retry_times"])
+            self._retry_interval = float(data["retry_interval"])
+            self._retry_forever = bool(data["retry_forever"])
+            self._retry_forever_interval = float(data["retry_forever_interval"])
+            self._save_quick_settings()
+        finally:
+            if self._connection_setting_dialog is dialog:
+                self._connection_setting_dialog = None
 
     def _open_browser_setting_dialog(self):
         """
@@ -382,12 +374,12 @@ class AgentPage(QWidget):
             "current_server": self.current_server(),
             "server_list": dict(self._server_list),
             "show_logs": self.show_log_checkbox.isChecked(),
-            "max_send_size": int(self.max_send_size_input.value() * 1024),
-            "retry_times": int(self.retry_times_input.value()),
-            "retry_interval": float(self.retry_interval_input.value()),
-            "retry": self.retry_checkbox.isChecked(),
-            "retry_forever": self.retry_forever_checkbox.isChecked(),
-            "retry_forever_interval": float(self.retry_forever_interval_input.value()),
+            "max_send_size": int(self._max_send_size_kb * 1024),
+            "retry_times": int(self._retry_times),
+            "retry_interval": float(self._retry_interval),
+            "retry": self._retry,
+            "retry_forever": self._retry_forever,
+            "retry_forever_interval": float(self._retry_forever_interval),
             "config_sync_url": self._config_sync_url,
             "config_sync_initialized": self._config_sync_initialized,
             "config_sync_last_sync_at": self._config_sync_last_sync_at,
@@ -419,20 +411,23 @@ class AgentPage(QWidget):
 
         self._quick_save_guard = True
         self._apply_server_options(config.current_server)
-        self.max_send_size_input.setValue(max(1, int(config.max_send_size / 1024)))
         self.show_log_checkbox.setChecked(config.show_logs)
-        self.retry_checkbox.setChecked(config.retry)
-        self.retry_times_input.setValue(config.retry_times)
-        self.retry_interval_input.setValue(float(config.retry_interval))
-        self.retry_forever_checkbox.setChecked(bool(getattr(config, "retry_forever", False)))
-        self.retry_forever_interval_input.setValue(float(getattr(config, "retry_forever_interval", 300) or 300))
         self.ai_workspace_root_input.setText(str(getattr(config, "ticket_ai_workspace_root", "") or ""))
         self.ai_local_repo_path_input.setText(str(getattr(config, "ticket_ai_local_repo_path", "") or ""))
-        self.mac_value_label.setText(local_mac or "-")
         self._quick_save_guard = False
+
+        # 发送/重连配置已收敛到连接设置弹窗，页面只同步值副本
+        self._max_send_size_kb = max(1, int(config.max_send_size / 1024))
+        self._retry = bool(config.retry)
+        self._retry_times = int(config.retry_times)
+        self._retry_interval = float(config.retry_interval)
+        self._retry_forever = bool(getattr(config, "retry_forever", False))
+        self._retry_forever_interval = float(getattr(config, "retry_forever_interval", 300) or 300)
+        self.set_local_mac(local_mac)
 
         self._update_server_meta()
         self._sync_server_manage_dialog_state()
+        self._sync_connection_setting_dialog_state()
         self._sync_browser_setting_dialog_state()
         self._apply_state_text(connection_state)
 
@@ -464,8 +459,29 @@ class AgentPage(QWidget):
         self.status_detail_label.setText(message or "-")
 
     def set_local_mac(self, local_mac: str):
-        self.mac_value_label.setText(local_mac or "-")
-        self._update_server_meta()
+        """
+        记录本机 MAC（连接地址由服务端按 MAC 拼接，页面不再展示）。
+
+        :param local_mac: 本机 MAC 地址。
+        """
+        self._local_mac = str(local_mac or "").strip()
+
+    def _sync_connection_setting_dialog_state(self):
+        """
+        连接设置弹窗打开期间配置被刷新时，同步弹窗控件值。
+        """
+        if not self._connection_setting_dialog:
+            return
+        self._connection_setting_dialog.set_values(
+            {
+                "max_send_size_kb": self._max_send_size_kb,
+                "retry": self._retry,
+                "retry_times": self._retry_times,
+                "retry_interval": self._retry_interval,
+                "retry_forever": self._retry_forever,
+                "retry_forever_interval": self._retry_forever_interval,
+            }
+        )
 
     def set_config_syncing(self, syncing: bool):
         self._sync_in_progress = syncing
@@ -507,18 +523,6 @@ class AgentPage(QWidget):
         server = self.current_server()
         alias = self._server_list.get(server) or "-"
         self.server_alias_label.setText(alias)
-        self.ws_url_value_label.setText(self._build_ws_url(server))
-
-    def _build_ws_url(self, server: str) -> str:
-        base = (server or "").strip()
-        if not base:
-            return "-"
-
-        mac = self.mac_value_label.text().strip()
-        if not mac or mac == "-":
-            return base.rstrip("/")
-
-        return f"{base.rstrip('/')}/{mac}"
 
     def _apply_state_text(self, state: str):
         state_map = {
