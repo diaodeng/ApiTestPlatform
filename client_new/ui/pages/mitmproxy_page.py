@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -74,19 +75,17 @@ class MitmWidget(QWidget):
         self.status_badge.setAlignment(Qt.AlignCenter)
         self.status_badge.setFixedWidth(72)
 
-        self.port_value_label = QLabel("-")
-        self.web_port_value_label = QLabel("-")
         self.startup_mode_value_label = QLabel("-")
         self.flow_count_label = QLabel("记录 0 条")
-        self.mode_hint_label = QLabel("当前模式说明：-")
-        self.mode_hint_label.setWordWrap(True)
-        self.mode_hint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # 模式说明与运行方式收纳在问号按钮中，点击弹出完整说明
+        self.mode_help_btn = QPushButton("?")
+        self.mode_help_btn.setFixedSize(28, 28)
+        self.mode_help_btn.setToolTip("查看当前模式与运行方式说明")
+        self._mode_hint_text = ""
         self.cert_status_label = QLabel("证书状态：-")
         self.cert_status_label.setWordWrap(True)
         self.cert_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.install_cert_btn = QPushButton("安装当前用户证书")
-        self.port_value_label.setMinimumWidth(64)
-        self.web_port_value_label.setMinimumWidth(64)
         self.startup_mode_value_label.setMinimumWidth(64)
         self.flow_count_label.setMinimumWidth(120)
         self.mode_select = QComboBox()
@@ -108,10 +107,6 @@ class MitmWidget(QWidget):
         info_layout.setSpacing(10)
         info_layout.addWidget(QLabel("状态"))
         info_layout.addWidget(self.status_badge)
-        info_layout.addWidget(QLabel("代理端口"))
-        info_layout.addWidget(self.port_value_label)
-        info_layout.addWidget(QLabel("Web端口"))
-        info_layout.addWidget(self.web_port_value_label)
         info_layout.addWidget(QLabel("启动方式"))
         info_layout.addWidget(self.startup_mode_value_label)
         info_layout.addWidget(QLabel("记录"))
@@ -120,6 +115,7 @@ class MitmWidget(QWidget):
         info_layout.addWidget(self.mode_select)
         info_layout.addWidget(self.mode_value_container)
         info_layout.addStretch()
+        info_layout.addWidget(self.mode_help_btn)
 
         cert_layout = QHBoxLayout()
         cert_layout.setContentsMargins(0, 0, 0, 0)
@@ -151,9 +147,17 @@ class MitmWidget(QWidget):
 
         main_layout.addLayout(action_layout)
         main_layout.addLayout(info_layout)
-        main_layout.addWidget(self.mode_hint_label)
         main_layout.addLayout(cert_layout)
         main_layout.addWidget(self.flow_container, 1)
+
+    def _show_mode_help(self, _checked=False):
+        """
+        弹窗展示当前模式说明与运行方式。
+        :return:
+        """
+        QMessageBox.information(
+            self, "当前模式与运行方式", self._mode_hint_text or "尚未配置代理模式。"
+        )
 
     def _bind(self):
         self.start_btn.clicked.connect(self._handle_start_clicked)
@@ -164,6 +168,7 @@ class MitmWidget(QWidget):
             lambda _checked=False: self.open_web_clicked.emit()
         )
         self.settings_btn.clicked.connect(self._open_settings_dialog)
+        self.mode_help_btn.clicked.connect(self._show_mode_help)
         self.install_cert_btn.clicked.connect(
             lambda _checked=False: self.install_cert_clicked.emit()
         )
@@ -224,8 +229,6 @@ class MitmWidget(QWidget):
         self._update_mode_input(config.proxy_model)
         self._quick_save_guard = False
 
-        self.port_value_label.setText(str(config.port))
-        self.web_port_value_label.setText(str(config.web_port))
         self.startup_mode_value_label.setText(
             str(getattr(config, "startup_mode", "dump") or "dump").strip().lower()
         )
@@ -262,21 +265,21 @@ class MitmWidget(QWidget):
         if mode == "local":
             target = str(config.proxy_model_value or "").strip() or "指定进程"
             message = (
-                f"当前模式说明：local 会自动拦截本机进程 {target} 的流量。"
+                f"local 会自动拦截本机进程 {target} 的流量。"
                 "Windows 下通常需要管理员权限；HTTPS 网站仍需要先信任 mitmproxy CA。"
             )
         elif mode == "regular":
             message = (
-                f"当前模式说明：regular 不会自动抓包，需要把浏览器或系统代理手动指向 "
+                f"regular 不会自动抓包，需要把浏览器或系统代理手动指向 "
                 f"127.0.0.1:{config.port}。"
             )
         elif mode:
             message = (
-                f"当前模式说明：{mode} 模式需要按 mitmproxy 的该模式完成代理接入，"
+                f"{mode} 模式需要按 mitmproxy 的该模式完成代理接入，"
                 "HTTPS 网站仍需要先信任 mitmproxy CA。"
             )
         else:
-            message = "当前模式说明：尚未配置代理模式。"
+            message = "尚未配置代理模式。"
         if startup_mode == "web":
             browser_hint = (
                 "启动后会自动打开 Web 页面。"
@@ -291,7 +294,7 @@ class MitmWidget(QWidget):
             message = f"{message}\n当前运行方式：web。{browser_hint}{display_hint}"
         else:
             message = f"{message}\n当前运行方式：dump，流量会显示在当前应用界面。"
-        self.mode_hint_label.setText(message)
+        self._mode_hint_text = message
 
     def _should_show_app_flows(self, config=None) -> bool:
         cfg = config or self.config
@@ -348,6 +351,12 @@ class MitmWidget(QWidget):
         prefix = "证书状态"
         if cert_path:
             prefix = f"证书状态（{cert_path}）"
+        # 证书文件不存在说明代理从未启动过（首次启动时才会生成 CA），给出引导提示
+        if "未找到" in str(message or ""):
+            message = (
+                f"{message}。首次使用请先点击「启动」运行一次代理，"
+                "证书文件会在首次启动时自动生成，之后再安装证书。"
+            )
         self.cert_status_label.setText(f"{prefix}：{message}")
         if trusted:
             color = "#2f855a"

@@ -1,3 +1,30 @@
+## [2026-09-12] FEATURE | client_new 插件安装目录支持用户自定义（默认程序目录）
+
+- 背景：上一版把插件运行数据固定到 %LOCALAPPDATA% 规避构建产物污染；用户希望恢复"绿色便携"默认（exe 所在目录），同时支持自定义安装路径并在修改时给出影响提示。
+- 实现：①PluginConfigModel 新增 install_dir（空=默认）；PluginsConfig 配置文件路径 frozen 感知（打包态固定 exe 目录，helper 子进程 cwd 异常也能读到）；②manager.get_plugin_root() 动态解析（自定义 > 默认 exe/项目目录），plugin_dir 改动态；新增 set_install_dir(new_dir, migrate)（绝对路径校验/保存/按需迁移当前根目录已装插件）；_legacy_plugin_roots 迁移链（LOCALAPPDATA + 旧 exe 目录 → 当前根，启动时执行，覆盖升级与改回默认两个场景）；③插件对话框新增"安装目录"行（输入+浏览+保存），路径变化时三选影响提示（迁移已装插件/仅保存/取消），文案说明默认目录随程序目录、自定义目录可用性、dist 内需停 WinDivert 驱动。
+- 文档：plugins.md"安装目录"章节重写、更新记录 `web/public/docs/updates/2026-09-12-client-new-plugin-install-dir-config.md`（history.md 已加条目）。
+- 验证：离屏自测 10 项全过（默认根目录/切换并迁移/相对路径拒绝/恢复默认迁回/对话框一致）；py_compile 通过；ruff 较基线 +3 为防御性盲捕获。
+- 遗留：默认目录回到程序目录后，"构建输出目录内装插件 + 重打包"的驱动锁定场景会重现（提示与文档已给出 sc stop WinDivert 处理办法）；修改目录需重启生效；仅保存不迁移时旧目录插件不再生效（文案已说明）。
+
+## [2026-09-12] FIX | 插件运行数据与构建产物解耦（修复重打包 PermissionError: WinDivert64.sys）
+
+- 现象：插件化后 `pyinstaller QTRClientNewPortable.spec --noconfirm` 报 WinError 5，指向 `dist/QTRClientNew_portable/storage/plugins/proxy/mitmproxy_windows/WinDivert64.sys`；插件化之前正常。
+- 根因（叠加）：①frozen 态插件根目录原为 exe 所在目录 = COLLECT 输出目录，在构建产物里运行客户端并装插件后输出目录被运行数据污染；②local 模式加载的 WinDivert 内核驱动保持 RUNNING（sc query WinDivert 可见），.sys 被内核锁定，PyInstaller 清理输出目录删除失败。
+- 修复（plugins/manager.py）：frozen 态插件根目录改 `%LOCALAPPDATA%/QTRClientNew/storage/plugins`（无 LOCALAPPDATA 回退 exe 目录，开发态仍 client_new）；activate_installed 启动时自动把 exe 目录旧 storage/plugins/<name> 迁到新位置（shutil.move，目标已存在跳过，异常仅记日志）。
+- 现场处置：杀 QTRClientNew/redirector 进程 → 删被污染的 dist/QTRClientNew_portable/storage（此时 .sys 可删）→ 重跑 portable 构建 → 成功，输出目录仅 exe+_internal（128MB）。
+- 文档：plugins.md 增加"安装后目录说明 + 重新打包注意事项"、更新记录 `web/public/docs/updates/2026-09-12-client-new-plugin-dir-decouple.md`（history.md 已加条目）。
+- 验证：manager py_compile 通过、ruff 较基线 +1（迁移函数防御性盲捕获）；portable 与 onefile 构建均成功。
+- 遗留：sc stop WinDivert 需管理员权限（本次环境无）；其他 storage 运行数据（config/logs）仍 cwd 相对路径，双击启动会写进输出目录但普通文件可清理，后续可一并迁 LOCALAPPDATA；升级用户若迁移因占用失败需手动处理。
+
+
+## [2026-09-12] FIX | client_new mitmproxy 页面体验优化（证书引导/信息栏精简/窗口最大化）
+
+- 背景：用户反馈四点——首次使用提示"找不到证书"无引导、顶部端口展示与设置重复、模式说明独占一行且运行方式不直观、启动窗口 1200x800 笔记本显示不全。
+- 实现（ui/pages/mitmproxy_page.py + main.py）：①set_cert_status 在消息含"未找到"时追加"先点击「启动」运行一次代理，证书首次启动时自动生成"引导；②信息栏移除代理端口/Web 端口展示（apply_config 同步清理）；③删除独立模式说明 label，新增「?」按钮（信息栏右侧，tooltip 提示），点击 QMessageBox 展示 `_mode_hint_text`（_update_mode_hint 文案组装保留、去掉"当前模式说明："冗余前缀）；④main.py window.show() → showMaximized()。
+- 文档：用户说明 `web/public/docs/client/mitm-proxy.md`（入口/首次使用/窗口显示/FAQ 更新）、更新记录 `web/public/docs/updates/2026-09-12-client-new-mitm-page-ux.md`（history.md 已加条目）。
+- 验证：离屏自测 10 项全过（端口移除/问号按钮/启动方式保留/弹窗文案两要素/说明标签移除/证书缺失提示与按钮禁用/已信任不受影响）；py_compile 通过；ruff 与基线一致零新增。
+- 遗留：启动最大化对全员生效，未做"记住上次窗口状态"；证书提示依赖上游"未找到"文案关键字；最大化观感需带屏环境肉眼确认。
+
 ## [2026-09-12] FEATURE | client_new 拆分「抓包代理」插件 + 菜单按插件显隐（阶段 2.5）
 
 - 背景：插件化阶段 2 后继续把 mitmproxy（压缩态约 15MB）拆为第三个插件 `proxy`，并实现菜单按插件显隐。

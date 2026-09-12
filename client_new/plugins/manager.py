@@ -11,21 +11,39 @@ from loguru import logger
 from do.config import PluginsConfig
 
 
+def _frozen_base_dir() -> Path:
+    """
+    打包态基准目录：exe 所在目录（默认插件安装位置的基准）。
+    :return: 基准目录
+    """
+    return Path(sys.executable).resolve().parent
+
+
 def _plugin_base_dir() -> Path:
     """
-    插件根目录的基准目录：开发态为 client_new 目录，打包态为 exe 所在目录。
+    插件默认根目录的基准：开发态为 client_new 目录，打包态为 exe 所在目录。
 
     不能用 cwd：mitmproxy helper 子进程在打包态下 cwd 可能是 PyInstaller
     临时解压目录，用 cwd 会导致 helper 找不到已安装插件。
     :return: 基准目录
     """
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        return _frozen_base_dir()
     return Path(__file__).resolve().parents[1]
 
 
-# 插件包根目录：storage/plugins/<name>/
-PLUGIN_ROOT_DIR = _plugin_base_dir() / "storage" / "plugins"
+# 插件默认根目录（用户可通过插件管理页面自定义，见 PluginManager.get_plugin_root）
+DEFAULT_PLUGIN_ROOT_DIR = _plugin_base_dir() / "storage" / "plugins"
+
+# 历史版本的插件存放位置（用于启动时自动迁移到当前根目录）
+def _legacy_plugin_roots() -> list[Path]:
+    roots: list[Path] = []
+    local_app = os.environ.get("LOCALAPPDATA")
+    if local_app:
+        roots.append(Path(local_app) / "QTRClientNew" / "storage" / "plugins")
+    if getattr(sys, "frozen", False):
+        roots.append(_frozen_base_dir() / "storage" / "plugins")
+    return roots
 
 # zip 包内清单文件名
 MANIFEST_FILE = "manifest.json"
@@ -90,13 +108,71 @@ class PluginManager:
 
     # ===== 查询 =====
 
+    def get_plugin_root(self) -> Path:
+        """
+        获取当前插件根目录：配置了自定义安装目录则使用之，否则用默认目录
+        （打包态为 exe 所在目录下 storage/plugins，开发态为 client_new 下）。
+        :return: 插件根目录
+        """
+        try:
+            custom = str(PluginsConfig.read().install_dir or "").strip()
+        except Exception as e:
+            logger.warning(f"读取自定义插件目录失败，回退默认目录: {e}")
+            custom = ""
+        if not custom:
+            return DEFAULT_PLUGIN_ROOT_DIR
+        return Path(custom).expanduser()
+
     def plugin_dir(self, name: str) -> Path:
         """
         获取指定插件目录路径。
         :param name: 插件标识
         :return: 插件目录
         """
-        return PLUGIN_ROOT_DIR / name
+        return self.get_plugin_root() / name
+
+    def set_install_dir(self, new_dir: str, migrate: bool) -> tuple[bool, str]:
+        """
+        设置自定义插件安装目录并按需迁移已安装插件。
+
+        :param new_dir: 新的插件根目录（绝对路径）；传空字符串恢复默认目录
+        :param migrate: 是否把当前目录下已安装的插件搬到新目录
+        :return: (是否成功, 结果消息)
+        """
+        import shutil
+
+        try:
+            current_root = self.get_plugin_root()
+            normalized = str(new_dir or "").strip()
+            new_root = (
+                Path(normalized).expanduser() if normalized else DEFAULT_PLUGIN_ROOT_DIR
+            )
+            if normalized and not new_root.is_absolute():
+                return False, "插件安装目录必须是绝对路径"
+
+            config = PluginsConfig.read()
+            config.install_dir = normalized
+            PluginsConfig.write(config)
+            logger.info(f"插件安装目录已保存: {new_root}")
+
+            migrated = 0
+            if migrate:
+                for name in PLUGIN_DEFINITIONS:
+                    src = current_root / name
+                    dst = self.plugin_dir(name)
+                    if not src.exists() or dst.exists():
+                        continue
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src), str(dst))
+                    migrated += 1
+                if migrated:
+                    logger.info(f"已迁移 {migrated} 个插件到 {new_root}")
+
+            suffix = f"，已迁移 {migrated} 个插件" if migrate and migrated else ""
+            return True, f"插件安装目录已设置为 {new_root}{suffix}，重启客户端后生效"
+        except Exception as e:
+            logger.exception(f"设置插件安装目录失败: {e}")
+            return False, f"设置插件安装目录失败: {e}"
 
     def get_status(self, name: str) -> str:
         """
@@ -133,11 +209,35 @@ class PluginManager:
         必须在任何业务模块导入之前调用（main.py 最早阶段），
         这样 desktop_test_service / playwright 的守卫导入才能找到插件包。
         """
+        self._migrate_legacy_plugin_dirs()
         for name in PLUGIN_DEFINITIONS:
             plugin_dir = self.plugin_dir(name)
             if not self._is_installed(name):
                 continue
             self._activate(name, plugin_dir)
+
+    def _migrate_legacy_plugin_dirs(self) -> None:
+        """
+        启动时迁移：把历史版本存放位置的插件搬到当前根目录（当前根目录已有同名插件时跳过），
+        覆盖两个场景——①旧版本固定装在 exe 目录/LOCALAPPDATA；②用户修改过自定义目录后又改回。
+        """
+        import shutil
+
+        current_root = self.get_plugin_root()
+        for legacy_root in _legacy_plugin_roots():
+            if legacy_root == current_root or not legacy_root.exists():
+                continue
+            for name in PLUGIN_DEFINITIONS:
+                legacy_dir = legacy_root / name
+                new_dir = current_root / name
+                if not legacy_dir.exists() or new_dir.exists():
+                    continue
+                try:
+                    new_dir.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(legacy_dir), str(new_dir))
+                    logger.info(f"插件目录已迁移至 {new_dir}")
+                except Exception as e:
+                    logger.warning(f"插件目录迁移失败 name={name}: {e}")
 
     def _activate(self, name: str, plugin_dir: Path) -> bool:
         """
@@ -250,7 +350,7 @@ class PluginManager:
             if target_dir.exists():
                 shutil.move(str(target_dir), str(backup_dir))
             try:
-                PLUGIN_ROOT_DIR.mkdir(parents=True, exist_ok=True)
+                self.plugin_dir(name).parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(extracted_root), str(target_dir))
             except Exception:
                 # 替换失败时回滚旧目录，保证旧版本仍可用

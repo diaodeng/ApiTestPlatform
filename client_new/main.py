@@ -199,7 +199,8 @@ if __name__ == "__main__":
     single_instance.activation_requested.connect(
         lambda: bring_window_to_front(window)
     )
-    window.show()
+    # 启动时直接最大化显示，避免笔记本小屏下窗口超出可视区域
+    window.showMaximized()
     apply_window_icon(window)
     bring_window_to_front(window)
     single_instance.mark_ready()

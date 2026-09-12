@@ -75,6 +75,7 @@ class PluginConfigModel(BaseModel):
     """插件管理配置"""
 
     download_base_url: str = ""  # 插件包下载源根地址，留空表示未配置（无法在线下载）
+    install_dir: str = ""  # 插件安装根目录，留空使用默认目录（exe/项目目录下 storage/plugins）
 
 
 class StartConfigModel(BaseModel):

@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pathlib import Path
+
 from loguru import logger
 from plugins.manager import PLUGIN_DEFINITIONS, plugin_manager
 from ui.utils.icon_util import apply_window_icon
@@ -49,7 +51,7 @@ class PluginManagerDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # 下载源配置
+        # 下载源与安装目录配置
         source_box = QFormLayout()
         source_row = QWidget()
         source_layout = QHBoxLayout(source_row)
@@ -63,6 +65,21 @@ class PluginManagerDialog(QDialog):
         source_layout.addWidget(self.url_input, 1)
         source_layout.addWidget(self.save_url_button)
         source_box.addRow("下载源", source_row)
+
+        dir_row = QWidget()
+        dir_layout = QHBoxLayout(dir_row)
+        dir_layout.setContentsMargins(0, 0, 0, 0)
+        dir_layout.setSpacing(6)
+        self.dir_input = QLineEdit()
+        self.dir_input.setPlaceholderText(
+            "插件安装根目录；留空使用默认目录（程序目录下 storage/plugins）"
+        )
+        self.browse_dir_button = QPushButton("浏览")
+        self.save_dir_button = QPushButton("保存安装目录")
+        dir_layout.addWidget(self.dir_input, 1)
+        dir_layout.addWidget(self.browse_dir_button)
+        dir_layout.addWidget(self.save_dir_button)
+        source_box.addRow("安装目录", dir_row)
         layout.addLayout(source_box)
 
         # 插件列表
@@ -109,18 +126,66 @@ class PluginManagerDialog(QDialog):
         layout.addWidget(self.table, 1)
 
         self.hint_label = QLabel(
-            "插件目录：storage/plugins/。安装成功后需重启客户端生效；"
-            "未安装插件时对应功能不可用，但其他功能不受影响。"
+            "安装成功后需重启客户端生效；未安装插件时对应功能不可用，"
+            "但其他功能不受影响。修改安装目录会影响已安装插件的生效位置，保存前请阅读影响提示。"
         )
         self.hint_label.setWordWrap(True)
         layout.addWidget(self.hint_label)
 
     def _bind(self):
         self.save_url_button.clicked.connect(self._save_download_url)
+        self.save_dir_button.clicked.connect(self._save_install_dir)
+        self.browse_dir_button.clicked.connect(self._browse_install_dir)
         self._install_finished.connect(self._on_install_finished)
 
     def _load_download_url(self):
         self.url_input.setText(plugin_manager.read_download_base_url())
+        self.dir_input.setText(str(plugin_manager.get_plugin_root()))
+
+    def _browse_install_dir(self):
+        chosen = QFileDialog.getExistingDirectory(self, "选择插件安装根目录")
+        if chosen:
+            self.dir_input.setText(chosen)
+
+    def _save_install_dir(self):
+        """
+        保存插件安装目录；路径变化时展示影响提示，由用户决定是否迁移已装插件。
+        :return:
+        """
+        new_dir = self.dir_input.text().strip()
+        current_root = str(plugin_manager.get_plugin_root())
+        normalized_new = str(Path(new_dir).expanduser()) if new_dir else ""
+        if normalized_new == current_root:
+            QMessageBox.information(self, "插件管理", "安装目录未变化。")
+            return
+
+        impact_text = (
+            "修改插件安装目录的影响：\n\n"
+            "1. 新下载/安装的插件将放入新目录；\n"
+            "2. 默认目录随程序目录（拷贝程序目录可整体带走插件），"
+            "自定义目录请自行保证其固定可用、不被清理；\n"
+            "3. 若目录位于构建输出目录（dist/...）内，重新打包前需先停止 "
+            "WinDivert 驱动（管理员执行 sc stop WinDivert）。\n\n"
+            "是否把当前已安装的插件迁移到新目录？"
+        )
+        box = QMessageBox(QMessageBox.Question, "修改插件安装目录", impact_text, parent=self)
+        migrate_button = box.addButton("迁移已装插件", QMessageBox.YesRole)
+        keep_button = box.addButton("仅保存", QMessageBox.NoRole)
+        box.addButton("取消", QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked not in (migrate_button, keep_button):
+            return
+        migrate = clicked is migrate_button
+
+        ok, message = plugin_manager.set_install_dir(new_dir, migrate)
+        if ok:
+            logger.info(f"插件安装目录已修改: {message}")
+            QMessageBox.information(self, "插件管理", message)
+            self._refresh_table()
+        else:
+            logger.warning(f"插件安装目录修改失败: {message}")
+            QMessageBox.warning(self, "插件管理", message)
 
     def _save_download_url(self):
         ok, message = plugin_manager.save_download_base_url(self.url_input.text())
