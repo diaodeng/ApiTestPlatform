@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from emitter.mitm_flow_emitter import flow_emitter
 from models.mitmproxy_models import FlowTableModel
 from ui.theme_manager import ThemeManager, color_to_hex
+from ui.widgets.flow_event_buffer import FlowEventBuffer
 from ui.widgets.menu_select_button import MenuSelectButton
 
 
@@ -397,8 +398,10 @@ class FlowTableWidget(QWidget):
         self._refresh_stats()
 
     def _bind(self):
-        flow_emitter.new_flow.connect(self.model.add_flow)
-        flow_emitter.update_flow.connect(self.model.update_flow)
+        # 流量事件先经缓冲层节流，再写入模型；断点流量由缓冲层旁路立即写入
+        self._event_buffer = FlowEventBuffer(self.model, parent=self)
+        flow_emitter.new_flow.connect(self._event_buffer.add_flow)
+        flow_emitter.update_flow.connect(self._event_buffer.update_flow)
         self.model.changed.connect(self._on_model_changed)
         self.search_input.textChanged.connect(self._apply_filters)
         self.method_filter.value_changed.connect(self._apply_filters)
@@ -528,6 +531,7 @@ class FlowTableWidget(QWidget):
 
     def clear(self):
         self._selected_flow_id = ""
+        self._event_buffer.discard()
         self.search_input.clear()
         self.method_filter.set_current_data("ALL", emit_signal=False)
         self.status_filter.set_current_data("ALL", emit_signal=False)

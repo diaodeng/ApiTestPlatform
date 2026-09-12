@@ -120,13 +120,21 @@ class ProxyCore:
         )
 
         master = DumpMaster(opts)
-        master.addons.add(MockHandle())
+        mock_handle = MockHandle()
+        master.addons.add(mock_handle)
 
         with self._lock:
             self._master = master
             self._state = ProxyState.RUNNING
 
-        await master.run()
+        try:
+            await master.run()
+        finally:
+            # 代理会话结束，释放 mock 探测复用的连接池
+            try:
+                await mock_handle.aclose_client()
+            except Exception:
+                pass
 
     def _cleanup_loop(self, loop: asyncio.AbstractEventLoop):
         with self._lock:

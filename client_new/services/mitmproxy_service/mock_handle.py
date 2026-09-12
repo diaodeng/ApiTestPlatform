@@ -27,6 +27,52 @@ class MockHandle:
         self._flow_dispatcher = flow_dispatcher
         self._emit_flows = emit_flows
         self._breakpoint_manager = breakpoint_manager
+        # mock 探测复用的 httpx 客户端，按代理会话（MockHandle 实例）持有
+        self._mock_client: httpx.AsyncClient | None = None
+        self._mock_client_loop: asyncio.AbstractEventLoop | None = None
+
+    async def _get_mock_client(self) -> httpx.AsyncClient:
+        """
+        获取 mock 探测复用的 AsyncClient。
+
+        连接池按代理会话复用，避免每个请求重建连接与 TLS 握手；
+        事件循环变化（如代理重启后换了 loop）时自动重建，防止客户端绑定到已关闭的 loop。
+        :return: 可复用的 httpx 异步客户端
+        """
+        loop = asyncio.get_running_loop()
+        client = self._mock_client
+        if client is None or client.is_closed or self._mock_client_loop is not loop:
+            if client is not None and not client.is_closed:
+                try:
+                    await client.aclose()
+                except Exception as e:
+                    logger.debug(f"关闭旧 mock 探测客户端失败: {e}")
+            client = httpx.AsyncClient(
+                timeout=DEFAULT_HTTP_TIMEOUT,
+                follow_redirects=True,
+                limits=httpx.Limits(
+                    max_connections=50,
+                    max_keepalive_connections=20,
+                    keepalive_expiry=30.0,
+                ),
+            )
+            self._mock_client = client
+            self._mock_client_loop = loop
+        return client
+
+    async def aclose_client(self):
+        """
+        关闭 mock 探测客户端，代理会话结束时调用，释放连接池资源。
+        :return:
+        """
+        client = self._mock_client
+        self._mock_client = None
+        self._mock_client_loop = None
+        if client is not None and not client.is_closed:
+            try:
+                await client.aclose()
+            except Exception as e:
+                logger.debug(f"关闭 mock 探测客户端失败: {e}")
 
     def _emit_flow(self, event_type: str, item: FlowItem):
         """
@@ -58,6 +104,16 @@ class MockHandle:
         :param flow: mitmproxy 请求流
         :return:
         """
+        config = RuntimeConfig.get()
+        path = str(flow.request.path or "")
+
+        # ===== 流量过滤：命中规则的流量完全放行，不记录、不 mock、不延迟 =====
+        # 系统代理模式下全机器流量都会进入这里，静态资源等无关请求直接放行，
+        # 避免每条流量全量构造 FlowItem 拖慢代理与 UI 链路。
+        if config and self._is_flow_filtered(config, path):
+            flow.metadata["flow_filtered"] = True
+            return
+
         item = FlowItem(
             id=flow.id,
             method=flow.request.method,
@@ -95,7 +151,6 @@ class MockHandle:
 
         self._emit_flow("new", item)
 
-        config = RuntimeConfig.get()
         if not config:
             return
 
@@ -130,8 +185,6 @@ class MockHandle:
                 self._emit_flow("update", item)
                 logger.exception(f"请求断点处理异常 flow_id={flow.id}: {e}")
 
-        path = flow.request.path
-
         # ===== 请求延迟 =====
         if config.request_delay.enabled and path in config.request_delay.delay_path:
             await asyncio.sleep(config.request_delay.delay)
@@ -157,16 +210,16 @@ class MockHandle:
             json_data, form_data = self._build_mock_payload(flow, config.add_body)
             headers = self._parse_key_values(config.add_headers)
 
-            async with httpx.AsyncClient(
+            client = await self._get_mock_client()
+            # 复用连接池的同时清理 cookie，避免 mock 服务端的会话状态跨请求残留
+            client.cookies.clear()
+            resp = await client.post(
+                f"{config.mock_server}{path}",
+                json=json_data,
+                data=form_data,
+                headers=headers,
                 timeout=probe_timeout,
-                follow_redirects=True,
-            ) as client:
-                resp = await client.post(
-                    f"{config.mock_server}{path}",
-                    json=json_data,
-                    data=form_data,
-                    headers=headers,
-                )
+            )
 
             if resp.status_code == 505:
                 logger.info(f"mock 未命中规则，继续真实请求: {path}")
@@ -192,6 +245,10 @@ class MockHandle:
         :param flow: mitmproxy 请求流
         :return:
         """
+        # 请求阶段已过滤的流量，响应阶段同样完全放行
+        if flow.metadata.get("flow_filtered"):
+            return
+
         logger.info(
             f"收到响应 flow_id={flow.id}, path={flow.request.path}, status={getattr(flow.response, 'status_code', None)}"
         )
@@ -286,6 +343,36 @@ class MockHandle:
         except Exception as e:
             logger.warning(f"断点等待异常 flow_id={flow_id}, stage={stage}, err={e}")
             return {}
+
+    def _is_flow_filtered(self, config: Any, path: str) -> bool:
+        """
+        判断当前请求是否命中流量过滤规则。
+
+        规则按逗号或换行分隔；以 . 开头的规则按路径后缀匹配（忽略大小写），
+        其余规则按路径子串匹配；query 部分不参与匹配。
+        :param config: 运行时配置
+        :param path: 请求路径（可含 query）
+        :return: 是否命中过滤（命中则完全放行，不记录）
+        """
+        enabled = bool(getattr(config, "flow_filter_enabled", False))
+        raw_pattern = str(getattr(config, "flow_filter_pattern", "") or "").strip()
+        if not enabled or not raw_pattern:
+            return False
+
+        normalized_path = path.split("?", 1)[0].lower()
+        if not normalized_path:
+            return False
+
+        for token in self._split_paths(raw_pattern):
+            rule = token.lower()
+            if not rule:
+                continue
+            if rule.startswith("."):
+                if normalized_path.endswith(rule):
+                    return True
+            elif rule in normalized_path:
+                return True
+        return False
 
     def _is_breakpoint_match(self, config: Any, flow: HTTPFlow) -> bool:
         """

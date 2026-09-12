@@ -152,6 +152,14 @@ class MitmSettingDialog(QDialog):
         self.include_input.setMinimumHeight(90)
         self.exclude_input = QTextEdit()
         self.exclude_input.setMinimumHeight(90)
+        self.flow_filter_enabled_checkbox = QCheckBox(
+            "过滤静态资源流量（命中后直接放行，不记录到列表、不参与 mock）"
+        )
+        self.flow_filter_input = QTextEdit()
+        self.flow_filter_input.setMinimumHeight(70)
+        self.flow_filter_input.setPlaceholderText(
+            "逗号或换行分隔；以 . 开头按路径后缀匹配，否则按子串匹配，如 .png,.js,.woff2"
+        )
 
         layout.addRow("", self.breakpoint_enabled_checkbox)
         layout.addRow("断点接口", self.breakpoint_input)
@@ -159,6 +167,8 @@ class MitmSettingDialog(QDialog):
         layout.addRow("包含路径", self.include_input)
         layout.addRow("", self.exclude_checkbox)
         layout.addRow("排除路径", self.exclude_input)
+        layout.addRow("", self.flow_filter_enabled_checkbox)
+        layout.addRow("过滤路径", self.flow_filter_input)
 
         return box
 
@@ -220,6 +230,12 @@ class MitmSettingDialog(QDialog):
         self.exclude_checkbox.setChecked(d.open_exclude)
         self.include_input.setPlainText(d.include)
         self.exclude_input.setPlainText(d.exclude)
+        self.flow_filter_enabled_checkbox.setChecked(
+            bool(getattr(d, "flow_filter_enabled", True))
+        )
+        self.flow_filter_input.setPlainText(
+            str(getattr(d, "flow_filter_pattern", "") or "")
+        )
 
         self.req_delay_enabled.setChecked(d.request_delay.enabled)
         self.req_delay_input.setText(str(d.request_delay.delay))
@@ -281,6 +297,8 @@ class MitmSettingDialog(QDialog):
                 "open_exclude": self.exclude_checkbox.isChecked(),
                 "include": self.include_input.toPlainText(),
                 "exclude": self.exclude_input.toPlainText(),
+                "flow_filter_enabled": self.flow_filter_enabled_checkbox.isChecked(),
+                "flow_filter_pattern": self.flow_filter_input.toPlainText(),
                 "request_delay": {
                     "enabled": self.req_delay_enabled.isChecked(),
                     "delay": float(self.req_delay_input.text() or 0),

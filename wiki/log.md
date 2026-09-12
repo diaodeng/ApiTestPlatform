@@ -1,3 +1,11 @@
+## [2026-09-12] FEATURE | client_new mitmproxy 抓包性能优化三项 + 分阶段优化/迁移方案落地
+
+- 背景：系统代理模式下全机器流量过代理出现请求排队慢；定位三个瓶颈——每条流量全量构造 FlowItem 上报 UI、mock 探测每请求新建 httpx.AsyncClient（每条重建 TLS 握手）、UI 每条流量逐条触发表格插入+统计+选中恢复致 UI 线程饱和。
+- 实现：①入口过滤 `flow_filter_enabled/flow_filter_pattern`（mock_handle 请求钩子最前判断，命中完全放行不记录不 mock 不延迟；`.` 开头后缀匹配忽略大小写剔除 query，否则子串匹配；设置弹窗接入，update 命令热生效）；②MockHandle 实例级 AsyncClient 复用（连接池 50/keepalive 20/30s 过期，探测前清 cookie，跨 loop 自动重建，helper/proxy_core 会话结束 aclose）；③新增 `ui/widgets/flow_event_buffer.py` 缓冲层（250ms 定时器制批量 flush，超 500 条立即落盘，断点流量旁路先 flush 存量再立即写入保证顺序与放行即时性；模型新增 add_flows/update_flows 整块操作单次 changed 信号；修复批量插入裁剪超限缺陷——原 _trim_before_add 只裁现有行；移除逐条 debug 日志）。
+- 文档：用户说明 `web/public/docs/client/mitm-proxy.md`（新增）、更新记录 `web/public/docs/updates/2026-09-12-client-new-mitm-performance-optimization.md`（history.md 已加条目）、分阶段方案 `wiki/features/client-new-optimization-and-go-migration-plan.md`（代理优化→插件化瘦身→pywebview UI→Go 迁移 POC 四阶段及评估结论）。
+- 验证：一次性自测脚本 25 项全过（过滤 11 + 批量写入 6 + 缓冲层 8，跑完已删除）；改动文件 py_compile 与 helper/proxy_core 导入通过；uvx ruff 53 处告警中 48 处为存量基线（项目无 ruff 强制配置），新增 5 处为周边一致的 BLE001。
+- 遗留：过滤默认开启，存量用户升级后静态资源不再出现在列表（可关闭）；刷新间隔 250ms 固定值未做成配置；真实抓包链路（local/系统代理连真实应用）未手工回归。
+
 ## [2026-09-11] FEATURE | AI 结果回帖消息形态开关与卡片字段白名单
 
 - 需求：卡片化落地后补充两项配置——①显式开关控制回帖用文本还是卡片（模板留空时不再固定卡片）；②卡片模式下按配置字段裁剪区块。

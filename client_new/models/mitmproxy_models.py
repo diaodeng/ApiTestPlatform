@@ -1,4 +1,3 @@
-from loguru import logger
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
 
@@ -85,12 +84,46 @@ class FlowTableModel(QAbstractTableModel):
 
     # ===== 新增 =====
     def add_flow(self, item):
-        logger.debug(f"抓取到数据了{item}")
         self._trim_before_add(1)
         self.beginInsertRows(QModelIndex(), len(self._data), len(self._data))
         self._data.append(item)
         self._map[item.id] = len(self._data) - 1
         self.endInsertRows()
+        self.changed.emit()
+
+    def add_flows(self, items):
+        """
+        批量新增流量，整块插入只触发一次模型变更信号，供 UI 节流缓冲层使用。
+        :param items: FlowItem 列表
+        :return:
+        """
+        valid_items = [item for item in items if item is not None]
+        if not valid_items:
+            return
+
+        # 批量插入可能一次性超过保留上限：先裁掉现有头部，不够再丢弃新数据头部，
+        # 保证插入后总量不超过 _max_records
+        overflow_count = len(self._data) + len(valid_items) - self._max_records
+        if overflow_count > 0:
+            remove_old = min(overflow_count, len(self._data))
+            if remove_old > 0:
+                self.beginRemoveRows(QModelIndex(), 0, remove_old - 1)
+                del self._data[:remove_old]
+                self.endRemoveRows()
+                overflow_count -= remove_old
+            if overflow_count > 0:
+                valid_items = valid_items[overflow_count:]
+                if not valid_items:
+                    self._rebuild_map()
+                    return
+
+        first_row = len(self._data)
+        self.beginInsertRows(
+            QModelIndex(), first_row, first_row + len(valid_items) - 1
+        )
+        self._data.extend(valid_items)
+        self.endInsertRows()
+        self._rebuild_map()
         self.changed.emit()
 
     def update_flow(self, item):
@@ -104,6 +137,30 @@ class FlowTableModel(QAbstractTableModel):
         self.dataChanged.emit(
             self.index(row, 0), self.index(row, self.columnCount() - 1)
         )
+        self.changed.emit()
+
+    def update_flows(self, items):
+        """
+        批量更新流量，逐行发出 dataChanged 但只触发一次 changed 信号，供 UI 节流缓冲层使用。
+        :param items: FlowItem 列表
+        :return:
+        """
+        updated_rows = []
+        for item in items:
+            if item is None or item.id not in self._map:
+                continue
+            row = self._map[item.id]
+            self._data[row] = item
+            self._map[item.id] = row
+            updated_rows.append(row)
+
+        if not updated_rows:
+            return
+
+        for row in updated_rows:
+            self.dataChanged.emit(
+                self.index(row, 0), self.index(row, self.columnCount() - 1)
+            )
         self.changed.emit()
 
     def clear(self):
