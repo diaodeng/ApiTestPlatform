@@ -71,6 +71,12 @@ class PaymentMockConfigModel(BaseModel):
     back_data: dict = dict()
 
 
+class PluginConfigModel(BaseModel):
+    """插件管理配置"""
+
+    download_base_url: str = ""  # 插件包下载源根地址，留空表示未配置（无法在线下载）
+
+
 class StartConfigModel(BaseModel):
     """POS启动配置"""
 

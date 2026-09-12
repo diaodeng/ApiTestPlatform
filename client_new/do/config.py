@@ -11,6 +11,7 @@ from model.config import (
     AgentConfigModel,
     FtpConfigModel,
     MitmProxyConfigModel,
+    PluginConfigModel,
     PosConfigModel,
     PosParamsModel,
     SearchConfigModel,
@@ -144,6 +145,42 @@ class MitmproxyConfig:
             data = MitmProxyConfigModel.model_validate(data)
         data = data.model_dump()
         with open(cls.config_file, "w") as f:
+            f.write(json.dumps(data, indent=4, ensure_ascii=False))
+
+
+class PluginsConfig:
+    config_file = "storage/data/config_plugins.json"
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def read(cls) -> PluginConfigModel:
+        """
+        读取插件管理配置，文件不存在时用默认值初始化。
+        :return: 插件配置模型
+        """
+        if not os.path.exists(cls.config_file):
+            return PluginConfigModel()
+        try:
+            with open(cls.config_file, encoding="utf-8") as f:
+                config = json.load(f)
+                return PluginConfigModel(**config)
+        except Exception as e:
+            logger.warning(f"读取插件配置失败:{cls.config_file}, {e}")
+            return PluginConfigModel()
+
+    @classmethod
+    def write(cls, data: dict | PluginConfigModel):
+        """
+        写入插件管理配置。
+        :param data: 配置数据
+        """
+        if not isinstance(data, PluginConfigModel):
+            data = PluginConfigModel.model_validate(data)
+        data = data.model_dump()
+        os.makedirs(os.path.dirname(cls.config_file), exist_ok=True)
+        with open(cls.config_file, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, indent=4, ensure_ascii=False))
 
 

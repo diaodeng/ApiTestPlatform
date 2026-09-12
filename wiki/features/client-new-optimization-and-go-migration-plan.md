@@ -32,13 +32,20 @@ PySide6 运行时约 60-80MB（压缩后）、cv2 113MB、playwright 106MB（含
 
 预期：系统代理模式下无关流量不再进入 Python 处理链，目标应用流量 UI 刷新恒定为每 250ms 一次。
 
-### 阶段 2：插件化瘦身（不动业务逻辑）⏳ 未开始
+### 阶段 2：插件化瘦身（不动业务逻辑）✅ 已实施（2026-09-12）
 - cv2 + numpy + pytesseract（只有 `desktop_test_service.py` 使用）拆为"桌面测试插件包"；
 - playwright（只有 web 测试 / agent 模块使用）拆为"Web 测试插件包"；
-- 插件形态：zip 内含 site-packages 子目录，下载解压到 `%APPDATA%\QTRClientNew\plugins\<name>\`，启用时加入 `sys.path`（共享主程序解释器）；桌面测试建议子进程隔离（复用 helper JSON 协议）；
-- 下载通道 HTTPS + sha256 校验 + 版本清单；UI 上功能页检查插件 → 无则"下载启用"；
-- 打包 onefile → onedir（启动提速）；spec 中 `collect_data_files("playwright")` 随拆分移除。
-- 预期：主程序（PySide6 + mitmproxy + mitmproxy_rs/windows-redirector + PIL）压缩后约 45-60MB。
+- 插件形态：zip 内含 site-packages 内容 + manifest.json，安装到 `storage/plugins/<name>/`，启动时由 `plugins/manager.py` 加入 `sys.path`（共享主程序解释器）；
+- 在线下载（可配下载源 + 可选 sha256 强校验）与本地 zip 安装两种方式，UI 入口为主窗口右上角「插件」按钮；安装失败自动回滚，所有插件异常只记日志/弹提示，不波及主进程；
+- 打包 spec 新增 PLUGIN_EXCLUDES 排除重依赖；插件包由 `scripts/build_plugins.py` 构建（含 pyautogui 传递依赖）。
+- 效果：主程序（PySide6 + mitmproxy + mitmproxy_rs/windows-redirector + PIL 除外）体积大幅下降，具体以构建产物为准。
+
+### 阶段 2.5：拆分「抓包代理」插件 + 菜单按插件显隐 ✅ 已实施（2026-09-12）
+- mitmproxy 及其独占依赖（36 个发行包，压缩后 19.5MB）拆为 `proxy` 插件；certifi/h11（httpx 共享）、Cryptodome（py7zr 使用）保留主程序；
+- spec 排除扩充 + 移除 mitmproxy 数据文件收集 + 补 6 个主程序不可达的 stdlib hiddenimports（struct/http.cookies/logging.handlers/wsgiref.validate/types/xml.dom.minidom）；
+- helper 子进程启动前激活插件；插件根目录 frozen 感知（exe 目录）；tornado 懒导入；
+- 「mitmproxy」菜单未装插件时隐藏（`ui/main_window.py` `_PLUGIN_GATED_NAV_ITEMS`），Agent 页常驻；
+- 验证：冻结态 helper 无插件报缺 mitmproxy / 有插件 ready（exit=0）；exe 55MB。
 
 ### 阶段 3：UI 迁 pywebview + Vue ⏳ 未开始
 - 用 pywebview（Windows 自带 Edge WebView2，本体几 MB）替换 PySide6，前端用 Vue3（团队已有 web/ 经验），本地 API 用 FastAPI/aiohttp + WebSocket 推流量；

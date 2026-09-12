@@ -1879,8 +1879,53 @@ class DesktopTestService:
     _recorders: dict[int, DesktopRecorderSession] = {}
     _lock = asyncio.Lock()
 
+    # 桌面测试必需的核心依赖：模块名 -> 本模块守卫导入绑定的全局变量名
+    _REQUIRED_PLUGIN_MODULES = (
+        ("cv2", "cv2"),
+        ("numpy", "np"),
+        ("pyautogui", "pyautogui"),
+        ("pytesseract", "pytesseract"),
+    )
+
+    @classmethod
+    def _missing_plugin_modules(cls) -> list[str]:
+        """
+        检查桌面测试插件核心依赖是否可用。
+        :return: 缺失的模块名列表，空列表表示插件可用
+        """
+        import importlib.util
+
+        missing = []
+        for module_name, global_name in cls._REQUIRED_PLUGIN_MODULES:
+            if globals().get(global_name) is not None:
+                continue
+            try:
+                if importlib.util.find_spec(module_name) is None:
+                    missing.append(module_name)
+            except Exception:
+                missing.append(module_name)
+        return missing
+
     @classmethod
     async def handle_request(cls, req_data: dict[str, Any], event_sender: EventSender | None = None) -> dict[str, Any]:
+        # 插件可用性前置检查：桌面测试依赖 cv2/numpy/pyautogui 等，插件缺失时
+        # 直接返回结构化失败消息引导安装，避免深层调用抛出难懂的 ImportError
+        missing_modules = cls._missing_plugin_modules()
+        if missing_modules:
+            message = (
+                "桌面测试插件未安装或未激活（缺少模块: "
+                f"{', '.join(missing_modules)}）。"
+                "请在客户端「插件管理」中安装「桌面测试」插件后重启客户端。"
+            )
+            logger.warning(f"桌面测试请求被拒绝: {message}")
+            return {
+                "request_type": REQUEST_TYPE_DESKTOP,
+                "command": req_data.get("command") or "run_case",
+                "success": False,
+                "status": "failed",
+                "message": message,
+            }
+
         command = req_data.get("command") or "run_case"
         if command == "run_case":
             return await cls._run_case(req_data)

@@ -9,8 +9,6 @@ import traceback
 from dataclasses import asdict
 from pathlib import Path
 
-import tornado.httpserver
-import tornado.ioloop
 from loguru import logger
 from mitmproxy import master as mitm_master
 from mitmproxy.options import Options
@@ -36,6 +34,10 @@ class ManagedWebMaster(WebMaster):
         self._http_server: tornado.httpserver.HTTPServer | None = None
 
     async def running(self):
+        # tornado 已拆入 proxy 插件（主程序打包不含），仅在 mitmweb 模式运行到这里时导入
+        import tornado.httpserver
+        import tornado.ioloop
+
         tornado.ioloop.IOLoop.current()
 
         if self._http_server is None:

@@ -1,3 +1,20 @@
+## [2026-09-12] FEATURE | client_new 拆分「抓包代理」插件 + 菜单按插件显隐（阶段 2.5）
+
+- 背景：插件化阶段 2 后继续把 mitmproxy（压缩态约 15MB）拆为第三个插件 `proxy`，并实现菜单按插件显隐。
+- 实现：①plugins/manager 新增 proxy 定义（36 发行包：mitmproxy/mitmproxy_rs/mitmproxy_windows/tornado/aioquic/cryptography/pyOpenSSL/flask 全家/h2/hpack/wsproto/ldap3/argon2/attr(s)/pyparsing/sortedcontainers 等），构建脚本支持 entry_globs 通配收集带 Python 版本标签的顶层 pyd（_brotli/_cffi_backend）；②两份 spec 排除清单扩充 33 项、移除 mitmproxy/mitmproxy_windows 数据收集、hiddenimports 补 6 个主程序不可达 stdlib（struct/http.cookies/logging.handlers/wsgiref.validate/types/xml.dom.minidom——xml.dom 缺失在冒烟中实际暴露）；③main.py --mitm-helper 分支先激活插件，插件根目录改 frozen 感知（exe 目录，原 cwd 相对路径在 helper 下指向临时解压目录）；④helper_process 顶层 tornado 导入移入 ManagedWebMaster.running()（仅 mitmweb 模式）；⑤主窗口 _PLUGIN_GATED_NAV_ITEMS + _resolve_nav_items：未装 proxy 隐藏「mitmproxy」菜单，异常兜底保持完整菜单，Agent 页为连接核心常驻。
+- 甄别原则：certifi/h11（httpx 共享）、Cryptodome（py7zr 使用）保留主程序。
+- 文档：`web/public/docs/client/plugins.md` 更新（三插件+菜单显隐）、更新记录 `web/public/docs/updates/2026-09-12-client-new-proxy-plugin.md`（history.md 已加条目）、方案文档补阶段 2.5。
+- 验证：开发态自测 12 项全过；冻结态冒烟——无插件 helper 报 ModuleNotFoundError mitmproxy 干净退出（预期）、有插件输出激活日志+ready 且 exit=0；缺口定位方法论：python -S + 白名单模拟冻结环境逐模块探针 + import 钩子记录导入链 80 个 stdlib + 与 PYZ/base_library.zip/builtins/PKG 扩展求差；exe 55MB（插件化累计 -45%）；PKG 中 mitmproxy/tornado/cryptography/WinDivert 残留 0；web-test 回归构建无影响。
+- 遗留：升级插件内 mitmproxy 大版本时需重跑 stdlib/三方依赖缺口分析；菜单显隐与插件一致需重启刷新；Portable spec 未单独构建；冻结态真实抓包链路（local 模式+目标应用）未端到端回归；dist 残留 2 个无法终止的冒烟幽灵进程（无害，重启消失）。
+
+## [2026-09-12] FEATURE | client_new 插件化瘦身（阶段 2）：重依赖拆插件、按需安装、异常隔离
+
+- 背景：主程序 100+MB 中 cv2/numpy/pytesseract（仅桌面测试用）与 playwright（仅 Web 测试用）合计约 220MB（解压后），按分阶段方案阶段 2 拆为插件。
+- 实现：①新增 `plugins/manager.py`（目录约定 storage/plugins/<name>/ 即 site-packages 内容，激活=插入 sys.path 前端；状态机 active/installed/missing；install_from_zip 校验 manifest+路径安全+备份原子替换+失败回滚；download_and_install 支持 {base}/{name}.zip + 可选 sha256 强校验；所有公开方法只返回 (ok,message) 不抛异常，异常一律记日志）；②main.py 在业务模块导入前 activate_installed()，激活失败仅 warning；③desktop_test_service.handle_request 入口守卫（cv2/np/pyautogui/pytesseract 缺失时返回结构化失败引导安装）、playwright_browser_runtime 错误文案指向插件管理、agent_server 既有 try/except 边界保持；④新增插件管理对话框（下载源配置+表格+在线下载/本地安装，后台线程+信号回 UI）与主窗口「插件」按钮入口；⑤两份 spec 新增 PLUGIN_EXCLUDES（cv2/numpy/playwright/PIL/pyautogui/pyscreeze/pymsgbox/pytweening/mouseinfo/pygetwindow/pynput/pytesseract）并移除 playwright 数据与 hiddenimports；⑥新增 scripts/build_plugins.py 从 .venv 打 zip（含 pyautogui 传递依赖与 dist-info，manifest.json+sha256）。
+- 文档：用户说明 `web/public/docs/client/plugins.md`（新增）、更新记录 `web/public/docs/updates/2026-09-12-client-new-plugin-architecture.md`（history.md 已加条目）、方案文档阶段 2 状态同步。
+- 验证：一次性自测 15 项全过（状态机/激活 no-op/zip 校验 7 项含越级路径拒绝与覆盖安装回滚/下载源缺省提示/桌面守卫/对话框实例化，跑完已删除）；py_compile 全过；主程序 PyInstaller 构建结果见更新记录补充。
+- 遗留：插件首次安装需重启生效（后续可改调用期动态导入）；下载源待维护方部署托管地址；打包排除后需完整回归 Agent 桌面/Web 链路；Portable spec 未单独构建验证；OCR 仍需系统装 Tesseract。后续修复：build_plugins.py 的 dist-info 硬编码版本改为按发行包名动态解析，并修复 rsplit('-') 切在 dist-info 连字符上的匹配缺陷；desktop-test.zip 实构建 63.4MB（numpy 2.5.2/pillow 12.3.0）且回环安装验证通过。
+
 ## [2026-09-12] FEATURE | client_new mitmproxy 抓包性能优化三项 + 分阶段优化/迁移方案落地
 
 - 背景：系统代理模式下全机器流量过代理出现请求排队慢；定位三个瓶颈——每条流量全量构造 FlowItem 上报 UI、mock 探测每请求新建 httpx.AsyncClient（每条重建 TLS 握手）、UI 每条流量逐条触发表格插入+统计+选中恢复致 UI 线程饱和。

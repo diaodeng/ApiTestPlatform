@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from loguru import logger
+
 from ui.theme_manager import (
     THEME_MODE_AUTO,
     THEME_MODE_DARK,
@@ -112,8 +114,16 @@ class MainWindow(QMainWindow):
             self.theme_actions[mode] = action
         self.theme_button.setMenu(self.theme_menu)
 
+        # 插件管理入口：重依赖（桌面测试/Web 测试）按需安装，异常不影响主窗口
+        self.plugin_button = QToolButton()
+        self.plugin_button.setObjectName("pluginManagerButton")
+        self.plugin_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.plugin_button.setText("插件")
+        self.plugin_button.clicked.connect(self._open_plugin_manager)
+
         header_layout.addWidget(self.app_title_label)
         header_layout.addStretch()
+        header_layout.addWidget(self.plugin_button)
         header_layout.addWidget(self.theme_button)
 
         content_layout = QHBoxLayout()
@@ -121,7 +131,11 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(12)
 
         # 左侧菜单
-        self.nav_items = ["Agent", "POS", "SQLite", "mitmproxy", "日志", "关于"]
+        # 菜单按插件显隐：mitmproxy 页依赖 proxy 插件（未安装时隐藏菜单项）；
+        # Agent 页是平台连接核心（httpx/websocket），常驻并在页内对插件缺失做降级提示
+        self.nav_items = self._resolve_nav_items(
+            ["Agent", "POS", "SQLite", "mitmproxy", "日志", "关于"]
+        )
         self.menu = QListWidget()
         self.menu.addItems(self.nav_items)
         self.menu.setFixedWidth(150)
@@ -186,6 +200,35 @@ class MainWindow(QMainWindow):
             self.theme_manager.current_mode(), self.theme_manager.is_dark()
         )
 
+    # 需要插件才显示的菜单项：插件标识 -> 依赖它的菜单项列表
+    _PLUGIN_GATED_NAV_ITEMS = {
+        "proxy": ["mitmproxy"],
+    }
+
+    def _resolve_nav_items(self, items: list[str]) -> list[str]:
+        """
+        按插件安装状态过滤菜单项，未安装对应插件的菜单不显示。
+        过滤过程异常时保持完整菜单，避免影响主界面可用性。
+        :param items: 全量菜单项
+        :return: 过滤后的菜单项
+        """
+        try:
+            from plugins.manager import PLUGIN_DEFINITIONS, plugin_manager
+
+            hidden: set[str] = set()
+            for plugin_name, gated_items in self._PLUGIN_GATED_NAV_ITEMS.items():
+                if plugin_name not in PLUGIN_DEFINITIONS:
+                    continue
+                if (
+                    plugin_manager.get_status(plugin_name)
+                    == plugin_manager.STATUS_MISSING
+                ):
+                    hidden.update(gated_items)
+            return [item for item in items if item not in hidden]
+        except Exception as e:
+            logger.warning(f"按插件过滤菜单失败，保持完整菜单: {e}")
+            return list(items)
+
     def _build_page_placeholder(self, page_name: str) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -235,6 +278,19 @@ class MainWindow(QMainWindow):
         self._status_timer.setInterval(2000)
         self._status_timer.timeout.connect(self._refresh_global_status)
         self._status_timer.start()
+
+    def _open_plugin_manager(self):
+        """
+        打开插件管理对话框；对话框内部异常仅记录日志，不影响主窗口。
+        :return:
+        """
+        try:
+            from ui.dialogs.plugin_manager_dialog import PluginManagerDialog
+
+            dialog = PluginManagerDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.exception(f"打开插件管理失败: {e}")
 
     def _update_theme_button(self, mode: str, is_dark: bool):
         for theme_mode, action in self.theme_actions.items():

@@ -392,7 +392,10 @@ def _load_async_playwright_factory():
     try:
         module = importlib.import_module("playwright.async_api")
     except Exception as exc:
-        raise RuntimeError("playwright Python 包未安装，无法执行 Web 操作") from exc
+        raise RuntimeError(
+            "playwright Python 包未安装（Web 测试插件缺失），"
+            "请在客户端「插件管理」中安装「Web 测试」插件后重启客户端"
+        ) from exc
     return getattr(module, "async_playwright")
 
 
@@ -400,7 +403,10 @@ def _compute_playwright_driver_command() -> tuple[str, str]:
     try:
         driver_module = importlib.import_module("playwright._impl._driver")
     except Exception as exc:
-        raise RuntimeError("未找到 Playwright 驱动，无法自动安装浏览器") from exc
+        raise RuntimeError(
+            "未找到 Playwright 驱动（Web 测试插件缺失或不完整），"
+            "请在客户端「插件管理」中重新安装「Web 测试」插件后重启客户端"
+        ) from exc
 
     compute_driver_executable = getattr(
         driver_module, "compute_driver_executable", None

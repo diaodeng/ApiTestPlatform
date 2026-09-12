@@ -23,9 +23,69 @@ while len(_version_tuple) < 4:
 
 icon_file = project_root / "assets" / "favicon.ico"
 
-datas = collect_data_files("playwright")
-datas += collect_data_files("mitmproxy")
-datas += collect_data_files("mitmproxy_windows")
+# 插件化瘦身：以下重依赖不再打入主程序，由「插件管理」按需安装到
+# storage/plugins/<name>/，应用启动时由 plugins.manager 激活到 sys.path。
+# 对应插件包由 scripts/build_plugins.py 构建到 dist_plugins/。
+PLUGIN_EXCLUDES = [
+    # desktop-test 插件
+    "cv2",
+    "numpy",
+    "PIL",
+    "pyautogui",
+    "pyscreeze",
+    "pymsgbox",
+    "pytweening",
+    "mouseinfo",
+    "pygetwindow",
+    "pynput",
+    "pytesseract",
+    # web-test 插件
+    "playwright",
+    # proxy 插件（mitmproxy 内核及其独占依赖；certifi/h11/sortedcontainers/pyparsing
+    # 为 httpx 等主程序共享依赖必须保留，Cryptodome 被 py7zr 使用也保留）
+    "mitmproxy",
+    "mitmproxy_rs",
+    "mitmproxy_windows",
+    "aioquic",
+    "pylsqpack",
+    "service_identity",
+    "pyasn1",
+    "tornado",
+    "flask",
+    "werkzeug",
+    "jinja2",
+    "markupsafe",
+    "itsdangerous",
+    "click",
+    "blinker",
+    "cryptography",
+    "cffi",
+    "pycparser",
+    "OpenSSL",
+    "h2",
+    "hyperframe",
+    "wsproto",
+    "msgpack",
+    "zstandard",
+    "brotli",
+    "_brotli",
+    "ldap3",
+    "argon2",
+    "bcrypt",
+    "kaitaistruct",
+    "publicsuffix2",
+    "pyperclip",
+    "ruamel",
+    "urwid",
+    "wcwidth",
+    "pydivert",
+    "asgiref",
+    "pyparsing",
+    "sortedcontainers",
+    "attrs",
+]
+
+datas = []
 if icon_file.exists():
     datas.append((str(icon_file), "assets"))
 
@@ -35,12 +95,18 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[
-        "playwright.async_api",
-        "playwright._impl._driver",
+        # proxy 插件运行期需要的标准库（主程序不可达，PyInstaller 不会自动打包）
+        "struct",
+        "http.cookies",
+        "logging.handlers",
+        "wsgiref.validate",
+        "wsgiref.types",
+        "xml.dom.minidom",
         "server.agent_server",
         "controller.agent_controller",
         "ui.dialogs.agent_server_manage_dialog",
         "ui.dialogs.agent_browser_setting_dialog",
+        "ui.dialogs.plugin_manager_dialog",
         "services.mitmproxy_service.helper_process",
         "services.mitmproxy_service.mock_handle",
         "services.mitmproxy_service.runtime_config",
@@ -50,7 +116,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=PLUGIN_EXCLUDES,
     noarchive=False,
     optimize=0,
 )

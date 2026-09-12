@@ -6,6 +6,8 @@ title: 更新历史
 
 
 ## 2026-09-12
+- 桌面客户端拆分「抓包代理」插件 + 菜单按插件显隐：mitmproxy 内核及其独占依赖（tornado/aioquic/cryptography 等 36 包）拆为第三个插件 proxy，主程序 exe 从 71MB 降至 55MB（插件化累计从 100+MB 降 45%）；「mitmproxy」菜单在插件未安装时隐藏，安装重启后出现；helper 子进程启动前激活插件（插件根目录改 frozen 感知路径）；tornado 改 mitmweb 模式懒导入；补齐 6 个主程序不可达的标准库 hiddenimports（xml.dom.minidom 等在冒烟中实际暴露缺失）。详见：[拆分抓包代理插件](2026-09-12-client-new-proxy-plugin.md)，用户说明：[插件管理](../client/plugins.md)。
+- 桌面客户端插件化瘦身：主程序不再内置桌面测试依赖（cv2/numpy/pytesseract/pyautogui/pynput/pillow）与 Web 测试依赖（playwright），新增「插件管理」入口（主界面右上角「插件」按钮）——支持在线下载（可配下载源+sha256 校验）与本地 zip 安装，插件安装到 storage/plugins/ 后重启生效；插件缺失时对应功能返回明确提示、其他功能不受影响，安装失败自动回滚，所有插件异常仅记日志不波及主进程。打包 spec 排除上述重依赖并新增 scripts/build_plugins.py 插件包构建脚本，主程序体积大幅下降。详见：[插件化瘦身](2026-09-12-client-new-plugin-architecture.md)，用户说明：[插件管理](../client/plugins.md)。
 - 桌面客户端 mitmproxy 抓包性能优化三项：①流量入口过滤——新增"过滤静态资源流量"开关与过滤路径规则（后缀/子串匹配，默认过滤 png/js/css/字体等静态资源），命中流量完全放行不记录不 mock，系统代理模式下无关流量不再拖慢代理与界面；②mock 探测连接复用——按代理会话持有单个 httpx 连接池，消除每请求重建连接与 TLS 握手，探测前清 cookie、会话结束显式释放；③UI 节流——流量列表改 250ms 定时批量渲染（整批只触发一次刷新），断点流量旁路立即显示保证放行按钮即时可用。设置弹窗「路径匹配」组可配置，保存热生效。详见：[mitm性能优化三项](2026-09-12-client-new-mitm-performance-optimization.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
 
 ## 2026-09-11

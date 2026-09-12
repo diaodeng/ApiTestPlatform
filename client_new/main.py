@@ -129,6 +129,14 @@ def _install_qt_message_filter():
 
 if __name__ == "__main__":
     if "--mitm-helper" in sys.argv:
+        # helper 子进程同样需要先激活插件目录（mitmproxy 已拆为 proxy 插件）；
+        # 打包态下插件根目录按 exe 所在目录解析，不受 cwd 影响
+        try:
+            from plugins.manager import plugin_manager
+
+            plugin_manager.activate_installed()
+        except Exception:
+            pass
         from services.mitmproxy_service.helper_process import main as mitm_helper_main
 
         mitm_helper_main()
@@ -145,6 +153,15 @@ if __name__ == "__main__":
 
     logger.info("应用开始启动")
     freeze_support()
+    # 在导入任何业务模块之前激活已安装插件目录，
+    # 使 desktop_test_service / playwright 的守卫导入能命中插件包；
+    # 激活失败只记录日志，不阻塞主功能启动。
+    try:
+        from plugins.manager import plugin_manager
+
+        plugin_manager.activate_installed()
+    except Exception as e:
+        logger.warning(f"插件激活失败（不影响主功能）: {e}")
     _install_global_exception_handlers()
     if sys.platform.startswith("win"):
         try:
