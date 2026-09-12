@@ -1,3 +1,13 @@
+## [2026-09-12] FEATURE | client_new Qt 运行时二次瘦身（目录版 122MB→76MB）
+
+- 背景：插件化拆分后目录版 `_internal` 仍 122MB，用户预期不应有此体量；逐层 du 定位 PySide6 独占 92MB，插件重依赖（cv2/numpy/playwright/mitmproxy 等）确认已不在，剩余全是 Qt 运行时被 PyInstaller 官方 PySide6 hook 按"包目录"级别连带收集。
+- 根因（pefile 解析产物全部 DLL/PYD 导入表证实，均与项目代码无关）：①hook 因 import QtGui 收集 `platforminputcontexts/qtvirtualkeyboardplugin.dll`（<1MB）→ 依赖 Qt6VirtualKeyboard → 依赖 Qt6Quick → 拖入 Qt6Qml 全家（约 17MB，纯 Widgets 应用零 QML 使用）；②imageformats 全目录中的 `qpdf.dll` 拖入 Qt6Pdf（约 5MB）；③默认携带软件 OpenGL 回退 `opengl32sw.dll`（约 20MB）；④96 个 Qt 翻译文件全量收集（约 7MB，实际只需 zh_CN）。单文件版 55MB 即同一套内容 zlib 压缩结果，不是内容更少。
+- 实现：新增 `client_new/scripts/qt_slim.py`（`apply_qt_slim(a)` 原位过滤 Analysis 的 binaries/datas，两个 spec 共用），`QTRClientNew.spec` 与 `QTRClientNewPortable.spec` 在 Analysis 后调用；剔除上述 7 个 DLL + platforminputcontexts 整目录 + qpdf.dll + 非中文翻译，共 103 个条目；qwindows/qdirect2d 平台插件、Qt6Network/Qt6OpenGL/Qt6Svg、其余 imageformats 全部保留。
+- 效果：目录版 `_internal` 122MB→76MB（-46MB/-38%）；单文件版 55MB→37.6MB。
+- 文档：更新记录 `web/public/docs/updates/2026-09-12-client-new-qt-runtime-slim.md`（history.md 已加条目）。
+- 验证：portable 与 onefile 构建均 exit=0；pefile 依赖一致性检查无新断链（Qt6Core 对 icuuc.dll 为延迟加载可选项，与瘦身前一致）；便携版启动冒烟通过（进程存活、fatal_error.log 无异常）。注意：构建前 dist 被运行中的旧实例锁定报 WinError 5，结束 QTRClientNew.exe 进程后重试成功。
+- 遗留：无 GPU 驱动的远程桌面环境可能缺软件渲染回退（删 qt_slim.py 中 opengl32sw 规则重打即可）；非 zh_CN 系统 Qt 标准对话框文案回退英文；再往下瘦身需换 Qt 模块裁剪/静态构建方案。
+
 ## [2026-09-12] FEATURE | client_new Agent 页面信息精简（连接设置弹窗/去掉冗余地址行）
 
 - 背景：mitmproxy 页信息栏精简后用户指出其他页面有同类初始显示冗余；离屏截图逐页核查 6 页，问题集中在 Agent 页——①地址下拉框下方整行重复展示 MAC/连接地址/状态信息；②地址后平铺最大发送/自动重试/重试次数/重试间隔/断线重连/低频间隔 6 个控件，1200px 宽度下顶栏溢出。

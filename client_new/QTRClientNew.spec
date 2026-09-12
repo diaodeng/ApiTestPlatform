@@ -17,6 +17,9 @@ project_root = Path(SPEC).resolve().parent
 sys.path.insert(0, str(project_root))
 from version import __version__ as _app_version
 
+# Qt 运行时裁剪规则（依赖 sys.path 已指向项目根目录）
+from scripts.qt_slim import apply_qt_slim
+
 _version_tuple = tuple(int(x) for x in _app_version.split("."))
 while len(_version_tuple) < 4:
     _version_tuple = (*_version_tuple, 0)
@@ -120,6 +123,9 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Qt 运行时裁剪：剔除纯 Widgets 应用用不到的 Quick/Qml/Pdf/VirtualKeyboard、
+# 软件 OpenGL 回退和非中文翻译，规则与原因见 scripts/qt_slim.py。
+apply_qt_slim(a)
 pyz = PYZ(a.pure)
 
 exe = EXE(

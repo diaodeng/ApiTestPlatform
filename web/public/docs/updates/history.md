@@ -6,6 +6,7 @@ title: 更新历史
 
 
 ## 2026-09-12
+- 桌面客户端 Qt 运行时二次瘦身：定位出插件化后剩余体积大头为 PySide6 被 PyInstaller hook 连带收集的冗余 Qt 运行时（虚拟键盘插件拖入 QML/Quick 引擎约 17MB、qpdf 图片插件拖入 Qt6Pdf 约 5MB、软件 OpenGL 回退 opengl32sw 约 20MB、96 个翻译文件只保留 zh_CN），新增 `scripts/qt_slim.py` 在两个打包 spec 的 Analysis 后统一过滤 103 个条目；目录版 `_internal` 122MB→76MB，单文件版 55MB→37.6MB。详见：[Qt运行时二次瘦身](2026-09-12-client-new-qt-runtime-slim.md)。
 - 桌面客户端 Agent 页面信息精简：①移除地址下方重复的 MAC/连接地址展示行（完整连接地址=地址+/MAC，页面不再展示，状态信息行保留）；②服务器选择后的最大发送、自动重试、重试次数、重试间隔、断线重连、低频间隔 6 项配置收敛到新增的「连接设置」弹窗（主开关联动禁用子项），顶栏只留状态/地址/别名/显示日志，小屏不再溢出；配置保存链路不变。详见：[Agent页面信息精简](2026-09-12-client-new-agent-page-declutter.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 - 插件安装目录支持自定义：默认恢复为程序目录下 storage/plugins（拷贝程序目录整体带走插件，绿色便携）；插件管理页新增"安装目录"行（浏览/保存），修改时弹影响提示并三选一（迁移已装插件/仅保存/取消）；旧版本历史位置（exe 目录/LOCALAPPDATA）的插件启动时自动迁移到当前根目录；插件配置文件路径打包态固定到 exe 目录，保证 helper 子进程能读到自定义目录。详见：[安装目录自定义](2026-09-12-client-new-plugin-install-dir-config.md)，用户说明：[插件管理](../client/plugins.md)。
 - 修复插件化后重新打包报 `PermissionError: WinDivert64.sys 拒绝访问`：根因是打包态插件根目录原为 exe 所在目录（即构建输出目录），运行数据写入其中后，local 模式加载的 WinDivert 内核驱动锁定 .sys 文件，PyInstaller 清理输出目录时删除失败；现插件运行数据可配置安装位置，构建产物目录不再被运行时污染。已在构建输出目录装过插件的用户升级后插件自动搬走；打包前若驱动残留锁定请 `sc stop WinDivert`（管理员）。详见：[插件目录解耦](2026-09-12-client-new-plugin-dir-decouple.md)，用户说明：[插件管理](../client/plugins.md)。
