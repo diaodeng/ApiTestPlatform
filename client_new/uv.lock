@@ -556,6 +556,7 @@ name = "client-new"
 version = "1.0.4.4"
 source = { virtual = "." }
 dependencies = [
+    { name = "cffi" },
     { name = "dotenv" },
     { name = "httpx" },
     { name = "loguru" },
@@ -583,6 +584,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cffi", specifier = ">=2.0.0" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "loguru", specifier = ">=0.7.3" },

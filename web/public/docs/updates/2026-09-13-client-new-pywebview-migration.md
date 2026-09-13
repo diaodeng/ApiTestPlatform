@@ -49,5 +49,10 @@ title: 桌面客户端界面由 PySide6 迁移到 pywebview
 ## 风险与后续
 
 - 桌面录制覆盖层（高亮/批注）待用 pywebview 透明窗口补齐。
-- 打包产物（exe）尚未重新构建验证，spec 已同步但需跑一次完整打包冒烟。
 - 深交互链路（mitm 断点编辑、POS 启动确认全流程、自更新）为代码级移植，建议日常使用中重点回归。
+
+## 打包修复（同日追加）
+
+- 首次打包运行报 `RuntimeError: Failed to create a .NET runtime`：根因是插件化瘦身时 `cffi`/`pycparser` 被列入 spec 的 PLUGIN_EXCLUDES（当时仅 proxy 插件使用），而 pywebview 的 WinForms 后端依赖链 pythonnet → clr_loader → cffi 需要在主程序内直接可用；且旧 hiddenimports 还引用了已删除的 Qt 模块（controller.agent_controller、ui.dialogs.*）。
+- 修复：`cffi>=2.0.0` 加入主依赖；两个 spec 从排除清单移除 cffi/pycparser，hiddenimports 改为 ui_web.api.bridge + webview.platforms.winforms/edgechromium + pythonnet + clr_loader（netfx/ffi/hostfxr）+ cffi/pycparser；webview/lib（WebView2Loader.dll 等）由 hooks-contrib 的 hook-webview 自动收集。
+- 验证：便携版全量重新打包通过，`_internal` 中确认包含 _cffi_backend/clr_loader/pythonnet/webview；打包 exe 实测启动正常（窗口出现、运行稳定、退出清理正常）。
