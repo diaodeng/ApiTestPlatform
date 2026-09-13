@@ -238,6 +238,36 @@ class MitmApi:
         self._refresh_cert_status_async()
         return self._ok()
 
+    def list_processes(self) -> dict:
+        """
+        列出当前系统进程名（去重、按名称排序），供设置弹窗「拦截应用」下拉选择。
+
+        与旧版 ProcessSelectorWidget 一致：优先取进程名，缺失时回退 exe 文件名；
+        大小写不敏感去重；列举失败返回失败结果由前端提示。
+        """
+        try:
+            import os
+
+            import psutil
+
+            names: dict[str, str] = {}
+            for proc in psutil.process_iter(["name", "exe"]):
+                try:
+                    name = (proc.info.get("name") or "").strip()
+                    exe = (proc.info.get("exe") or "").strip()
+                except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                    continue
+                display = name or os.path.basename(exe)
+                if not display:
+                    continue
+                names.setdefault(display.lower(), display)
+            processes = sorted(names.values(), key=str.lower)
+            logger.info(f"列举系统进程完成，共 {len(processes)} 个")
+            return self._ok(processes=processes)
+        except Exception as e:
+            logger.exception(f"列举系统进程失败: {e}")
+            return self._fail(str(e))
+
     def shutdown(self) -> None:
         """
         应用退出时停止 helper 并清理线程。
@@ -364,6 +394,13 @@ class MitmApi:
 
     def _is_helper_running(self) -> bool:
         return bool(self.helper and self.helper.poll() is None)
+
+    def _is_proxy_active(self) -> bool:
+        """
+        代理是否处于活动状态（启动中/运行中/停止中），与旧 Qt 版语义一致；
+        保存配置时据此决定是重启应用敏感变更还是热更新配置。
+        """
+        return self.helper_state in {"starting", "running", "stopping"}
 
     def _request_proxy_stop(self):
         if self.helper_state not in {"starting", "running", "stopping"}:

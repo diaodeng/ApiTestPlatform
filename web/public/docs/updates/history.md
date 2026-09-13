@@ -5,6 +5,9 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 
+## 2026-09-14
+- 桌面客户端 mitmproxy 设置弹窗修复：①证书路径为空时占位提示直接显示实际生效的默认证书路径（取后端解析结果），脚本路径注明"留空使用客户端内置脚本"；②代理字段语义修正——新增「代理模式」下拉（local/regular/wireguard/socks5/dns）与仅 local 模式显示的「拦截应用」输入框（支持手动输入 + datalist 下拉选择，mitm_api 新增 list_processes 进程枚举接口，首次点击自动加载、旁有「加载」按钮刷新），移除后端不消费的遗留「代理客户端」字段；修复迁移遗留缺陷：`save_config` 调用的 `_is_proxy_active` 在迁移时丢失导致运行中保存配置必现 AttributeError，已按旧版语义补回；③断点/包含/排除/流量过滤/Mock 等开关与对应内容输入框改为同一行展示，dump 模式下 web 相关复选框禁用；④全部输入框补充格式 placeholder，标签旁新增可点击「?」气泡说明（core.js 新增 helpTip 组件）；补回迁移时丢失的「附加 Body」字段。弹窗按基础配置/Mock 与请求改写/过滤与拦截/延迟设置重新分组。详见：[mitm设置弹窗修复](2026-09-14-client-new-mitm-setting-dialog-fix.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
+
 ## 2026-09-13
 - 桌面客户端一键发版构建与版本库跟踪清理：新增 `scripts/build_release.py` 统一编排 PyInstaller 两个 spec、插件包构建与产物整理，区分 dev/release 两种模式——release 三道硬闸门（工作区干净、tag==v{version.py} 且在 HEAD、Gitee 无同名 release）任一不满足拒绝构建；构建信息采用「进 git 的 version_build.py 固定加载器 + gitignore 的 version_build_local.py 动态值」两层设计，关于页版本号旁展示、插件 manifest 写入 build_mode/build_commit；正式产物按自更新资产匹配规则命名（QTRClientNew.exe / QTRClientNew_portable.zip）并附 .sha256 与 release-manifest.json 清单；插件 zip、build_webview、dist_webview、构建日志、.codeweaver 等约 150MB 构建产物退出 git 跟踪（分发走 Gitee release 附件），发版提交回归纯源码；确认版本比对按数字归一化与 tag 命名禁忌（禁字母+数字后缀）。详见：[一键发版构建](2026-09-13-client-new-one-command-release-build.md)。
 - 桌面客户端 Agent 页服务选择改为名称下拉：顶部「服务地址」输入框移除，替换为「服务」下拉框（选项显示服务名称，value 存地址），连接中（连接中/运行中/断开中）下拉框锁定不可切换，停止后才可更换；恢复 server_list 旧版存储语义 `{服务地址: 服务名称}`、current_server 存地址（修正迁移时写反导致管理弹窗两列颠倒），修改/删除当前服务时 current_server 跟随/回退；开始连接的状态提示不再携带连接地址，地址仅记日志。详见：[Agent服务名称下拉](2026-09-13-client-new-agent-server-name-select.md)，用户说明：[桌面客户端pywebview界面](../client/pywebview-ui.md)。

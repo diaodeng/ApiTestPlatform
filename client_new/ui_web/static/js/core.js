@@ -149,6 +149,26 @@
     return { close, body: bodyNode };
   }
 
+  /**
+   * 问号提示组件：label 旁的“?”图标，点击切换显示说明气泡。
+   * 用于表单字段说明，避免在页面中平铺大段提示文字。
+   */
+  function helpTip(text) {
+    const tip = el("span", { class: "help-tip", title: "点击查看说明" }, "?");
+    const bubble = el("span", { class: "help-tip-bubble", text });
+    tip.append(bubble);
+    tip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tip.classList.toggle("open");
+    });
+    return tip;
+  }
+
+  // 点击页面其他位置时收起所有已打开的问号提示气泡（全局只注册一次）
+  document.addEventListener("click", () => {
+    $$(".help-tip.open", document).forEach((n) => n.classList.remove("open"));
+  });
+
   /** 后端发起的确认框（ui_dialog 事件）使用，返回 Promise。 */
   function backendDialog(payload) {
     return new Promise((resolve) => {
@@ -255,6 +275,6 @@
   window.QTR = {
     Bus, call, rawCall, waitForApi, el, $, $$, clear, toast, openModal,
     backendDialog, fieldRow, textInput, checkbox, select, listEditor,
-    kvTable, copyText,
+    kvTable, copyText, helpTip,
   };
 })();

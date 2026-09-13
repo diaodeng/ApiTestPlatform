@@ -8,6 +8,8 @@ export function mitmPage(mount) {
   let flows = []; // FlowItem 字典数组
   let selectedFlow = null;
   let showDetail = true;
+  // 后端解析出的默认证书路径（证书路径留空时的实际生效值，用于设置弹窗占位提示）
+  let defaultCertPath = "";
   const FLOW_LIMIT_DEFAULT = 500;
 
   // ===== 工具栏 =====
@@ -214,51 +216,120 @@ export function mitmPage(mount) {
   // ===== 设置弹窗 =====
   btnSettings.addEventListener("click", () => {
     const c = config || {};
-    const F = (key, label, attrs = {}, transform = (v) => v) => {
-      const input = textInput(String(c[key] ?? ""), attrs);
-      input.dataset.key = key;
-      input.dataset.transform = transform.name;
-      return [label, input, transform];
+    const { helpTip } = window.QTR;
+
+    // 带问号提示的表单标签：点击“?”显示字段说明
+    const labelWith = (label, tip) => {
+      const node = el("label", { class: "sub", style: "display:inline-flex;align-items:center;gap:4px;flex:none" }, label);
+      if (tip) node.append(helpTip(tip));
+      return node;
     };
-    const fields = [
-      F("port", "代理端口", { type: "number" }, Number),
-      F("web_port", "Web端口", { type: "number" }, Number),
-      F("cert_path", "证书路径", {}),
-      F("script_path", "脚本路径", {}),
-      F("mitmproxy_config_dir", "配置目录", {}),
-      F("proxy_client", "代理客户端", { placeholder: "进程名" }),
-      F("proxy_model_value", "代理模式值", {}),
-      F("mock_server", "Mock 服务地址", {}),
-      F("flow_record_limit", "流量记录上限", { type: "number" }, Number),
-      F("flow_filter_pattern", "流量过滤关键字", {}),
-      F("add_headers", "附加请求头(文本)"),
-      F("exclude", "排除规则"),
-      F("include", "包含规则"),
-    ];
-    const grid = el("div", { class: "form-grid" });
-    for (const [label, input] of fields) {
-      grid.append(el("label", { class: "sub", text: label }), input);
-    }
-    const checks = {
-      startup_mode: select([{ value: "dump", label: "dump" }, { value: "web", label: "web" }], c.startup_mode || "dump"),
-      web_open_browser: checkbox("启动后打开浏览器", !!c.web_open_browser),
-      web_show_in_app: checkbox("Web 模式下同步显示到应用界面", !!c.web_show_in_app),
-      ssl_insecure: checkbox("忽略 SSL 校验", !!c.ssl_insecure),
-      is_mock: checkbox("启用 mock", !!c.is_mock),
-      open_include: checkbox("启用包含规则", !!c.open_include),
-      open_exclude: checkbox("启用排除规则", !!c.open_exclude),
-      breakpoint_enabled: checkbox("启用断点拦截", !!c.breakpoint_enabled),
-      flow_filter_enabled: checkbox("启用流量过滤", !!c.flow_filter_enabled),
+    const textArea = (value, rows, placeholder) => {
+      const area = el("textarea", { class: "input mono", rows, placeholder, style: "flex:1;box-sizing:border-box" });
+      area.value = value || "";
+      return area;
     };
-    const bpPattern = textInput(c.breakpoint_pattern || "", { placeholder: "输入要断点的接口关键字，如 /pos/token", style: "flex:1" });
+    // 读取 checkbox 组件（外层 label 包裹 input）的勾选状态
+    const isChecked = (box) => box.querySelector("input").checked;
+
+    // ---- 基础配置 ----
+    const portInput = textInput(String(c.port ?? 9080), { type: "number", style: "width:120px" });
+    const webPortInput = textInput(String(c.web_port ?? 9081), { type: "number", style: "width:120px" });
+    const recordLimitInput = textInput(String(c.flow_record_limit ?? FLOW_LIMIT_DEFAULT), { type: "number", style: "width:120px" });
+    const startupModeSelect = select(
+      [{ value: "dump", label: "dump（应用内展示）" }, { value: "web", label: "web（mitmweb 页面）" }],
+      c.startup_mode || "dump");
+    const webOpenBrowserBox = checkbox("启动后打开浏览器", !!c.web_open_browser);
+    const webShowInAppBox = checkbox("Web 模式下同步显示到应用界面", c.web_show_in_app !== false);
+    // 代理模式即 mitmproxy 的 mode：local 表示只拦截指定应用进程，其他为 mitmproxy 原生模式
+    const proxyModelSelect = select(
+      ["local", "regular", "wireguard", "socks5", "dns"].map((m) => ({ value: m, label: m })),
+      c.proxy_model || "local");
+    const proxyModelValueInput = textInput(String(c.proxy_model_value || ""), {
+      placeholder: "输入或选择要拦截的应用进程名，如 CPOS-DF.exe",
+      style: "flex:1",
+      list: "qtr-mitm-process-options",
+    });
+    // 进程下拉数据源：datalist 保证仍可手动输入，选项供下拉选择（与旧版可编辑下拉一致）
+    const processOptions = el("datalist", { id: "qtr-mitm-process-options" });
+    let processListLoaded = false;
+    const loadProcessOptions = async () => {
+      const res = await call("mitm", "list_processes");
+      if (!res.ok) return toast(res.message, "error");
+      clear(processOptions);
+      for (const name of res.processes || []) {
+        processOptions.append(el("option", { value: name }));
+      }
+      processListLoaded = true;
+      toast(`已加载 ${processOptions.children.length} 个进程`, "success", 1500);
+    };
+    // 首次点击输入框自动加载进程列表，之后可用「加载」按钮手动刷新
+    proxyModelValueInput.addEventListener("mousedown", () => {
+      if (!processListLoaded) loadProcessOptions();
+    });
+    const configDirInput = textInput(String(c.mitmproxy_config_dir || ""), {
+      placeholder: "留空使用 C:\\Users\\<用户名>\\.mitmproxy",
+      style: "flex:1",
+    });
+    // 证书路径留空时后端按 默认目录 下的 mitmproxy-ca-cert.cer 解析，占位符展示实际生效路径
+    const certPathInput = textInput(String(c.cert_path || ""), {
+      placeholder: defaultCertPath ? `留空使用默认证书：${defaultCertPath}` : "留空使用默认证书路径",
+      style: "flex:1",
+    });
+    const scriptPathInput = textInput(String(c.script_path || ""), {
+      placeholder: "留空使用客户端内置脚本",
+      style: "flex:1",
+    });
+    const sslInsecureBox = checkbox("忽略 SSL 校验（目标服务证书无效时仍抓包）", !!c.ssl_insecure);
+
+    // 启动方式联动：仅 web 模式下可配置浏览器/应用内展示
+    const syncStartupMode = () => {
+      const isWeb = startupModeSelect.value === "web";
+      webOpenBrowserBox.querySelector("input").disabled = !isWeb;
+      webShowInAppBox.querySelector("input").disabled = !isWeb;
+    };
+    startupModeSelect.addEventListener("change", syncStartupMode);
+    // 代理模式联动：仅 local 模式需要指定拦截的应用进程
+    const proxyValueRow = el("div", { class: "form-row" },
+      labelWith("拦截应用", "仅代理模式为 local 时生效：输入或从下拉中选择要拦截的本机应用进程名（不区分大小写），如 CPOS-DF.exe。点击输入框自动加载进程列表，「加载」按钮可手动刷新。"),
+      proxyModelValueInput,
+      processOptions,
+      el("button", { class: "btn small", text: "加载", title: "刷新系统进程列表", onclick: () => loadProcessOptions() }));
+    const syncProxyModel = () => { proxyValueRow.style.display = proxyModelSelect.value === "local" ? "" : "none"; };
+    proxyModelSelect.addEventListener("change", syncProxyModel);
+
+    // ---- Mock 与请求改写 ----
+    const mockEnabledBox = checkbox("启用 Mock", !!c.is_mock);
+    const mockServerInput = textInput(String(c.mock_server || ""), {
+      placeholder: "Mock 服务地址，如 https://example.com/hrm/mock",
+      style: "flex:1",
+    });
+    const addHeadersArea = textArea(c.add_headers, 3, "每行一个，格式：Content-Type=application/json");
+    const addBodyArea = textArea(c.add_body, 3, "Mock 请求附加的 Body 文本，通常为 JSON");
+
+    // ---- 过滤与拦截（开关与配置内容同行展示）----
+    const breakpointEnabledBox = checkbox("启用断点拦截", !!c.breakpoint_enabled);
+    const breakpointPatternInput = textInput(String(c.breakpoint_pattern || ""), {
+      placeholder: "要断点的接口关键字，如 /pos/token",
+      style: "flex:1",
+    });
+    const openIncludeBox = checkbox("启用包含规则", !!c.open_include);
+    const includeArea = textArea(c.include, 3, "逗号或换行分隔的路径，命中才参与 Mock，如 /hrm/token,/hrm/user");
+    const openExcludeBox = checkbox("启用排除规则", !!c.open_exclude);
+    const excludeArea = textArea(c.exclude, 3, "逗号或换行分隔的路径，命中则跳过 Mock，如 /hrm/heartbeat");
+    const flowFilterEnabledBox = checkbox("启用流量过滤", !!c.flow_filter_enabled);
+    const flowFilterArea = textArea(c.flow_filter_pattern, 3,
+      "逗号或换行分隔；以 . 开头按路径后缀匹配（如 .png），否则按路径子串匹配；命中后不记录到列表、不参与 Mock 与延迟");
+
+    // ---- 延迟设置 ----
     const delayBoxes = {};
     const delayRows = el("div", {});
     for (const key of ["request_delay", "response_delay"]) {
+      const name = key === "request_delay" ? "请求" : "响应";
       const d = c[key] || { enabled: false, delay: 0, delay_path: [] };
-      const enabledBox = checkbox(key === "request_delay" ? "启用请求延迟" : "启用响应延迟", d.enabled);
-      const delayInput = textInput(String(d.delay ?? 0), { type: "number", style: "width:100px" });
-      const pathText = el("textarea", { class: "input mono", rows: 2, style: "width:100%", placeholder: "每行一个路径关键字" });
-      pathText.value = (d.delay_path || []).join("\n");
+      const enabledBox = checkbox(`启用${name}延迟`, !!d.enabled);
+      const delayInput = textInput(String(d.delay ?? 0), { type: "number", step: "0.1", style: "width:100px" });
+      const pathText = textArea((d.delay_path || []).join("\n"), 2, `每行一个路径关键字，留空对全部${name}生效`);
       delayBoxes[key] = { enabledBox, delayInput, pathText };
       delayRows.append(
         el("div", { class: "form-row" }, enabledBox, el("label", { text: "延迟(秒)" }), delayInput),
@@ -267,38 +338,66 @@ export function mitmPage(mount) {
 
     const body = el(
       "div", {},
-      grid,
-      el("div", { class: "form-section", text: "开关与模式" }),
-      el("div", { class: "form-row" }, el("label", { text: "启动方式" }), checks.startup_mode, checks.web_open_browser, checks.web_show_in_app),
-      el("div", { class: "form-row" }, checks.ssl_insecure, checks.is_mock, checks.flow_filter_enabled),
-      el("div", { class: "form-row" }, checks.open_include, checks.open_exclude, checks.breakpoint_enabled),
-      el("div", { class: "form-row" }, el("label", { text: "断点关键字" }), bpPattern),
+      el("div", { class: "form-section", text: "基础配置" }),
+      el("div", { class: "form-row" }, labelWith("代理端口", "mitmproxy 代理监听端口，客户端需将代理指向 127.0.0.1:该端口，默认 9080。运行中修改会自动重启生效。"), portInput),
+      el("div", { class: "form-row" }, labelWith("Web端口", "启动方式为 web 时 mitmweb 页面的监听端口，默认 9081。"), webPortInput),
+      el("div", { class: "form-row" }, labelWith("流量记录上限", "列表最多保留的流量条数，超出后从最早的开始丢弃，默认 500。"), recordLimitInput),
+      el("div", { class: "form-row" },
+        labelWith("启动方式", "dump：流量直接显示在应用界面；web：通过浏览器 mitmweb 页面查看流量。"),
+        startupModeSelect, webOpenBrowserBox, webShowInAppBox),
+      el("div", { class: "form-row" },
+        labelWith("代理模式", "mitmproxy 的抓包模式：local 只拦截指定应用进程；regular 为普通代理；其余为 mitmproxy 原生模式。"),
+        proxyModelSelect),
+      proxyValueRow,
+      el("div", { class: "form-row" }, labelWith("配置目录", "mitmproxy 配置与证书所在目录，留空使用当前用户目录下的 .mitmproxy。"), configDirInput),
+      el("div", { class: "form-row" }, labelWith("证书路径", "自定义 mitmproxy CA 证书路径，留空时使用默认目录下的 mitmproxy-ca-cert.cer（见输入框占位提示）。"), certPathInput),
+      el("div", { class: "form-row" }, labelWith("脚本路径", "自定义 mitmproxy 附加脚本（.py）路径，留空使用客户端内置脚本。"), scriptPathInput),
+      el("div", { class: "form-row" }, sslInsecureBox),
+      el("div", { class: "form-section", text: "Mock 与请求改写" }),
+      el("div", { class: "form-row" }, mockEnabledBox, mockServerInput),
+      el("div", { class: "form-row" }, labelWith("附加请求头", "启用 Mock 后，转发到 Mock 服务的请求会附加这些请求头，每行一条 k=v。"), addHeadersArea),
+      el("div", { class: "form-row" }, labelWith("附加 Body", "启用 Mock 后，转发到 Mock 服务的请求会附加此 Body 文本。"), addBodyArea),
+      el("div", { class: "form-section", text: "过滤与拦截" }),
+      el("div", { class: "form-row" }, breakpointEnabledBox, breakpointPatternInput),
+      el("div", { class: "form-row" }, openIncludeBox, includeArea),
+      el("div", { class: "form-row" }, openExcludeBox, excludeArea),
+      el("div", { class: "form-row" }, flowFilterEnabledBox, flowFilterArea),
       el("div", { class: "form-section", text: "延迟设置" }),
       delayRows
     );
+
     openModal({
       title: "mitmproxy 设置", body, wide: true,
       footer: el("button", {
         class: "btn primary", text: "保存配置",
         onclick: async () => {
-          for (const [, input, transform] of fields) {
-            const key = input.dataset.key;
-            config[key] = transform(input.value.trim() || input.value);
-          }
-          config.startup_mode = checks.startup_mode.value;
-          config.web_open_browser = checks.web_open_browser.querySelector("input").checked;
-          config.web_show_in_app = checks.web_show_in_app.querySelector("input").checked;
-          config.ssl_insecure = checks.ssl_insecure.querySelector("input").checked;
-          config.is_mock = checks.is_mock.querySelector("input").checked;
-          config.open_include = checks.open_include.querySelector("input").checked;
-          config.open_exclude = checks.open_exclude.querySelector("input").checked;
-          config.breakpoint_enabled = checks.breakpoint_enabled.querySelector("input").checked;
-          config.breakpoint_pattern = bpPattern.value.trim();
-          config.flow_filter_enabled = checks.flow_filter_enabled.querySelector("input").checked;
+          config.port = Number(portInput.value || 0);
+          config.web_port = Number(webPortInput.value || 0);
+          config.flow_record_limit = Number(recordLimitInput.value || FLOW_LIMIT_DEFAULT);
+          config.startup_mode = startupModeSelect.value;
+          config.web_open_browser = isChecked(webOpenBrowserBox);
+          config.web_show_in_app = isChecked(webShowInAppBox);
+          config.proxy_model = proxyModelSelect.value;
+          config.proxy_model_value = proxyModelValueInput.value.trim();
+          config.mitmproxy_config_dir = configDirInput.value.trim();
+          config.cert_path = certPathInput.value.trim();
+          config.script_path = scriptPathInput.value.trim();
+          config.ssl_insecure = isChecked(sslInsecureBox);
+          config.is_mock = isChecked(mockEnabledBox);
+          config.add_headers = addHeadersArea.value;
+          config.add_body = addBodyArea.value;
+          config.breakpoint_enabled = isChecked(breakpointEnabledBox);
+          config.breakpoint_pattern = breakpointPatternInput.value.trim();
+          config.open_include = isChecked(openIncludeBox);
+          config.include = includeArea.value;
+          config.open_exclude = isChecked(openExcludeBox);
+          config.exclude = excludeArea.value;
+          config.flow_filter_enabled = isChecked(flowFilterEnabledBox);
+          config.flow_filter_pattern = flowFilterArea.value;
           for (const key of ["request_delay", "response_delay"]) {
             const d = delayBoxes[key];
             config[key] = {
-              enabled: d.enabledBox.querySelector("input").checked,
+              enabled: isChecked(d.enabledBox),
               delay: Number(d.delayInput.value || 0),
               delay_path: d.pathText.value.split("\n").map((s) => s.trim()).filter(Boolean),
             };
@@ -312,6 +411,8 @@ export function mitmPage(mount) {
         },
       }),
     });
+    syncStartupMode();
+    syncProxyModel();
   });
 
   // ===== 事件订阅 =====
@@ -348,6 +449,7 @@ export function mitmPage(mount) {
     config = res.config;
     state = res.state;
     webUrl = res.web_url || "";
+    defaultCertPath = (res.cert && res.cert.cert_path) || "";
     applyState();
     call("mitm", "refresh_cert_status");
   })();
