@@ -92,6 +92,25 @@ datas = []
 if icon_file.exists():
     datas.append((str(icon_file), "assets"))
 
+# 内置 Python 运行时（pip 安装插件模式）：存在时整体打包到 runtime/python，
+# 由 plugins.manager._locate_pip_python 在运行期定位；不存在则跳过（Pip安装按钮会明确报错引导）
+pip_runtime_dir = project_root / "runtime" / "python"
+if (pip_runtime_dir / "python.exe").exists():
+    # 手工展开 datas（Tree 的目标路径行为不符合 datas 二元组约定）：
+    # 源文件 -> runtime/python/<相对路径目录>，保持运行时内部目录结构
+    for file_path in pip_runtime_dir.rglob("*"):
+        if file_path.is_file():
+            rel_parent = file_path.parent.relative_to(pip_runtime_dir)
+            dest_dir = (
+                "runtime/python"
+                if str(rel_parent) == "."
+                else f"runtime/python/{rel_parent.as_posix()}"
+            )
+            datas.append((str(file_path), dest_dir))
+    print(f"[spec] 已包含内置 Python 运行时: {pip_runtime_dir}（{len(datas)} 个文件）")
+else:
+    print("[spec] 未找到 runtime/python，跳过内置 Python 运行时（Pip安装不可用）")
+
 a = Analysis(
     ["main.py"],
     pathex=[str(project_root)],

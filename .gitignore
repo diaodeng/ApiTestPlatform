@@ -169,3 +169,6 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# 内置 Python 运行时（scripts/setup_pip_runtime.py 可重建，不入库）
+client_new/runtime/

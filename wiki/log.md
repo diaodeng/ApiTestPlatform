@@ -2579,3 +2579,13 @@ updated: 2026-08-25
 - 验证：新增 `tests/test_plugin_manifest_compat.py`（匹配/不匹配/字段缺失与异常跳过）通过；端到端构造 python_version=3.8 的 zip 被 install_from_zip 正确拒绝且不动插件目录；本地构建 web-test 产物 manifest 含 python_version=3.14/app_version=1.1.1.0；真实 Gitee 冒烟（当前版本无 release 且各 release 均无附件）回退扫描与失败提示正确；ruff（I001/ISC004/F/E9）通过。
 - 风险：跨版本回退安装的组合未经一起测试，主程序对库的调用方式可能与旧插件包库版本不兼容（业务功能会明确报错，可重装配套版本）；build_plugins.py 必须用与打包主程序相同的虚拟环境（client_new/.venv）执行，否则产物 python_version 与 exe 运行时不一致会被强校验拦下。
 - 文档：用户说明 `web/public/docs/client/plugins.md` 已同步（在线下载策略/Python 兼容校验/跨版本安装 FAQ），更新记录 `web/public/docs/updates/2026-09-13-client-new-plugin-manifest-compat.md`，history.md 2026-09-13 段已更新。
+
+## [2026-09-13] FEATURE | 插件安装新增 Pip 模式（内置 Python 运行时）
+
+- 背景：插件内容本质是三方依赖库，用户希望支持从 PyPI 源直接 pip 安装（可自定义源、默认国内源）。关键前提：PyInstaller 打包不带 pip 模块，冻结进程无法直接 pip——需先给客户端配 Python 执行环境。与用户确认采用方案 A（内置嵌入式 Python，约 +10~15MB 体积，开箱即用；备选的按需下载/仅源码态方案因体验或价值不足未选）。
+- 运行时：新增 `scripts/setup_pip_runtime.py`（华为云镜像下载 embeddable Python 3.14.6 → `client_new/runtime/python/`，启用 ._pth 的 import site，get-pip.py 清华源引导 pip，幂等支持 --force）；两个 spec 在 runtime/python 存在时自动打入 datas（rglob 手工展开，Tree 的目标路径不符合 datas 二元组约定），缺失时跳过并提示。
+- 安装链路：`PluginConfigModel.pip_index_url`（默认清华源）+ 界面「Pip 源」行 + 每行「Pip安装」按钮；`_locate_pip_python`（exe 目录 → _MEIPASS → 当前解释器自带 pip 兜底）；`install_from_pip` 执行 `pip install --target <暂存目录> -i <源> <锁版本清单>`，成功后 `_check_modules_in_dir`（find_spec 不导入）校验模块、补写 manifest（install_mode=pip）、复用新抽取的 `_replace_plugin_dir` 原子替换（zip/pip 两路共用，含备份回滚）。超时 15 分钟。
+- 锁版本：新增 `plugins/pip_pins.py`，由 `build_plugins.py` 每次构建自动从 venv 实际版本生成（PLUGIN_PIP_REQUIREMENTS，随代码提交），保证 pip 安装与插件 zip 同一组测试过的版本；传递依赖由 pip 解析（未逐个锁定）。
+- 验证：运行时准备实跑通过（pip 26.2.1）；真实冒烟——内置运行时经清华源 --target 安装 playwright==1.62.0（cp314 wheel 含传递依赖），模块校验无缺失；单测与 ruff 通过；QTRClientNewPortable 全量打包通过，确认 `_internal/runtime/python/python.exe` 打入。`.gitignore` 新增 `client_new/runtime/`（脚本可重建）。
+- 风险：单文件版 onefile 解压时间略增；传递依赖小版本未逐个锁定；杀毒软件拦截 runtime/python 时 Pip 安装失败（可回退其他安装方式）。
+- 文档：`web/public/docs/client/plugins.md`（新增方式二 Pip 安装 + FAQ）、更新记录 `2026-09-13-client-new-plugin-pip-install.md`、history.md 已更新。

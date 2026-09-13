@@ -67,6 +67,19 @@ class PluginManagerDialog(QDialog):
         source_layout.addWidget(self.save_url_button)
         source_box.addRow("下载源", source_row)
 
+        pip_row = QWidget()
+        pip_layout = QHBoxLayout(pip_row)
+        pip_layout.setContentsMargins(0, 0, 0, 0)
+        pip_layout.setSpacing(6)
+        self.pip_url_input = QLineEdit()
+        self.pip_url_input.setPlaceholderText(
+            "Pip 包索引源，留空使用默认国内源（清华 PyPI 镜像），内网可填写私有 PyPI 源地址"
+        )
+        self.save_pip_url_button = QPushButton("保存 Pip 源")
+        pip_layout.addWidget(self.pip_url_input, 1)
+        pip_layout.addWidget(self.save_pip_url_button)
+        source_box.addRow("Pip 源", pip_row)
+
         dir_row = QWidget()
         dir_layout = QHBoxLayout(dir_row)
         dir_layout.setContentsMargins(0, 0, 0, 0)
@@ -115,13 +128,18 @@ class PluginManagerDialog(QDialog):
             local_button.clicked.connect(
                 lambda _=False, plugin=definition.name: self._install_local(plugin)
             )
+            pip_button = QPushButton("Pip安装")
+            pip_button.clicked.connect(
+                lambda _=False, plugin=definition.name: self._install_pip(plugin)
+            )
             actions_layout.addWidget(download_button)
             actions_layout.addWidget(local_button)
+            actions_layout.addWidget(pip_button)
             self.table.setCellWidget(row, 3, actions)
 
             # 记录按钮便于执行时禁用
             self.table.item(row, 0).setData(
-                Qt.UserRole + 1, (download_button, local_button)
+                Qt.UserRole + 1, (download_button, local_button, pip_button)
             )
 
         layout.addWidget(self.table, 1)
@@ -135,13 +153,26 @@ class PluginManagerDialog(QDialog):
 
     def _bind(self):
         self.save_url_button.clicked.connect(self._save_download_url)
+        self.save_pip_url_button.clicked.connect(self._save_pip_url)
         self.save_dir_button.clicked.connect(self._save_install_dir)
         self.browse_dir_button.clicked.connect(self._browse_install_dir)
         self._install_finished.connect(self._on_install_finished)
 
     def _load_download_url(self):
         self.url_input.setText(plugin_manager.read_download_base_url())
+        self.pip_url_input.setText(plugin_manager.read_pip_index_url())
         self.dir_input.setText(str(plugin_manager.get_plugin_root()))
+
+    def _save_pip_url(self):
+        """
+        保存 Pip 包索引源；留空表示恢复默认国内镜像。
+        :return:
+        """
+        ok, message = plugin_manager.save_pip_index_url(self.pip_url_input.text())
+        if ok:
+            QMessageBox.information(self, "插件管理", message)
+        else:
+            QMessageBox.warning(self, "插件管理", message)
 
     def _browse_install_dir(self):
         chosen = QFileDialog.getExistingDirectory(self, "选择插件安装根目录")
@@ -200,11 +231,12 @@ class PluginManagerDialog(QDialog):
             status = plugin_manager.describe_status(definition.name)
             self.table.item(row, 2).setText(status)
             enabled = definition.name not in self._running_tasks
-            download_button, local_button = self.table.item(row, 0).data(
+            download_button, local_button, pip_button = self.table.item(row, 0).data(
                 Qt.UserRole + 1
             )
             download_button.setEnabled(enabled)
             local_button.setEnabled(enabled)
+            pip_button.setEnabled(enabled)
 
     def _download_plugin(self, plugin_name: str):
         if plugin_name in self._running_tasks:
@@ -245,6 +277,29 @@ class PluginManagerDialog(QDialog):
 
         threading.Thread(
             target=_task, name=f"plugin-install-{plugin_name}", daemon=True
+        ).start()
+
+    def _install_pip(self, plugin_name: str):
+        """
+        通过 pip 从包索引源安装插件依赖；耗时较长（需下载编译包），后台线程执行。
+        :param plugin_name: 插件标识
+        :return:
+        """
+        if plugin_name in self._running_tasks:
+            return
+
+        self._running_tasks.add(plugin_name)
+        self._refresh_table()
+        logger.info(f"开始通过 pip 安装插件 name={plugin_name}")
+
+        import threading
+
+        def _task():
+            ok, message = plugin_manager.install_from_pip(plugin_name)
+            self._install_finished.emit(plugin_name, ok, message)
+
+        threading.Thread(
+            target=_task, name=f"plugin-pip-{plugin_name}", daemon=True
         ).start()
 
     def _on_install_finished(self, plugin_name: str, ok: bool, message: str):

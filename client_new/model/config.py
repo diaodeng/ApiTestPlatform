@@ -74,8 +74,9 @@ class PaymentMockConfigModel(BaseModel):
 class PluginConfigModel(BaseModel):
     """插件管理配置"""
 
-    download_base_url: str = ""  # 插件包下载源根地址，留空表示未配置（无法在线下载）
+    download_base_url: str = ""  # 插件包下载源根地址，留空表示未配置（走 Gitee 按版本回退下载）
     install_dir: str = ""  # 插件安装根目录，留空使用默认目录（exe/项目目录下 storage/plugins）
+    pip_index_url: str = ""  # pip 安装模式的包索引源，留空使用默认国内源（清华 PyPI 镜像）
 
 
 class StartConfigModel(BaseModel):
