@@ -22,6 +22,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SITE_PACKAGES = PROJECT_ROOT / ".venv" / "Lib" / "site-packages"
 OUTPUT_DIR = PROJECT_ROOT / "dist_plugins"
 
+# manifest 需要记录客户端应用版本号，脚本可能以任意 cwd 运行，显式把项目根加入搜索路径
+sys.path.insert(0, str(PROJECT_ROOT))
+from version import __version__ as APP_VERSION  # noqa: E402
+
 # 各插件包含的 site-packages 条目（目录或 .py 文件，不含 dist-info）；
 # dist-info 按 distributions 列出的发行包名动态解析，避免硬编码版本号
 PLUGIN_PACKAGE_MAP: dict[str, dict] = {
@@ -244,6 +248,10 @@ def build_plugin(name: str, spec: dict) -> Path:
         "display_name": spec["display_name"],
         "version": "+".join(f"{pkg}-{ver}" for pkg, ver in versions.items()),
         "modules": spec["modules"],
+        # .pyd 等编译产物只兼容构建时的 CPython 大.小版本，客户端安装前据此强校验
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+        # 构建时配套的客户端应用版本，仅供参考（软约束，跨版本安装时界面会提示）
+        "app_version": APP_VERSION,
         "built_at": datetime.now().isoformat(timespec="seconds"),
     }
     (work_dir / "manifest.json").write_text(

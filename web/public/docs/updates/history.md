@@ -5,6 +5,10 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 
+## 2026-09-13
+- 桌面客户端插件包 manifest 版本兼容信息与跨版本回退下载：`build_plugins.py` 产物 manifest 新增 `python_version`（构建时 CPython 大.小版本，硬约束）与 `app_version`（配套客户端版本，参考）；`install_from_zip` 安装前对 Python 版本强校验，不兼容拒绝安装（在线/配置源/本地三路径统一生效，旧格式包跳过校验向后兼容）；Gitee 在线下载放宽为"同版本 release 优先、缺附件时按最新在前回退其他 release"，回退安装成功消息注明来源，应用版本不同仅软提示不拦截。详见：[manifest版本兼容与跨版本回退](2026-09-13-client-new-plugin-manifest-compat.md)，用户说明：[插件管理](../client/plugins.md)。
+- 桌面客户端插件在线下载支持 Gitee 按版本自动下载：未配置下载源时自动从 Gitee releases 中查找 tag 与当前客户端版本一致的 release，下载其中的 `{插件名}.zip` 附件（存在 `.sha256` 则强校验），配置了下载源仍优先走配置源；Gitee release 地址、版本归一化与附件定位逻辑从 utils/common 下沉为新增的 utils/gitee_release 共享 util，主程序更新检查与插件下载两链路共用；移除「在线下载」的"先配下载源"前置拦截。发版约定：tag 与 version.py 版本一致，同一 release 上传三个插件 zip 及可选 .sha256。详见：[插件Gitee按版本下载](2026-09-13-client-new-plugin-gitee-release-download.md)，用户说明：[插件管理](../client/plugins.md)。
+
 ## 2026-09-12
 - 桌面客户端 Qt 运行时二次瘦身：定位出插件化后剩余体积大头为 PySide6 被 PyInstaller hook 连带收集的冗余 Qt 运行时（虚拟键盘插件拖入 QML/Quick 引擎约 17MB、qpdf 图片插件拖入 Qt6Pdf 约 5MB、软件 OpenGL 回退 opengl32sw 约 20MB、96 个翻译文件只保留 zh_CN），新增 `scripts/qt_slim.py` 在两个打包 spec 的 Analysis 后统一过滤 103 个条目；目录版 `_internal` 122MB→76MB，单文件版 55MB→37.6MB。详见：[Qt运行时二次瘦身](2026-09-12-client-new-qt-runtime-slim.md)。
 - 桌面客户端 Agent 页面信息精简：①移除地址下方重复的 MAC/连接地址展示行（完整连接地址=地址+/MAC，页面不再展示，状态信息行保留）；②服务器选择后的最大发送、自动重试、重试次数、重试间隔、断线重连、低频间隔 6 项配置收敛到新增的「连接设置」弹窗（主开关联动禁用子项），顶栏只留状态/地址/别名/显示日志，小屏不再溢出；配置保存链路不变。详见：[Agent页面信息精简](2026-09-12-client-new-agent-page-declutter.md)，用户说明：[Agent连接使用说明](../client/agent.md)。

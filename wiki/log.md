@@ -2560,3 +2560,22 @@ updated: 2026-08-25
 - 修复：`_format_samples`/`_labels`/`_append_metric` 增加 `with_role` 维度：machine 与 cgroup 指标强制剥离 `role`；`qtr_process_*` 与 `qtr_task_*` 强制携带 `role`。`role` 引入时间经 VM 数据回溯确认约为 2026-08-27（扩展指标上线），该日期前的历史序列存在覆盖问题。
 - 附带发现：VM 中存在 `machine=home`（instance=TEST，无 role）的旧环境数据，已于 2026-09-03 左右停止推送；`machine=dev` 仅存在于 30 天前，均为历史遗留非当前链路。
 - 验证：新增 `test_machine_level_metrics_do_not_carry_role_label` 与 `test_legacy_mode_samples_exclude_extended_metrics` 两个回归用例，tests/test_memory_metrics.py 7 个用例全部通过；ruff 无新增问题。
+
+## [2026-09-13] FEATURE | 插件在线下载 Gitee 按版本回退
+
+- 背景：插件化后「在线下载」依赖手动配置 `download_base_url`，留空即不可用；而主程序更新检查早已走 Gitee releases API，插件包（含与主程序 Python 版本绑定的 .pyd）本就应与主程序同版本发布。
+- 方案：`plugins/manager.py` 的 `download_and_install` 改为两级下载源——配置了 `download_base_url` 优先用配置源（内网/私有托管兼容不变）；未配置时从 Gitee releases 中按 tag 与 `version.py` 版本归一化精确匹配 release，下载其中 `{插件名}.zip` 附件（`{插件名}.zip.sha256` 存在则强校验）。找不到版本 release 或缺附件时给出明确提示（等待发版/配置下载源/本地安装）。
+- 结构：新增 `utils/gitee_release.py` 共享 util（API 地址常量、`normalize_release_version`、`fetch_release_list`/`fetch_release_list_sync`、`find_release_by_version`、`find_release_asset`）；`utils/common.py` 删除 `_RELEASES_API_URL`/`_fetch_release_list`/`_normalize_version_tuple`，更新检查与 `download_new_app` 调用方同步切换，无旧入口残留。
+- UI：`plugin_manager_dialog.py` 移除「在线下载」的"先配下载源"前置拦截，占位文案更新。
+- 发版约定：release tag 与 version.py 版本号一致（v 前缀可选），同一 release 上传三个插件 zip 及可选 .sha256（`scripts/build_plugins.py` 产出）。
+- 验证：新增 `client_new/tests/test_gitee_release.py`（归一化/release 匹配/附件定位含异常分支）通过；真实 Gitee 实测——当前 1.1.1.0 无对应 release（最新 v1.1.0.0）时提示正确，v1.1.0.0 的 release 定位与附件读取正常；ruff（I001/ISC004/F）通过；`plugins.manager`/`utils.common`/`plugin_manager_dialog` 导入链正常。
+- 风险：manifest 未记录构建时应用/Python 版本，版本配对依赖同 release 发布约定；Gitee 附件单文件上限需关注（desktop-test.zip 已 64MB）；releases 接口 per_page=20，积压超 20 个 release 且目标版本不在其中会匹配不到。
+- 文档：用户说明 `web/public/docs/client/plugins.md` 已同步，更新记录 `web/public/docs/updates/2026-09-13-client-new-plugin-gitee-release-download.md`，history.md 已加 2026-09-13 段。
+
+## [2026-09-13] FEATURE | 插件包 manifest 版本兼容信息与跨版本回退下载
+
+- 背景：上一轮 Gitee 按版本下载落地后，版本配对完全依赖"同 release 发布"约定，manifest 未记录构建时 Python/应用版本，客户端无法自行判断插件包可否安装。技术分层：Python 版本是硬约束（.pyd 只兼容构建时 CPython 大.小版本）；应用版本是软约定（插件包是第三方依赖，同 release 发版的价值是"一起测试过"的组合背书）。
+- 方案：`build_plugins.py` manifest 新增 `python_version`（如 3.11）与 `app_version`（读 version.py）；`plugins/manager.py` 新增 `_manifest_compatibility_error`，`install_from_zip` 在解压/替换前强校验 Python 版本，不兼容拒绝（在线/配置源/本地三路径统一生效，字段缺失跳过以兼容旧包）；manifest `app_version` 与当前不同时仅在成功消息中软提示。Gitee 下载策略放宽：`_resolve_gitee_plugin_urls` 改为同版本 release 优先、缺附件时按最新在前回退其他 release，回退来源在安装结果中注明，Python 兼容由安装前校验兜底。
+- 验证：新增 `tests/test_plugin_manifest_compat.py`（匹配/不匹配/字段缺失与异常跳过）通过；端到端构造 python_version=3.8 的 zip 被 install_from_zip 正确拒绝且不动插件目录；本地构建 web-test 产物 manifest 含 python_version=3.14/app_version=1.1.1.0；真实 Gitee 冒烟（当前版本无 release 且各 release 均无附件）回退扫描与失败提示正确；ruff（I001/ISC004/F/E9）通过。
+- 风险：跨版本回退安装的组合未经一起测试，主程序对库的调用方式可能与旧插件包库版本不兼容（业务功能会明确报错，可重装配套版本）；build_plugins.py 必须用与打包主程序相同的虚拟环境（client_new/.venv）执行，否则产物 python_version 与 exe 运行时不一致会被强校验拦下。
+- 文档：用户说明 `web/public/docs/client/plugins.md` 已同步（在线下载策略/Python 兼容校验/跨版本安装 FAQ），更新记录 `web/public/docs/updates/2026-09-13-client-new-plugin-manifest-compat.md`，history.md 2026-09-13 段已更新。

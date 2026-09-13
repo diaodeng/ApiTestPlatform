@@ -1,14 +1,22 @@
 """插件化基础设施：重依赖（桌面测试 / Web 测试 / 代理）按插件包按需安装与激活。"""
 
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
 from loguru import logger
 
 from do.config import PluginsConfig
+from utils.gitee_release import (
+    fetch_release_list_sync,
+    find_release_asset,
+    find_release_by_version,
+)
+from version import __version__ as APP_VERSION
 
 
 def _frozen_base_dir() -> Path:
@@ -333,6 +341,15 @@ class PluginManager:
                         f"插件包与目标不一致: 包={manifest.get('name')}, 目标={name}"
                     )
 
+                # Python 版本硬校验：编译产物跨解释器版本必然导入失败，不兼容直接拒绝
+                compat_error = self._manifest_compatibility_error(manifest)
+                if compat_error:
+                    logger.warning(
+                        f"插件包与运行时 Python 版本不兼容 name={name}, "
+                        f"package_python={manifest.get('python_version')}"
+                    )
+                    return False, compat_error
+
                 # 路径安全校验：拒绝绝对路径与越级路径
                 for entry in names:
                     candidate = Path(entry)
@@ -361,15 +378,50 @@ class PluginManager:
                 shutil.rmtree(backup_dir, ignore_errors=True)
 
             logger.info(
-                f"插件安装成功 name={name}, version={manifest.get('version')}, src={zip_file}"
+                f"插件安装成功 name={name}, version={manifest.get('version')}, "
+                f"package_app={manifest.get('app_version') or '未记录'}, src={zip_file}"
+            )
+            # app_version 为软约束参考：跨版本安装不拦截，仅在结果中提示用户关注兼容性
+            manifest_app = str(manifest.get("app_version") or "").strip()
+            version_note = (
+                f"（插件包配套应用版本 {manifest_app}，与当前客户端版本不同，建议关注兼容性）"
+                if manifest_app and manifest_app != APP_VERSION
+                else ""
             )
             return True, (
                 f"{definition.display_name} 插件安装成功（版本 {manifest.get('version', '未知')}），"
-                "重启客户端后生效"
+                f"重启客户端后生效{version_note}"
             )
         except Exception as e:
             logger.exception(f"插件安装失败 name={name}: {e}")
             return False, f"插件安装失败: {e}"
+
+    @staticmethod
+    def _manifest_compatibility_error(manifest: dict) -> str:
+        """
+        校验插件包 manifest 与当前运行时的兼容性。
+
+        python_version 是硬约束：插件包内的 .pyd 等编译产物只能被构建时的
+        CPython 大.小版本导入，不一致时必须拒绝安装；字段缺失（旧格式包）
+        或无法解析时跳过校验，保持对历史包的向后兼容。
+        :param manifest: manifest 字典
+        :return: 不兼容原因，兼容返回空串
+        """
+        package_python = str(manifest.get("python_version") or "").strip()
+        if not package_python:
+            return ""
+        parts = re.findall(r"\d+", package_python)
+        if len(parts) < 2:
+            return ""
+        package = (int(parts[0]), int(parts[1]))
+        current = (sys.version_info.major, sys.version_info.minor)
+        if package == current:
+            return ""
+        return (
+            f"插件包由 Python {package[0]}.{package[1]} 构建，"
+            f"与当前客户端运行时（Python {current[0]}.{current[1]}）不兼容，已拒绝安装；"
+            "请下载与当前客户端配套版本的插件包。"
+        )
 
     def _resolve_extract_root(self, temp_dir: Path, manifest_file: str) -> Path:
         """
@@ -387,9 +439,15 @@ class PluginManager:
 
     def download_and_install(self, name: str) -> tuple[bool, str]:
         """
-        从配置的下载源在线下载并安装插件。
+        在线下载并安装插件。
 
-        下载地址为 {download_base_url}/{name}.zip，可选 {name}.zip.sha256 校验文件。
+        下载源优先级：
+        1. 配置了自定义下载源（PluginsConfig.download_base_url）时，从 {下载源}/{name}.zip 下载；
+        2. 未配置时，从 Gitee releases 定位：优先取 tag 与当前客户端版本一致的 release，
+           下载其中的 {name}.zip 附件；该 release 缺附件时回退到其他 release 中
+           第一个含附件的（Python 版本兼容性由 manifest 在安装前强校验兜底）。
+
+        可选 {name}.zip.sha256 校验文件：存在时强校验，防止下载损坏。
         该方法为阻塞操作，调用方应放到后台线程执行。
         :param name: 插件标识
         :return: (是否成功, 结果消息)
@@ -402,12 +460,15 @@ class PluginManager:
 
         config = PluginsConfig.read()
         base_url = str(config.download_base_url or "").strip().rstrip("/")
-        if not base_url:
-            return False, "未配置插件下载源，请在插件管理中先填写下载地址"
+        source_note = ""
+        if base_url:
+            zip_url = f"{base_url}/{name}.zip"
+            sha_url: str | None = f"{zip_url}.sha256"
+        else:
+            zip_url, sha_url, source_note, resolve_error = self._resolve_gitee_plugin_urls(name)
+            if not zip_url:
+                return False, resolve_error
 
-        import httpx
-
-        zip_url = f"{base_url}/{name}.zip"
         temp_file: Path | None = None
         try:
             logger.info(f"开始下载插件 name={name}, url={zip_url}")
@@ -426,19 +487,22 @@ class PluginManager:
                             downloaded += len(chunk)
 
                 # 可选 sha256 校验：存在校验文件时强校验，防止下载损坏
-                sha_url = f"{zip_url}.sha256"
-                try:
-                    sha_response = client.get(sha_url)
-                    if sha_response.status_code == 200:
-                        expected = sha_response.text.strip().split()[0].lower()
-                        actual = hashlib.sha256(temp_file.read_bytes()).hexdigest()
-                        if expected != actual:
-                            return False, "插件包校验失败（sha256 不一致），已放弃安装"
-                except Exception as e:
-                    logger.warning(f"插件校验文件获取失败（跳过强校验）: {e}")
+                if sha_url:
+                    try:
+                        sha_response = client.get(sha_url)
+                        if sha_response.status_code == 200:
+                            expected = sha_response.text.strip().split()[0].lower()
+                            actual = hashlib.sha256(temp_file.read_bytes()).hexdigest()
+                            if expected != actual:
+                                return False, "插件包校验失败（sha256 不一致），已放弃安装"
+                    except Exception as e:
+                        logger.warning(f"插件校验文件获取失败（跳过强校验）: {e}")
 
             logger.info(f"插件下载完成 name={name}, size={downloaded} bytes")
-            return self.install_from_zip(name, temp_file)
+            ok, message = self.install_from_zip(name, temp_file)
+            if ok and source_note:
+                message = f"{message}{source_note}"
+            return ok, message
         except Exception as e:
             logger.exception(f"插件下载失败 name={name}: {e}")
             return False, f"插件下载失败: {e}"
@@ -448,6 +512,75 @@ class PluginManager:
                     temp_file.unlink()
                 except Exception:
                     pass
+
+    def _resolve_gitee_plugin_urls(
+        self, name: str
+    ) -> tuple[str | None, str | None, str, str]:
+        """
+        从 Gitee releases 中定位插件包下载地址。
+
+        策略：优先取 tag 与当前客户端版本一致的 release（发版配套、经过一起测试的组合）；
+        该 release 未上传插件附件时，回退到其他 release 中第一个含附件的——
+        跨版本包的 Python 版本兼容性由 manifest 的 python_version 在安装前强校验兜底，
+        不兼容会被 install_from_zip 拒绝，因此回退不会装上解释器版本错误的包。
+        :param name: 插件标识
+        :return: (插件 zip 下载地址, sha256 校验地址或 None, 成功后的来源提示, 失败原因)
+        """
+        try:
+            releases = fetch_release_list_sync()
+        except Exception as e:
+            logger.exception(f"获取 Gitee releases 列表失败: {e}")
+            return None, None, "", f"获取 Gitee 版本列表失败: {e}"
+
+        paired = find_release_by_version(releases, APP_VERSION)
+        if paired is None:
+            tag_names = [str(item.get("tag_name") or "") for item in releases[:5]]
+            logger.warning(
+                f"Gitee 未找到与客户端版本一致的 release version={APP_VERSION}, 已见 tag={tag_names}"
+            )
+
+        # 排序：同版本 release 优先，其余按接口返回顺序（最新在前）作为回退候选
+        ordered = ([paired] if paired is not None else []) + [
+            release for release in releases if release is not paired
+        ]
+
+        for index, release in enumerate(ordered):
+            asset = find_release_asset(release, f"{name}.zip")
+            if asset is None:
+                continue
+            zip_url = str(asset.get("browser_download_url") or "").strip()
+            if not zip_url:
+                continue
+            sha_asset = find_release_asset(release, f"{name}.zip.sha256")
+            sha_url = (
+                str(sha_asset.get("browser_download_url") or "").strip()
+                if sha_asset
+                else None
+            )
+            tag = str(release.get("tag_name") or "").strip()
+            if index == 0 and paired is not None:
+                logger.info(
+                    f"已定位 Gitee 插件包（同版本配套） version={APP_VERSION}, name={name}, url={zip_url}"
+                )
+                return zip_url, sha_url, "", ""
+            source_note = f"（插件包来自 release {tag}，非当前版本配套包，已校验 Python 版本兼容）"
+            logger.info(
+                f"同版本 release 缺少插件附件或不存在，已回退 tag={tag}, name={name}, url={zip_url}"
+            )
+            return zip_url, sha_url, source_note, ""
+
+        logger.warning(
+            f"Gitee 各 release 均未找到插件附件 version={APP_VERSION}, asset={name}.zip"
+        )
+        return (
+            None,
+            None,
+            "",
+            (
+                f"Gitee 的 release 中均未上传 {name}.zip 附件，"
+                "请联系维护方确认发版产物，或使用「本地安装」。"
+            ),
+        )
 
     def read_download_base_url(self) -> str:
         """

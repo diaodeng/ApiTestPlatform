@@ -59,7 +59,8 @@ class PluginManagerDialog(QDialog):
         source_layout.setSpacing(6)
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(
-            "插件包下载源根地址，例如 https://example.com/qtr-plugins（留空则无法在线下载）"
+            "插件包下载源根地址，例如 https://example.com/qtr-plugins；"
+            "留空时自动从 Gitee 下载与当前客户端版本一致的插件包"
         )
         self.save_url_button = QPushButton("保存下载源")
         source_layout.addWidget(self.url_input, 1)
@@ -207,11 +208,6 @@ class PluginManagerDialog(QDialog):
 
     def _download_plugin(self, plugin_name: str):
         if plugin_name in self._running_tasks:
-            return
-        if not self.url_input.text().strip():
-            QMessageBox.warning(
-                self, "插件管理", "请先填写并保存插件下载源，或使用「本地安装」。"
-            )
             return
 
         self._running_tasks.add(plugin_name)

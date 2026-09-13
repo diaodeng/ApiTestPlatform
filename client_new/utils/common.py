@@ -20,8 +20,9 @@ import win32api
 from loguru import logger
 
 from common import appState
-from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 from utils import VERSION
+from utils.gitee_release import fetch_release_list, normalize_release_version
+from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 
 
 class DBHelper:
@@ -393,7 +394,6 @@ def get_all_process() -> list[dict]:
     return all_process
 
 
-_RELEASES_API_URL = "https://gitee.com/api/v5/repos/panda26/api-test-platform/releases?page=1&per_page=20&direction=desc"
 _RUNTIME_PRESERVE_NAMES = {"storage", "logs", ".update_backup"}
 _RELEASE_PACKAGE_SUFFIXES = {".exe", ".zip"}
 _RELEASE_SPLIT_ASSET_RE = re.compile(
@@ -538,34 +538,13 @@ def _portable_zip_exact_names(current_exe_stem: str) -> set[str]:
     return exact_names
 
 
-def _normalize_version_tuple(value: str | None) -> tuple[int, ...]:
-    parts = re.findall(r"\d+", str(value or ""))
-    if not parts:
-        return (0,)
-    return tuple(int(part) for part in parts)
-
-
 def _has_newer_version(candidate: str | None, current: str = VERSION) -> bool:
-    return _normalize_version_tuple(candidate) > _normalize_version_tuple(current)
+    return normalize_release_version(candidate) > normalize_release_version(current)
 
 
 def _safe_release_suffix(value: str | None) -> str:
     suffix = re.sub(r"[^0-9A-Za-z._-]+", "_", str(value or "").strip())
     return suffix or "latest"
-
-
-async def _fetch_release_list() -> list[dict[str, Any]]:
-    async with httpx.AsyncClient(
-        timeout=DEFAULT_HTTP_TIMEOUT,
-        follow_redirects=True,
-    ) as client:
-        response = await client.get(_RELEASES_API_URL)
-        response.raise_for_status()
-        data = response.json()
-
-    if not isinstance(data, list):
-        raise RuntimeError("版本接口返回格式异常")
-    return data
 
 
 def _build_release_markdown(releases: list[dict[str, Any]]) -> str:
@@ -768,7 +747,7 @@ def _select_release_asset(release: dict[str, Any]) -> dict[str, Any] | None:
 
 
 async def check_app_has_new() -> tuple[bool | str, str]:
-    releases = await _fetch_release_list()
+    releases = await fetch_release_list()
     if not releases:
         return False, ""
     latest_release = releases[0]
@@ -793,7 +772,7 @@ async def download_new_app(
             f"升级资源策略: {runtime_profile['preferred_asset_label']}"
         )
 
-    releases = await _fetch_release_list()
+    releases = await fetch_release_list()
     if not releases:
         return None
 
