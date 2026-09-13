@@ -63,3 +63,4 @@ title: 桌面客户端界面由 PySide6 迁移到 pywebview
 - POS 页工具栏还原原版布局：模式与目录配置全部收纳进「工作目录」弹窗（含扫描模式分节），页面仅保留「工作目录 / 扫描」入口与启动前勾选、过滤；设置弹窗按“服务地址 / 环境文件清单 / 缓存文件清单 / 环境分组 / 商家配置 / 配置拉取”分节展示。
 - 切换 POS 弹窗修复指定 POS_ID 模式下的两列排版异常（POS_ID 行改为与其它行一致的两列网格，随模式显隐）。
 - 日志页恢复三个页签：SSH日志（原版占位行为一致）/ 本地日志 / 程序日志（勾选“监控日志”跟踪最新应用日志）。
+- 修复 Agent 页无法显示请求/响应日志：core.js 的 checkbox 辅助函数把 input 重复 append 且返回外层 label，导致勾选状态读取恒为 undefined、show_logs 保存始终为 false，后端因此不推送 agent_request/agent_response 事件；修正节点顺序与返回结构，agent.js 改为经 querySelector 读取勾选状态。

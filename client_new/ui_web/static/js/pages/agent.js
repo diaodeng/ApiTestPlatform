@@ -64,7 +64,7 @@ export function agentPage(mount) {
     return {
       ...config,
       current_server: serverInput.value.trim(),
-      show_logs: showLogCheck.checked,
+      show_logs: showLogCheck.querySelector("input").checked,
     };
   }
 
@@ -76,7 +76,7 @@ export function agentPage(mount) {
   function applyConfig() {
     if (!config) return;
     serverInput.value = config.current_server || "";
-    showLogCheck.checked = !!config.show_logs;
+    showLogCheck.querySelector("input").checked = !!config.show_logs;
     datalist.clear?.();
     clear(datalist);
     for (const name of Object.keys(config.server_list || {})) {

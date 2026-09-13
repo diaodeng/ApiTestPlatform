@@ -189,8 +189,9 @@
   }
 
   function checkbox(labelText, checked, onChange) {
+    // 注意：返回外层 label；读取/设置勾选状态请用 result.querySelector("input")
     const box = el("input", { type: "checkbox", checked, onchange: onChange });
-    return el("label", { class: "checkbox" }, box, el("span", { text: labelText }), box);
+    return el("label", { class: "checkbox" }, box, el("span", { text: labelText }));
   }
 
   function select(options, value, onChange, attrs = {}) {
