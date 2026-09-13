@@ -51,14 +51,22 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     pytesseract = None
 
-# 桌面录制覆盖层（高亮框选/批注）依赖 PySide6 透明窗口，界面迁移到 pywebview 后
-# 已随旧 Qt 界面一并退役；以下能力置为 None，相关调用点按“无覆盖层”降级执行。
-cancel_recording_annotation = None
-hide_recording_viewport = None
-request_recording_annotation = None
-resume_recording_overlays_after_capture = None
-show_recording_viewport = None
-suspend_recording_overlays_for_capture = None
+try:
+    from ui_web.desktop_overlay import (
+        cancel_recording_annotation,
+        hide_recording_viewport,
+        request_recording_annotation,
+        resume_recording_overlays_after_capture,
+        show_recording_viewport,
+        suspend_recording_overlays_for_capture,
+    )
+except Exception:  # pragma: no cover - optional dependency
+    cancel_recording_annotation = None
+    hide_recording_viewport = None
+    request_recording_annotation = None
+    resume_recording_overlays_after_capture = None
+    show_recording_viewport = None
+    suspend_recording_overlays_for_capture = None
 
 if pyautogui is not None:
     pyautogui.FAILSAFE = False

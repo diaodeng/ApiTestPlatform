@@ -1,4 +1,13 @@
 
+## [2026-09-13] FEATURE | 桌面录制覆盖层补齐（pywebview 透明窗口）
+
+- 背景：client_new 界面迁移 pywebview 后，desktop_test_service 依赖的屏幕高亮/框选/批注覆盖层（原 ui/utils/desktop_record_overlay，Qt 透明窗口）暂缺并按 None 降级；本次补齐并恢复接入。
+- 实现：新增 ui_web/desktop_overlay.py，公开六函数与原 Qt 版签名一致（show/hide_recording_viewport、suspend/resume_recording_overlays_for_capture、request/cancel_recording_annotation）。三个懒创建 pywebview 窗口：透明描边窗（WS_EX_TRANSPARENT|LAYERED|NOACTIVATE 整窗点击穿透，WindowFromPoint 实测穿透）、交互选择窗（拖拽选区/几何 clamp/Esc 取消，js_api 回传）、标注工具条（六按钮，位置贴视口候选策略同原版）。物理像素定位（SetWindowPos + pywebview SetProcessDPIAware，与 pyautogui 同空间），CSS↔屏幕坐标按物理宽度/innerWidth 动态换算兼容缩放。
+- 语义对齐：全屏视口不描边、标注结果结构与 skipped 语义、suspend/resume 可见性恢复、<4x4 选择视为取消、新请求跳过未决请求，均与原版一致。
+- 验证：150% 缩放描边位置正确；穿透命中下层；标注流程 Future 解析正确；suspend/resume 正确；取消标注 skipped。desktop_test_service 导入链恢复（try-import ui_web.desktop_overlay）。
+- 风险：混合 DPI 多屏的副屏框选场景建议实测；覆盖层常驻懒创建带来少量 WebView2 内存开销；app 退出经 Bridge.shutdown→shutdown_overlays 销毁并放行未决标注。
+- 文档：用户说明 pywebview-ui.md 覆盖层条目更新；更新记录 pywebview-migration 追加补齐段。
+
 ## [2026-09-13] REVERT | 移除插件 Pip 安装模式（内置 Python 运行时）
 
 - 背景：早前加入的插件「Pip 安装」需在客户端内捆绑独立嵌入式 Python 运行时（runtime/python，几十 MB），用户确认体积代价过高，要求移除；对应的改动作为独立提交。

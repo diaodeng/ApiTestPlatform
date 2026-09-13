@@ -63,4 +63,10 @@ class Bridge:
             self.dialog_service.cancel_all()
         except Exception as e:
             logger.debug(f"放行未决弹窗失败: {e}")
+        try:
+            from ui_web.desktop_overlay import shutdown_overlays
+
+            shutdown_overlays()
+        except Exception as e:
+            logger.debug(f"清理桌面覆盖层失败: {e}")
         logger.info("界面后端清理完成")

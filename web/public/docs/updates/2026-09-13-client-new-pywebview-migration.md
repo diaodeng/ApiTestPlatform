@@ -66,3 +66,11 @@ title: 桌面客户端界面由 PySide6 迁移到 pywebview
 - 修复 Agent 页无法显示请求/响应日志：core.js 的 checkbox 辅助函数把 input 重复 append 且返回外层 label，导致勾选状态读取恒为 undefined、show_logs 保存始终为 false，后端因此不推送 agent_request/agent_response 事件；修正节点顺序与返回结构，agent.js 改为经 querySelector 读取勾选状态。
 - 修复程序日志页勾选「监控日志」后无内容：监控目标改为后端 get_app_log_file 解析（当天日期命名日志优先、回退最新 .log，与原版一致），勾选后立即渲染最近 500 行，新增内容经 log_tail 事件实时推送。
 - 日志页页签增加明确选中样式（tab-btn.active），并将监控会话改为模块级持久状态：切换到其它页面不中断日志监控，回到日志页自动恢复当前页签、监控状态与已累计内容。
+
+## 桌面录制覆盖层补齐（同日追加）
+
+- 背景：界面迁移时桌面录制覆盖层（视口描边/框选/批注工具条）因依赖 Qt 透明窗口暂缺，本次用 pywebview 透明窗口补齐，公开 API 与原 Qt 版签名一致，desktop_test_service 按原调用方式恢复接入。
+- 实现：新增 `ui_web/desktop_overlay.py`——三个懒创建的 pywebview 无边框窗口：透明描边窗（Win32 WS_EX_TRANSPARENT|WS_EX_LAYERED|WS_EX_NOACTIVATE 整窗点击穿透，等价原 WA_TransparentForMouseEvents）、交互选择窗（透明遮罩+拖拽虚线框+Esc 取消，经 js_api 回传）、不透明标注工具条（验证区域/忽略区域/增加断言/清空/继续录制/跳过标注）。窗口几何用 Win32 SetWindowPos 以物理像素定位（pywebview 已设 SetProcessDPIAware，与 pyautogui 坐标同空间），窗口内 CSS 坐标与屏幕坐标按“物理宽度/innerWidth”动态换算，兼容系统缩放。
+- 语义对齐：视口全屏时不显示描边；标注结果 {focusRegion, maskRegions, assertRegions, skipped} 结构不变；suspend/resume 保持原可见性恢复行为；小于 4x4 的选择视为取消；新请求会跳过未决旧请求。
+- 验证：150% 缩放下描边框位置换算正确；WindowFromPoint 穿过描边窗口命中下层；标注流程（选择→记录→继续录制）Future 正确解析；suspend/resume 状态恢复正确；取消标注按 skipped 解析。
+- 风险：多屏混合 DPI 下 CSS 坐标换算按窗口所在原点线性映射，跨不同缩放率的副屏选择场景建议实测；覆盖层窗口为常驻懒创建（首次使用约 +3 个 WebView2 实例的内存开销）。
