@@ -1,3 +1,13 @@
+
+## [2026-09-13] FEATURE | 新版客户端界面由 PySide6 迁移到 pywebview
+
+- 背景：用户要求将 client_new 界面从 PySide6 迁移到 pywebview（基于 master_params 拉出 client_pywebview 分支实施）。调研确认 Qt 耦合面集中在 ui/controller/workers/emitter/QTableModel 与 agent_client_service 的 Signal 外衣，services/server/managers/utils/plugins 全部纯 Python 可复用。
+- 方案：新增 client_new/ui_web/ 界面桥接层——app.py 装配 pywebview 窗口（必须 http_server=True，ES module 在 file:// 下被 WebView 拦截）；event_bus 用 evaluate_js 向前端推送事件（事件名与原 Qt Signal 一一对应）；dialog_bridge 把业务确认弹窗桥接为前端模态框（threading.Event 等待 + resolve_dialog 回传，超时按取消）；api/ 以 Bridge 门面聚合 app/agent/pos/sqlite/mitm/log/about 七个子 API（Qt QThread/QTimer/Worker 换 threading/ThreadPoolExecutor，mitm helper 子进程协议与状态机完整保留）。前端 static/ 为无构建原生 SPA（CSS 变量双主题、Modal/Toast、6 页面 + 插件弹窗），前端错误经 app.log_js_error 写后端日志。
+- 改造与删除：agent_client_service 剥离 QObject/Signal 改回调注册（事件名不变）；mock_handle._emit_flow 移除 Qt emitter 兜底；desktop_test_service 覆盖层能力置 None 降级（依赖 Qt 透明窗口，后续用 pywebview 补齐）；删除 ui/、controller/、workers/、emitter/、QTableModel、qt_slim.py 与 Qt 版测试；依赖去 pyside6 加 pywebview>=5.4；spec 移除裁剪脚本并打入 ui_web_static。
+- 验证：uv sync 通过；Bridge 各子 API 冒烟通过；仪器化 GUI 冒烟——页面加载、6 页面切换渲染、插件弹窗、get_global_status 轮询均正常，无 js_error/js_rejection；ruff F/E9 无新增。
+- 风险：exe 未重新打包验证（spec 已同步）；桌面录制覆盖层暂缺；断点编辑/POS 启动确认/自更新等深链路建议日常回归。
+- 文档：wiki 新增 entities/components/new-client-webview-ui.md（旧壳层文档加退役注记）、log.md 记录；用户说明 web/public/docs/client/pywebview-ui.md、更新记录 updates/2026-09-13-client-new-pywebview-migration.md、history.md 已更新。
+
 ## [2026-09-12] FEATURE | client_new Qt 运行时二次瘦身（目录版 122MB→76MB）
 
 - 背景：插件化拆分后目录版 `_internal` 仍 122MB，用户预期不应有此体量；逐层 du 定位 PySide6 独占 92MB，插件重依赖（cv2/numpy/playwright/mitmproxy 等）确认已不在，剩余全是 Qt 运行时被 PyInstaller 官方 PySide6 hook 按"包目录"级别连带收集。

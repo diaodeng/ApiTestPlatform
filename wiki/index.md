@@ -47,6 +47,7 @@ updated: 2026-05-20
 - [旧版客户端运行时](entities/components/legacy-client-runtime.md)
 - [旧版客户端功能模块](entities/services/legacy-client-features.md)
 - [新版客户端壳层](entities/components/new-client-shell.md)
+- [新版客户端 pywebview 界面](entities/components/new-client-webview-ui.md)
 - [新版客户端运行时](entities/components/new-client-runtime.md)
 - [新版客户端服务模块](entities/services/new-client-services.md)
 

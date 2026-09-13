@@ -2,9 +2,11 @@ import asyncio
 import json
 import threading
 import traceback
+from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
-from PySide6.QtCore import QObject, Signal
 
 from model.config import AgentConfigModel
 
@@ -31,21 +33,61 @@ def _websocket_client_class():
     return getattr(_agent_server_module(), "WebSocketClient")
 
 
-class AgentClientService(QObject):
-    state_changed = Signal(str)
-    status_message = Signal(str)
-    request_message = Signal(str)
-    response_message = Signal(str)
-    error_message = Signal(str)
+class AgentClientService:
+    """
+    Agent 通信服务（pywebview 版，纯 Python 实现）。
+
+    原 PySide6 版本基于 QObject + Signal 向界面推送事件；迁移到 pywebview 后
+    改为监听器回调注册制：界面桥接层通过 add_listener 订阅事件，回调里再经
+    EventBus 推送到前端。事件名保持与原 Signal 同名，语义一致：
+
+    - state_changed: 连接状态（stopped/starting/running/stopping）
+    - status_message: 状态提示文本
+    - request_message / response_message: 请求/响应日志（JSON 文本）
+    - error_message: 错误信息
+    """
 
     def __init__(self):
-        super().__init__()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._client: WebSocketClient | None = None
+        self._client: Any | None = None
         self._state = "stopped"
         self._stop_requested = False
+        self._listeners: dict[str, list[Callable]] = defaultdict(list)
+
+    # ===== 事件订阅 =====
+
+    def add_listener(self, event: str, callback: Callable) -> None:
+        """
+        注册事件监听器。
+
+        :param event: 事件名（state_changed/status_message/request_message/response_message/error_message）
+        :param callback: 回调函数，签名 callback(*args)
+        """
+        with self._lock:
+            listeners = list(self._listeners[event])
+        if callback not in listeners:
+            with self._lock:
+                self._listeners[event].append(callback)
+
+    def remove_listener(self, event: str, callback: Callable) -> None:
+        with self._lock:
+            listeners = self._listeners.get(event)
+            if callback in listeners:
+                listeners.remove(callback)
+
+    def _emit(self, event: str, *args) -> None:
+        """
+        向所有订阅者分发事件；回调异常只记录日志，不影响服务主流程。
+        """
+        with self._lock:
+            listeners = list(self._listeners.get(event, ()))
+        for callback in listeners:
+            try:
+                callback(*args)
+            except Exception as e:
+                logger.exception(f"Agent 服务事件回调异常 event={event}: {e}")
 
     @property
     def state(self) -> str:
@@ -67,8 +109,8 @@ class AgentClientService(QObject):
             self._stop_requested = False
             self._state = "starting"
 
-        self.state_changed.emit("starting")
-        self.status_message.emit(f"开始连接服务器：{connect_url}")
+        self._emit("state_changed", "starting")
+        self._emit("status_message", f"开始连接服务器：{connect_url}")
 
         config_copy = config.model_copy(deep=True)
         thread = threading.Thread(
@@ -100,21 +142,21 @@ class AgentClientService(QObject):
             self._state = "stopping"
             self._stop_requested = True
 
-        self.state_changed.emit("stopping")
-        self.status_message.emit("正在断开 Agent 连接...")
+        self._emit("state_changed", "stopping")
+        self._emit("status_message", "正在断开 Agent 连接...")
 
         if loop and client:
             try:
                 asyncio.run_coroutine_threadsafe(client.send_close(), loop)
             except Exception as e:
                 logger.exception(f"停止 Agent 客户端失败: {e}")
-                self.error_message.emit(f"停止 Agent 客户端失败: {e}")
+                self._emit("error_message", f"停止 Agent 客户端失败: {e}")
 
         return True, "Agent 停止请求已发送"
 
     def update_runtime_config(self, config: AgentConfigModel):
         # 仅在通信模块已加载时同步分片配置；模块未加载说明还没有连接过，
-        # 此时不在 UI 线程触发首次导入（约 1.5 秒），保存配置等动作会另行处理。
+        # 此时不在界面线程触发首次导入（约 1.5 秒），保存配置等动作会另行处理。
         if _AGENT_SERVER_MODULE is not None:
             try:
                 agent_server_module = _agent_server_module()
@@ -150,7 +192,7 @@ class AgentClientService(QObject):
         return ok, message
 
     def _thread_main(self, config: AgentConfigModel, connect_url: str):
-        # 重型模块首次导入统一放在本后台线程执行，避免阻塞 UI 线程。
+        # 重型模块首次导入统一放在本后台线程执行，避免阻塞界面线程。
         try:
             agent_server_module = _agent_server_module()
             agent_server_module.MAX_MESSAGE_SIZE = agent_server_module.clamp_message_size(
@@ -164,8 +206,8 @@ class AgentClientService(QObject):
                 self._thread = None
                 self._state = "stopped"
                 self._stop_requested = False
-            self.state_changed.emit("stopped")
-            self.error_message.emit(f"加载 Agent 通信模块失败: {e}")
+            self._emit("state_changed", "stopped")
+            self._emit("error_message", f"加载 Agent 通信模块失败: {e}")
             return
 
         loop = asyncio.new_event_loop()
@@ -198,8 +240,8 @@ class AgentClientService(QObject):
             )
         except Exception as e:
             logger.exception(f"Agent 客户端线程异常: {e}")
-            self.error_message.emit(f"Agent 客户端异常: {e}")
-            self.status_message.emit(str(e))
+            self._emit("error_message", f"Agent 客户端异常: {e}")
+            self._emit("status_message", str(e))
             logger.debug(traceback.format_exc())
         finally:
             terminal_state = None
@@ -228,48 +270,49 @@ class AgentClientService(QObject):
                 self._state = "stopped"
                 self._stop_requested = False
 
-            self.state_changed.emit("stopped")
+            self._emit("state_changed", "stopped")
             if stop_requested or terminal_state in {"running", "stopping"}:
-                self.status_message.emit("Agent 已断开")
+                self._emit("status_message", "Agent 已断开")
 
     def _handle_before_request(self, data: dict):
-        self.request_message.emit(self._format_object(data))
+        self._emit("request_message", self._format_object(data))
 
     def _handle_after_request(self, data: dict):
         if not isinstance(data, dict):
-            self.response_message.emit(self._format_object(data))
+            self._emit("response_message", self._format_object(data))
             return
 
         payload = data.get("text")
         if isinstance(payload, str):
             try:
-                self.response_message.emit(
-                    json.dumps(json.loads(payload), ensure_ascii=False, indent=2)
+                self._emit(
+                    "response_message",
+                    json.dumps(json.loads(payload), ensure_ascii=False, indent=2),
                 )
                 return
             except Exception:
                 pass
 
-        self.response_message.emit(self._format_object(payload or data))
+        self._emit("response_message", self._format_object(payload or data))
 
     def _handle_client_status(self, event_type: str, message: str):
         logger.info(f"Agent 状态[{event_type}] {message}")
-        self.status_message.emit(message)
+        self._emit("status_message", message)
 
         if event_type == "connected":
             with self._lock:
                 self._state = "running"
-            self.state_changed.emit("running")
+            self._emit("state_changed", "running")
             return
 
         if event_type == "retry":
             with self._lock:
                 self._state = "starting"
-            self.state_changed.emit("starting")
+            self._emit("state_changed", "starting")
             return
 
         if event_type == "error":
-            self.error_message.emit(message)
+            self._emit("error_message", message)
 
     def _format_object(self, data) -> str:
         if data in (None, ""):

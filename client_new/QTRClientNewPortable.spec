@@ -17,8 +17,6 @@ project_root = Path(SPEC).resolve().parent
 sys.path.insert(0, str(project_root))
 from version import __version__ as _app_version
 
-# Qt 运行时裁剪规则（依赖 sys.path 已指向项目根目录）
-from scripts.qt_slim import apply_qt_slim
 
 _version_tuple = tuple(int(x) for x in _app_version.split("."))
 while len(_version_tuple) < 4:
@@ -92,6 +90,13 @@ datas = []
 if icon_file.exists():
     datas.append((str(icon_file), "assets"))
 
+# pywebview 界面静态资源：整体打入 ui_web_static/，运行期由 ui_web.app.get_static_dir 解析
+static_dir = project_root / "ui_web" / "static"
+if static_dir.is_dir():
+    for file_path in static_dir.rglob("*"):
+        if file_path.is_file():
+            datas.append((str(file_path), "ui_web_static" / file_path.relative_to(static_dir).parent))
+
 # 内置 Python 运行时（pip 安装插件模式）：存在时整体打包到 runtime/python，
 # 由 plugins.manager._locate_pip_python 在运行期定位；不存在则跳过（Pip安装按钮会明确报错引导）
 pip_runtime_dir = project_root / "runtime" / "python"
@@ -142,9 +147,6 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
-# Qt 运行时裁剪：剔除纯 Widgets 应用用不到的 Quick/Qml/Pdf/VirtualKeyboard、
-# 软件 OpenGL 回退和非中文翻译，规则与原因见 scripts/qt_slim.py。
-apply_qt_slim(a)
 pyz = PYZ(a.pure)
 
 exe = EXE(

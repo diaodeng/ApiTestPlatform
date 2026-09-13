@@ -19,6 +19,8 @@ related_files:
 
 # 新版客户端壳层
 
+> **状态更新（2026-09-13）**：本文档描述的 PySide6 壳层已随界面迁移退役，当前实现为 pywebview 壳层，见 [新版客户端 pywebview 界面](new-client-webview-ui.md)。以下内容仅作历史参考。
+
 新版客户端壳层负责 PySide6 启动、单实例、主窗口、主题、图标和窗口生命周期管理。
 
 ```mermaid

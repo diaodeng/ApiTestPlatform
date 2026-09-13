@@ -86,17 +86,8 @@ class MockHandle:
         if self._flow_dispatcher:
             self._flow_dispatcher(event_type, item)
             return
-
-        # 延迟导入，避免 helper 子进程对 Qt emitter 形成硬依赖。
-        try:
-            from emitter.mitm_flow_emitter import flow_emitter
-
-            if event_type == "new":
-                flow_emitter.new_flow.emit(item)
-            else:
-                flow_emitter.update_flow.emit(item)
-        except Exception as e:
-            logger.debug(f"flow 事件分发失败: {e}")
+        # 无分发器时（如 helper 子进程内直接运行 mock）事件无处投递，仅保留调试日志。
+        logger.debug(f"flow 事件无分发器，已丢弃 event_type={event_type}, flow_id={getattr(item, 'id', '')}")
 
     async def request(self, flow: HTTPFlow):
         """
