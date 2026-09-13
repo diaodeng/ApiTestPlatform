@@ -69,9 +69,14 @@
     const started = Date.now();
     return new Promise((resolve, reject) => {
       (function check() {
-        if (window.pywebview && window.pywebview.api) return resolve();
+        // 注意：pywebview.api 先以空对象注入，函数由 _createApi 异步填充；
+        // 必须等目标函数真正存在，否则会命中"接口不存在"空窗期。
+        const api = window.pywebview && window.pywebview.api;
+        if (api && typeof api.app === "object" && typeof api.app.get_bootstrap === "function") {
+          return resolve();
+        }
         if (Date.now() - started > timeout) return reject(new Error("pywebview api 加载超时"));
-        setTimeout(check, 80);
+        setTimeout(check, 50);
       })();
     });
   }

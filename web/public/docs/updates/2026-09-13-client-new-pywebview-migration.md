@@ -74,3 +74,8 @@ title: 桌面客户端界面由 PySide6 迁移到 pywebview
 - 语义对齐：视口全屏时不显示描边；标注结果 {focusRegion, maskRegions, assertRegions, skipped} 结构不变；suspend/resume 保持原可见性恢复行为；小于 4x4 的选择视为取消；新请求会跳过未决旧请求。
 - 验证：150% 缩放下描边框位置换算正确；WindowFromPoint 穿过描边窗口命中下层；标注流程（选择→记录→继续录制）Future 正确解析；suspend/resume 状态恢复正确；取消标注按 skipped 解析。
 - 风险：多屏混合 DPI 下 CSS 坐标换算按窗口所在原点线性映射，跨不同缩放率的副屏选择场景建议实测；覆盖层窗口为常驻懒创建（首次使用约 +3 个 WebView2 实例的内存开销）。
+## 修复前端启动竞态（同日追加）
+
+- 现象：启动稳定报“后端接口不存在: app.get_bootstrap”。根因：pywebview 先注入空的 `pywebview.api` 对象、再由内部线程异步填充接口函数；前端 `waitForApi` 只判空对象存在即通过，启动引导在函数填充前发起调用，必然命中空窗期。
+- 修复：`waitForApi` 改为等待目标接口函数（app.get_bootstrap）真正可调用后再放行前端启动。
+- 验证：连续三次启动均正常渲染（此前必现失败）。
