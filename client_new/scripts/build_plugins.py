@@ -275,42 +275,12 @@ def build_plugin(name: str, spec: dict) -> Path:
     return zip_path
 
 
-PIP_PINS_MODULE = PROJECT_ROOT / "plugins" / "pip_pins.py"
-
-
-def write_pip_pins() -> None:
-    """
-    生成 plugins/pip_pins.py：各插件 pip 安装模式使用的锁定版本清单。
-
-    版本取自当前构建虚拟环境的实际安装版本，保证 pip 安装与插件 zip
-    是同一组经过测试的包版本；随构建自动刷新，不手工维护。
-    """
-    lines = [
-        "# 由 scripts/build_plugins.py 自动生成，请勿手工编辑。",
-        "# 各插件「pip 安装」模式的锁定版本清单（与构建插件 zip 的虚拟环境版本一致）。",
-        "PLUGIN_PIP_REQUIREMENTS: dict[str, tuple[str, ...]] = {",
-    ]
-    for name, spec in PLUGIN_PACKAGE_MAP.items():
-        pins = []
-        for dist_name in spec["distributions"]:
-            version = _resolve_version(dist_name)
-            if version == "unknown":
-                raise RuntimeError(f"pip 锁版本清单生成失败: {dist_name} 版本未知")
-            pins.append(f"{dist_name}=={version}")
-        rendered = ", ".join(f'"{pin}"' for pin in pins)
-        lines.append(f'    "{name}": ({rendered},),')
-    lines.append("}")
-    PIP_PINS_MODULE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"[OK] {PIP_PINS_MODULE.relative_to(PROJECT_ROOT)}")
-
-
 def main():
     if not SITE_PACKAGES.exists():
         print(f"未找到虚拟环境 site-packages: {SITE_PACKAGES}")
         sys.exit(1)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    write_pip_pins()
     requested = sys.argv[1:] or list(PLUGIN_PACKAGE_MAP)
     for name in requested:
         spec = PLUGIN_PACKAGE_MAP.get(name)

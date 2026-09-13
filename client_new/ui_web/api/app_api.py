@@ -97,13 +97,12 @@ class AppApi:
 
     def get_plugin_settings(self) -> dict:
         """
-        插件管理配置：下载源、pip 源、安装目录。
+        插件管理配置：下载源、安装目录。
         """
         try:
             return {
                 "ok": True,
                 "download_base_url": plugin_manager.read_download_base_url(),
-                "pip_index_url": plugin_manager.read_pip_index_url(),
                 "install_dir": str(plugin_manager.get_plugin_root()),
             }
         except Exception as e:
@@ -112,10 +111,6 @@ class AppApi:
 
     def save_plugin_download_url(self, base_url: str) -> dict:
         ok, message = plugin_manager.save_download_base_url(str(base_url or "").strip())
-        return {"ok": bool(ok), "message": message}
-
-    def save_plugin_pip_url(self, index_url: str) -> dict:
-        ok, message = plugin_manager.save_pip_index_url(str(index_url or "").strip())
         return {"ok": bool(ok), "message": message}
 
     def save_plugin_install_dir(self, install_dir: str, migrate: bool = True) -> dict:
@@ -137,12 +132,6 @@ class AppApi:
         return self._run_plugin_task(
             name, "zip", lambda: plugin_manager.install_from_zip(name, zip_path)
         )
-
-    def install_plugin_pip(self, name: str) -> dict:
-        """
-        通过 pip 从包索引源安装插件依赖。
-        """
-        return self._run_plugin_task(name, "pip", lambda: plugin_manager.install_from_pip(name))
 
     def _run_plugin_task(self, name: str, mode: str, task) -> dict:
         with self._lock:

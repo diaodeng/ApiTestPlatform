@@ -1,4 +1,13 @@
 
+## [2026-09-13] REVERT | 移除插件 Pip 安装模式（内置 Python 运行时）
+
+- 背景：早前加入的插件「Pip 安装」需在客户端内捆绑独立嵌入式 Python 运行时（runtime/python，几十 MB），用户确认体积代价过高，要求移除；对应的改动作为独立提交。
+- 移除：plugins/manager.py 的 install_from_pip / read_pip_index_url / save_pip_index_url / _locate_pip_python / _runtime_python_version / _check_modules_in_dir / _write_pip_manifest 与默认 Pip 源常量（_replace_plugin_dir 为 zip 路径共用，保留）；plugins/pip_pins.py 与 build_plugins.py 的清单生成；scripts/setup_pip_runtime.py 与本地 runtime/ 目录；PluginConfigModel.pip_index_url 字段；两个 spec 的 runtime/python 打包块；插件管理弹窗的 Pip 源行与 Pip安装按钮（ui_web api/plugins.js）。
+- 保留：manifest python_version/app_version 兼容校验（zip 安装强校验）、Gitee 按版本回退下载、sha256 校验、安装失败回滚，均与 pip 模式无关。
+- 验证：ruff F/E9 通过；plugin_manager 导入与三插件状态读取正常、pip 入口确认不存在、install_from_zip/download_and_install 保留；PluginConfigModel 无 pip_index_url；Bridge get_plugin_settings 无 pip 字段；plugins.js 语法通过。
+- 影响：pip 模式装过的插件目录无需处理（manifest 结构一致，可被在线/本地安装覆盖重装）；打包体积回退数十 MB。
+- 文档：用户说明 web/public/docs/client/plugins.md 移除 Pip 相关章节与 FAQ；更新记录 updates/2026-09-13-client-new-remove-plugin-pip-install.md；history.md 已更新。
+
 ## [2026-09-13] FEATURE | 新版客户端界面由 PySide6 迁移到 pywebview
 
 - 背景：用户要求将 client_new 界面从 PySide6 迁移到 pywebview（基于 master_params 拉出 client_pywebview 分支实施）。调研确认 Qt 耦合面集中在 ui/controller/workers/emitter/QTableModel 与 agent_client_service 的 Signal 外衣，services/server/managers/utils/plugins 全部纯 Python 可复用。

@@ -21,15 +21,12 @@ export function openPluginManager() {
   );
 
   const downloadUrlInput = textInput("", { placeholder: "插件包下载源根地址，留空走 Gitee 按版本回退下载", style: "flex:1" });
-  const pipUrlInput = textInput("", { placeholder: "留空使用默认国内镜像", style: "flex:1" });
   const installDirInput = textInput("", { style: "flex:1", readonly: true });
 
   const body = el(
     "div", {},
     el("div", { class: "form-row" }, el("label", { text: "下载源" }), downloadUrlInput,
       el("button", { class: "btn small", text: "保存下载源", onclick: saveDownloadUrl })),
-    el("div", { class: "form-row" }, el("label", { text: "Pip 源" }), pipUrlInput,
-      el("button", { class: "btn small", text: "保存 Pip 源", onclick: savePipUrl })),
     el("div", { class: "form-row" }, el("label", { text: "安装目录" }), installDirInput,
       el("button", {
         class: "btn small", text: "选择目录",
@@ -48,10 +45,6 @@ export function openPluginManager() {
 
   async function saveDownloadUrl() {
     const res = await call("app", "save_plugin_download_url", downloadUrlInput.value.trim());
-    toast(res.message || (res.ok ? "已保存" : "保存失败"), res.ok ? "success" : "error");
-  }
-  async function savePipUrl() {
-    const res = await call("app", "save_plugin_pip_url", pipUrlInput.value.trim());
     toast(res.message || (res.ok ? "已保存" : "保存失败"), res.ok ? "success" : "error");
   }
   async function saveInstallDir() {
@@ -84,14 +77,7 @@ export function openPluginManager() {
           if (!res.ok) toast(res.message, "error");
         },
       });
-      const btnPip = el("button", {
-        class: "btn small", text: "Pip安装", disabled,
-        onclick: async () => {
-          const res = await call("app", "install_plugin_pip", p.name);
-          if (!res.ok) toast(res.message, "error");
-        },
-      });
-      actions.append(btnOnline, btnZip, btnPip);
+      actions.append(btnOnline, btnZip);
       tbody.append(el("tr", {},
         el("td", { text: p.title }),
         el("td", {}, statusChip),
@@ -105,7 +91,6 @@ export function openPluginManager() {
     const res = await call("app", "get_plugin_settings");
     if (res.ok) {
       downloadUrlInput.value = res.download_base_url || "";
-      pipUrlInput.value = res.pip_index_url || "";
       installDirInput.value = res.install_dir || "";
     }
   }
