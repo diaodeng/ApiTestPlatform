@@ -65,3 +65,4 @@ title: 桌面客户端界面由 PySide6 迁移到 pywebview
 - 日志页恢复三个页签：SSH日志（原版占位行为一致）/ 本地日志 / 程序日志（勾选“监控日志”跟踪最新应用日志）。
 - 修复 Agent 页无法显示请求/响应日志：core.js 的 checkbox 辅助函数把 input 重复 append 且返回外层 label，导致勾选状态读取恒为 undefined、show_logs 保存始终为 false，后端因此不推送 agent_request/agent_response 事件；修正节点顺序与返回结构，agent.js 改为经 querySelector 读取勾选状态。
 - 修复程序日志页勾选「监控日志」后无内容：监控目标改为后端 get_app_log_file 解析（当天日期命名日志优先、回退最新 .log，与原版一致），勾选后立即渲染最近 500 行，新增内容经 log_tail 事件实时推送。
+- 日志页页签增加明确选中样式（tab-btn.active），并将监控会话改为模块级持久状态：切换到其它页面不中断日志监控，回到日志页自动恢复当前页签、监控状态与已累计内容。
