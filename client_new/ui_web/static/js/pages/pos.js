@@ -5,12 +5,8 @@ export function posPage(mount) {
   let boot = null; // get_bootstrap 结果
   let posConfig = null;
 
-  // ===== 工具栏：扫描区 =====
-  const workDirSelect = select([], "", null, { style: "min-width:220px" });
+  // ===== 工具栏：扫描区（工作目录/模式配置收纳进「工作目录」弹窗） =====
   const btnWorkDir = el("button", { class: "btn", text: "工作目录" });
-  const filePatternInput = textInput("", { style: "width:130px" });
-  const dirPatternInput = textInput("*", { style: "width:90px" });
-  const depthInput = textInput("1", { type: "number", style: "width:60px", min: 1 });
   const btnScan = el("button", { class: "btn primary", text: "扫描" });
   const btnStopPos = el("button", { class: "btn danger", text: "停止POS" });
   const btnStopOffline = el("button", { class: "btn", text: "停止离线" });
@@ -18,16 +14,16 @@ export function posPage(mount) {
   const btnSetting = el("button", { class: "btn", text: "设置" });
   const btnChangePos = el("button", { class: "btn", text: "切换POS" });
   const btnProcess = el("button", { class: "btn", text: "进程管理" });
-  const btnAccount = el("button", { class: "btn", text: "退出账号" });
+  const btnAccount = el("button", { class: "btn", text: "POS账号处理" });
 
-  // ===== 启动配置勾选 =====
+  // ===== 启动配置勾选（与原版一致的替换证书/清缓存/覆盖驱动等） =====
   const START_FIELDS = [
     ["backup", "备份支付配置"],
-    ["replace_mitm_cert", "替换mitm证书"],
-    ["change_env", "切换POS本地环境"],
-    ["change_pos", "调用接口切换云端POS"],
-    ["remove_cache", "清除缓存"],
-    ["cover_payment_driver", "覆盖支付驱动"],
+    ["replace_mitm_cert", "替换证书"],
+    ["change_env", "切换本地环境"],
+    ["change_pos", "切换云端POS"],
+    ["remove_cache", "清缓存"],
+    ["cover_payment_driver", "覆盖驱动"],
     ["account_logout", "退出登录"],
   ];
   const startChecks = {};
@@ -46,18 +42,14 @@ export function posPage(mount) {
 
   mount.append(
     el("div", { class: "toolbar" },
-      el("label", { text: "工作目录" }), workDirSelect, btnWorkDir,
-      el("label", { text: "文件名" }), filePatternInput,
-      el("label", { text: "目录名" }), dirPatternInput,
-      el("label", { text: "深度" }), depthInput,
-      btnScan, btnStopPos, btnStopOffline,
+      btnWorkDir, btnScan,
       el("div", { style: "flex:1" }),
-      btnSyncCfg, btnSetting, btnChangePos, btnProcess, btnAccount
+      btnStopPos, btnStopOffline, btnChangePos, btnProcess, btnAccount, btnSyncCfg, btnSetting
     ),
     el("div", { class: "toolbar" },
-      el("label", { text: "启动配置" }),
+      el("label", { text: "启动前:" }),
       Object.values(startChecks),
-      el("div", { style: "flex:1" }),
+      el("label", { text: "过滤:" }),
       filterInput
     ),
     el("div", { class: "table-wrap flex-fill" },
@@ -69,11 +61,6 @@ export function posPage(mount) {
   resultTable.append(resultTbody);
 
   // ===== 渲染 =====
-  function renderWorkDirs(dirs) {
-    clear(workDirSelect);
-    for (const d of dirs || []) workDirSelect.append(el("option", { value: d, text: d }));
-  }
-
   function renderRows() {
     clear(resultTbody);
     const keyword = filterInput.value.trim().toLowerCase();
@@ -155,11 +142,16 @@ export function posPage(mount) {
     document.getElementById("modal-root").append(overlay);
   }
 
-  // ===== 弹窗：工作目录 =====
+  // ===== 弹窗：工作目录（目录管理与扫描模式配置） =====
   btnWorkDir.addEventListener("click", () => {
-    const editor = listEditor(boot?.search_config?.dir || [], "目录路径");
+    const sc = boot?.search_config || {};
+    const editor = listEditor(sc.dir || [], "目录路径");
+    const filePatternInput = textInput(sc.file_pattern || "", { style: "flex:1" });
+    const dirPatternInput = textInput(sc.dir_pattern || "*", { style: "flex:1" });
+    const depthInput = textInput(sc.max_depth || "1", { type: "number", min: 1, style: "width:80px" });
     const body = el(
       "div", {},
+      el("div", { class: "form-section", text: "工作目录" }),
       editor.node,
       el("div", { class: "form-row" },
         el("button", {
@@ -169,6 +161,10 @@ export function posPage(mount) {
             if (res.ok) editor.add(res.path);
           },
         })),
+      el("div", { class: "form-section", text: "扫描模式" }),
+      el("div", { class: "form-row" }, el("label", { text: "文件名模式" }), filePatternInput),
+      el("div", { class: "form-row" }, el("label", { text: "目录名模式" }), dirPatternInput),
+      el("div", { class: "form-row" }, el("label", { text: "递归深度" }), depthInput)
     );
     openModal({
       title: "工作目录",
@@ -176,7 +172,13 @@ export function posPage(mount) {
       footer: el("button", {
         class: "btn primary", text: "保存",
         onclick: async () => {
-          await call("pos", "save_search_config", { ...boot.search_config, dir: editor.getValue() });
+          await call("pos", "save_search_config", {
+            ...sc,
+            dir: editor.getValue(),
+            file_pattern: filePatternInput.value.trim(),
+            dir_pattern: dirPatternInput.value.trim() || "*",
+            max_depth: depthInput.value || "1",
+          });
           await reload();
           toast("已保存", "success", 1200);
         },
@@ -187,10 +189,12 @@ export function posPage(mount) {
   // ===== 弹窗：POS 设置 =====
   btnSetting.addEventListener("click", () => {
     const c = posConfig || {};
-    const hosts = {};
     const hostFields = [
-      ["pos_tool_test_host", "POS工具Test"], ["pos_tool_uat_host", "POS工具UAT"],
-      ["pos_test_host", "POSTest"], ["pos_uat_host", "POSUAT"], ["pos_pro_host", "POSProd"],
+      ["pos_tool_test_host", "POS工具Test"],
+      ["pos_tool_uat_host", "POS工具UAT"],
+      ["pos_test_host", "POS Test"],
+      ["pos_uat_host", "POS UAT"],
+      ["pos_pro_host", "POS 生产"],
     ];
     const envFiles = listEditor(c.env_files || []);
     const cacheFiles = listEditor(c.cache_files || []);
@@ -203,22 +207,25 @@ export function posPage(mount) {
     const body = el(
       "div", {},
       el("div", { class: "form-section", text: "服务地址" }),
-      el("div", { class: "form-grid" },
-        hostFields.map(([key, label]) => [
-          el("label", { class: "sub", text: label }),
-          textInput(c[key] || "", { onchange: (e) => (c[key] = e.target.value.trim()) }),
-        ])),
-      el("div", { class: "form-section", text: "环境/缓存文件清单" }),
-      el("div", { class: "form-row" }, el("label", { text: "环境文件" }), el("div", { style: "flex:1" }, envFiles.node)),
+      hostFields.map(([key, label]) =>
+        el("div", { class: "form-row" },
+          el("label", { text: label }),
+          textInput(c[key] || "", { style: "flex:1", onchange: (e) => (c[key] = e.target.value.trim()) }))
+      ),
+      el("div", { class: "form-section", text: "环境文件清单（启动前按此备份/切换）" }),
+      el("div", { style: "display:flex;flex-direction:column;gap:4px" }, envFiles.node),
       el("div", { class: "form-row" },
-        el("button", { class: "btn small", text: "+环境文件", onclick: () => envFiles.add() }),
-        el("button", { class: "btn small", text: "+缓存文件", onclick: () => cacheFiles.add() })),
-      el("div", { class: "form-row" }, el("label", { text: "缓存文件" }), el("div", { style: "flex:1" }, cacheFiles.node)),
-      el("div", { class: "form-section", text: "环境分组 / 商家配置（JSON）" }),
-      el("div", { class: "hint", text: "env_group_vendor：环境key -> 账号列表；vendor_config：商家列表" }),
-      envGroupText, vendorText,
+        el("button", { class: "btn small", text: "添加环境文件", onclick: () => envFiles.add() })),
+      el("div", { class: "form-section", text: "缓存文件清单（清理缓存按此处理）" }),
+      el("div", { style: "display:flex;flex-direction:column;gap:4px" }, cacheFiles.node),
+      el("div", { class: "form-row" },
+        el("button", { class: "btn small", text: "添加缓存文件", onclick: () => cacheFiles.add() })),
+      el("div", { class: "form-section", text: "环境分组（env_group_vendor：环境key -> 账号列表，JSON）" }),
+      envGroupText,
+      el("div", { class: "form-section", text: "商家配置（vendor_config：商家/账号/分辨率，JSON）" }),
+      vendorText,
       el("div", { class: "form-section", text: "配置拉取" }),
-      el("div", { class: "form-row" }, syncUrl)
+      el("div", { class: "form-row" }, el("label", { text: "拉取地址" }), syncUrl)
     );
 
     openModal({
@@ -257,11 +264,11 @@ export function posPage(mount) {
     const storeSel = select([], s.store_id);
     const modeSel = select([{ value: "1", label: "指定MAC" }, { value: "2", label: "指定POS_ID" }], s.switch_mode || "1");
     const macInput = textInput(res.pos_mac || "", { style: "flex:1" });
-    const posNoInput = textInput(s.pos_no || "");
+    const posNoInput = textInput(s.pos_no || "", { style: "width:100%" });
+    const posNoLabel = el("label", { class: "sub", text: "POS_ID" });
     const ipInput = textInput(res.pos_ip || "");
     const typeSel = select([{ value: "1", label: "人工收银" }, { value: "2", label: "SCO" }, { value: "4", label: "Combined" }], s.pos_type || "1");
     const groupInput = textInput(s.pos_group || "", { placeholder: "POS机台组(可选)" });
-    const posRow = el("div", { class: "form-row" }, el("label", { text: "POS_ID" }), posNoInput);
 
     function refreshVendors() {
       s.env = envSel.value;
@@ -295,7 +302,7 @@ export function posPage(mount) {
       call("pos", "save_change_pos_state", s);
     };
     modeSel.addEventListener("change", () => {
-      posRow.style.display = modeSel.value === "2" ? "" : "none";
+      applyModeVisibility();
       persist();
     });
     [macInput, posNoInput, ipInput, groupInput].forEach((i) => i.addEventListener("change", persist));
@@ -305,13 +312,18 @@ export function posPage(mount) {
       el("label", { class: "sub", text: "环境/商家/门店" }),
       el("div", { style: "display:flex;flex-direction:column;gap:6px" }, envSel, vendorSel, storeSel),
       el("label", { class: "sub", text: "模式" }), modeSel,
-      posRow,
+      posNoLabel, posNoInput,
       el("label", { class: "sub", text: "MAC" }), macInput,
       el("label", { class: "sub", text: "IP" }), ipInput,
       el("label", { class: "sub", text: "POS类型" }), typeSel,
       el("label", { class: "sub", text: "POS机台组" }), groupInput
     );
-    posRow.style.display = (s.switch_mode === "2") ? "" : "none";
+    const applyModeVisibility = () => {
+      const show = modeSel.value === "2";
+      posNoLabel.style.display = show ? "" : "none";
+      posNoInput.style.display = show ? "" : "none";
+    };
+    applyModeVisibility();
 
     let modal;
     modal = openModal({
@@ -455,24 +467,12 @@ export function posPage(mount) {
     if (!res.ok) return;
     boot = res;
     posConfig = res.pos_config;
-    renderWorkDirs(res.search_config.dir);
-    workDirSelect.value = res.search_config.dir?.[0] || "";
-    filePatternInput.value = res.search_config.file_pattern || "";
-    dirPatternInput.value = res.search_config.dir_pattern || "*";
-    depthInput.value = res.search_config.max_depth || "1";
     for (const [key] of START_FIELDS) startChecks[key].querySelector("input").checked = !!res.start_config[key];
     renderRows();
   }
 
-  // ===== 工具栏事件 =====
+  // ===== 弹窗：扫描（按已保存配置执行） =====
   btnScan.addEventListener("click", async () => {
-    // 保存当前搜索配置后扫描
-    await call("pos", "save_search_config", {
-      ...boot.search_config,
-      file_pattern: filePatternInput.value.trim(),
-      dir_pattern: dirPatternInput.value.trim() || "*",
-      max_depth: depthInput.value || "1",
-    });
     const res = await call("pos", "scan");
     if (!res.ok) return toast(res.message, "error");
     boot.history = res.result;

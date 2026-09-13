@@ -56,3 +56,10 @@ title: 桌面客户端界面由 PySide6 迁移到 pywebview
 - 首次打包运行报 `RuntimeError: Failed to create a .NET runtime`：根因是插件化瘦身时 `cffi`/`pycparser` 被列入 spec 的 PLUGIN_EXCLUDES（当时仅 proxy 插件使用），而 pywebview 的 WinForms 后端依赖链 pythonnet → clr_loader → cffi 需要在主程序内直接可用；且旧 hiddenimports 还引用了已删除的 Qt 模块（controller.agent_controller、ui.dialogs.*）。
 - 修复：`cffi>=2.0.0` 加入主依赖；两个 spec 从排除清单移除 cffi/pycparser，hiddenimports 改为 ui_web.api.bridge + webview.platforms.winforms/edgechromium + pythonnet + clr_loader（netfx/ffi/hostfxr）+ cffi/pycparser；webview/lib（WebView2Loader.dll 等）由 hooks-contrib 的 hook-webview 自动收集。
 - 验证：便携版全量重新打包通过，`_internal` 中确认包含 _cffi_backend/clr_loader/pythonnet/webview；打包 exe 实测启动正常（窗口出现、运行稳定、退出清理正常）。
+
+## 界面交互修正（同日追加，对照原 PySide6 版还原）
+
+- Agent 服务器管理弹窗改为原版「新增 / 修改 / 删除」三按钮交互（修改/删除需先选中列表行，新增/修改弹出子表单）。
+- POS 页工具栏还原原版布局：模式与目录配置全部收纳进「工作目录」弹窗（含扫描模式分节），页面仅保留「工作目录 / 扫描」入口与启动前勾选、过滤；设置弹窗按“服务地址 / 环境文件清单 / 缓存文件清单 / 环境分组 / 商家配置 / 配置拉取”分节展示。
+- 切换 POS 弹窗修复指定 POS_ID 模式下的两列排版异常（POS_ID 行改为与其它行一致的两列网格，随模式显隐）。
+- 日志页恢复三个页签：SSH日志（原版占位行为一致）/ 本地日志 / 程序日志（勾选“监控日志”跟踪最新应用日志）。

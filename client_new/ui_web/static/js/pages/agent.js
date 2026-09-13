@@ -93,58 +93,78 @@ export function agentPage(mount) {
     stateChip.textContent = labelMap[state] || state;
   }
 
-  // ===== 弹窗：服务器管理 =====
+  // ===== 弹窗：服务器管理（新增/修改/删除，沿用原版三按钮交互） =====
   btnServers.addEventListener("click", () => {
     const tbody = el("tbody", {});
     const syncUrlInput = textInput(config.config_sync_url || "", { placeholder: "配置拉取地址", style: "flex:1" });
-    const nameInput = textInput("", { placeholder: "名称" });
-    const urlInput = textInput("", { placeholder: "地址 ws://..." });
+    let selectedName = "";
 
     function renderRows() {
+      selectedName = "";
       clear(tbody);
       for (const [name, url] of Object.entries(config.server_list || {})) {
-        tbody.append(el("tr", {},
+        const tr = el("tr", { onclick: () => {
+          selectedName = name;
+          for (const row of tbody.children) row.classList.toggle("selected", row === tr);
+        } },
           el("td", { text: name }),
           el("td", { text: url }),
-          el("td", {},
-            el("button", {
-              class: "btn small", text: "编辑",
-              onclick: () => { nameInput.value = name; urlInput.value = url; nameInput.dataset.old = name; },
-            }),
-            el("button", {
-              class: "btn small danger", text: "删除",
-              onclick: async () => {
-                await call("agent", "delete_server", name);
-                await reloadConfig();
-                renderRows();
-              },
-            })
-          )
-        ));
+          el("td", { class: "muted small", text: name === config.current_server ? "当前使用" : "" })
+        );
+        tbody.append(tr);
       }
+    }
+
+    /** 新增/修改共用的小弹窗；editName 为空表示新增。 */
+    function openServerEditor(editName = "") {
+      const nameInput = textInput(editName, { placeholder: "名称" });
+      const urlInput = textInput(editName ? config.server_list[editName] || "" : "", { placeholder: "地址 ws://...", style: "width:100%" });
+      let editorModal;
+      editorModal = openModal({
+        title: editName ? `修改服务器：${editName}` : "新增服务器",
+        body: el("div", { class: "form-grid" },
+          el("label", { class: "sub", text: "名称" }), nameInput,
+          el("label", { class: "sub", text: "地址" }), urlInput),
+        footer: el("button", {
+          class: "btn primary", text: "保存",
+          onclick: async () => {
+            const res = await call("agent", "save_server", nameInput.value.trim(), urlInput.value.trim(), editName);
+            if (!res.ok) return toast(res.message, "error");
+            await reloadConfig();
+            renderRows();
+            editorModal.close();
+            toast("已保存", "success", 1200);
+          },
+        }),
+      });
     }
 
     const body = el(
       "div", {},
-      el("div", { class: "table-wrap", style: "max-height:40vh" },
-        el("table", { class: "data" },
-          el("thead", {}, el("tr", {}, el("th", { text: "名称" }), el("th", { text: "地址" }), el("th", { text: "操作" }))),
-          tbody)),
-      el("div", { class: "form-row", style: "margin-top:10px" },
-        nameInput, urlInput,
+      el("div", { class: "toolbar", style: "margin:0" },
+        el("button", { class: "btn small primary", text: "新增", onclick: () => openServerEditor() }),
         el("button", {
-          class: "btn small primary", text: "保存",
+          class: "btn small", text: "修改",
+          onclick: () => {
+            if (!selectedName) return toast("请先在列表中选择要修改的服务器", "error");
+            openServerEditor(selectedName);
+          },
+        }),
+        el("button", {
+          class: "btn small danger", text: "删除",
           onclick: async () => {
-            const res = await call("agent", "save_server", nameInput.value.trim(), urlInput.value.trim(), nameInput.dataset.old || "");
+            if (!selectedName) return toast("请先在列表中选择要删除的服务器", "error");
+            const res = await call("agent", "delete_server", selectedName);
             if (!res.ok) return toast(res.message, "error");
-            delete nameInput.dataset.old;
-            nameInput.value = "";
-            urlInput.value = "";
             await reloadConfig();
             renderRows();
           },
         })),
-      el("div", { class: "form-row" },
+      el("div", { class: "table-wrap", style: "max-height:40vh; margin-top:8px" },
+        el("table", { class: "data" },
+          el("thead", {}, el("tr", {}, el("th", { text: "名称" }), el("th", { text: "地址" }), el("th", { text: "" }))),
+          tbody)),
+      el("div", { class: "form-row", style: "margin-top:10px" },
         el("label", { text: "配置拉取" }), syncUrlInput,
         el("button", {
           class: "btn small", text: "保存拉取地址",
