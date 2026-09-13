@@ -1,13 +1,15 @@
-# 2026-09-14 桌面客户端 mitmproxy 设置弹窗修复（字段显示/代理模式/开关同行/问号提示）
+# 2026-09-14 桌面客户端 mitmproxy 设置弹窗修复（字段显示/代理模式/开关同行/问号提示/详情区样式）
 
 ## 背景
 
-pywebview 版 mitmproxy 页面「设置」弹窗存在四个问题：
+用户反馈 mitmproxy 页面与设置弹窗共六点问题：
 
 1. 证书路径、脚本路径输入框为空时一片空白，用户看不到实际生效的默认值；
 2. 代理相关字段语义错位——弹窗展示的是"代理客户端"（遗留无用字段，恒为空）与"代理模式值"（实际是拦截的应用进程名），真正起作用的代理模式（local/regular 等下拉）没有入口，用户无法切换；
 3. 启用包含规则、启用排除规则、启用流量过滤、启用断点拦截、启用 Mock 等开关集中堆在"开关与模式"区，对应的路径/关键字内容却在另一个输入框区，开关与内容对不上号；
-4. 大部分输入框没有格式提示，不知道该填什么。
+4. 大部分输入框没有格式提示，不知道该填什么；
+5. 拦截应用迁移前可选择进程，迁移后只能手动输入；
+6. 隐藏详情时右侧留白（列表不扩展）；详情的请求/响应信息没有按旧版样式分区展示。
 
 ## 变更内容
 
@@ -22,7 +24,23 @@ pywebview 版 mitmproxy 页面「设置」弹窗存在四个问题：
 7. **补回遗漏字段**：迁移时丢失的「附加 Body」（`add_body`）重新加入 Mock 与请求改写组。
 8. 移除旧的 `F()` 通用字段数组机制，改为显式字段构造与保存赋值，避免 dataset/transform 的隐式映射。
 
-- `client_new/ui_web/api/mitm_api.py`：新增 `list_processes` 接口（psutil 枚举系统进程名，去重排序），供「拦截应用」下拉选择；修复迁移遗留缺陷——`save_config` 调用的 `_is_proxy_active` 方法在迁移时丢失（旧 Qt 版有定义），运行中保存配置必现 `AttributeError`，已按旧版语义补回（`helper_state in {starting, running, stopping}`），恢复"敏感字段变更自动重启、非敏感字段热更新"行为。
+### `client_new/ui_web/static/js/pages/mitm.js`（详情区重构 + 布局修复）
+
+1. **隐藏详情列表占满**：原先隐藏详情时仅隐藏列内的文本面板，右侧留白；现改为隐藏整个详情列，列表列 flex 自动占满整行宽度，再次点击恢复分栏。
+2. **详情样式对齐旧 PySide 版 `FlowDetailWidget`**：
+   - 标签页从「请求/响应」扩为「总览/请求/响应」（默认总览）；
+   - 总览：摘要行（时间 | 方法 | 状态 | 耗时 | URL）+ 总览信息键值表（17 项，空值统一显示 `-`）；
+   - 请求：请求信息卡（Request Line、URL、Host、Content-Type）+ Form Data / Cookies（空则整卡隐藏）+ Headers + Body；
+   - 响应：响应信息卡（Response Line、耗时、Content-Type、大小）+ Headers + Body；
+   - Headers/Body 卡片带「复制」按钮，Body 支持「JSON」一键格式化（解析失败提示原因并回显原文），格式状态按请求/响应分别记忆、流量刷新不重置；
+   - 详情工具栏新增「复制请求 / 复制响应 / 复制 cURL」，文本组装与 cURL 生成对齐旧版（PowerShell 反引号续行、剔除 Content-Length、无 Body 回退 Form Data）；
+   - Body 最长展示 2 万字符（格式化后 4 万），避免超大响应拖垮渲染。
+
+### `client_new/ui_web/api/mitm_api.py`
+
+### `client_new/ui_web/api/mitm_api.py`
+
+- 新增 `list_processes` 接口（psutil 枚举系统进程名，去重排序），供「拦截应用」下拉选择；修复迁移遗留缺陷——`save_config` 调用的 `_is_proxy_active` 方法在迁移时丢失（旧 Qt 版有定义），运行中保存配置必现 `AttributeError`，已按旧版语义补回（`helper_state in {starting, running, stopping}`），恢复"敏感字段变更自动重启、非敏感字段热更新"行为。
 
 ### `client_new/ui_web/static/js/core.js`
 
@@ -31,10 +49,11 @@ pywebview 版 mitmproxy 页面「设置」弹窗存在四个问题：
 ### `client_new/ui_web/static/css/app.css`
 
 - 新增 `.help-tip` / `.help-tip-bubble` 样式；气泡以图标左缘对齐向右展开（避免靠近弹窗左边缘时被 `modal-body` 的 overflow 裁剪）。
+- 新增 mitm 详情卡片样式：`.detail-body`（纵向滚动容器）、`.detail-card` / `.detail-card-head` / `.detail-card-title`（分区卡片）、`.detail-meta`（键值表）、`.detail-summary`（摘要行）、`pre.detail-body`（等宽文本区，可选中复制）。
 
 ### 文档
 
-- `web/public/docs/client/mitm-proxy.md`：配置项说明同步新分组、代理模式/拦截应用命名、证书路径默认值展示、脚本路径条目与问号提示用法。
+- `web/public/docs/client/mitm-proxy.md`：配置项说明同步新分组、代理模式/拦截应用命名、证书路径默认值展示、脚本路径条目与问号提示用法；新增「流量详情」章节说明总览/请求/响应三个标签页的内容、复制与 JSON 格式化能力、隐藏详情列表占满行为。
 
 ## 验证
 
@@ -48,6 +67,7 @@ pywebview 版 mitmproxy 页面「设置」弹窗存在四个问题：
   - 修改端口/断点/请求延迟后点击保存，回传 config 数值转换正确（port=9443、breakpoint_pattern 去首尾空格、request_delay 结构 `{enabled,delay,delay_path}`）、`proxy_client` 原值保留；
   - 下半部分截图确认开关与内容同行布局。
 - 「拦截应用」下拉浏览器实测：点击输入框自动加载 8 个桩进程选项、当前值保留；「加载」按钮触发刷新；模式切 regular 整行隐藏（含加载按钮）；改选进程后保存回传 `proxy_model_value` 正确。
+- 详情区浏览器实测（桩注入两条流量，含一条断点暂停）：总览信息卡 17 项渲染正确；请求 tab 呈现 请求信息卡/Cookies/Headers/Body（Form Data 空则隐藏）；Body 点「JSON」缩进格式化、按钮切为「文本」，再点切回；断点暂停流量显示「继续放行/编辑并放行」；点「隐藏详情」详情列隐藏、列表列宽与容器总宽一致（1263px 占满），「显示详情」恢复分栏；响应 tab 呈现 响应信息卡/Headers/Body。
 - 验证用临时 HTML 与本地静态服务已删除/停止。
 
 ## 剩余风险

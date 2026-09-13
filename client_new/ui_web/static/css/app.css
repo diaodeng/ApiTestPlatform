@@ -361,6 +361,32 @@ pre.panel {
 .pagination { display: flex; align-items: center; gap: 8px; }
 .badge-flow-count { min-width: 90px; text-align: center; }
 
+/* ===== mitm 流量详情区（对齐旧版 详情卡片样式）===== */
+.detail-body { overflow: auto; display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; padding: 2px; }
+.detail-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.detail-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.detail-card-head .spacer { flex: 1; }
+.detail-card-title { font-weight: 600; font-size: 13px; }
+.detail-summary { font-size: 12.5px; color: var(--text-muted); word-break: break-all; user-select: text; -webkit-user-select: text; }
+.detail-meta { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.detail-meta td { padding: 4px 8px 4px 0; vertical-align: top; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.detail-meta td:first-child { color: var(--text-muted); width: 110px; white-space: nowrap; }
+pre.detail-body {
+  margin: 0;
+  padding: 8px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono-font);
+  font-size: 12px;
+  overflow: auto;
+  max-height: 300px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* ===== 页签（日志页等） ===== */
 .tab-btn {
   min-width: 88px;

@@ -37,11 +37,24 @@ export function mitmPage(mount) {
       el("th", { text: "Path" }), el("th", { text: "状态" }), el("th", { text: "大小" }),
       el("th", { text: "耗时" }), el("th", { text: "断点" }))));
 
-  // ===== 详情区 =====
+  // ===== 详情区（对齐旧 PySide 版：总览/请求/响应 tab + 信息卡 + Headers/Body 分区卡片）=====
   const detailTabs = el("div", { class: "toolbar", style: "margin:0" });
-  const detailPre = el("pre", { class: "panel flex-fill" });
+  const detailBody = el("div", { class: "detail-body" });
   const btnPass = el("button", { class: "btn small primary", text: "继续放行", style: "display:none" });
   const btnEditPass = el("button", { class: "btn small", text: "编辑并放行", style: "display:none" });
+  const btnCopyRequest = el("button", { class: "btn small", text: "复制请求" });
+  const btnCopyResponse = el("button", { class: "btn small", text: "复制响应" });
+  const btnCopyCurl = el("button", { class: "btn small", text: "复制 cURL" });
+  // Body 卡片的显示格式（json/text），按请求/响应分别记忆，流量刷新不重置
+  const bodyFormat = { request: "text", response: "text" };
+
+  const flowTableWrap = el("div", { class: "col", style: "flex:3" },
+    el("div", { class: "table-wrap flex-fill" }, flowTable));
+  // 详情独立成列：隐藏详情时整列 display:none，列表列自动占满剩余空间
+  const detailCol = el("div", { class: "col", style: "flex:2" },
+    el("div", { class: "toolbar", style: "margin:0" },
+      detailTabs, btnPass, btnEditPass, btnCopyRequest, btnCopyResponse, btnCopyCurl),
+    detailBody);
 
   mount.append(
     el("div", { class: "toolbar" },
@@ -52,19 +65,15 @@ export function mitmPage(mount) {
       btnStart, btnStop, btnClear, btnToggleDetail, btnOpenWeb, btnSettings),
     el("div", { class: "toolbar" },
       certLabel, btnInstallCert, webUrlLabel),
-    el("div", { class: "split-v flex-fill" },
-      el("div", { class: "col", style: "flex:3" },
-        el("div", { class: "table-wrap flex-fill" }, flowTable)),
-      el("div", { class: "col", style: "flex:2" },
-        el("div", { class: "toolbar", style: "margin:0" }, detailTabs, btnPass, btnEditPass),
-        detailPre))
+    el("div", { class: "split-v flex-fill" }, flowTableWrap, detailCol)
   );
   flowTable.append(flowTbody);
 
-  let detailTab = "request";
-  ["request", "response"].forEach((tab) => {
-    const btn = el("button", { class: "btn small", text: tab === "request" ? "请求" : "响应" });
-    btn.addEventListener("click", () => { detailTab = tab; renderDetail(); markTab(tab); });
+  let detailTab = "overview";
+  const TAB_LABELS = { overview: "总览", request: "请求", response: "响应" };
+  ["overview", "request", "response"].forEach((tab) => {
+    const btn = el("button", { class: "btn small", text: TAB_LABELS[tab] });
+    btn.addEventListener("click", () => { detailTab = tab; renderDetail(); });
     btn.dataset.tab = tab;
     detailTabs.append(btn);
   });
@@ -103,31 +112,189 @@ export function mitmPage(mount) {
     return (size / 1024 / 1024).toFixed(2) + "MB";
   }
 
+  function formatDuration(ms) {
+    if (ms == null) return "-";
+    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
+  }
+
+  /** 空值统一显示 "-"（与旧版 InfoCard 行为一致） */
+  const dash = (v) => (v === null || v === undefined || v === "" ? "-" : v);
+
+  /** 键值信息卡内容表 */
+  function infoRows(rows) {
+    const tbody = el("tbody", {});
+    for (const [key, value] of rows) {
+      tbody.append(el("tr", {}, el("td", { text: key }), el("td", { text: String(dash(value)) })));
+    }
+    return el("table", { class: "detail-meta" }, tbody);
+  }
+
+  /**
+   * 分区文本卡片（对齐旧版 StructuredTextCard 的定位）：
+   * - 标题行 + 可选「复制」按钮 + 可选 JSON 格式化切换（bodyFormat 记忆状态）
+   * - hideIfEmpty 时内容为空不渲染整卡（对应旧版 _set_optional_text_card）
+   */
+  function textCard(title, text, opts = {}) {
+    const has = !!(text || "").trim();
+    if (opts.hideIfEmpty && !has) return null;
+    const pre = el("pre", { class: "detail-body", text: has ? String(text).slice(0, 20000) : "（空）" });
+    const head = el("div", { class: "detail-card-head" }, el("span", { class: "detail-card-title", text: title }), el("span", { class: "spacer" }));
+    if (opts.formatKey) {
+      if (bodyFormat[opts.formatKey] === "json") {
+        try {
+          pre.textContent = JSON.stringify(JSON.parse(String(text)), null, 2).slice(0, 40000);
+        } catch (e) {
+          pre.textContent = `JSON 格式化失败: ${e.message}\n\n原始内容:\n${String(text).slice(0, 20000)}`;
+        }
+      }
+      head.append(el("button", {
+        class: "btn small",
+        text: bodyFormat[opts.formatKey] === "json" ? "文本" : "JSON",
+        onclick: () => {
+          bodyFormat[opts.formatKey] = bodyFormat[opts.formatKey] === "json" ? "text" : "json";
+          renderDetail();
+        },
+      }));
+    }
+    if (opts.copyable !== false && has) {
+      head.append(el("button", { class: "btn small", text: "复制", onclick: () => copyText(pre.textContent) }));
+    }
+    return el("div", { class: "detail-card" }, head, pre);
+  }
+
+  /** 信息卡：标题 + 键值表 */
+  function metaCard(title, rows) {
+    return el("div", { class: "detail-card" },
+      el("div", { class: "detail-card-head" }, el("span", { class: "detail-card-title", text: title })),
+      infoRows(rows));
+  }
+
+  /** 复制用请求文本（对齐旧版 _build_request_text） */
+  function buildRequestText(f) {
+    const sections = [
+      "[Request Line]\n" + [
+        `${dash(f.method)} ${f.path || "/"} ${dash(f.request_http_version)}`,
+        `URL: ${dash(f.url)}`,
+        `Scheme: ${dash(f.request_scheme)}`,
+        `Host: ${dash(f.request_host)}`,
+        `Port: ${dash(f.request_port)}`,
+        `Content-Type: ${dash(f.request_content_type)}`,
+      ].join("\n"),
+    ];
+    if ((f.request_form || "").trim()) sections.push(`[Form Data]\n${f.request_form}`);
+    if ((f.request_headers || "").trim()) sections.push(`[Headers]\n${f.request_headers}`);
+    if ((f.request_body || "").trim()) sections.push(`[Body]\n${f.request_body}`);
+    return sections.join("\n\n");
+  }
+
+  /** 复制用响应文本（对齐旧版 _build_response_text） */
+  function buildResponseText(f) {
+    const sections = [
+      "[Response Line]\n" + [
+        `${dash(f.response_http_version)} ${dash(f.status_code)} ${dash(f.response_reason)}`,
+        `Content-Type: ${dash(f.response_content_type)}`,
+        `Duration: ${formatDuration(f.duration_ms)}`,
+        `Size: ${dash(f.size)}`,
+      ].join("\n"),
+    ];
+    if ((f.response_headers || "").trim()) sections.push(`[Headers]\n${f.response_headers}`);
+    if ((f.response_body || "").trim()) sections.push(`[Body]\n${f.response_body}`);
+    return sections.join("\n\n");
+  }
+
+  /** 复制用 cURL 命令（PowerShell 反引号续行，对齐旧版 _build_curl） */
+  function buildCurl(f) {
+    const quote = (v) => "'" + String(v || "").replace(/'/g, "''") + "'";
+    const lines = [
+      `curl.exe -X ${quote(f.method || "GET")}`,
+      `--url ${quote(f.url || "")}`,
+    ];
+    for (const line of (f.request_headers || "").split("\n")) {
+      const item = line.trim();
+      if (!item || item.toLowerCase().startsWith("content-length:")) continue;
+      lines.push(`-H ${quote(item)}`);
+    }
+    let body = (f.request_body || "").trim();
+    if (body.startsWith("<binary content:")) body = "";
+    if (!body) body = (f.request_form || "").trim();
+    if (body) lines.push(`--data-raw ${quote(body)}`);
+    return "`\n".join([lines[0], ...lines.slice(1).map((l) => "  " + l)]);
+  }
+
+  btnCopyRequest.addEventListener("click", () => selectedFlow && copyText(buildRequestText(selectedFlow)));
+  btnCopyResponse.addEventListener("click", () => selectedFlow && copyText(buildResponseText(selectedFlow)));
+  btnCopyCurl.addEventListener("click", () => selectedFlow && copyText(buildCurl(selectedFlow)));
+
   function renderDetail() {
     btnPass.style.display = "none";
     btnEditPass.style.display = "none";
-    if (!selectedFlow) {
-      detailPre.textContent = "点击左侧流量查看详情";
-      markTab(detailTab);
+    const hasFlow = !!selectedFlow;
+    btnCopyRequest.disabled = !hasFlow;
+    btnCopyResponse.disabled = !hasFlow;
+    btnCopyCurl.disabled = !hasFlow;
+    clear(detailBody);
+    markTab(detailTab);
+    if (!hasFlow) {
+      detailBody.append(el("div", { class: "hint", text: "点击左侧流量查看详情" }));
       return;
     }
-    markTab(detailTab);
-    if (detailTab === "response" && !selectedFlow.response_headers && !selectedFlow.response_body) {
-      detailPre.textContent = "（暂无响应数据）";
+    const f = selectedFlow;
+
+    if (detailTab === "overview") {
+      detailBody.append(
+        el("div", {
+          class: "detail-summary",
+          text: [f.time_full, f.method, `状态 ${dash(f.status_code)}`, formatDuration(f.duration_ms), dash(f.url)].join(" | "),
+        }),
+        metaCard("总览信息", [
+          ["时间", f.time_full],
+          ["方法", f.method],
+          ["URL", f.url],
+          ["域名", f.request_host],
+          ["路径", f.path],
+          ["状态", f.status_code],
+          ["响应说明", f.response_reason],
+          ["耗时", formatDuration(f.duration_ms)],
+          ["响应大小", formatBytes(f.size)],
+          ["客户端", f.client_address],
+          ["服务端", f.server_address],
+          ["协议", f.request_scheme],
+          ["端口", f.request_port],
+          ["请求版本", f.request_http_version],
+          ["响应版本", f.response_http_version],
+          ["请求类型", f.request_content_type],
+          ["响应类型", f.response_content_type],
+        ]));
+    } else if (detailTab === "request") {
+      const cards = [
+        metaCard("请求信息", [
+          ["Request Line", `${dash(f.method)} ${f.path || "/"} ${dash(f.request_http_version)}`],
+          ["URL", f.url],
+          ["Host", f.request_host],
+          ["Content-Type", f.request_content_type],
+        ]),
+        textCard("Form Data", f.request_form, { hideIfEmpty: true }),
+        textCard("Cookies", f.request_cookies, { hideIfEmpty: true }),
+        textCard("Headers", f.request_headers),
+        textCard("Body", f.request_body, { formatKey: "request" }),
+      ];
+      for (const card of cards) if (card) detailBody.append(card);
     } else {
-      const lines = [];
-      const src = detailTab === "request" ? selectedFlow : selectedFlow;
-      const prefix = detailTab === "request" ? "request" : "response";
-      lines.push(`${(src[`${prefix}_http_version`] || "").toUpperCase()} ${detailTab === "request" ? src.method + " " + (src.url || "") : (src.status_code || "") + " " + (src.response_reason || "")}`);
-      lines.push("");
-      lines.push(src[`${prefix}_headers`] || "（无 headers）");
-      if (detailTab === "request" && src.request_cookies) { lines.push("", "[Cookies]", src.request_cookies); }
-      if (detailTab === "request" && src.request_form) { lines.push("", "[Form]", src.request_form); }
-      if (src[`${prefix}_body`]) { lines.push("", "[Body]", String(src[`${prefix}_body`]).slice(0, 20000)); }
-      detailPre.textContent = lines.join("\n") || "（空）";
+      const cards = [
+        metaCard("响应信息", [
+          ["Response Line", `${dash(f.response_http_version)} ${dash(f.status_code)} ${dash(f.response_reason)}`],
+          ["耗时", formatDuration(f.duration_ms)],
+          ["Content-Type", f.response_content_type],
+          ["大小", formatBytes(f.size)],
+        ]),
+        textCard("Headers", f.response_headers),
+        textCard("Body", f.response_body, { formatKey: "response" }),
+      ];
+      for (const card of cards) if (card) detailBody.append(card);
     }
-    // 断点操作
-    if (selectedFlow.breakpoint_paused) {
+
+    // 断点操作：暂停中的流量显示放行按钮（响应 tab 按响应阶段放行，其余按请求阶段）
+    if (f.breakpoint_paused) {
       btnPass.style.display = "";
       btnEditPass.style.display = "";
     }
@@ -159,8 +326,8 @@ export function mitmPage(mount) {
   btnToggleDetail.addEventListener("click", () => {
     showDetail = !showDetail;
     btnToggleDetail.textContent = showDetail ? "隐藏详情" : "显示详情";
-    detailPre.style.display = showDetail ? "" : "none";
-    detailTabs.style.display = showDetail ? "" : "none";
+    // 整列隐藏，列表列 flex 自动占满剩余空间
+    detailCol.style.display = showDetail ? "" : "none";
   });
   btnOpenWeb.addEventListener("click", async () => {
     const res = await call("mitm", "open_web");
