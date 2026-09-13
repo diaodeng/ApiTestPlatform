@@ -145,16 +145,12 @@ export function logsPage(mount) {
       appStatus.textContent = "已停止监控";
       return;
     }
-    const res = await call("log", "list_log_files");
-    if (!res.ok || !res.files.length) {
-      appStatus.textContent = "未找到应用日志文件";
-      return toast(res.message || "未找到应用日志文件", "error");
-    }
-    // 监控最新的应用日志（列表已按修改时间倒序）
-    const target = res.files.find((f) => f.name.endsWith(".log"));
-    if (!target) return toast("未找到 .log 应用日志文件", "error");
-    await startTail(target.path);
-    appStatus.textContent = "正在监控: " + target.name;
+    // 监控当前应用日志（当天日期命名优先，与原版一致；后端回退最新 .log）
+    const res2 = await call("log", "get_app_log_file");
+    if (!res2.ok) return toast(res2.message || "未找到应用日志文件", "error");
+    await startTail(res2.path);
+    renderLog(appPre);
+    appStatus.textContent = "正在监控: " + res2.path.split(/[\\/]/).pop();
   });
 
   // ===== 公共过滤控件联动 =====

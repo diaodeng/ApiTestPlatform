@@ -104,6 +104,29 @@ class LogApi:
                         continue
         return {"ok": True, "files": files}
 
+    def get_app_log_file(self) -> dict:
+        """
+        返回当前应用日志文件路径（程序日志页监控目标）。
+
+        优先取当天日期命名的日志（logs/YYYY-MM-DD.log，与原版一致）；
+        不存在时回退最新的 .log 文件；目录为空返回 ok=False。
+        """
+        logs_dir = Path("logs")
+        if not logs_dir.is_dir():
+            return {"ok": False, "message": "logs 目录不存在"}
+
+        today = logs_dir / (time.strftime("%Y-%m-%d") + ".log")
+        if today.exists():
+            return {"ok": True, "path": str(today)}
+
+        candidates = [
+            item for item in logs_dir.glob("*.log") if item.is_file()
+        ]
+        if not candidates:
+            return {"ok": False, "message": "未找到 .log 应用日志文件"}
+        latest = max(candidates, key=lambda p: p.stat().st_mtime)
+        return {"ok": True, "path": str(latest)}
+
     def read_head(self, path: str, max_lines: int = 500) -> dict:
         """
         读取日志文件末尾若干行，用于打开文件时先展示近期内容。
