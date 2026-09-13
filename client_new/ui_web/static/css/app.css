@@ -224,6 +224,9 @@ pre.panel {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+  /* 日志输出内容允许鼠标选中，便于手动复制部分内容 */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ===== 表单布局 ===== */

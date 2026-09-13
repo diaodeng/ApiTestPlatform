@@ -1,12 +1,14 @@
 """
 插件包构建脚本：从当前虚拟环境 .venv 收集重依赖打包为可分发的插件 zip。
 
-产物：client_new/dist_plugins/<name>.zip 与 <name>.zip.sha256
-用法：cd client_new && uv run python scripts/build_plugins.py
+产物：<输出目录>/<name>.zip 与 <name>.zip.sha256（默认 client_new/dist_plugins/，
+可由 build_release.py 通过 --out 指定到 dist_dev/plugins、dist_release/plugins）
+用法：cd client_new && uv run python scripts/build_plugins.py [--out 目录] [插件名...]
 说明：插件 zip 根目录包含 manifest.json 与对应包目录（如 cv2/、numpy/、playwright/），
 客户端「插件管理」支持在线下载（配合 .sha256 校验文件）或本地安装该 zip。
 """
 
+import argparse
 import hashlib
 import json
 import re
@@ -24,6 +26,11 @@ OUTPUT_DIR = PROJECT_ROOT / "dist_plugins"
 
 # manifest 需要记录客户端应用版本号，脚本可能以任意 cwd 运行，显式把项目根加入搜索路径
 sys.path.insert(0, str(PROJECT_ROOT))
+# 构建信息：version_build.py 为进 git 的固定加载器，实际值由 build_release.py 构建时
+# 写入 version_build_local.py（gitignore），记录进 manifest 便于追溯包体来源；
+# 未走构建脚本时各字段为空值，详见 version_build.py
+from version_build import BUILD_COMMIT_SHORT, BUILD_MODE  # noqa: E402
+
 from version import __version__ as APP_VERSION  # noqa: E402
 
 # 各插件包含的 site-packages 条目（目录或 .py 文件，不含 dist-info）；
@@ -195,13 +202,15 @@ def _resolve_version(package_name: str) -> str:
         return "unknown"
 
 
-def build_plugin(name: str, spec: dict) -> Path:
+def build_plugin(name: str, spec: dict, out_dir: Path) -> Path:
     """
     构建单个插件 zip。
     :param name: 插件标识
     :param spec: 插件打包配置
+    :param out_dir: 产物输出目录
     :return: 生成的 zip 路径
     """
+    out_dir.mkdir(parents=True, exist_ok=True)
     missing = [entry for entry in spec["entries"] if not (SITE_PACKAGES / entry).exists()]
 
     # 通配条目（如带 Python 版本标签的 .pyd），逐个展开为实际文件
@@ -223,7 +232,7 @@ def build_plugin(name: str, spec: dict) -> Path:
     if missing:
         raise FileNotFoundError(f"虚拟环境缺少插件条目: {missing}，请先 uv sync")
 
-    work_dir = OUTPUT_DIR / "_work" / name
+    work_dir = out_dir / "_work" / name
     if work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
@@ -254,11 +263,16 @@ def build_plugin(name: str, spec: dict) -> Path:
         "app_version": APP_VERSION,
         "built_at": datetime.now().isoformat(timespec="seconds"),
     }
+    # 构建模式与 commit（由 build_release.py 注入 version_build.py），便于追溯包体来源
+    if BUILD_MODE:
+        manifest["build_mode"] = BUILD_MODE
+    if BUILD_COMMIT_SHORT:
+        manifest["build_commit"] = BUILD_COMMIT_SHORT
     (work_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    zip_path = OUTPUT_DIR / f"{name}.zip"
+    zip_path = out_dir / f"{name}.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
@@ -267,27 +281,40 @@ def build_plugin(name: str, spec: dict) -> Path:
                 archive.write(file_path, file_path.relative_to(work_dir))
 
     sha256 = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-    (OUTPUT_DIR / f"{name}.zip.sha256").write_text(f"{sha256}\n", encoding="utf-8")
+    (out_dir / f"{name}.zip.sha256").write_text(f"{sha256}\n", encoding="utf-8")
 
-    shutil.rmtree(OUTPUT_DIR / "_work", ignore_errors=True)
+    shutil.rmtree(out_dir / "_work", ignore_errors=True)
     size_mb = zip_path.stat().st_size / 1024 / 1024
     print(f"[OK] {zip_path.name}  {size_mb:.1f} MB  manifest={manifest['version']}")
     return zip_path
 
 
 def main():
+    parser = argparse.ArgumentParser(description="插件包构建脚本（从 .venv 收集重依赖打包为 zip）")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=OUTPUT_DIR,
+        help=f"产物输出目录（默认 {OUTPUT_DIR}）",
+    )
+    parser.add_argument(
+        "plugins",
+        nargs="*",
+        help="要构建的插件名，留空构建全部",
+    )
+    args = parser.parse_args()
+
     if not SITE_PACKAGES.exists():
         print(f"未找到虚拟环境 site-packages: {SITE_PACKAGES}")
         sys.exit(1)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    requested = sys.argv[1:] or list(PLUGIN_PACKAGE_MAP)
+    requested = args.plugins or list(PLUGIN_PACKAGE_MAP)
     for name in requested:
         spec = PLUGIN_PACKAGE_MAP.get(name)
         if spec is None:
             print(f"未知插件: {name}，可选: {list(PLUGIN_PACKAGE_MAP)}")
             sys.exit(1)
-        build_plugin(name, spec)
+        build_plugin(name, spec, args.out)
 
 
 if __name__ == "__main__":

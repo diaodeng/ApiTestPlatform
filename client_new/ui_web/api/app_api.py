@@ -162,17 +162,18 @@ class AppApi:
         """
         弹出系统文件选择对话框，返回选中路径。
 
-        :param file_types: 形如 "Log Files (*.log;*.txt)|All Files (*)" 的过滤串
+        :param file_types: 形如 "日志文件 (*.log;*.txt)|所有文件 (*.*)" 的过滤串
         """
         import webview
 
         window = self._window_holder()
         if window is None:
             return {"ok": False, "message": "窗口不可用"}
-        filters = self._parse_file_types(file_types)
+        # pywebview 要求 file_types 为字符串列表，形如 "描述 (*.a;*.b)"
+        filters = self._parse_file_types(file_types) or ["所有文件 (*.*)"]
         result = window.create_file_dialog(
             dialog_type=webview.OPEN_DIALOG,
-            file_types=filters or [("所有文件 (*.*)", "*.*")],
+            file_types=filters,
         )
         # create_file_dialog 返回元组或列表
         path = ""
@@ -191,7 +192,9 @@ class AppApi:
         window = self._window_holder()
         if window is None:
             return {"ok": False, "message": "窗口不可用"}
-        result = window.create_file_dialog(dialog_type=webview.FOLDER_DIALOG)
+        # FOLDER_DIALOG 已弃用，统一使用 FileDialog 枚举
+        dialog_type = getattr(webview.FileDialog, "FOLDER", webview.FOLDER_DIALOG)
+        result = window.create_file_dialog(dialog_type=dialog_type)
         path = ""
         if isinstance(result, (list, tuple)) and result:
             path = str(result[0] or "")
@@ -200,10 +203,13 @@ class AppApi:
         return {"ok": bool(path), "path": path}
 
     @staticmethod
-    def _parse_file_types(file_types: str) -> list[tuple]:
+    def _parse_file_types(file_types: str) -> list[str]:
         """
         把 "描述 (*.a;*.b)|描述2 (*.c)" 解析为 pywebview 需要的
-        [("描述", "*.a;*.b"), ...] 形式。
+        ["描述 (*.a;*.b)", "描述2 (*.c)"] 字符串列表形式。
+
+        注意：pywebview 内部用正则对每个过滤项做字符串匹配，
+        传元组会抛 TypeError: expected string or bytes-like object。
         """
         if not file_types:
             return []
@@ -214,7 +220,7 @@ class AppApi:
                 continue
             desc, _, pattern = part.partition("(")
             pattern = pattern.replace(")", "").strip() or "*.*"
-            filters.append((desc.strip() or "文件", pattern))
+            filters.append(f"{(desc.strip() or '文件')} ({pattern})")
         return filters
 
     # ===== 弹窗应答与退出 =====

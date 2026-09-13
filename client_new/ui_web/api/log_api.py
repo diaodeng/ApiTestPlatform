@@ -18,11 +18,13 @@ class LogTailThread(threading.Thread):
     日志文件 tail 线程（替代原 Qt _FileTailThread）。
 
     按 offset 增量读取文件新增内容，整批经 EventBus 推送
-    "log_tail" 事件：{path, lines: [...], eof: bool}。
+    "log_tail" 事件：{source, path, lines: [...]}。
+    每个来源（local=本地日志 / app=程序日志）各自持有独立线程，互不影响。
     """
 
-    def __init__(self, file_path: str):
-        super().__init__(name="log-tail", daemon=True)
+    def __init__(self, source: str, file_path: str):
+        super().__init__(name=f"log-tail-{source}", daemon=True)
+        self.source = source
         self.file_path = file_path
         self._stop_event = threading.Event()
 
@@ -44,7 +46,10 @@ class LogTailThread(threading.Thread):
                 if size > offset:
                     lines = self._read_new_lines(offset)
                     if lines:
-                        event_bus.push("log_tail", {"path": self.file_path, "lines": lines})
+                        event_bus.push(
+                            "log_tail",
+                            {"source": self.source, "path": self.file_path, "lines": lines},
+                        )
                     offset = size
             except FileNotFoundError:
                 pass
@@ -74,11 +79,14 @@ class LogApi:
     """
     日志页面后端桥（替代原 Qt 页面的本地文件 tail 与应用日志列表）。
 
-    原 SSH 页签在旧版本即为占位（提示“未实现”），本次迁移不再保留。
+    本地日志（local）与程序日志（app）两路 tail 相互独立：
+    - 每个来源各自维护一个 LogTailThread，启动其中一路不会停止另一路；
+    - "log_tail" 事件携带 source 字段，前端据此分发到对应页签。
     """
 
     def __init__(self):
-        self._tail_thread: LogTailThread | None = None
+        # 按来源隔离的 tail 线程：{"local": LogTailThread, "app": LogTailThread}
+        self._tails: dict[str, LogTailThread] = {}
         self._lock = threading.Lock()
 
     def list_log_files(self) -> dict:
@@ -140,20 +148,50 @@ class LogApi:
             logger.exception(f"读取日志文件失败: {e}")
             return {"ok": False, "message": str(e)}
 
-    def start_tail(self, path: str) -> dict:
+    def start_tail(self, source: str, path: str) -> dict:
         """
-        开始增量推送指定文件的日志（先停止旧任务）。
+        开始增量推送指定来源（local/app）的指定文件日志。
+
+        同一来源重复启动会先停掉旧线程再启动新线程；不同来源互不影响。
         """
-        self.stop_tail()
+        src = str(source or "").strip() or "local"
+        self.stop_tail(src)
         with self._lock:
-            self._tail_thread = LogTailThread(path)
-            self._tail_thread.start()
+            thread = LogTailThread(src, path)
+            self._tails[src] = thread
+            thread.start()
         return {"ok": True}
 
-    def stop_tail(self) -> dict:
+    def stop_tail(self, source: str = "") -> dict:
+        """
+        停止指定来源的 tail；source 为空时停止所有来源（应用退出清理用）。
+        """
+        src = str(source or "").strip()
         with self._lock:
-            thread = self._tail_thread
-            self._tail_thread = None
-        if thread:
+            if src:
+                threads = [self._tails.pop(src)] if src in self._tails else []
+            else:
+                threads = list(self._tails.values())
+                self._tails.clear()
+        for thread in threads:
             thread.stop()
         return {"ok": True}
+
+    def get_tail_status(self) -> dict:
+        """
+        返回各来源当前的 tail 状态（文件路径、是否在跟踪），供页面恢复现场。
+        """
+        with self._lock:
+            return {
+                "ok": True,
+                "tails": {
+                    src: {"path": thread.file_path, "tailing": True}
+                    for src, thread in self._tails.items()
+                },
+            }
+
+    def shutdown(self) -> dict:
+        """
+        应用退出时停止全部 tail 线程（Bridge.shutdown 调用）。
+        """
+        return self.stop_tail()

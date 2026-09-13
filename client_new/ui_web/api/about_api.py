@@ -4,7 +4,7 @@ import threading
 from loguru import logger
 
 from ui_web.event_bus import event_bus
-from utils import VERSION
+from utils import VERSION, get_build_label
 from utils.common import (
     check_app_has_new,
     get_client_update_runtime_profile,
@@ -33,6 +33,8 @@ class AboutApi:
         return {
             "ok": True,
             "version": VERSION,
+            # 构建信息标签（模式/tag/commit/时间），未走构建脚本时为空串
+            "build_label": get_build_label(),
             "package_mode_label": profile.get("package_mode_label", ""),
             "preferred_asset_label": profile.get("preferred_asset_label", ""),
         }

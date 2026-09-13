@@ -12,8 +12,8 @@ export function agentPage(mount) {
   const statusLabel = el("span", { class: "muted", text: "就绪" });
   const macLabel = el("span", { class: "muted small", text: "MAC: -" });
 
-  const serverInput = textInput("", { list: "agent-server-list", placeholder: "例如: ws://127.0.0.1:9099/qtr/agent/ws", style: "min-width: 280px" });
-  const datalist = el("datalist", { id: "agent-server-list" });
+  // 服务器选择下拉框：选项显示服务名称（config.server_list 结构为 {地址: 名称}，value 存地址）
+  const serverSelect = select([], "", () => saveQuickSettings(), { style: "min-width: 260px" });
   const showLogCheck = checkbox("显示请求/响应日志", false);
   const btnStart = el("button", { class: "btn primary", text: "启动" });
   const btnStop = el("button", { class: "btn", text: "停止", disabled: true });
@@ -35,7 +35,7 @@ export function agentPage(mount) {
       btnStart, btnStop, btnClearLogs
     ),
     el("div", { class: "toolbar" },
-      el("label", { text: "服务地址" }), serverInput, datalist,
+      el("label", { text: "服务" }), serverSelect,
       showLogCheck,
       el("div", { style: "flex:1" }),
       btnServers, btnConn, btnBrowser, btnSync
@@ -57,13 +57,12 @@ export function agentPage(mount) {
     const res = await call("agent", "sync_config");
     if (!res.ok) toast(res.message, "error");
   });
-  serverInput.addEventListener("change", saveQuickSettings);
   showLogCheck.addEventListener("change", saveQuickSettings);
 
   function collectData() {
     return {
       ...config,
-      current_server: serverInput.value.trim(),
+      current_server: serverSelect.value,
       show_logs: showLogCheck.querySelector("input").checked,
     };
   }
@@ -75,19 +74,29 @@ export function agentPage(mount) {
 
   function applyConfig() {
     if (!config) return;
-    serverInput.value = config.current_server || "";
-    showLogCheck.querySelector("input").checked = !!config.show_logs;
-    datalist.clear?.();
-    clear(datalist);
-    for (const name of Object.keys(config.server_list || {})) {
-      datalist.append(el("option", { value: config.server_list[name] }));
+    const list = config.server_list || {};
+    const urls = Object.keys(list);
+    clear(serverSelect);
+    // 占位项：未选择时提示如何添加服务器
+    serverSelect.append(el("option", { value: "", text: urls.length ? "请选择服务器" : "请先在服务器管理中添加" }));
+    for (const url of urls) {
+      // 选项显示服务名称，无名称时兜底显示地址
+      serverSelect.append(el("option", { value: url, text: list[url] || url }));
     }
+    // 历史遗留：当前服务器不在列表中时兜底展示地址，避免选中值丢失
+    const current = (config.current_server || "").trim();
+    if (current && !urls.includes(current)) {
+      serverSelect.append(el("option", { value: current, text: current }));
+    }
+    serverSelect.value = current;
   }
 
   function applyState() {
     const running = ["starting", "running", "stopping"].includes(state);
     btnStart.disabled = running;
     btnStop.disabled = !running;
+    // 连接状态下不允许修改服务器选择（与旧版 server_combo.setEnabled(not running) 一致）
+    serverSelect.disabled = running;
     stateChip.className = "chip " + (state === "running" ? "ok" : running ? "warn" : "");
     const labelMap = { stopped: "已停止", starting: "连接中", running: "运行中", stopping: "停止中" };
     stateChip.textContent = labelMap[state] || state;
@@ -97,40 +106,43 @@ export function agentPage(mount) {
   btnServers.addEventListener("click", () => {
     const tbody = el("tbody", {});
     const syncUrlInput = textInput(config.config_sync_url || "", { placeholder: "配置拉取地址", style: "flex:1" });
-    let selectedName = "";
+    // 选中行按服务地址标识（config.server_list 结构为 {地址: 名称}）
+    let selectedUrl = "";
 
     function renderRows() {
-      selectedName = "";
+      selectedUrl = "";
       clear(tbody);
-      for (const [name, url] of Object.entries(config.server_list || {})) {
+      for (const [url, name] of Object.entries(config.server_list || {})) {
         const tr = el("tr", { onclick: () => {
-          selectedName = name;
+          selectedUrl = url;
           for (const row of tbody.children) row.classList.toggle("selected", row === tr);
         } },
-          el("td", { text: name }),
+          el("td", { text: name || url }),
           el("td", { text: url }),
-          el("td", { class: "muted small", text: name === config.current_server ? "当前使用" : "" })
+          el("td", { class: "muted small", text: url === config.current_server ? "当前使用" : "" })
         );
         tbody.append(tr);
       }
     }
 
-    /** 新增/修改共用的小弹窗；editName 为空表示新增。 */
-    function openServerEditor(editName = "") {
-      const nameInput = textInput(editName, { placeholder: "名称" });
-      const urlInput = textInput(editName ? config.server_list[editName] || "" : "", { placeholder: "地址 ws://...", style: "width:100%" });
+    /** 新增/修改共用的小弹窗；editUrl 为空表示新增。 */
+    function openServerEditor(editUrl = "") {
+      const nameInput = textInput(editUrl ? config.server_list[editUrl] || "" : "", { placeholder: "名称" });
+      const urlInput = textInput(editUrl, { placeholder: "地址 ws://...", style: "width:100%" });
       let editorModal;
       editorModal = openModal({
-        title: editName ? `修改服务器：${editName}` : "新增服务器",
+        title: editUrl ? `修改服务器：${config.server_list[editUrl] || editUrl}` : "新增服务器",
         body: el("div", { class: "form-grid" },
           el("label", { class: "sub", text: "名称" }), nameInput,
           el("label", { class: "sub", text: "地址" }), urlInput),
         footer: el("button", {
           class: "btn primary", text: "保存",
           onclick: async () => {
-            const res = await call("agent", "save_server", nameInput.value.trim(), urlInput.value.trim(), editName);
+            // 后端 server_list 按 {地址: 名称} 组织，第三个参数为修改前的地址
+            const res = await call("agent", "save_server", nameInput.value.trim(), urlInput.value.trim(), editUrl);
             if (!res.ok) return toast(res.message, "error");
-            await reloadConfig();
+            config = res.config;
+            applyConfig();
             renderRows();
             editorModal.close();
             toast("已保存", "success", 1200);
@@ -146,23 +158,24 @@ export function agentPage(mount) {
         el("button", {
           class: "btn small", text: "修改",
           onclick: () => {
-            if (!selectedName) return toast("请先在列表中选择要修改的服务器", "error");
-            openServerEditor(selectedName);
+            if (!selectedUrl) return toast("请先在列表中选择要修改的服务器", "error");
+            openServerEditor(selectedUrl);
           },
         }),
         el("button", {
           class: "btn small danger", text: "删除",
           onclick: async () => {
-            if (!selectedName) return toast("请先在列表中选择要删除的服务器", "error");
-            const res = await call("agent", "delete_server", selectedName);
+            if (!selectedUrl) return toast("请先在列表中选择要删除的服务器", "error");
+            const res = await call("agent", "delete_server", selectedUrl);
             if (!res.ok) return toast(res.message, "error");
-            await reloadConfig();
+            config = res.config;
+            applyConfig();
             renderRows();
           },
         })),
       el("div", { class: "table-wrap", style: "max-height:40vh; margin-top:8px" },
         el("table", { class: "data" },
-          el("thead", {}, el("tr", {}, el("th", { text: "名称" }), el("th", { text: "地址" }), el("th", { text: "" }))),
+          el("thead", {}, el("tr", {}, el("th", { text: "服务名称" }), el("th", { text: "服务地址" }), el("th", { text: "" }))),
           tbody)),
       el("div", { class: "form-row", style: "margin-top:10px" },
         el("label", { text: "配置拉取" }), syncUrlInput,

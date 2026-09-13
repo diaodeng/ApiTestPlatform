@@ -1,20 +1,25 @@
 /**
  * 日志页面：三个页签（SSH日志 / 本地日志 / 程序日志），与原 PySide6 版结构一致。
  *
+ * 本地日志与程序日志为两路完全独立的监控：
+ * - 各自维护独立的监听状态、已读内容与监听开关，互不影响；
+ * - 本地日志：选择文件仅"选中"，勾选「监听日志」才开始 tail，取消勾选即停止；
+ * - 程序日志：完全监听当前程序自身日志（logs 目录当天文件），由独立开关控制。
+ *
  * 监控会话（tail 状态、已读内容、页签、过滤配置）保存在模块级 session 中：
  * 切换到其它页面不会中断监控，回到日志页时恢复当前页签与内容继续显示。
  */
 const { Bus, call, el, $, clear, toast, textInput, copyText } = window.QTR;
 
 // ===== 模块级监控会话（跨页面切换保持） =====
+// 每个来源（local/app）独立持有：监控文件路径、是否在监听、已累计日志行。
 const session = {
   tab: "local",        // 当前页签
-  tailing: "",         // 正在跟踪的文件路径
-  source: "",          // 跟踪来源：local（本地文件）/ app（程序日志）
-  rawLines: [],        // 已累计的日志行
-  maxLines: 3000,
   filter: "",
+  maxLines: 3000,
   autoScroll: true,
+  local: { path: "", tailing: false, lines: [] },  // 本地日志会话
+  app: { path: "", tailing: false, lines: [] },    // 程序日志会话
 };
 let busBound = false;
 // 当前页面实例的视图引用（页面挂载期间有效，供事件处理器刷新显示）
@@ -24,10 +29,13 @@ function bindBusOnce() {
   if (busBound) return;
   busBound = true;
   Bus.on("log_tail", (p) => {
-    if (session.tailing && p.path !== session.tailing) return;
-    session.rawLines.push(...p.lines);
-    if (session.rawLines.length > session.maxLines * 2) {
-      session.rawLines = session.rawLines.slice(-session.maxLines);
+    const src = p.source === "app" ? "app" : "local";
+    const one = session[src];
+    // 只接收该来源当前正在监听的文件内容（切换文件后旧线程的残留推送会被丢弃）
+    if (!one.tailing || p.path !== one.path) return;
+    one.lines.push(...p.lines);
+    if (one.lines.length > session.maxLines * 2) {
+      one.lines = one.lines.slice(-session.maxLines);
     }
     renderViews();
   });
@@ -36,30 +44,42 @@ function bindBusOnce() {
 function renderViews() {
   if (!views) return;
   const keyword = session.filter.trim().toLowerCase();
-  const shown = keyword
-    ? session.rawLines.filter((l) => l.toLowerCase().includes(keyword))
-    : session.rawLines;
-  for (const pre of [views.localPre, views.appPre]) {
-    pre.textContent = shown.join("\n") || "（暂无日志）";
+  const pick = (lines) => {
+    const shown = keyword
+      ? lines.filter((l) => l.toLowerCase().includes(keyword))
+      : lines;
+    return shown.join("\n") || "（暂无日志）";
+  };
+  for (const [key, pre] of [["local", views.localPre], ["app", views.appPre]]) {
+    pre.textContent = pick(session[key].lines);
     if (session.autoScroll) pre.scrollTop = pre.scrollHeight;
   }
 }
 
-async function startTail(path, source) {
+// ===== tail 控制（后端按 source 隔离，两路互不影响） =====
+
+async function startTail(source, path) {
   const head = await call("log", "read_head", path, 500);
-  session.rawLines = head.ok ? head.lines : [];
-  await call("log", "stop_tail");
-  const res = await call("log", "start_tail", path);
+  const one = session[source];
+  one.lines = head.ok ? head.lines : [];
+  const res = await call("log", "start_tail", source, path);
   if (!res.ok) return toast(res.message, "error");
-  session.tailing = path;
-  session.source = source;
+  one.path = path;
+  one.tailing = true;
   renderViews();
 }
 
-async function stopTail() {
-  await call("log", "stop_tail");
-  session.tailing = "";
-  session.source = "";
+async function stopTail(source) {
+  await call("log", "stop_tail", source);
+  const one = session[source];
+  one.tailing = false;
+}
+
+// ===== 复制：优先复制用户选中的文本，无选区时复制全部内容 =====
+
+function copyPanelContent(pre) {
+  const selected = String(window.getSelection ? window.getSelection() : "").trim();
+  copyText(selected || pre.textContent);
 }
 
 export function logsPage(mount) {
@@ -140,22 +160,52 @@ export function logsPage(mount) {
     sshLogPre
   );
 
-  // ===== Tab 2：本地日志（选择外部文件 + tail） =====
+  // ===== Tab 2：本地日志（选择外部文件，独立监听开关） =====
   const localPre = el("pre", { class: "panel", style: "flex:1;min-height:0" });
-  const localPathLabel = el("span", { class: "muted small", text: session.tailing || "未选择文件" });
-  const localStatus = el("span", { class: "muted", text: session.source === "local" ? "正在跟踪" : "未在跟踪" });
+  const localPathLabel = el("span", { class: "muted small", text: session.local.path || "未选择文件" });
+  const localStatus = el("span", { class: "muted", text: "未在监听" });
+  const localWatchCheck = mkCheckbox("监听日志", session.local.tailing);
+  const fileName = (p) => p.split(/[\\/]/).pop();
+
+  // 「选择文件」只负责选中文件（更新路径显示），不自动开始监听
+  const chooseBtn = el("button", {
+    class: "btn", text: "选择文件",
+    onclick: async () => {
+      const res = await call("choose_file", "选择日志文件", "日志文件 (*.log;*.txt)|所有文件 (*.*)");
+      if (!res.ok) return;
+      session.local.path = res.path;
+      localPathLabel.textContent = res.path;
+      // 若当前正在监听旧文件，切换到新文件继续监听；否则仅选中不监听
+      if (localWatchCheck.querySelector("input").checked) {
+        await startTail("local", res.path);
+        localStatus.textContent = "正在监听: " + fileName(res.path);
+      } else {
+        localStatus.textContent = "已选中，未监听";
+      }
+    },
+  });
+
+  // 独立监听开关：勾选开始监听选中文件，取消勾选停止监听
+  localWatchCheck.addEventListener("change", async () => {
+    const on = localWatchCheck.querySelector("input").checked;
+    if (!on) {
+      await stopTail("local");
+      localStatus.textContent = "已停止监听";
+      return;
+    }
+    if (!session.local.path) {
+      localWatchCheck.querySelector("input").checked = false;
+      localStatus.textContent = "请先选择文件";
+      return toast("请先选择要监听的日志文件", "error");
+    }
+    await startTail("local", session.local.path);
+    localStatus.textContent = "正在监听: " + fileName(session.local.path);
+  });
+
   panels.local.append(
     el("div", { class: "toolbar", style: "margin:0" },
-      el("button", {
-        class: "btn", text: "选择文件",
-        onclick: async () => {
-          const res = await call("choose_file", "选择日志文件", "日志文件 (*.log;*.txt)|所有文件 (*.*)");
-          if (!res.ok) return;
-          localPathLabel.textContent = res.path;
-          await startTail(res.path, "local");
-          localStatus.textContent = "正在跟踪: " + res.path.split(/[\\/]/).pop();
-        },
-      }),
+      chooseBtn,
+      localWatchCheck,
       localPathLabel,
       el("div", { style: "flex:1" }), localStatus),
     el("div", { class: "toolbar", style: "margin:0" },
@@ -164,20 +214,20 @@ export function logsPage(mount) {
       autoScrollCheck,
       el("button", {
         class: "btn small", text: "复制",
-        onclick: () => copyText(localPre.textContent),
+        onclick: () => copyPanelContent(localPre),
       })),
     localPre
   );
 
-  // ===== Tab 3：程序日志（监控当天应用日志） =====
+  // ===== Tab 3：程序日志（完全监听当前程序自身日志，独立监听开关） =====
   const appPre = el("pre", { class: "panel", style: "flex:1;min-height:0" });
-  const watchAppCheck = mkCheckbox("监控日志", session.source === "app" && !!session.tailing);
-  const appStatus = el("span", { class: "muted", text: "就绪" });
+  const watchAppCheck = mkCheckbox("监听日志", session.app.tailing);
+  const appStatus = el("span", { class: "muted", text: "未在监听" });
   watchAppCheck.addEventListener("change", async () => {
     const on = watchAppCheck.querySelector("input").checked;
     if (!on) {
-      await stopTail();
-      appStatus.textContent = "已停止监控";
+      await stopTail("app");
+      appStatus.textContent = "已停止监听";
       return;
     }
     const res = await call("log", "get_app_log_file");
@@ -186,14 +236,14 @@ export function logsPage(mount) {
       appStatus.textContent = "未找到应用日志文件";
       return toast(res.message || "未找到应用日志文件", "error");
     }
-    await startTail(res.path, "app");
-    appStatus.textContent = "正在监控: " + res.path.split(/[\\/]/).pop();
+    await startTail("app", res.path);
+    appStatus.textContent = "正在监听: " + fileName(res.path);
   });
   panels.app.append(
     el("div", { class: "toolbar", style: "margin:0" },
       watchAppCheck,
       el("div", { style: "flex:1" }),
-      el("button", { class: "btn small", text: "复制", onclick: () => copyText(appPre.textContent) }),
+      el("button", { class: "btn small", text: "复制", onclick: () => copyPanelContent(appPre) }),
       appStatus),
     appPre
   );
@@ -203,12 +253,27 @@ export function logsPage(mount) {
   // ===== 挂载视图并恢复现场 =====
   views = { localPre, appPre };
   switchTab(session.tab || "local");
-  if (session.source === "app" && session.tailing) {
-    appStatus.textContent = "正在监控: " + session.tailing.split(/[\\/]/).pop();
-  } else if (session.source === "local" && session.tailing) {
-    localStatus.textContent = "正在跟踪: " + session.tailing.split(/[\\/]/).pop();
+  if (session.local.tailing && session.local.path) {
+    localStatus.textContent = "正在监听: " + fileName(session.local.path);
+  } else if (session.local.path) {
+    localStatus.textContent = "已选中，未监听";
+  }
+  if (session.app.tailing && session.app.path) {
+    appStatus.textContent = "正在监听: " + fileName(session.app.path);
   }
   renderViews();
+
+  // ===== 首次进入：本地日志默认选中当前程序日志文件，但不开始监听 =====
+  if (!session.local.path) {
+    call("log", "get_app_log_file").then((res) => {
+      if (!res.ok || session.local.path) return;
+      session.local.path = res.path;
+      localPathLabel.textContent = res.path;
+      if (views && !(session.local.tailing && session.local.path)) {
+        localStatus.textContent = "已选中，未监听";
+      }
+    });
+  }
 
   // ===== 页面销毁：保存现场，不中断监控 =====
   return {

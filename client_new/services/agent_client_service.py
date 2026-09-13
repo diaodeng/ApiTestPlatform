@@ -110,7 +110,8 @@ class AgentClientService:
             self._state = "starting"
 
         self._emit("state_changed", "starting")
-        self._emit("status_message", f"开始连接服务器：{connect_url}")
+        # 状态提示不携带连接地址（界面顶部不再展示服务地址），地址仅在日志中记录
+        self._emit("status_message", "开始连接服务器...")
 
         config_copy = config.model_copy(deep=True)
         thread = threading.Thread(

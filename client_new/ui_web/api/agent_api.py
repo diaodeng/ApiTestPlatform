@@ -120,47 +120,49 @@ class AgentApi:
         logger.info("Agent 配置已保存")
         return {"ok": True, "config": self.config.model_dump(), "message": "配置已保存"}
 
-    def save_server(self, name: str, url: str, old_name: str = "") -> dict:
+    def save_server(self, name: str, url: str, old_url: str = "") -> dict:
         """
-        新增/修改服务器地址（服务器管理弹窗使用）。
+        新增/修改服务器（服务器管理弹窗使用）。
 
-        :param name: 服务器名称
-        :param url: 服务器地址
-        :param old_name: 修改前的名称，为空表示新增
+        server_list 结构与旧版一致：{服务地址: 服务名称}，current_server 存地址。
+
+        :param name: 服务名称
+        :param url: 服务地址
+        :param old_url: 修改前的服务地址，为空表示新增
         """
         name = str(name or "").strip()
         url = str(url or "").strip()
-        old_name = str(old_name or "").strip()
+        old_url = str(old_url or "").strip()
         if not name or not url:
             return {"ok": False, "message": "名称与地址不能为空"}
 
         config = AgentConfig.read_config()
-        if old_name and old_name != name:
-            if name in config.server_list:
-                return {"ok": False, "message": f"服务器名称已存在: {name}"}
-            config.server_list.pop(old_name, None)
-            if config.current_server == old_name:
-                config.current_server = name
-        config.server_list[name] = url
+        if old_url and old_url != url:
+            if url in config.server_list:
+                return {"ok": False, "message": f"服务地址已存在: {url}"}
+            config.server_list.pop(old_url, None)
+            if config.current_server == old_url:
+                config.current_server = url
+        config.server_list[url] = name
         AgentConfig.save_config(config)
         self.config = AgentConfig.read_config()
         logger.info(f"Agent 服务器已保存: {name} -> {url}")
         return {"ok": True, "config": self.config.model_dump()}
 
-    def delete_server(self, name: str) -> dict:
+    def delete_server(self, url: str) -> dict:
         """
-        删除指定服务器地址。
+        删除指定服务地址（server_list 按 {地址: 名称} 组织）。
         """
-        name = str(name or "").strip()
+        url = str(url or "").strip()
         config = AgentConfig.read_config()
-        if name not in config.server_list:
-            return {"ok": False, "message": f"服务器不存在: {name}"}
-        config.server_list.pop(name, None)
-        if config.current_server == name:
+        if url not in config.server_list:
+            return {"ok": False, "message": f"服务器不存在: {url}"}
+        config.server_list.pop(url, None)
+        if config.current_server == url:
             config.current_server = next(iter(config.server_list), "")
         AgentConfig.save_config(config)
         self.config = AgentConfig.read_config()
-        logger.info(f"Agent 服务器已删除: {name}")
+        logger.info(f"Agent 服务器已删除: {url}")
         return {"ok": True, "config": self.config.model_dump()}
 
     def sync_config(self) -> dict:
@@ -263,7 +265,7 @@ class AgentApi:
         server = (self.config.current_server or "").strip()
         if not server:
             self.connection_state = "stopped"
-            self._push_status("请先输入或选择服务地址")
+            self._push_status("请先选择服务器")
             self._push_state()
             return
 

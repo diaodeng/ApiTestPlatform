@@ -65,6 +65,7 @@ export function aboutPage(mount) {
     const res = await call("about", "get_info");
     if (res.ok) {
       versionTip.textContent = `当前版本: ${res.version}`;
+      if (res.build_label) versionTip.textContent += `（${res.build_label}）`;
       tips.textContent += ` 当前运行形态：${res.package_mode_label}，升级资源策略：${res.preferred_asset_label}。`;
     }
   })();

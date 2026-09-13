@@ -43,6 +43,9 @@ graph TD
 - **线程模型**：原 QThread/QTimer/QThreadPool 全部替换为 `threading.Thread`、`threading.Timer` 与 `concurrent.futures.ThreadPoolExecutor`（POS 上限 4，与原一致）；mitm helper 的子进程 JSON 行协议管理与状态机完整保留，仅把 QTimer 轮询换成监控线程。
 - **单实例**：Windows 用命名互斥体 + FindWindow 激活旧窗口；非 Windows 用临时目录锁文件（`ui_web/utils/single_instance.py`）。
 - **主题**：原 ThemeTokens/QPalette 改为 CSS 变量（light/dark 两套 + `prefers-color-scheme` auto），模式持久化沿用 `ThemeConfig`。
+- **日志页双路 tail**：`api/log_api.py` 按 source（`local`=本地日志 / `app`=程序日志）各自维护独立的 `LogTailThread`，`start_tail(source, path)` / `stop_tail(source)` 互不影响（停止/重启其中一路不影响另一路）；`log_tail` 事件携带 `source` 字段供前端分发到对应页签；`shutdown()` 供 Bridge 在应用退出时停止全部 tail。
+- **Agent 服务器配置契约**：`AgentConfigModel.server_list` 结构为 `{服务地址: 服务名称}`、`current_server` 存服务地址（与旧 PySide6 版一致，pywebview 迁移时曾写反已修正）；Agent 页用下拉框按名称选择服务，连接中禁用切换；连接地址只在应用日志中记录，状态提示与界面均不展示。
+- **文件对话框契约**：`app.choose_file` 的 `file_types` 过滤串（形如 `"日志文件 (*.log;*.txt)|所有文件 (*.*)"`）解析为 pywebview 要求的**字符串列表** `"描述 (*.a;*.b)"`；pywebview 内部用正则对每项做字符串匹配，传元组会抛 `TypeError`。目录选择使用 `webview.FileDialog.FOLDER`（`FOLDER_DIALOG` 常量已弃用）。
 - **前端错误上报**：`index.html` 全局 error/unhandledrejection 钩子经 `app.log_js_error` 写后端日志，便于排查页面问题。
 
 ## 服务层的同步改造
