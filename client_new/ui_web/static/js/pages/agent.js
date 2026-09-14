@@ -89,6 +89,9 @@ export function agentPage(mount) {
       serverSelect.append(el("option", { value: current, text: current }));
     }
     serverSelect.value = current;
+    // 回显「显示请求/响应日志」勾选状态：状态持久化在后端 config.show_logs，
+    // 页面切换重挂载后 DOM 是新建的，必须从配置恢复，否则显示未勾选但日志仍在输出
+    showLogCheck.querySelector("input").checked = !!config.show_logs;
   }
 
   function applyState() {
