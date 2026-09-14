@@ -1,9 +1,13 @@
 /** POS 页面：扫描、启停、维护操作、设置/切换/进程/账号/本地环境弹窗。 */
-const { Bus, call, el, $, clear, toast, openModal, textInput, checkbox, select, listEditor, kvTable, copyText } = window.QTR;
+const { Bus, call, el, $, clear, toast, openModal, textInput, checkbox, select, listEditor, copyText, icon } = window.QTR;
 
 export function posPage(mount) {
   let boot = null; // get_bootstrap 结果
   let posConfig = null;
+  // 每个 POS 路径的环境信息状态：path -> {loading, text}，供左侧列动态展示
+  const envState = new Map();
+  // 当前渲染的行内环境信息节点：path -> DOM 节点（重渲染时重建）
+  const envNodes = new Map();
 
   // ===== 工具栏：扫描区（工作目录/模式配置收纳进「工作目录」弹窗） =====
   const btnWorkDir = el("button", { class: "btn", text: "工作目录" });
@@ -33,12 +37,21 @@ export function posPage(mount) {
   const filterInput = textInput("", { placeholder: "过滤关键字", style: "width:200px" });
   const resultTbody = el("tbody", {});
   const resultTable = el(
-    "table", { class: "data" },
+    "table", { class: "data pos-table" },
     el("thead", {}, el("tr", {},
       el("th", { text: "POS 路径" }), el("th", { text: "操作" }))));
 
-  const statusLabel = el("span", { class: "muted", text: "就绪" });
+  const statusLabel = el("span", { class: "muted selectable", text: "就绪" });
   const logPre = el("pre", { class: "panel", style: "height:120px;flex:none" });
+  // 状态区收起/展开：收起时隐藏状态文本与日志面板，按钮本身保持可见
+  const btnToggleStatus = el("button", { class: "btn small", text: "收起" });
+  let statusExpanded = true;
+  btnToggleStatus.addEventListener("click", () => {
+    statusExpanded = !statusExpanded;
+    statusLabel.style.display = statusExpanded ? "" : "none";
+    logPre.style.display = statusExpanded ? "" : "none";
+    btnToggleStatus.textContent = statusExpanded ? "收起" : "展开";
+  });
 
   mount.append(
     el("div", { class: "toolbar" },
@@ -54,7 +67,8 @@ export function posPage(mount) {
     ),
     el("div", { class: "table-wrap flex-fill" },
       resultTable),
-    el("div", { class: "toolbar", style: "margin-bottom:0" }, statusLabel),
+    // 底部状态区：收起/展开按钮 + 运行状态 + 日志面板
+    el("div", { class: "toolbar", style: "margin-bottom:0" }, btnToggleStatus, statusLabel),
     logPre
   );
 
@@ -69,21 +83,63 @@ export function posPage(mount) {
   }
 
   function buildRow(path) {
-    const name = path.split(/[\\/]/).pop();
-    const actions = el("div", { style: "display:flex;gap:5px;flex-wrap:wrap" });
-    const mk = (text, cls, fn) => el("button", { class: `btn small ${cls || ""}`, text, onclick: () => fn(path) });
+    // 左侧列两行：第一行完整路径，第二行环境信息（查看环境/本地环境切换后动态更新，行为对齐旧版 PySide）
+    const envLine = el("div", { class: "pos-env-line" });
+    envNodes.set(path, envLine);
+    renderEnvLine(envLine, path);
+    // 双击路径单元格复制完整路径（对齐旧版双击复制交互）
+    const pathCell = el("td", { ondblclick: () => copyText(path) },
+      el("div", { class: "mono small", text: path }),
+      envLine);
+    const actions = el("div", { style: "display:flex;gap:5px" });
+    // 图标按钮：语义通过 title 提示，避免操作列占用过宽
+    const mk = (name, title, cls, fn) =>
+      el("button", { class: `btn small icon-btn ${cls || ""}`, title, onclick: () => fn(path) }, icon(name));
     actions.append(
-      mk("启动", "primary", startPos),
-      mk("打开目录", "", (p) => call("pos", "open_location", p)),
-      mk("在线切换", "", switchOnline),
-      mk("查看环境", "", viewEnv),
-      mk("本地环境", "", openLocalEnv),
-      mk("更多", "", (p) => openMoreMenu(p, actions))
+      mk("play", "启动", "primary", startPos),
+      mk("folder", "打开目录", "", (p) => call("pos", "open_location", p)),
+      mk("refresh", "在线切换", "", switchOnline),
+      mk("info", "查看环境", "", viewEnv),
+      mk("home", "本地环境", "", openLocalEnv),
+      mk("more", "更多操作", "", (p) => openMoreMenu(p, actions))
     );
-    return el("tr", {},
-      el("td", {}, el("span", { class: "mono small", text: name }),
-        el("div", { class: "muted small", text: path })),
-      el("td", {}, actions));
+    return el("tr", {}, pathCell, el("td", {}, actions));
+  }
+
+  // ===== 左侧列环境信息 =====
+  // 按状态渲染环境信息行：未获取 / 获取中（高亮）/ 结果摘要
+  function renderEnvLine(node, path) {
+    const st = envState.get(path);
+    node.classList.toggle("loading", !!(st && st.loading));
+    node.textContent = !st ? "环境: 未获取"
+      : st.loading ? "环境: 获取中..."
+      : (st.text || "环境: 获取失败");
+  }
+
+  // 刷新指定路径当前渲染行的环境信息
+  function refreshEnvLine(path) {
+    const node = envNodes.get(path);
+    if (node) renderEnvLine(node, path);
+  }
+
+  // 由 get_env 返回的 payload 拼一行环境摘要（格式对齐旧版 _format_env_message，含商家/门店）
+  function formatEnvSummary(d) {
+    if (!d) return "";
+    const source = d.is_local ? "本地" : "远端";
+    const envShow = d.remote_env || d.local_env || "-";
+    return `${source} 商家:${d.vender_no || "-"} | 门店ID(sap/org): ${d.sap_org_no || "-"}/${d.org_no || "-"} | 环境:${envShow} 版本:${d.version || "-"} POS:${d.pos_id || "-"}`;
+  }
+
+  // 获取环境信息并更新左侧列（查看环境点击、本地环境切换成功后共用）
+  async function fetchEnvToLine(path) {
+    envState.set(path, { loading: true, text: "" });
+    refreshEnvLine(path);
+    const res = await call("pos", "get_env", path);
+    envState.set(path, res.ok
+      ? { loading: false, text: formatEnvSummary(res.data) }
+      : { loading: false, text: "" });
+    refreshEnvLine(path);
+    return res;
   }
 
   async function startPos(path) {
@@ -98,16 +154,9 @@ export function posPage(mount) {
   }
 
   async function viewEnv(path) {
-    const res = await call("pos", "get_env", path);
+    // 环境信息直接更新到左侧列（信息行已展示完整摘要，不再弹窗）；日志区同步留档
+    const res = await fetchEnvToLine(path);
     if (!res.ok) return toast(res.message, "error");
-    openModal({
-      title: "环境信息",
-      body: kvTable(Object.entries(res.data)),
-      footer: el("button", {
-        class: "btn", text: "复制",
-        onclick: () => copyText(res.message),
-      }),
-    });
     appendLog(res.message);
   }
 
@@ -132,7 +181,13 @@ export function posPage(mount) {
             const res = await call("pos", method, path);
             if (res.message) toast(res.message, res.ok ? "success" : "error");
           },
-        }))
+        })),
+      // 复制路径：纯前端行为，不走后端接口（对齐旧版更多菜单）
+      el("hr", { style: "border:none;border-top:1px solid var(--border);width:100%;margin:2px 0" }),
+      el("button", {
+        class: "btn", text: "复制路径",
+        onclick: () => { overlay.remove(); copyText(path); },
+      })
     );
     const overlay = el("div", { class: "modal-overlay" }, el("div", { class: "modal", style: "width:260px" },
       el("div", { class: "modal-head" }, el("span", { text: "更多操作" }),
@@ -361,7 +416,8 @@ export function posPage(mount) {
       el("label", { class: "sub", text: "当前环境" }), el("pre", { class: "panel", text: res.current_info }),
       el("label", { class: "sub", text: "已备份环境" }), envSel
     );
-    openModal({
+    let modal;
+    modal = openModal({
       title: "切换本地环境", body,
       footer: el("button", {
         class: "btn primary", text: "确定切换",
@@ -369,6 +425,11 @@ export function posPage(mount) {
           if (!envSel.value) return toast("请先选择目标环境", "error");
           const r = await call("pos", "change_local_env", path, envSel.value);
           toast(r.message || (r.ok ? "切换成功" : "切换失败"), r.ok ? "success" : "error");
+          if (r.ok) {
+            modal.close();
+            // 切换成功后重新获取环境信息，动态更新左侧列
+            fetchEnvToLine(path);
+          }
         },
       }),
     });
@@ -478,7 +539,11 @@ export function posPage(mount) {
     boot.history = res.result;
     renderRows();
   });
-  btnStopPos.addEventListener("click", () => call("pos", "stop_pos"));
+  btnStopPos.addEventListener("click", async () => {
+    const res = await call("pos", "stop_pos");
+    // 停止后不再保留之前 POS 的运行信息，状态区直接以停止结果为准
+    if (res && res.message) statusLabel.textContent = res.message;
+  });
   btnStopOffline.addEventListener("click", () => call("pos", "stop_offline"));
   btnSyncCfg.addEventListener("click", async () => {
     const url = (posConfig?.config_sync_url || "").trim();

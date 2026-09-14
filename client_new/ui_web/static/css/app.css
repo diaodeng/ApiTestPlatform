@@ -212,6 +212,28 @@ table.data tbody tr.selected { background: color-mix(in srgb, var(--primary) 15%
 
 .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; max-height: 100%; }
 
+/* ===== POS 列表专用 ===== */
+/* 操作列按内容收缩（width:1% + nowrap 是标准贴内容写法），剩余空间全部留给路径列 */
+.pos-table th:last-child, .pos-table td:last-child { width: 1%; white-space: nowrap; }
+/* 路径单元格允许选中复制（全局 body 为 user-select:none，这里局部放开） */
+.pos-table td:first-child { user-select: text; -webkit-user-select: text; cursor: text; }
+/* 环境信息行：默认弱化色，获取中用主题色高亮（与旧版 PySide 行为一致） */
+.pos-env-line { font-size: 11.5px; color: var(--text-muted); }
+.pos-env-line.loading { color: var(--primary); }
+
+/* 文本可选工具类：状态栏等需要选中复制的区域局部放开 user-select */
+.selectable { user-select: text; -webkit-user-select: text; }
+
+/* 图标按钮：正方形紧凑布局，配合 title 提示语义 */
+.btn.icon-btn {
+  padding: 4px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.btn.icon-btn svg { display: block; }
+
 /* ===== 日志/文本面板 ===== */
 pre.panel {
   margin: 0;

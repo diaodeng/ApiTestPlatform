@@ -272,9 +272,46 @@
     );
   }
 
+  // ===== 内联 SVG 图标 =====
+  // 零依赖图标方案：路径数据取自 Feather Icons（MIT），通过 currentColor 跟随文字颜色。
+  const ICON_PATHS = {
+    play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+    folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+    info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+    home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    more: '<circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/>',
+  };
+
+  /**
+   * 构造内联 SVG 图标节点。
+   * @param {string} name 图标名（见 ICON_PATHS）
+   * @param {number} size 边长像素，默认 15
+   */
+  function icon(name, size = 15) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", size);
+    svg.setAttribute("height", size);
+    svg.setAttribute("aria-hidden", "true");
+    if (name === "more") {
+      // 竖排圆点用实心渲染才清晰
+      svg.setAttribute("fill", "currentColor");
+    } else {
+      svg.setAttribute("fill", "none");
+      svg.setAttribute("stroke", "currentColor");
+      svg.setAttribute("stroke-width", "2");
+      svg.setAttribute("stroke-linecap", "round");
+      svg.setAttribute("stroke-linejoin", "round");
+    }
+    svg.innerHTML = ICON_PATHS[name] || "";
+    return svg;
+  }
+
   window.QTR = {
     Bus, call, rawCall, waitForApi, el, $, $$, clear, toast, openModal,
     backendDialog, fieldRow, textInput, checkbox, select, listEditor,
-    kvTable, copyText, helpTip,
+    kvTable, copyText, helpTip, icon,
   };
 })();
