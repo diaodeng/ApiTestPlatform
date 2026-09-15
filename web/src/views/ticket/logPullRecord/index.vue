@@ -143,7 +143,7 @@
         <template #default="scope">
           <el-tooltip
             v-if="scope.row.pullSource === 'automation'"
-            :content="`自动拉取（场景：${getPullSourceSceneLabel(scope.row.pullSourceScene)}）`"
+            :content="`自动拉取（场景：${getLogPullSourceSceneLabel(scope.row.pullSourceScene)}）`"
             placement="top"
           >
             <el-tag type="primary" effect="plain">自动</el-tag>
