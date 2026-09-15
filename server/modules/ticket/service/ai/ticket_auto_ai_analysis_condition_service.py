@@ -81,7 +81,13 @@ class TicketAutoAiAnalysisConditionService:
                 )
 
         latest_task = TicketAiDao.get_latest_task_by_ticket_id(db, ticket.ticket_id)
-        active_statuses = {TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value}
+        # pending_recovery（连接中断等待补交）同样视为活动任务：
+        # 恢复期间补交结果随时可能到达，此时自动触发新分析会造成并发同工单分析。
+        active_statuses = {
+            TicketAiAnalysisStatus.CREATED.value,
+            TicketAiAnalysisStatus.RUNNING.value,
+            TicketAiAnalysisStatus.PENDING_RECOVERY.value,
+        }
         latest_status = str(getattr(latest_task, "status", "") or "").strip() if latest_task else ""
         if latest_task and latest_status in active_statuses:
             return (

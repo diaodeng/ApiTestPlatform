@@ -35,6 +35,7 @@ related_files:
   - server/modules/ticket/service/ai/ticket_auto_classification_service.py
   - server/modules/ticket/service/ai/ticket_light_ai_service.py
   - server/modules/ticket/service/ai/ticket_ai_analysis_service.py
+  - server/modules/ticket/service/ai/ticket_ai_recovery_service.py
   - client_new/services/ticket_ai_analysis_service.py
   - client_new/services/ticket_ai_codex_config_service.py
   - server/modules/ticket/service/ai/ticket_embedding_service.py

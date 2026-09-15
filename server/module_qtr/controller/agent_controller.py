@@ -40,6 +40,10 @@ agentController = APIRouter(prefix="/qtr/agent")
 
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
+# 心跳离线判定阈值（秒）：超过该时长未收到 Agent 任何消息（含 pong）即判定离线。
+# 客户端每 30 秒响应一次 ping，且 AI Worker 在后台线程执行不阻塞事件循环，
+# 正常链路上该时间始终新鲜；静默死链（机器睡眠、网络中断）超过阈值必然被发现。
+HEARTBEAT_OFFLINE_SECONDS = 120
 # 分片注册表过期时间（秒）：超过该时间的未完成分片条目视为丢失（Agent 掉线、断流或分组异常），
 # 由心跳任务定期清理，避免分片内容长期驻留内存造成缓慢泄漏。
 CHUNK_REGISTRY_EXPIRE_SECONDS = 10 * 60
@@ -271,14 +275,6 @@ def change_agent_status(current_db, agent):
         logger.error(f"改变agent状态失败:{e}")
 
 
-def _count_pending_requests(agent_code: str) -> int:
-    """
-    统计指定 Agent 当前未完成的请求数。
-    :param agent_code: Agent 编码
-    :return: 未完成请求数
-    """
-    return sum(1 for request_state in response_futures.values() if request_state.get("agent_code") == agent_code)
-
 
 def _resolve_future_loop(request_state: dict[str, Any] | None):
     """
@@ -334,6 +330,9 @@ class ConnectionManager:
         agents[agent_code] = websocket
         agent_loops[agent_code] = asyncio.get_running_loop()
         agent_status.setdefault(agent_code, {})
+        # 连接建立即初始化最后收信时间：若客户端连接后完全静默（异常场景），
+        # 心跳超时判定也能在阈值后将其识别为离线，而不是永远跳过。
+        agent_status[agent_code]["heart_time"] = datetime.now()
         logger.info(f"Client connected: {self.agents[agent_code].client_state}")
 
     async def disconnect(self, agent_code: str, close_code):
@@ -347,58 +346,75 @@ class ConnectionManager:
         except Exception:
             pass
 
+    async def _remove_agent_connection(self, db, agent_code: str) -> None:
+        """
+        从内存注册表移除 Agent 并回写数据库离线状态。
+
+        主动关闭 WebSocket 是为了让仍阻塞在 receive_text 的端点循环尽快退出，
+        由端点 finally 统一取消该 Agent 的等待 Future 并再次回写离线状态（幂等）。
+        :param db: 数据库会话
+        :param agent_code: Agent 编码
+        :return: 无
+        """
+        agent_status.pop(agent_code, None)
+        websocket = self.agents.pop(agent_code, None)
+        agent_loops.pop(agent_code, None)
+        change_agent_status(db, agent_code)
+        if websocket is None:
+            return
+        try:
+            # 限时关闭，避免异常连接拖住心跳循环
+            await asyncio.wait_for(websocket.close(code=1011), timeout=5)
+        except Exception:
+            pass
+
     async def send_heartbeat(self):
         while True:
             try:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)  # 每30秒发送一次心跳
-                # logger.info(f'开始向客户端发送心跳信息：{self.agents}')
                 invalid_agent_key = []
                 # 顺带清理分片注册表：未凑齐且超时的 event_chunk 组、长时间无完整响应帧的响应分片。
                 now_mono = time.monotonic()
                 _sweep_stale_event_chunks(now_mono)
                 _prune_response_future_chunks(now_mono)
+                # 离线判定只依赖"最后一次收到该 Agent 消息的时间"（含 pong，由端点
+                # receive 循环刷新），心跳发送侧不再无条件刷新该时间，保证判定真实。
+                # 此前"存在未完成请求则跳过判定"的逻辑已移除：AI Worker 在客户端
+                # 后台线程执行，pong 不会因任务执行而中断；连接真死时结果也无法
+                # 回传，跳过判定只会留下僵尸在线状态（INC00001967826 根因之一）。
+                now = datetime.now()
                 for k, v in agent_status.items():
-                    if len(v) > 0:
-                        # logger.info(agent_status)
-                        pending_request_count = _count_pending_requests(k)
-                        heart_time = v.get("heart_time")
-                        if not heart_time:
-                            continue
-                        if pending_request_count > 0:
-                            logger.info(
-                                "agent【%s】存在 %s 个未完成请求，跳过离线判定，heart_time=%s",
-                                k,
-                                pending_request_count,
-                                heart_time,
-                            )
-                            continue
-                        if datetime.now() - heart_time > timedelta(seconds=(HEARTBEAT_INTERVAL + 5)):
-                            invalid_agent_key.append(k)
+                    if not v:
+                        continue
+                    heart_time = v.get("heart_time")
+                    if not heart_time:
+                        continue
+                    if now - heart_time > timedelta(seconds=HEARTBEAT_OFFLINE_SECONDS):
+                        invalid_agent_key.append(k)
                 current_db = SessionLocal()
                 try:
                     for agent in invalid_agent_key:
-                        logger.info(f"agent【{agent}】已经离线")
-                        del agent_status[agent]
-                        if self.agents.get(agent):
-                            del self.agents[agent]
-                        agent_loops.pop(agent, None)
-                        change_agent_status(current_db, agent)
+                        last_heart_time = (agent_status.get(agent) or {}).get("heart_time")
+                        logger.info(
+                            f"agent【{agent}】超过 {HEARTBEAT_OFFLINE_SECONDS} 秒未收到心跳，判定离线 | "
+                            f"last_heart_time={last_heart_time}"
+                        )
+                        await self._remove_agent_connection(current_db, agent)
 
                     for agent_code, _ in list(self.agents.items()):
                         if self.agents[agent_code].client_state.value == 1:
-                            # logger.info(f'当前发送心跳信息的客户端为：{agent_code}')
-                            agent_status[agent_code]["heart_time"] = datetime.now()
                             agent_status[agent_code]["heart_status"] = False
                             try:
                                 await self.agents[agent_code].send_text(
                                     json.dumps({"type": "ping", "status": "ok", "message": "service is alive"})
                                 )
                             except Exception:
-                                change_agent_status(current_db, agent_code)
+                                # ping 发送失败说明连接已不可用，立即移除，不再等待心跳超时
+                                logger.warning(f"agent【{agent_code}】心跳发送失败，立即判定离线")
+                                await self._remove_agent_connection(current_db, agent_code)
                         else:
                             logger.info(f"客户端{agent_code}已断开连接，从内存中移除")
-                            del self.agents[agent_code]
-                            agent_loops.pop(agent_code, None)
+                            await self._remove_agent_connection(current_db, agent_code)
                 finally:
                     current_db.close()
             except Exception:

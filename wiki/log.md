@@ -1,4 +1,16 @@
 
+## [2026-09-14] FIX | Agent 静默断连治理：AI 下发快速失败 + 心跳判离线 + 客户端看门狗 + 断连自动恢复
+
+- 背景：生产工单 INC00001967826 停留"AI 分析中"近一小时且 Agent 日志无任务记录。排查确认：Agent 与服务端连接静默死亡（半开 TCP，机器睡眠/网络中断类场景），客户端状态机与界面仍显示"运行中"，服务端 AI 下发循环对"Agent 不在连接表"只空转轮询到总超时（默认 3600 秒），期间任务一直显示"分析中"；用例执行链路直查内存连接表所以能立刻报"Agent 未连接"。三个根因：AI 下发不快速失败、心跳离线判定被"存在未完成请求则跳过"且 heart_time 在发 ping 前被无条件刷新（判定实为死代码）、客户端对静默死链无感知不重连。
+- 修复1（下发快速失败）：`AgentDispatchService.send_ai_analysis_message` 提交时与排队期间检测 Agent 离线立即返回明确失败（"当前离线"/"排队期间连接断开"）；连续 3 次 `WEBSOCKET_NOT_CONNECTED` 转发失败（新增常量 `AGENT_AI_ANALYSIS_DISCONNECT_REQUEUE_LIMIT=3`）判定连接不可用直接失败，堵住"入队-失败-再入队"空转。
+- 修复3（心跳判离线）：`agent_controller` 心跳重构——离线判定只依赖"最后一次收到该 Agent 消息的时间"（端点 receive 循环刷新，连接建立时初始化），发 ping 前不再无条件刷新；删除"存在未完成请求跳过判定"（AI Worker 在客户端后台线程执行不影响 pong）；阈值 `HEARTBEAT_OFFLINE_SECONDS=120`（2 分钟）；判定离线或 ping 发送失败统一走新增 `_remove_agent_connection`：清理 `agents/agent_loops/agent_status` 注册表 + DB 置离线 + 主动关闭 WebSocket 让阻塞的端点循环退出走 finally 取消等待 Future。
+- 修复4（客户端看门狗）：`client_new/server/agent_server.py` WebSocketClient 新增 `_watchdog_loop`——超过 90 秒（`HEARTBEAT_WATCHDOG_SILENCE_SECONDS`，3 个 ping 周期）未收到服务端任何消息即调用新增 `_abort_connection`（只关 socket 不置 manual_stop）触发既有重连链路；连接建立时启动、退出/重连时重建，recv 收到任何消息刷新计时。
+- 自动恢复（pending_recovery）：新增枚举值 `TicketAiAnalysisStatus.PENDING_RECOVERY`；网关断连取消返回专用错误码 `AgentResponseEnum.AGENT_CONNECTION_LOST(5009)`；`_process_task` 收到该错误码调用新增 `_enter_pending_recovery` 置任务为"连接中断，等待Agent补交结果"（非终态、不发失败通知，恢复期限=任务超时+15 分钟存任务上下文 `pendingRecoveryDeadline`）；恢复等待中且无补交结果的任务不派发新尝试（防与客户端仍在跑的 Worker 并发）；取消允许 pending_recovery、重试拒绝；自动 AI 前置条件将其视为活动任务；`resume_pending_tasks` 不置败交由扫描兜底。新增 `modules/ticket/service/ai/ticket_ai_recovery_service.py`：扫描 pending_recovery 任务，Redis 迟到结果缓存命中即 `queue_task` 重新排队走 `_load_recovered_agent_response` 写回成功（不重复消耗 token），超期置败 `AI_RECOVERY_DEADLINE_EXCEEDED` 并发失败通知；定时任务注册 `module_task.scheduler_maintenance.scan_pending_recovery_ai_tasks`（种子 SQL `server/sql/20260914_ticket_ai_recovery_scan_task.sql`，默认 60 秒间隔）。
+- 前端：工单列表处理状态新增"AI恢复中"（`ai_pending_recovery`）；工单详情 AI 任务标签新增"恢复中（等待Agent补交）"（warning）；恢复中任务允许取消、隐藏重试按钮。
+- 验证：`tests/test_agent_dispatch_service.py` 10 用例全过（含新增提交时离线快速失败、排队期间掉线快速失败 2 例）；AI/Agent 相关 7 个测试文件 37 用例全过；全量套件中 `test_ticket_read_summary_includes_ai_token_summary` 等 20 个失败经二分定位确认为工作区并行改动（非本次文件）与 HEAD 预存在问题（test_python_assert_ast 5 例）所致，还原本次全部改动后仍失败；ruff 本次改动文件无新增问题（scheduler_maintenance.py 的 I001/E501 为预存在）；client_new agent_server.py 语法与 ruff 通过。
+- 风险：恢复扫描任务需在部署时执行种子 SQL 或在任务调度页手动创建（60 秒间隔），未创建时 pending_recovery 任务不会被自动写回/置败；客户端看门狗阈值 90 秒与服务端判定 120 秒需保持"客户端先于服务端"关系，调整时注意联动；服务端心跳跳过判定移除后，若客户端实现改为阻塞事件循环将误判离线（当前 Worker 均在后台线程，无此风险）。
+- 文档：wiki flows/ticket-automation-flow.md（步骤 10/13、新增 13.2、错误处理表）、entities/services/ticket-domain.md（文件清单）已更新；用户说明 web/public/docs/ticket_ai_analysis.md 与更新记录已同步。
+
 ## [2026-09-13] FEATURE | 桌面录制覆盖层补齐（pywebview 透明窗口）
 
 - 背景：client_new 界面迁移 pywebview 后，desktop_test_service 依赖的屏幕高亮/框选/批注覆盖层（原 ui/utils/desktop_record_overlay，Qt 透明窗口）暂缺并按 None 降级；本次补齐并恢复接入。

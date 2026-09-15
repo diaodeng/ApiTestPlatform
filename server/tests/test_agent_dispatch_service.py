@@ -5,7 +5,7 @@ import time
 from config.cache_backend import MemoryRedis
 from module_qtr.service import agent_dispatch_service as dispatch_module
 from module_qtr.service.agent_dispatch_service import AgentDispatchService
-from module_qtr.service.agent_service import AgentResponseWebUI, HandleResponse
+from module_qtr.service.agent_service import AgentResponseEnum, AgentResponseWebUI, HandleResponse
 
 
 def test_ai_analysis_dispatch_queues_over_agent_concurrency_limit():
@@ -454,5 +454,104 @@ def test_cleanup_orphan_active_leases_recovers_queue_immediately():
         assert admitted is True
         active = await redis.hgetall(f"agent:ai_analysis:active:{agent}")
         assert set(active.keys()) == {"req-new"}
+
+    asyncio.run(scenario())
+
+
+def test_ai_analysis_dispatch_fails_fast_when_agent_offline_at_submit():
+    """
+    提交时 Agent 已离线：应立即返回失败并带明确原因，不进入队列等待到总超时。
+    回归场景（INC00001967826）：Agent 静默断连后任务排队空转约一小时才超时。
+    """
+    import asyncio
+
+    async def scenario():
+        redis = MemoryRedis()
+        await redis.set("sys_config:ticket.ai.agent.maxConcurrentTasks", "1")
+
+        dispatch_module.connected_agents = {}
+        try:
+            response = await AgentDispatchService.send_ai_analysis_message(
+                redis,
+                "agent-offline",
+                {"requestType": 6, "command": "run_ticket_ai_analysis"},
+                request_id="dispatch-offline-1",
+                timeout_seconds=30,
+            )
+            assert response.status_code == AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value
+            assert "当前离线" in str(response.message)
+            # 不应写入请求缓存和队列
+            assert await redis.get(AgentDispatchService._request_key("dispatch-offline-1")) is None
+            assert await redis.lrange("agent:ai_analysis:queue:agent-offline", 0, -1) == []
+        finally:
+            dispatch_module.connected_agents = {}
+
+    asyncio.run(scenario())
+
+
+def test_ai_analysis_dispatch_fails_fast_when_agent_goes_offline_while_queued():
+    """
+    排队期间 Agent 掉线：等待循环应立即失败并清理队列，不再空转到总超时。
+    """
+
+    async def scenario():
+        redis = MemoryRedis()
+        await redis.set("sys_config:ticket.ai.agent.maxConcurrentTasks", "1")
+
+        dispatch_module.connected_agents = {"agent-1": object()}
+        first_request_can_finish = asyncio.Event()
+
+        async def fake_agent_send_message(agent_code, message, request_id=None, timeout_seconds=None):
+            del agent_code, message, timeout_seconds
+            await first_request_can_finish.wait()
+            return HandleResponse(
+                status_code=200,
+                response=AgentResponseWebUI(
+                    request_type=6,
+                    success=True,
+                    message="ok",
+                    result={"analysis_result": {"root_cause": "排队掉线测试"}},
+                ),
+                message="操作成功",
+            )
+
+        original_sender = dispatch_module.agent_send_message
+        dispatch_module.agent_send_message = fake_agent_send_message
+        try:
+            first_task = asyncio.create_task(
+                AgentDispatchService.send_ai_analysis_message(
+                    redis,
+                    "agent-1",
+                    {"requestType": 6, "command": "run_ticket_ai_analysis"},
+                    request_id="dispatch-queued-offline-1",
+                    timeout_seconds=30,
+                )
+            )
+            await asyncio.sleep(0.2)
+
+            second_task = asyncio.create_task(
+                AgentDispatchService.send_ai_analysis_message(
+                    redis,
+                    "agent-1",
+                    {"requestType": 6, "command": "run_ticket_ai_analysis"},
+                    request_id="dispatch-queued-offline-2",
+                    timeout_seconds=30,
+                )
+            )
+            await asyncio.sleep(0.2)
+            # 排队中的第二个请求等待期间 Agent 掉线，应快速失败
+            dispatch_module.connected_agents = {}
+            second_response = await second_task
+            assert second_response.status_code == AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value
+            assert "排队期间连接断开" in str(second_response.message)
+            # 队列中不应残留该请求
+            assert await redis.lrange("agent:ai_analysis:queue:agent-1", 0, -1) == []
+
+            first_request_can_finish.set()
+            first_response = await first_task
+            assert first_response.status_code == 200
+        finally:
+            dispatch_module.agent_send_message = original_sender
+            dispatch_module.connected_agents = {}
 
     asyncio.run(scenario())

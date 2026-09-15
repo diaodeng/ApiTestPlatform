@@ -148,6 +148,7 @@
     if (status === 'success') return 'success';
     if (status === 'failed') return 'danger';
     if (status === 'running') return 'warning';
+    if (status === 'pending_recovery') return 'warning';
     if (status === 'created') return 'info';
     return 'info';
   }
@@ -162,6 +163,7 @@
     if (status === 'success') return '成功';
     if (status === 'failed') return '失败';
     if (status === 'running') return '执行中';
+    if (status === 'pending_recovery') return '恢复中（等待Agent补交）';
     if (status === 'created') return '待执行';
     return status || '-';
   }

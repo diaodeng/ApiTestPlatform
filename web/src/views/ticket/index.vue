@@ -2302,6 +2302,9 @@
       if (aiStatus === 'running' || aiStatus === 'created') {
         return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_running'), type: 'warning' };
       }
+      if (aiStatus === 'pending_recovery') {
+        return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_pending_recovery'), type: 'warning' };
+      }
       if (aiStatus === 'success') {
         return { label: getOptionLabel(ticketProcessStatusOptions, 'ai_success'), type: 'success' };
       }

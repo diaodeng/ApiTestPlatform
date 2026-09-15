@@ -157,6 +157,7 @@ class AgentResponseEnum(Enum):
     TASK_CANCELLED = 418            # 任务被取消
     UNKNOWN_EXCEPTION = 500         # 发生了未预期的异常
     WEBSOCKET_NOT_CONNECTED = 5008  # WebSocket 连接尚未建立或已断开，无法进行通信
+    AGENT_CONNECTION_LOST = 5009    # Agent WebSocket 连接中途断开，执行中的请求被取消（可等待 Agent 补交结果恢复）
 
 
 class ScopeEnum(Enum):
