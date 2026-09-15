@@ -212,6 +212,46 @@ table.data tbody tr.selected { background: color-mix(in srgb, var(--primary) 15%
 
 .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; max-height: 100%; }
 
+/* ===== mitmproxy 流量表专用 ===== */
+/* 固定布局：小列按内容定宽，Host 固定比例，Path 列（无宽度声明）吃满剩余空间 */
+.mitm-flow-table { table-layout: fixed; }
+.mitm-flow-table .col-time { width: 76px; }
+.mitm-flow-table .col-method { width: 52px; }
+.mitm-flow-table .col-host { width: 24%; }
+.mitm-flow-table .col-status { width: 46px; }
+.mitm-flow-table .col-size { width: 58px; }
+.mitm-flow-table .col-duration { width: 60px; }
+.mitm-flow-table .col-breakpoint { width: 62px; }
+/* 所有列强制单行显示：不换行、不按字符断行，超出列宽的内容隐藏（不换行撑高行） */
+.mitm-flow-table th, .mitm-flow-table td {
+  white-space: nowrap;
+  word-break: normal;
+  overflow: hidden;
+}
+/* 仅 Path 列超长时显示省略号，悬停 title 可看完整路径 */
+.mitm-flow-table td.flow-path {
+  text-overflow: ellipsis;
+}
+/* 列宽拖拽手柄：贴在表头单元格右缘，悬停高亮提示可拖拽 */
+.mitm-flow-table .col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+}
+.mitm-flow-table .col-grip::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+}
+.mitm-flow-table .col-grip:hover::after { background: var(--primary); }
+
 /* ===== POS 列表专用 ===== */
 /* 操作列按内容收缩（width:1% + nowrap 是标准贴内容写法），剩余空间全部留给路径列 */
 .pos-table th:last-child, .pos-table td:last-child { width: 1%; white-space: nowrap; }

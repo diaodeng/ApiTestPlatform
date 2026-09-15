@@ -31,7 +31,13 @@ export function mitmPage(mount) {
   // ===== 流量表 =====
   const flowTbody = el("tbody", {});
   const flowTable = el(
-    "table", { class: "data" },
+    "table", { class: "data mitm-flow-table" },
+    // 固定布局列宽：时间/方法/状态/大小/耗时/断点按内容定宽，Host 固定比例，Path 列占满剩余空间（超长省略）
+    el("colgroup", {},
+      el("col", { class: "col-time" }), el("col", { class: "col-method" }),
+      el("col", { class: "col-host" }), el("col", { class: "col-path" }),
+      el("col", { class: "col-status" }), el("col", { class: "col-size" }),
+      el("col", { class: "col-duration" }), el("col", { class: "col-breakpoint" })),
     el("thead", {}, el("tr", {},
       el("th", { text: "时间" }), el("th", { text: "方法" }), el("th", { text: "Host" }),
       el("th", { text: "Path" }), el("th", { text: "状态" }), el("th", { text: "大小" }),
@@ -68,6 +74,65 @@ export function mitmPage(mount) {
     el("div", { class: "split-v flex-fill" }, flowTableWrap, detailCol)
   );
   flowTable.append(flowTbody);
+  setupColumnResize();
+
+  // ===== 列宽拖拽调整 =====
+  // Path 列保持弹性占满剩余空间，不设手柄；拖动其他列手柄时 Path 自动反向伸缩
+  const RESIZE_COL_KEYS = ["time", "method", "host", "status", "size", "duration", "breakpoint"];
+  const COL_WIDTH_STORE_KEY = "qtr-mitm-flow-col-widths";
+  // Path 列在 colgroup / 表头中占下标 3，可拖拽列按下标 3 之后整体 +1 映射
+  const colIndex = (i) => (i >= 3 ? i + 1 : i);
+
+  /** 读取用户手动调整过的列宽（localStorage 持久化，跨会话保留） */
+  function loadColWidths() {
+    try { return JSON.parse(localStorage.getItem(COL_WIDTH_STORE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+
+  /**
+   * 给表头各列（除 Path 外）右缘安装拖拽手柄：
+   * - 按住左右拖动调整该列宽度（固定布局下 Path 列自动吸收变化）
+   * - 双击手柄恢复该列默认宽度
+   * - 拖出的宽度持久化到 localStorage，重启客户端后仍生效
+   */
+  function setupColumnResize() {
+    const cols = flowTable.querySelectorAll("colgroup col");
+    const headCells = flowTable.tHead.rows[0].cells;
+    const widths = loadColWidths();
+    // 恢复已保存的列宽（覆盖 CSS 默认值；Path 列无对应 key，始终弹性）
+    RESIZE_COL_KEYS.forEach((key, i) => {
+      if (widths[key]) cols[colIndex(i)].style.width = widths[key] + "px";
+    });
+    RESIZE_COL_KEYS.forEach((key, i) => {
+      const col = cols[colIndex(i)];
+      const grip = el("span", { class: "col-grip", title: "拖动调整列宽，双击恢复默认" });
+      // Path 列在 colgroup / 表头中的下标为 3，可拖拽列按下标映射跳过它
+      headCells[colIndex(i)].append(grip);
+      grip.addEventListener("mousedown", (e) => {
+        // 阻止默认行为避免拖动时选中文本；不拦截 th 上其他交互（本表无排序）
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = col.getBoundingClientRect().width;
+        const onMove = (ev) => {
+          // 最小 36px，防止把列拖没
+          col.style.width = Math.max(36, Math.round(startW + ev.clientX - startX)) + "px";
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          widths[key] = Math.round(col.getBoundingClientRect().width);
+          localStorage.setItem(COL_WIDTH_STORE_KEY, JSON.stringify(widths));
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+      grip.addEventListener("dblclick", () => {
+        col.style.width = "";
+        delete widths[key];
+        localStorage.setItem(COL_WIDTH_STORE_KEY, JSON.stringify(widths));
+      });
+    });
+  }
 
   let detailTab = "overview";
   const TAB_LABELS = { overview: "总览", request: "请求", response: "响应" };
@@ -94,7 +159,7 @@ export function mitmPage(mount) {
         el("td", { class: "mono small", text: f.time || "" }),
         el("td", { text: f.method || "" }),
         el("td", { class: "small", text: f.request_host || "" }),
-        el("td", { class: "mono small", text: f.path || "" }),
+        el("td", { class: "mono small flow-path", text: f.path || "", title: f.path || "" }),
         el("td", { class: "small", text: f.status_code ? String(f.status_code) : "..." }),
         el("td", { class: "small", text: formatBytes(f.size) }),
         el("td", { class: "small", text: f.duration_ms != null ? f.duration_ms + "ms" : "-" }),

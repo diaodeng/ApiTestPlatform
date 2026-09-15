@@ -17,6 +17,7 @@ server/alembic
 server/alembic.ini
 node_modules
 server/temp_test
+server/scripts/output
 .vscode
 temp
 _internal
