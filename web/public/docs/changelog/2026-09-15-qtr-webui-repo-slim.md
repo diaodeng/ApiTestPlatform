@@ -34,6 +34,40 @@
 - 部署端浅克隆实测：`git clone --depth 1 -b dist-release` 仅 **25 MB**
 - master 提交数 452 → 355（dist-only 提交被剔除），工作区 dist 由 gitignore 正确忽略
 
+### 执行后修复：分支跟踪丢失（no tracking information）
+
+filter-repo 会随 remote 一起清掉分支跟踪配置（`branch.master.remote/merge`），
+恢复 remote 后未补设 upstream，导致 sync 脚本第 1 步 `git pull --ff-only` 报
+"There is no tracking information for the current branch"。已做两层修复：
+
+- 影子仓库：四个分支已补 `--set-upstream-to=origin/<branch>`，`git pull` 验证恢复正常
+- `repo-cleanup.sh` 步骤 4：恢复 remote 时同步补设四个分支的跟踪配置
+- `sync-subrepos.ps1` 第 1 步：fetch 后检测当前分支缺 upstream 时自动补设（自愈，不再依赖一次性配置）
+
+### 执行后修复二：WSL bash 误命中 + 发布输入缺失
+
+日常 sync 实跑暴露两个问题：
+
+1. PowerShell 里 `bash` 命中的是 WSL 的 `C:\Windows\System32\bash.exe` 而非 Git Bash，
+   WSL bash 无法解析 Windows 路径（`E:\xj\...` 被吃成 `E:xj...`，报 No such file or directory）。
+   修复：sync 脚本从 git.exe 安装目录逐级探测 `bin\bash.exe`/`usr\bin\bash.exe` 定位 Git Bash，
+   并在影子仓库根目录用相对路径执行，绕开路径转换差异。
+2. 首轮改造把"镜像 dist 到影子仓库"整体删掉了，但 `publish-dist.sh` 是在影子仓库内读
+   自己的 `dist/` 作为发布输入，会导致下轮 sync 报 "dist/ 不存在或为空"。
+   修复：恢复 robocopy dist /MIR——影子仓库 .gitignore 已排除 `dist/`，dist 只作为
+   发布输入的工作区文件，`git add -A` 不会把它提交进 master，防复发机制不受影响。
+
+PowerShell → Git Bash 全链路已实测：publish-dist.sh 成功强推 dist-release。
+
+### 执行后修复三：dist-release 目录结构与 master 对齐
+
+dist-release 首版把 dist 内容平铺在根目录（index.html 在根），但部署端按
+master 的原布局取 `<仓库根>/dist/` 目录，平铺会导致取不到文件。已修正：
+`publish-dist.sh` 不再做子树提升，直接用含 `dist/` 前缀的完整索引树生成单提交，
+dist-release 根目录下即 `dist/` 子目录（`dist/index.html`），与 master 布局完全兼容。
+已重新发布并验证：根目录仅 `dist` 一项、`dist/index.html` 存在、745 个文件、0 个 map、
+浅克隆实测 25MB 且 `dist/index.html` 可取到。
+
 ## 体积结果
 
 | 项 | 清理前 | 清理后 |

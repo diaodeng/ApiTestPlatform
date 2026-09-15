@@ -4,7 +4,8 @@
 #
 # dist-release 分支永远只有一个提交（每次发布重写），因此仓库体积
 # 恒定 = 源码历史 + 最新一份 dist，不会再膨胀。
-# dist-release 根目录即 dist 的内容（index.html 在根），部署端浅克隆即可部署。
+# dist-release 的目录结构与 master 保持一致：根目录下是 dist/ 子目录
+# （dist/index.html），部署端按 <仓库根>/dist/ 取文件，与旧布局完全兼容。
 #
 # 实现（v2，plumbing 方式）：
 #   通过临时索引（GIT_INDEX_FILE）直接装载 dist 构建树并 commit-tree，
@@ -44,11 +45,12 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# 2. 生成单提交：取 dist 子树作为根树（dist-release 根目录 = dist 内容）
+# 2. 生成单提交：直接用含 dist/ 前缀的完整索引树
+#    （dist-release 结构与 master 一致：根目录下是 dist/ 子目录，部署端
+#    按 <仓库根>/dist/ 取文件；不做子树提升，避免部署端取不到文件）
 # ---------------------------------------------------------------------
-FULLTREE=$(GIT_INDEX_FILE="$TMPIDX" git write-tree)
-DISTTREE=$(git rev-parse "$FULLTREE:dist")
-COMMIT=$(git commit-tree "$DISTTREE" -m "$MSG")
+TREE=$(GIT_INDEX_FILE="$TMPIDX" git write-tree)
+COMMIT=$(git commit-tree "$TREE" -m "$MSG")
 log "发布提交: $COMMIT"
 
 # ---------------------------------------------------------------------
@@ -60,6 +62,6 @@ git push --force origin dist-release:dist-release
 git tag -f dist-release-head "$COMMIT" >/dev/null
 git push --force origin refs/tags/dist-release-head >/dev/null 2>&1 || true
 
-log "✅ 发布完成：origin/dist-release 根目录 = 最新 dist 内容"
-log "   部署端拉取: git clone --depth 1 -b dist-release <repo-url>"
+log "✅ 发布完成：origin/dist-release 根目录下 = dist/（与 master 结构一致）"
+log "   部署端拉取: git clone --depth 1 -b dist-release <repo-url>，取 dist/ 目录"
 log "   或增量更新: git fetch --depth 1 origin dist-release && git checkout FETCH_HEAD"

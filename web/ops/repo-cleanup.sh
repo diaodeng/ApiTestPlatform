@@ -85,11 +85,14 @@ log "filter-repo 完成，本地仓库现状："
 du -sh .git | awk '{print "  .git = " $1}'
 
 # ---------------------------------------------------------------------
-# 4. 恢复 origin（filter-repo 出于安全会移除 remote）
+# 4. 恢复 origin（filter-repo 出于安全会移除 remote，连同分支跟踪配置）
 # ---------------------------------------------------------------------
-log "4/6 恢复 remote origin"
+log "4/6 恢复 remote origin 与分支跟踪"
 git remote add origin "http://gitlab.rta-os.com/jie.xiong/qtr-webui.git"
-git fetch origin --prune || warn "fetch 失败，检查网络后可手动执行 git fetch origin --prune"
+for BR in master panda panda-newstep yoyo; do
+  git branch --set-upstream-to="origin/$BR" "$BR" 2>/dev/null \
+    || warn "分支 $BR 的 upstream 设置失败（分支不存在时忽略）"
+done
 
 # ---------------------------------------------------------------------
 # 5. .gitignore 增加 dist/（master 从此不再提交 dist）
