@@ -1188,7 +1188,7 @@
                   v-for="item in projectOptions"
                   :key="item.projectId"
                   :label="item.projectName"
-                  :value="item.projectId"
+                  :value="String(item.projectId)"
                 />
               </el-select>
             </el-form-item>
@@ -1731,7 +1731,7 @@
     delTicket,
     downloadTicketImportTemplate,
     exportTickets,
-    getTicket,
+    getTicketEditDetail,
     getTicketVersionStatistics,
     importTicketExcel,
     listTicketIssues,
@@ -2498,7 +2498,8 @@
 
   function handleUpdate(row) {
     reset();
-    getTicket(row.ticketId)
+    // 使用轻量编辑详情接口：仅回填表单所需字段，避免加载消息、快照和相似工单导致弹窗打开缓慢
+    getTicketEditDetail(row.ticketId)
       .then((response) => {
         const ticketData = response.data || {};
         suppressProjectWatcher = true;

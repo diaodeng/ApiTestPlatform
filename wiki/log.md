@@ -1,4 +1,15 @@
 
+## [2026-09-16] PERF | 工单编辑弹窗打开慢治理：新增轻量编辑详情接口，切断编辑链路与相似检索/消息/快照的耦合
+
+- 背景：工单列表点"编辑"后弹窗迟迟不打开。根因是 `handleUpdate`（web/src/views/ticket/index.vue）复用旧全量详情接口 `GET /ticket/{ticket_id}`，且等响应返回后才 `open.value = true`。该接口（TicketService.get_ticket_detail_services）除工单本体外同步组装：相似工单检索（TicketSimilarityQueryService——向量 missing/stale 时同步外呼 Embedding API 并可能同步写 Qdrant，超时配置 15-120s；MySQL 向量全量分页扫描逐条算余弦（2664 条×1024 维约 85MB）；混合重排对每个候选逐条查画像/信号/案例，候选池 10-100 时最多约 300 条小 SQL 的 N+1）、全量消息流（list_messages 无 limit）、全量 ACR 快照（list_snapshots 无 limit）——而编辑表单对这些数据零引用。
+- 方案（方案A）：编辑链路专用轻量接口，不复用也不扩展 summary（summary 带 6 项编辑用不到的附加查询且缺 3 个表单字段，契约混用）。
+- 后端：新增 `GET /ticket/{ticket_id:int}/edit-detail`（ticket_crud_controller，权限 ticket:ticket:query，run_in_threadpool 包装）；TicketReadService.get_edit_detail（ticket_read_service.py）只做 get_ticket_by_id + 版本标签 attach + 项目/模块业务码 attach + 最近日志拉取摘要（供 logPullRecord 预填兜底）+ originalDescription/aiTranslation 装饰（口径与全量详情 _decorate_ticket_item 对齐但不引入对主服务反向依赖）；新增白名单 VO TicketEditModel（ticket_read_vo.py），补齐编辑表单需要而 TicketSummaryModel 缺失的 tags/categoryName/problemPatternVerified；全部 BIGINT 主键与关联 ID 字符串化（_stringify_id），更新链路由 TicketUpdateModel 按 Pydantic 宽松模式解析回整数（已验证 str→int 强制转换）。
+- 前端：api/ticket/ticket.js 新增 getTicketEditDetail；index.vue handleUpdate 切换新接口，编辑弹窗"所属项目"option value 统一 String()（模块下拉原本 String(item.moduleId)、版本下拉 version_id 后端本就是 str，处理人下拉靠 UserSelect initialOption upsert 机制按字符串回显，均已核对）；logPullRecord/index.vue 预填同步切换。旧 getTicket 的两个调用点全部切换，无残留。
+- 验证：ruff 改动文件通过；按应用导入顺序（先 module_admin controller）验证模块导入/路由注册/TicketEditModel 校验/TicketUpdateModel 字符串 ID 解析正常（直接导 controller 触发的 login_service 循环导入为既有现象，与本次无关）；npm run build:prod 通过；handleUpdate 全部回填字段与 resolveTicketSyncSource 预填来源链逐项核对新接口覆盖。
+- 风险：建议对带标签/问题分类/细分问题类型勾选的工单做一次编辑保存回归；相似检索子系统自身性能问题（同步外呼、全量扫描、N+1）仍在，属 /similar-tickets 独立接口与重建功能范畴，另行治理；旧全量详情接口前端已无调用方，后续可评估精简或废弃。
+- 文档：server/docs/ticket_read_api.md、web/public/docs/updates/2026-09-16-ticket-edit-detail-lightweight.md 已更新。
+
+
 ## [2026-09-14] FIX | Agent 静默断连治理：AI 下发快速失败 + 心跳判离线 + 客户端看门狗 + 断连自动恢复
 
 - 背景：生产工单 INC00001967826 停留"AI 分析中"近一小时且 Agent 日志无任务记录。排查确认：Agent 与服务端连接静默死亡（半开 TCP，机器睡眠/网络中断类场景），客户端状态机与界面仍显示"运行中"，服务端 AI 下发循环对"Agent 不在连接表"只空转轮询到总超时（默认 3600 秒），期间任务一直显示"分析中"；用例执行链路直查内存连接表所以能立刻报"Agent 未连接"。三个根因：AI 下发不快速失败、心跳离线判定被"存在未完成请求则跳过"且 heart_time 在发 ping 前被无条件刷新（判定实为死代码）、客户端对静默死链无感知不重连。

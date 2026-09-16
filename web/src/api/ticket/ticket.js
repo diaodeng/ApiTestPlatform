@@ -138,6 +138,14 @@ export function getTicket(ticketId) {
   });
 }
 
+// 查询工单编辑回填数据（轻量：仅编辑表单字段，主键为字符串，不含消息/快照/相似工单）
+export function getTicketEditDetail(ticketId) {
+  return request({
+    url: `/ticket/${ticketId}/edit-detail`,
+    method: 'get',
+  });
+}
+
 
 // 查询工单分页协同消息
 export function getTicketMessagesPage(ticketId, params = {}) {
