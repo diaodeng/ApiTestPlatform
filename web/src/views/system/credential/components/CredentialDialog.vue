@@ -639,7 +639,7 @@ async function save() {
     const authConfig = { ...form.authConfig, targetHostPatterns:targetHostsText.value.split(',').map(v=>v.trim()).filter(Boolean), loginUrl:loginRequest.url, refreshUrl:refreshRequest.url, loginMethod:loginRequest.method, refreshMethod:refreshRequest.method, loginRequestTemplate:buildRequest(loginRequest), refreshRequestTemplate:buildRequest(refreshRequest), loginResponseMapping:buildMapping(loginRequest), refreshResponseMapping:buildMapping(refreshRequest), loginSuccessAssertions:buildAssertions(loginRequest), refreshSuccessAssertions:buildAssertions(refreshRequest) }
     validateRequestTemplateVariables(authConfig, secret)
     validateResponseMappingTargets(authConfig)
-    const data = { ...form, secret, authConfig }
+    const data = { ...form, expireTime: form.expireTime || null, secret, authConfig }
     saving.value = true
     const request = form.credentialId ? updateCredential(form.credentialId, { ...data, expectedRevision:form.revision }) : addCredential(data)
     await request
