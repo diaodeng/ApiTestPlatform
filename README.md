@@ -1,5 +1,5 @@
 <h1 align="center" style="margin: 30px 0 30px; font-weight: bold;">QTestRunner</h1>
-<h4 align="center">基于RuoYi-Vue3+FastAPI前后端分离的快速开发框架</h4>
+<h4 align="center">基于RuoYi-Vue3+FastAPI前后端分离的接口测试平台</h4>
 
 
 [本项目gitee地址](https://gitee.com/zywstart/api-test-platform.git)
@@ -8,7 +8,11 @@
 
 ## 平台简介
 
-RuoYi-Vue3-FastAPI是一套全部开源的快速开发平台，毫无保留给个人及企业免费使用。
+QTestRunner（api-test-platform）是一套前后端分离 + 桌面客户端的接口测试平台，由三部分组成：
+
+* **服务端**（`server/`）：FastAPI 后端，承担用例管理、任务调度、Agent 通信、AI 分析等业务；
+* **Web 管理端**（`web/`）：Vue3 + Vite 前端（RuoYi-Vue3 模板），管理用例、任务、工单、AI 配置等；
+* **桌面客户端**（`client_new/`）：pywebview 客户端，作为测试 Agent 注册到服务端，接收并执行下发任务（接口测试、桌面测试、Web 测试、抓包代理等），旧版 Flet 客户端（`client/`）保留但不再演进。
 
 * 特别鸣谢：<u>[RuoYi-Vue3](https://github.com/yangzongzhuan/RuoYi-Vue3)</u>
 
@@ -43,78 +47,105 @@ RuoYi-Vue3-FastAPI是一套全部开源的快速开发平台，毫无保留给�
 14. 缓存监控：对系统的缓存信息查询，命令统计等。
 15. 系统接口：根据业务代码自动生成相关的api接口文档。
 
-## 项目开发及发布相关
+## 项目结构
 
-### 开发
-
-```bash
-# 克隆项目
-git clone https://gitee.com/insistence2022/RuoYi-Vue3-FastAPI.git
-
-# 进入项目根目录
-cd RuoYi-Vue3-FastAPI
+```
+api-test-platform
+├── server/            # FastAPI 后端（uv 管理依赖，module_admin/module_qtr/module_task 按域分模块）
+├── web/               # Vue3 + Vite 前端（RuoYi-Vue3 模板，Docker 由 nginx 托管构建产物）
+│   └── public/docs/   # 面向用户的说明文档与更新记录（前端自动发现展示）
+├── client_new/        # 桌面客户端（pywebview + WebView2，测试 Agent，当前主力）
+├── client/            # 旧版 Flet 客户端（保留，不再演进）
+└── wiki/              # 项目内部知识库（架构、组件、流程设计文档）
 ```
 
-#### 前端
-```bash
-# 进入前端目录
-cd ruoyi-fastapi-frontend
+## 快速开始
 
-# 安装依赖
-npm install 或 yarn --registry=https://registry.npmmirror.com
+### 后端（server/）
 
-# 建议不要直接使用 cnpm 安装依赖，会有各种诡异的 bug。可以通过如下操作解决 npm 下载速度慢的问题
-npm install --registry=https://registry.npmmirror.com
-
-# 启动服务
-npm run dev 或 yarn dev
-```
-
-#### 后端
 ```bash
 # 进入后端目录
-cd ruoyi-fastapi-backend
+cd server
 
-# 安装项目依赖环境
-pip3 install -r requirements.txt
+# 安装依赖（uv 管理，含 .venv 创建）
+uv sync
 
 # 配置环境
-在.env.dev文件中配置开发环境的数据库和redis
+# .env.base 为公共配置，.env.dev / .env.prod 分别对应开发/生产环境的数据库与 redis
+# 数据库支持 MySQL（DB_TYPE=mysql）与 SQLite（DB_TYPE=sqlite）
 
-# 运行sql文件
-1.新建数据库ruoyi-fastapi(默认，可修改)
-2.使用命令或数据库连接工具运行sql文件夹下的ruoyi-fastapi.sql
+# 初始化数据库
+# 新建数据库后执行 server/sql/apitest.sql（增量变更脚本在 server/sql/ 下按日期追加）
 
-# 运行后端
-python3 app.py --env=dev
+# 启动后端
+uv run python app.py --env=dev
+
+# 代码检查
+uv run ruff check .
 ```
 
-#### 访问
+### 前端（web/）
+
 ```bash
-# 默认账号密码
-账号：admin
-密码：admin123
+# 进入前端目录
+cd web
 
-# 浏览器访问
-地址：http://localhost:80
+# 安装依赖
+npm install --registry=https://registry.npmmirror.com
+
+# 启动开发服务
+npm run dev
+
+# 浏览器访问（默认账号密码 admin / admin123，访问地址以启动输出为准）
 ```
 
-### 发布
+### 桌面客户端（client_new/）
 
-#### 前端
 ```bash
-# 构建测试环境
-npm run build:stage 或 yarn build:stage
+# 进入客户端目录
+cd client_new
 
-# 构建生产环境
-npm run build:prod 或 yarn build:prod
+# 安装依赖
+uv sync
+
+# 启动客户端（作为测试 Agent 注册到服务端）
+uv run python main.py
 ```
 
-#### 后端
+旧版 Flet 客户端（client/）启动方式：`cd client && uv run flet run`。
+
+## 构建与发版
+
+### 桌面客户端一键构建（client_new/scripts/build_release.py）
+
 ```bash
-# 配置环境
-在.env.prod文件中配置生产环境的数据库和redis
+cd client_new
 
-# 运行后端
-python3 app.py --env=prod
+# 开发打包（默认）：允许未提交代码，产物在 dist_dev/
+uv run python scripts/build_release.py
+
+# 正式发版打包：三道硬闸门（工作区干净、HEAD 上有 tag v{version.py 版本}、Gitee 无同名 release），
+# 任一不满足拒绝构建；产物在 dist_release/（exe、portable.zip、插件、sha256、release-manifest.json）
+uv run python scripts/build_release.py --mode release
 ```
+
+- 版本号唯一来源 `client_new/version.py`（纯数字四段式），tag 格式 `v{版本号}`；
+- 发版顺序：改 version.py → commit → 打 tag → release 构建 → 按 `release-manifest.json` 清单上传 Gitee release；
+- 主程序重依赖拆分为插件包（desktop-test / web-test / proxy），由客户端「插件管理」在线下载安装；
+- 客户端内置检查更新（走 Gitee release），详见 `client_new/README.md` 与 `wiki/entities/components/client-release-build.md`。
+
+### Docker 部署
+
+```bash
+# 后端（qtr-api，端口 9099，挂载 server/.env.dev 配置）
+cd server && docker compose up -d
+
+# 前端（多阶段构建，nginx 托管 web/dist 构建产物）
+cd web && docker build -t qtr-web .
+```
+
+## 文档
+
+- **用户说明**：`web/public/docs/`（平台内自动发现展示），覆盖 Agent 连接、插件管理、抓包 Mock、AI 配置等模块使用说明；
+- **更新记录**：`web/public/docs/updates/`（按时间倒序）；
+- **内部设计知识库**：`wiki/`（架构、组件、流程设计，供开发与 AI 分析使用）。

@@ -249,7 +249,8 @@ export function useSyncConfig(proxy) {
         template: '', manualTemplate: '',
         aiResultFollowUp: {
           enabled: false, sendOn: 'none', replyInThread: true, template: '',
-          noAnchorStrategy: 'skip',
+          noAnchorStrategy: 'skip', oncePerTicket: false,
+          messageStyle: 'card', cardFields: [],
         },
       },
       messageSync: {
@@ -697,6 +698,11 @@ export function useSyncConfig(proxy) {
         replyInThread: groupPush.aiResultFollowUp?.replyInThread !== false,
         template: groupPush.aiResultFollowUp?.template || '',
         noAnchorStrategy: groupPush.aiResultFollowUp?.noAnchorStrategy || 'skip',
+        oncePerTicket: Boolean(groupPush.aiResultFollowUp?.oncePerTicket),
+        messageStyle: groupPush.aiResultFollowUp?.messageStyle === 'text' ? 'text' : 'card',
+        cardFields: Array.isArray(groupPush.aiResultFollowUp?.cardFields)
+          ? groupPush.aiResultFollowUp.cardFields
+          : [],
       },
     }
     if (!form.groupPush.priorityRoutes.length) {
@@ -1030,6 +1036,13 @@ export function useSyncConfig(proxy) {
         replyInThread: payload.groupPush?.aiResultFollowUp?.replyInThread !== false,
         template: (payload.groupPush?.aiResultFollowUp?.template || '').trim(),
         noAnchorStrategy: payload.groupPush?.aiResultFollowUp?.noAnchorStrategy || 'skip',
+        oncePerTicket: Boolean(payload.groupPush?.aiResultFollowUp?.oncePerTicket),
+        messageStyle: payload.groupPush?.aiResultFollowUp?.messageStyle === 'text' ? 'text' : 'card',
+        cardFields: Array.isArray(payload.groupPush?.aiResultFollowUp?.cardFields)
+          ? payload.groupPush.aiResultFollowUp.cardFields
+              .map((item) => String(item || '').trim())
+              .filter(Boolean)
+          : [],
       }
       payload.groupPush.priorityRoutes = Array.isArray(payload.groupPush?.priorityRoutes)
         ? payload.groupPush.priorityRoutes

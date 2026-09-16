@@ -56,6 +56,12 @@ class TicketLogPullRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="处理完成时间")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="created", comment="内部处理状态")
     status_desc: Mapped[str] = mapped_column(String(100), nullable=False, default="待提交", comment="内部状态说明")
+    pull_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="manual", comment="拉取来源：manual人工，automation自动化链路"
+    )
+    pull_source_scene: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, comment="自动拉取触发场景：external_sync/remote_pull/bitable_pull/manual_create"
+    )
     is_error: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否异常/失败")
     error_message: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="异常信息")
     exception_detail: Mapped[str | None] = mapped_column(long_text_type(), nullable=True, comment="异常堆栈或详细错误")

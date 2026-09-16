@@ -626,6 +626,7 @@ class TicketSyncNotifyService:
         message_id: str,
         content: str,
         reply_in_thread: bool = True,
+        card: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         通过飞书应用身份回复指定消息或话题。
@@ -633,25 +634,34 @@ class TicketSyncNotifyService:
         :param app_id: 飞书应用 app_id。
         :param app_secret: 飞书应用 app_secret。
         :param message_id: 根消息、父消息或话题内消息 ID。
-        :param content: 回复正文。
+        :param content: 回帖正文；card 传入时该参数不再参与发送。
         :param reply_in_thread: 是否按话题内回复发送。
+        :param card: 可选飞书交互卡片，传入后按 msg_type=interactive 发送卡片回帖；不传保持纯文本回帖。
         :return: 飞书响应中的消息明细。
         """
         normalized_message_id = str(message_id or "").strip()
         message_text = str(content or "").strip()
         if not normalized_message_id:
             raise ValueError("飞书回复 message_id 不能为空")
-        if not message_text:
+        use_card = isinstance(card, dict) and bool(card)
+        if not use_card and not message_text:
             raise ValueError("飞书回复内容不能为空")
         token = cls._get_tenant_access_token(app_id, app_secret)
         url = f"{cls.FEISHU_BASE_URL}/im/v1/messages/{normalized_message_id}/reply"
+        if use_card:
+            # 卡片回帖：飞书要求 interactive 消息的 content 是序列化后的卡片 JSON 文本。
+            reply_content = json.dumps(card, ensure_ascii=False)
+            reply_msg_type = "interactive"
+        else:
+            reply_content = json.dumps({"text": message_text}, ensure_ascii=False)
+            reply_msg_type = "text"
         response_data = cls._request_feishu_json(
             method="POST",
             url=url,
             tenant_access_token=token,
             json_body={
-                "msg_type": "text",
-                "content": json.dumps({"text": message_text}, ensure_ascii=False),
+                "msg_type": reply_msg_type,
+                "content": reply_content,
                 "reply_in_thread": bool(reply_in_thread),
             },
         )

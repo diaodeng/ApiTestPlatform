@@ -11,6 +11,7 @@ from model.config import (
     AgentConfigModel,
     FtpConfigModel,
     MitmProxyConfigModel,
+    PluginConfigModel,
     PosConfigModel,
     PosParamsModel,
     SearchConfigModel,
@@ -144,6 +145,61 @@ class MitmproxyConfig:
             data = MitmProxyConfigModel.model_validate(data)
         data = data.model_dump()
         with open(cls.config_file, "w") as f:
+            f.write(json.dumps(data, indent=4, ensure_ascii=False))
+
+
+class PluginsConfig:
+    @classmethod
+    def _config_file(cls) -> str:
+        """
+        配置文件路径：打包态固定到 exe 目录（helper 子进程 cwd 可能是临时解压目录，
+        cwd 相对路径会导致 helper 读不到自定义安装目录），开发态沿用 cwd 相对约定。
+        :return: 配置文件路径
+        """
+        import sys
+        from pathlib import Path
+
+        if getattr(sys, "frozen", False):
+            return str(
+                Path(sys.executable).resolve().parent
+                / "storage"
+                / "data"
+                / "config_plugins.json"
+            )
+        return "storage/data/config_plugins.json"
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def read(cls) -> PluginConfigModel:
+        """
+        读取插件管理配置，文件不存在时用默认值初始化。
+        :return: 插件配置模型
+        """
+        config_file = cls._config_file()
+        if not os.path.exists(config_file):
+            return PluginConfigModel()
+        try:
+            with open(config_file, encoding="utf-8") as f:
+                config = json.load(f)
+                return PluginConfigModel(**config)
+        except Exception as e:
+            logger.warning(f"读取插件配置失败:{config_file}, {e}")
+            return PluginConfigModel()
+
+    @classmethod
+    def write(cls, data: dict | PluginConfigModel):
+        """
+        写入插件管理配置。
+        :param data: 配置数据
+        """
+        if not isinstance(data, PluginConfigModel):
+            data = PluginConfigModel.model_validate(data)
+        data = data.model_dump()
+        config_file = cls._config_file()
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        with open(config_file, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, indent=4, ensure_ascii=False))
 
 

@@ -17,6 +17,7 @@ server/alembic
 server/alembic.ini
 node_modules
 server/temp_test
+server/scripts/output
 .vscode
 temp
 _internal
@@ -169,3 +170,16 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# 内置 Python 运行时（scripts/setup_pip_runtime.py 可重建，不入库）
+client_new/runtime/
+
+# 客户端构建产物与构建过程文件（不进 git；分发产物走 Gitee release 附件）
+client_new/version_build_local.py
+client_new/dist_plugins/
+client_new/dist_release/
+client_new/dist_dev/
+client_new/build_webview/
+client_new/dist_webview/
+client_new/build_log*.txt
+.codeweaver/

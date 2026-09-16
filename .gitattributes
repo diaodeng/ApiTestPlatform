@@ -1,0 +1,21 @@
+# 主仓库 .gitattributes
+# 统一文本文件行尾：仓库内一律 LF，检出时按平台转换
+* text=auto eol=lf
+
+# Windows 专属文件保持 CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# 二进制文件不做任何转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.mp3 binary
+*.mp4 binary
+*.zip binary
+*.gz binary

@@ -504,15 +504,24 @@ class TicketLightAiService:
 
     @classmethod
     def _extract_all_explicit_machine_nos(cls, text: str, label: str) -> list[int]:
-        """提取原文中全部带机台语义的编号候选，按出现顺序去重。"""
+        """提取原文中全部带机台语义的编号候选，按出现顺序去重。
+
+        防误提规则：
+        1. 编号数字紧邻冒号或"数字+冒号"（时间 HH:mm 语境）不作为候选，避免
+           "[08/09 23:56 POS#2 ]" 中 23:56 的分钟被当成 "56 POS"、"POS 23:56" 的小时
+           被当成机台号；
+        2. "数字在前 POS 在后" 的两个分支在 POS 后追加负向前瞻，排除 POS 自身还紧跟
+           分隔符+数字的情况（那是 "POS 在前数字在后" 分支的领地），避免 finditer 消耗
+           掉 POS token 后 "POS#2" 无法再被匹配，导致正确机台号从候选中消失。
+        """
         if not text:
             return []
         escaped_label = re.escape(label)
         result: list[int] = []
         for matched in re.finditer(
-            rf"(?:^|[^A-Za-z0-9]){escaped_label}\s*[-#号编号:]?\s*(\d{{1,10}})"
-            rf"|(?:^|[^A-Za-z0-9])#?\s*(\d{{1,10}})\s*{escaped_label}(?:\b|[^A-Za-z0-9])"
-            rf"|(?:^|[^A-Za-z0-9])(?:\d{{1,10}})\s*号?{escaped_label}(?:\b|[^A-Za-z0-9])",
+            rf"(?:^|[^A-Za-z0-9]){escaped_label}\s*[-#号编号:]?\s*(\d{{1,10}})(?!\d*[:：]\d)"
+            rf"|(?:^|[^A-Za-z0-9])#?\s*(?<![:：])(\d{{1,10}})\s*{escaped_label}(?:\b|[^A-Za-z0-9])(?![\s]*[-#号编号:]?\s*\d)"
+            rf"|(?:^|[^A-Za-z0-9])(?<![:：])(\d{{1,10}})\s*号?{escaped_label}(?:\b|[^A-Za-z0-9])(?![\s]*[-#号编号:]?\s*\d)",
             text,
             flags=re.IGNORECASE,
         ):
@@ -535,11 +544,13 @@ class TicketLightAiService:
         """
         校验模型机台编号结果与原文机台语义的一致性，返回校验告警。
 
-        归一化策略为模型结果优先：模型具备语义判断能力，只有当模型返回无效值时
-        才用原文正则候选兜底；模型返回了有效编号且原文只存在唯一机台候选并与模型
-        冲突时，判定模型极大概率误判（如把金额片段当编号），用原文唯一候选纠正。
-        原文出现多个机台候选时（常见于"检查过A机、故障在B机"的工单），不猜测该信
-        哪一个，保留模型结果并输出告警供人工复核。
+        归一化策略为模型结果优先、正则仅兜底：模型具备语义判断能力且可随提示词
+        进化，只有当模型返回无效值（如金额片段）或未填写时，才用原文正则候选兜
+        底；模型返回了有效编号但不在原文候选中时，不再用原文候选覆盖（正则无法
+        判断语义，时间/金额/单号都可能被误提取为候选，历史上曾把 "23:56 POS#2"
+        的分钟 56 当成唯一候选反向覆盖模型的正确值），统一保留模型结果并输出告警
+        供人工复核。原文出现多个机台候选时（常见于"检查过A机、故障在B机"的工单），
+        同样不猜测该信任哪一个，以模型结果为准并告警。
         """
         raw_pos_value = (
             parsed_payload.get("posNo")
@@ -585,7 +596,7 @@ class TicketLightAiService:
         warnings: list[str],
     ) -> int | None:
         """
-        按模型优先策略对齐单个机台编号与原文候选。
+        按模型优先、正则兜底策略对齐单个机台编号与原文候选。
 
         :param label: 机台标签（POS/SCO），用于告警文案。
         :param model_no: 模型返回并归一化后的编号，无效为 None。
@@ -606,11 +617,8 @@ class TicketLightAiService:
             return candidates[0]
         if model_no in candidates:
             return model_no
-        if len(candidates) == 1:
-            # 原文只有一个机台候选且与模型结果冲突：模型大概率误判，用原文唯一候选纠正。
-            warnings.append(f"模型{label}={model_no}与原文唯一机台候选{label}={candidates[0]}不一致，已采用原文值")
-            return candidates[0]
-        # 原文有多个机台候选且模型结果不在其中：无法确定正确值，保留模型结果并告警供人工复核。
+        # 模型值有效但不在原文候选中（不论候选数量）：正则候选可能来自时间/金额/单号等
+        # 误提取，不具备语义判断能力，不再用候选覆盖模型值；保留模型结果并告警供人工复核。
         warnings.append(
             f"模型{label}={model_no}不在原文机台候选{candidates}中，已保留模型值，请人工复核"
         )

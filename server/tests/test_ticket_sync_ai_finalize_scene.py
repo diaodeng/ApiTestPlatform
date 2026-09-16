@@ -97,6 +97,45 @@ class TestBuildMetaSyncScenePassthrough(unittest.TestCase):
         self.assertEqual(meta["sync_state"]["sync_scene"], "")
 
 
+class TestBuildMetaExcludesMigratedKeys(unittest.TestCase):
+    """
+    两处 build_meta 白名单不得再包含已拆表的锚点/幂等字段。
+
+    背景（INC00001934853 / INC00001934853R）：锚点与回帖幂等原存 sync_state JSON，
+    被 build_meta 白名单重建静默擦除导致回帖丢失；2026-09 拆表后
+    （ticket_group_push_anchor 表 + ticket_ai_analysis_task.result_replied_at 列）
+    这两个键必须从白名单移除，防止再次出现"JSON 与表双源"。
+    """
+
+    def test_group_push_build_meta_excludes_migrated_keys(self):
+        """即使旧工单 JSON 中残留锚点/幂等键，build_meta 输出也不再包含（表为唯一事实源）。"""
+        extra_data = {
+            "external_sync": {
+                "sync_state": {
+                    "group_push_message_refs": [{"messageId": "om_1", "chatId": "oc_a"}],
+                    "ai_result_reply_task_ids": ["123"],
+                }
+            }
+        }
+        meta = TicketSyncGroupPushService.build_meta(extra_data)
+        self.assertNotIn("group_push_message_refs", meta["sync_state"])
+        self.assertNotIn("ai_result_reply_task_ids", meta["sync_state"])
+
+    def test_payload_build_meta_excludes_migrated_keys(self):
+        """TicketSyncPayloadService.build_meta 同样不再输出已拆表字段。"""
+        extra_data = {
+            "external_sync": {
+                "sync_state": {
+                    "group_push_message_refs": [{"messageId": "om_1"}],
+                    "ai_result_reply_task_ids": ["123"],
+                }
+            }
+        }
+        meta = TicketSyncPayloadService.build_meta(extra_data)
+        self.assertNotIn("group_push_message_refs", meta["sync_state"])
+        self.assertNotIn("ai_result_reply_task_ids", meta["sync_state"])
+
+
 class TestFinalizeSyncAfterAiSceneResolution(unittest.TestCase):
     """finalize_sync_after_ai 必须用工单元数据里的真实场景触发群推送。"""
 

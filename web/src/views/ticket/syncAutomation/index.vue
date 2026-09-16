@@ -1138,6 +1138,64 @@
                     </div>
                   </el-form-item>
                 </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="每工单仅回帖一次">
+                    <el-switch
+                      v-model="form.groupPush.aiResultFollowUp.oncePerTicket"
+                      inline-prompt
+                      active-text="开"
+                      inactive-text="关"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    />
+                    <div class="mapping-desc">
+                      幂等粒度：默认关闭（任务级，同一分析任务只回一次，多次分析会多次回帖）；
+                      开启后为工单级——该工单回帖成功过一次，后续分析结果不再回帖。
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="消息形态">
+                    <el-radio-group
+                      v-model="form.groupPush.aiResultFollowUp.messageStyle"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    >
+                      <el-radio value="card">卡片</el-radio>
+                      <el-radio value="text">纯文本</el-radio>
+                    </el-radio-group>
+                    <div class="mapping-desc">
+                      仅回帖模板留空时生效：卡片把结论、根因分析、修复建议等分区块展示；
+                      纯文本使用系统默认文本模板。配置了回帖模板时始终按模板发纯文本。
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col v-if="form.groupPush.aiResultFollowUp.messageStyle === 'card'" :xs="24" :md="12">
+                  <el-form-item label="卡片展示字段">
+                    <el-select
+                      v-model="form.groupPush.aiResultFollowUp.cardFields"
+                      multiple
+                      collapse-tags
+                      collapse-tags-tooltip
+                      clearable
+                      placeholder="留空默认全部展示"
+                      style="width: 100%"
+                      :disabled="form.groupPush.sendMode === 'push_config'"
+                    >
+                      <el-option label="工单信息（工单号/标题/模块/商家）" value="ticket_info" />
+                      <el-option label="结论" value="analysis_summary" />
+                      <el-option label="根因分析" value="root_cause" />
+                      <el-option label="修复建议" value="fix_suggestion" />
+                      <el-option label="依据" value="evidence" />
+                      <el-option label="风险项" value="risk_items" />
+                      <el-option label="后续动作" value="next_steps" />
+                      <el-option label="置信度备注" value="confidence" />
+                      <el-option label="查看工单按钮" value="ticket_link" />
+                    </el-select>
+                    <div class="mapping-desc">
+                      卡片模式下勾选的字段才展示对应区块，未勾选的区块不显示；留空默认全部展示。
+                      切到纯文本或配置回帖模板后本项不生效，但已勾选的值会保留。
+                    </div>
+                  </el-form-item>
+                </el-col>
                 <el-col :span="24">
                   <el-form-item label="回帖模板">
                     <el-input

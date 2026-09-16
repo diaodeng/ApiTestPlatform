@@ -115,6 +115,9 @@ class TicketAiAnalysisStatus(str, Enum):
 
     CREATED = "created"
     RUNNING = "running"
+    # 连接中断恢复中：Agent WebSocket 中途断开导致执行被取消，等待 Agent 重连
+    # 补交结果后自动写回成功；超过恢复期限无结果则由恢复扫描任务置为失败。
+    PENDING_RECOVERY = "pending_recovery"
     SUCCESS = "success"
     FAILED = "failed"
     CANCELED = "canceled"

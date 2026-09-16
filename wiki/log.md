@@ -1,3 +1,150 @@
+
+## [2026-09-14] FIX | Agent 静默断连治理：AI 下发快速失败 + 心跳判离线 + 客户端看门狗 + 断连自动恢复
+
+- 背景：生产工单 INC00001967826 停留"AI 分析中"近一小时且 Agent 日志无任务记录。排查确认：Agent 与服务端连接静默死亡（半开 TCP，机器睡眠/网络中断类场景），客户端状态机与界面仍显示"运行中"，服务端 AI 下发循环对"Agent 不在连接表"只空转轮询到总超时（默认 3600 秒），期间任务一直显示"分析中"；用例执行链路直查内存连接表所以能立刻报"Agent 未连接"。三个根因：AI 下发不快速失败、心跳离线判定被"存在未完成请求则跳过"且 heart_time 在发 ping 前被无条件刷新（判定实为死代码）、客户端对静默死链无感知不重连。
+- 修复1（下发快速失败）：`AgentDispatchService.send_ai_analysis_message` 提交时与排队期间检测 Agent 离线立即返回明确失败（"当前离线"/"排队期间连接断开"）；连续 3 次 `WEBSOCKET_NOT_CONNECTED` 转发失败（新增常量 `AGENT_AI_ANALYSIS_DISCONNECT_REQUEUE_LIMIT=3`）判定连接不可用直接失败，堵住"入队-失败-再入队"空转。
+- 修复3（心跳判离线）：`agent_controller` 心跳重构——离线判定只依赖"最后一次收到该 Agent 消息的时间"（端点 receive 循环刷新，连接建立时初始化），发 ping 前不再无条件刷新；删除"存在未完成请求跳过判定"（AI Worker 在客户端后台线程执行不影响 pong）；阈值 `HEARTBEAT_OFFLINE_SECONDS=120`（2 分钟）；判定离线或 ping 发送失败统一走新增 `_remove_agent_connection`：清理 `agents/agent_loops/agent_status` 注册表 + DB 置离线 + 主动关闭 WebSocket 让阻塞的端点循环退出走 finally 取消等待 Future。
+- 修复4（客户端看门狗）：`client_new/server/agent_server.py` WebSocketClient 新增 `_watchdog_loop`——超过 90 秒（`HEARTBEAT_WATCHDOG_SILENCE_SECONDS`，3 个 ping 周期）未收到服务端任何消息即调用新增 `_abort_connection`（只关 socket 不置 manual_stop）触发既有重连链路；连接建立时启动、退出/重连时重建，recv 收到任何消息刷新计时。
+- 自动恢复（pending_recovery）：新增枚举值 `TicketAiAnalysisStatus.PENDING_RECOVERY`；网关断连取消返回专用错误码 `AgentResponseEnum.AGENT_CONNECTION_LOST(5009)`；`_process_task` 收到该错误码调用新增 `_enter_pending_recovery` 置任务为"连接中断，等待Agent补交结果"（非终态、不发失败通知，恢复期限=任务超时+15 分钟存任务上下文 `pendingRecoveryDeadline`）；恢复等待中且无补交结果的任务不派发新尝试（防与客户端仍在跑的 Worker 并发）；取消允许 pending_recovery、重试拒绝；自动 AI 前置条件将其视为活动任务；`resume_pending_tasks` 不置败交由扫描兜底。新增 `modules/ticket/service/ai/ticket_ai_recovery_service.py`：扫描 pending_recovery 任务，Redis 迟到结果缓存命中即 `queue_task` 重新排队走 `_load_recovered_agent_response` 写回成功（不重复消耗 token），超期置败 `AI_RECOVERY_DEADLINE_EXCEEDED` 并发失败通知；定时任务注册 `module_task.scheduler_maintenance.scan_pending_recovery_ai_tasks`（种子 SQL `server/sql/20260914_ticket_ai_recovery_scan_task.sql`，默认 60 秒间隔）。
+- 前端：工单列表处理状态新增"AI恢复中"（`ai_pending_recovery`）；工单详情 AI 任务标签新增"恢复中（等待Agent补交）"（warning）；恢复中任务允许取消、隐藏重试按钮。
+- 验证：`tests/test_agent_dispatch_service.py` 10 用例全过（含新增提交时离线快速失败、排队期间掉线快速失败 2 例）；AI/Agent 相关 7 个测试文件 37 用例全过；全量套件中 `test_ticket_read_summary_includes_ai_token_summary` 等 20 个失败经二分定位确认为工作区并行改动（非本次文件）与 HEAD 预存在问题（test_python_assert_ast 5 例）所致，还原本次全部改动后仍失败；ruff 本次改动文件无新增问题（scheduler_maintenance.py 的 I001/E501 为预存在）；client_new agent_server.py 语法与 ruff 通过。
+- 风险：恢复扫描任务需在部署时执行种子 SQL 或在任务调度页手动创建（60 秒间隔），未创建时 pending_recovery 任务不会被自动写回/置败；客户端看门狗阈值 90 秒与服务端判定 120 秒需保持"客户端先于服务端"关系，调整时注意联动；服务端心跳跳过判定移除后，若客户端实现改为阻塞事件循环将误判离线（当前 Worker 均在后台线程，无此风险）。
+- 文档：wiki flows/ticket-automation-flow.md（步骤 10/13、新增 13.2、错误处理表）、entities/services/ticket-domain.md（文件清单）已更新；用户说明 web/public/docs/ticket_ai_analysis.md 与更新记录已同步。
+
+## [2026-09-13] FEATURE | 桌面录制覆盖层补齐（pywebview 透明窗口）
+
+- 背景：client_new 界面迁移 pywebview 后，desktop_test_service 依赖的屏幕高亮/框选/批注覆盖层（原 ui/utils/desktop_record_overlay，Qt 透明窗口）暂缺并按 None 降级；本次补齐并恢复接入。
+- 实现：新增 ui_web/desktop_overlay.py，公开六函数与原 Qt 版签名一致（show/hide_recording_viewport、suspend/resume_recording_overlays_for_capture、request/cancel_recording_annotation）。三个懒创建 pywebview 窗口：透明描边窗（WS_EX_TRANSPARENT|LAYERED|NOACTIVATE 整窗点击穿透，WindowFromPoint 实测穿透）、交互选择窗（拖拽选区/几何 clamp/Esc 取消，js_api 回传）、标注工具条（六按钮，位置贴视口候选策略同原版）。物理像素定位（SetWindowPos + pywebview SetProcessDPIAware，与 pyautogui 同空间），CSS↔屏幕坐标按物理宽度/innerWidth 动态换算兼容缩放。
+- 语义对齐：全屏视口不描边、标注结果结构与 skipped 语义、suspend/resume 可见性恢复、<4x4 选择视为取消、新请求跳过未决请求，均与原版一致。
+- 验证：150% 缩放描边位置正确；穿透命中下层；标注流程 Future 解析正确；suspend/resume 正确；取消标注 skipped。desktop_test_service 导入链恢复（try-import ui_web.desktop_overlay）。
+- 风险：混合 DPI 多屏的副屏框选场景建议实测；覆盖层常驻懒创建带来少量 WebView2 内存开销；app 退出经 Bridge.shutdown→shutdown_overlays 销毁并放行未决标注。
+- 文档：用户说明 pywebview-ui.md 覆盖层条目更新；更新记录 pywebview-migration 追加补齐段。
+
+## [2026-09-13] REVERT | 移除插件 Pip 安装模式（内置 Python 运行时）
+
+- 背景：早前加入的插件「Pip 安装」需在客户端内捆绑独立嵌入式 Python 运行时（runtime/python，几十 MB），用户确认体积代价过高，要求移除；对应的改动作为独立提交。
+- 移除：plugins/manager.py 的 install_from_pip / read_pip_index_url / save_pip_index_url / _locate_pip_python / _runtime_python_version / _check_modules_in_dir / _write_pip_manifest 与默认 Pip 源常量（_replace_plugin_dir 为 zip 路径共用，保留）；plugins/pip_pins.py 与 build_plugins.py 的清单生成；scripts/setup_pip_runtime.py 与本地 runtime/ 目录；PluginConfigModel.pip_index_url 字段；两个 spec 的 runtime/python 打包块；插件管理弹窗的 Pip 源行与 Pip安装按钮（ui_web api/plugins.js）。
+- 保留：manifest python_version/app_version 兼容校验（zip 安装强校验）、Gitee 按版本回退下载、sha256 校验、安装失败回滚，均与 pip 模式无关。
+- 验证：ruff F/E9 通过；plugin_manager 导入与三插件状态读取正常、pip 入口确认不存在、install_from_zip/download_and_install 保留；PluginConfigModel 无 pip_index_url；Bridge get_plugin_settings 无 pip 字段；plugins.js 语法通过。
+- 影响：pip 模式装过的插件目录无需处理（manifest 结构一致，可被在线/本地安装覆盖重装）；打包体积回退数十 MB。
+- 文档：用户说明 web/public/docs/client/plugins.md 移除 Pip 相关章节与 FAQ；更新记录 updates/2026-09-13-client-new-remove-plugin-pip-install.md；history.md 已更新。
+
+## [2026-09-13] FEATURE | 新版客户端界面由 PySide6 迁移到 pywebview
+
+- 背景：用户要求将 client_new 界面从 PySide6 迁移到 pywebview（基于 master_params 拉出 client_pywebview 分支实施）。调研确认 Qt 耦合面集中在 ui/controller/workers/emitter/QTableModel 与 agent_client_service 的 Signal 外衣，services/server/managers/utils/plugins 全部纯 Python 可复用。
+- 方案：新增 client_new/ui_web/ 界面桥接层——app.py 装配 pywebview 窗口（必须 http_server=True，ES module 在 file:// 下被 WebView 拦截）；event_bus 用 evaluate_js 向前端推送事件（事件名与原 Qt Signal 一一对应）；dialog_bridge 把业务确认弹窗桥接为前端模态框（threading.Event 等待 + resolve_dialog 回传，超时按取消）；api/ 以 Bridge 门面聚合 app/agent/pos/sqlite/mitm/log/about 七个子 API（Qt QThread/QTimer/Worker 换 threading/ThreadPoolExecutor，mitm helper 子进程协议与状态机完整保留）。前端 static/ 为无构建原生 SPA（CSS 变量双主题、Modal/Toast、6 页面 + 插件弹窗），前端错误经 app.log_js_error 写后端日志。
+- 改造与删除：agent_client_service 剥离 QObject/Signal 改回调注册（事件名不变）；mock_handle._emit_flow 移除 Qt emitter 兜底；desktop_test_service 覆盖层能力置 None 降级（依赖 Qt 透明窗口，后续用 pywebview 补齐）；删除 ui/、controller/、workers/、emitter/、QTableModel、qt_slim.py 与 Qt 版测试；依赖去 pyside6 加 pywebview>=5.4；spec 移除裁剪脚本并打入 ui_web_static。
+- 验证：uv sync 通过；Bridge 各子 API 冒烟通过；仪器化 GUI 冒烟——页面加载、6 页面切换渲染、插件弹窗、get_global_status 轮询均正常，无 js_error/js_rejection；ruff F/E9 无新增。
+- 风险：exe 未重新打包验证（spec 已同步）；桌面录制覆盖层暂缺；断点编辑/POS 启动确认/自更新等深链路建议日常回归。
+- 文档：wiki 新增 entities/components/new-client-webview-ui.md（旧壳层文档加退役注记）、log.md 记录；用户说明 web/public/docs/client/pywebview-ui.md、更新记录 updates/2026-09-13-client-new-pywebview-migration.md、history.md 已更新。
+
+## [2026-09-12] FEATURE | client_new Qt 运行时二次瘦身（目录版 122MB→76MB）
+
+- 背景：插件化拆分后目录版 `_internal` 仍 122MB，用户预期不应有此体量；逐层 du 定位 PySide6 独占 92MB，插件重依赖（cv2/numpy/playwright/mitmproxy 等）确认已不在，剩余全是 Qt 运行时被 PyInstaller 官方 PySide6 hook 按"包目录"级别连带收集。
+- 根因（pefile 解析产物全部 DLL/PYD 导入表证实，均与项目代码无关）：①hook 因 import QtGui 收集 `platforminputcontexts/qtvirtualkeyboardplugin.dll`（<1MB）→ 依赖 Qt6VirtualKeyboard → 依赖 Qt6Quick → 拖入 Qt6Qml 全家（约 17MB，纯 Widgets 应用零 QML 使用）；②imageformats 全目录中的 `qpdf.dll` 拖入 Qt6Pdf（约 5MB）；③默认携带软件 OpenGL 回退 `opengl32sw.dll`（约 20MB）；④96 个 Qt 翻译文件全量收集（约 7MB，实际只需 zh_CN）。单文件版 55MB 即同一套内容 zlib 压缩结果，不是内容更少。
+- 实现：新增 `client_new/scripts/qt_slim.py`（`apply_qt_slim(a)` 原位过滤 Analysis 的 binaries/datas，两个 spec 共用），`QTRClientNew.spec` 与 `QTRClientNewPortable.spec` 在 Analysis 后调用；剔除上述 7 个 DLL + platforminputcontexts 整目录 + qpdf.dll + 非中文翻译，共 103 个条目；qwindows/qdirect2d 平台插件、Qt6Network/Qt6OpenGL/Qt6Svg、其余 imageformats 全部保留。
+- 效果：目录版 `_internal` 122MB→76MB（-46MB/-38%）；单文件版 55MB→37.6MB。
+- 文档：更新记录 `web/public/docs/updates/2026-09-12-client-new-qt-runtime-slim.md`（history.md 已加条目）。
+- 验证：portable 与 onefile 构建均 exit=0；pefile 依赖一致性检查无新断链（Qt6Core 对 icuuc.dll 为延迟加载可选项，与瘦身前一致）；便携版启动冒烟通过（进程存活、fatal_error.log 无异常）。注意：构建前 dist 被运行中的旧实例锁定报 WinError 5，结束 QTRClientNew.exe 进程后重试成功。
+- 遗留：无 GPU 驱动的远程桌面环境可能缺软件渲染回退（删 qt_slim.py 中 opengl32sw 规则重打即可）；非 zh_CN 系统 Qt 标准对话框文案回退英文；再往下瘦身需换 Qt 模块裁剪/静态构建方案。
+
+## [2026-09-12] FEATURE | client_new Agent 页面信息精简（连接设置弹窗/去掉冗余地址行）
+
+- 背景：mitmproxy 页信息栏精简后用户指出其他页面有同类初始显示冗余；离屏截图逐页核查 6 页，问题集中在 Agent 页——①地址下拉框下方整行重复展示 MAC/连接地址/状态信息；②地址后平铺最大发送/自动重试/重试次数/重试间隔/断线重连/低频间隔 6 个控件，1200px 宽度下顶栏溢出。
+- 实现：①agent_page 移除 mac_value_label/ws_url_value_label/_build_ws_url，MAC 改内部字段 `_local_mac`（set_local_mac 接口不变），状态信息保留独立一行；②新增 ui/dialogs/agent_connection_setting_dialog.py（QFormLayout 两组：发送/断线重连，主开关未勾选时子项禁用联动），页面操作栏加「连接设置」按钮，保存后回写页面值副本并走既有 _save_quick_settings 链路；③配置行仅留 状态/地址/别名/显示日志；apply_config 与 _collect_data 输出键完全一致（无配置契约变化）；弹窗打开期间 apply_config 经 _sync_connection_setting_dialog_state 同步值（与浏览器设置弹窗同模式）；默认发送上限兜底 5KB 与配置模型对齐。
+- 文档：新增用户说明 `web/public/docs/client/agent.md`（此前 Agent 页无用户文档）、更新记录 `2026-09-12-client-new-agent-page-declutter.md`（history.md 已加条目）。
+- 验证：离屏截图顶栏单行无溢出、弹窗渲染正常；联动与保存回读断言通过；apply_config→_collect_data 回环一致；已移除控件无残留引用；py_compile 通过；ruff 与基线一致（4 处存量，新文件零新增）；tests/test_agent_start_nonblocking.py 通过（FakeWidget 接口未变）。
+- 遗留：重连参数下次连接/重连时生效（与改动前一致，文档已注明）；其余 5 页核查无同类问题，未做改动。
+
+## [2026-09-12] FEATURE | client_new 插件安装目录支持用户自定义（默认程序目录）
+
+- 背景：上一版把插件运行数据固定到 %LOCALAPPDATA% 规避构建产物污染；用户希望恢复"绿色便携"默认（exe 所在目录），同时支持自定义安装路径并在修改时给出影响提示。
+- 实现：①PluginConfigModel 新增 install_dir（空=默认）；PluginsConfig 配置文件路径 frozen 感知（打包态固定 exe 目录，helper 子进程 cwd 异常也能读到）；②manager.get_plugin_root() 动态解析（自定义 > 默认 exe/项目目录），plugin_dir 改动态；新增 set_install_dir(new_dir, migrate)（绝对路径校验/保存/按需迁移当前根目录已装插件）；_legacy_plugin_roots 迁移链（LOCALAPPDATA + 旧 exe 目录 → 当前根，启动时执行，覆盖升级与改回默认两个场景）；③插件对话框新增"安装目录"行（输入+浏览+保存），路径变化时三选影响提示（迁移已装插件/仅保存/取消），文案说明默认目录随程序目录、自定义目录可用性、dist 内需停 WinDivert 驱动。
+- 文档：plugins.md"安装目录"章节重写、更新记录 `web/public/docs/updates/2026-09-12-client-new-plugin-install-dir-config.md`（history.md 已加条目）。
+- 验证：离屏自测 10 项全过（默认根目录/切换并迁移/相对路径拒绝/恢复默认迁回/对话框一致）；py_compile 通过；ruff 较基线 +3 为防御性盲捕获。
+- 遗留：默认目录回到程序目录后，"构建输出目录内装插件 + 重打包"的驱动锁定场景会重现（提示与文档已给出 sc stop WinDivert 处理办法）；修改目录需重启生效；仅保存不迁移时旧目录插件不再生效（文案已说明）。
+
+## [2026-09-12] FIX | 插件运行数据与构建产物解耦（修复重打包 PermissionError: WinDivert64.sys）
+
+- 现象：插件化后 `pyinstaller QTRClientNewPortable.spec --noconfirm` 报 WinError 5，指向 `dist/QTRClientNew_portable/storage/plugins/proxy/mitmproxy_windows/WinDivert64.sys`；插件化之前正常。
+- 根因（叠加）：①frozen 态插件根目录原为 exe 所在目录 = COLLECT 输出目录，在构建产物里运行客户端并装插件后输出目录被运行数据污染；②local 模式加载的 WinDivert 内核驱动保持 RUNNING（sc query WinDivert 可见），.sys 被内核锁定，PyInstaller 清理输出目录删除失败。
+- 修复（plugins/manager.py）：frozen 态插件根目录改 `%LOCALAPPDATA%/QTRClientNew/storage/plugins`（无 LOCALAPPDATA 回退 exe 目录，开发态仍 client_new）；activate_installed 启动时自动把 exe 目录旧 storage/plugins/<name> 迁到新位置（shutil.move，目标已存在跳过，异常仅记日志）。
+- 现场处置：杀 QTRClientNew/redirector 进程 → 删被污染的 dist/QTRClientNew_portable/storage（此时 .sys 可删）→ 重跑 portable 构建 → 成功，输出目录仅 exe+_internal（128MB）。
+- 文档：plugins.md 增加"安装后目录说明 + 重新打包注意事项"、更新记录 `web/public/docs/updates/2026-09-12-client-new-plugin-dir-decouple.md`（history.md 已加条目）。
+- 验证：manager py_compile 通过、ruff 较基线 +1（迁移函数防御性盲捕获）；portable 与 onefile 构建均成功。
+- 遗留：sc stop WinDivert 需管理员权限（本次环境无）；其他 storage 运行数据（config/logs）仍 cwd 相对路径，双击启动会写进输出目录但普通文件可清理，后续可一并迁 LOCALAPPDATA；升级用户若迁移因占用失败需手动处理。
+
+
+## [2026-09-12] FIX | client_new mitmproxy 页面体验优化（证书引导/信息栏精简/窗口最大化）
+
+- 背景：用户反馈四点——首次使用提示"找不到证书"无引导、顶部端口展示与设置重复、模式说明独占一行且运行方式不直观、启动窗口 1200x800 笔记本显示不全。
+- 实现（ui/pages/mitmproxy_page.py + main.py）：①set_cert_status 在消息含"未找到"时追加"先点击「启动」运行一次代理，证书首次启动时自动生成"引导；②信息栏移除代理端口/Web 端口展示（apply_config 同步清理）；③删除独立模式说明 label，新增「?」按钮（信息栏右侧，tooltip 提示），点击 QMessageBox 展示 `_mode_hint_text`（_update_mode_hint 文案组装保留、去掉"当前模式说明："冗余前缀）；④main.py window.show() → showMaximized()。
+- 文档：用户说明 `web/public/docs/client/mitm-proxy.md`（入口/首次使用/窗口显示/FAQ 更新）、更新记录 `web/public/docs/updates/2026-09-12-client-new-mitm-page-ux.md`（history.md 已加条目）。
+- 验证：离屏自测 10 项全过（端口移除/问号按钮/启动方式保留/弹窗文案两要素/说明标签移除/证书缺失提示与按钮禁用/已信任不受影响）；py_compile 通过；ruff 与基线一致零新增。
+- 遗留：启动最大化对全员生效，未做"记住上次窗口状态"；证书提示依赖上游"未找到"文案关键字；最大化观感需带屏环境肉眼确认。
+
+## [2026-09-12] FEATURE | client_new 拆分「抓包代理」插件 + 菜单按插件显隐（阶段 2.5）
+
+- 背景：插件化阶段 2 后继续把 mitmproxy（压缩态约 15MB）拆为第三个插件 `proxy`，并实现菜单按插件显隐。
+- 实现：①plugins/manager 新增 proxy 定义（36 发行包：mitmproxy/mitmproxy_rs/mitmproxy_windows/tornado/aioquic/cryptography/pyOpenSSL/flask 全家/h2/hpack/wsproto/ldap3/argon2/attr(s)/pyparsing/sortedcontainers 等），构建脚本支持 entry_globs 通配收集带 Python 版本标签的顶层 pyd（_brotli/_cffi_backend）；②两份 spec 排除清单扩充 33 项、移除 mitmproxy/mitmproxy_windows 数据收集、hiddenimports 补 6 个主程序不可达 stdlib（struct/http.cookies/logging.handlers/wsgiref.validate/types/xml.dom.minidom——xml.dom 缺失在冒烟中实际暴露）；③main.py --mitm-helper 分支先激活插件，插件根目录改 frozen 感知（exe 目录，原 cwd 相对路径在 helper 下指向临时解压目录）；④helper_process 顶层 tornado 导入移入 ManagedWebMaster.running()（仅 mitmweb 模式）；⑤主窗口 _PLUGIN_GATED_NAV_ITEMS + _resolve_nav_items：未装 proxy 隐藏「mitmproxy」菜单，异常兜底保持完整菜单，Agent 页为连接核心常驻。
+- 甄别原则：certifi/h11（httpx 共享）、Cryptodome（py7zr 使用）保留主程序。
+- 文档：`web/public/docs/client/plugins.md` 更新（三插件+菜单显隐）、更新记录 `web/public/docs/updates/2026-09-12-client-new-proxy-plugin.md`（history.md 已加条目）、方案文档补阶段 2.5。
+- 验证：开发态自测 12 项全过；冻结态冒烟——无插件 helper 报 ModuleNotFoundError mitmproxy 干净退出（预期）、有插件输出激活日志+ready 且 exit=0；缺口定位方法论：python -S + 白名单模拟冻结环境逐模块探针 + import 钩子记录导入链 80 个 stdlib + 与 PYZ/base_library.zip/builtins/PKG 扩展求差；exe 55MB（插件化累计 -45%）；PKG 中 mitmproxy/tornado/cryptography/WinDivert 残留 0；web-test 回归构建无影响。
+- 遗留：升级插件内 mitmproxy 大版本时需重跑 stdlib/三方依赖缺口分析；菜单显隐与插件一致需重启刷新；Portable spec 未单独构建；冻结态真实抓包链路（local 模式+目标应用）未端到端回归；dist 残留 2 个无法终止的冒烟幽灵进程（无害，重启消失）。
+
+## [2026-09-12] FEATURE | client_new 插件化瘦身（阶段 2）：重依赖拆插件、按需安装、异常隔离
+
+- 背景：主程序 100+MB 中 cv2/numpy/pytesseract（仅桌面测试用）与 playwright（仅 Web 测试用）合计约 220MB（解压后），按分阶段方案阶段 2 拆为插件。
+- 实现：①新增 `plugins/manager.py`（目录约定 storage/plugins/<name>/ 即 site-packages 内容，激活=插入 sys.path 前端；状态机 active/installed/missing；install_from_zip 校验 manifest+路径安全+备份原子替换+失败回滚；download_and_install 支持 {base}/{name}.zip + 可选 sha256 强校验；所有公开方法只返回 (ok,message) 不抛异常，异常一律记日志）；②main.py 在业务模块导入前 activate_installed()，激活失败仅 warning；③desktop_test_service.handle_request 入口守卫（cv2/np/pyautogui/pytesseract 缺失时返回结构化失败引导安装）、playwright_browser_runtime 错误文案指向插件管理、agent_server 既有 try/except 边界保持；④新增插件管理对话框（下载源配置+表格+在线下载/本地安装，后台线程+信号回 UI）与主窗口「插件」按钮入口；⑤两份 spec 新增 PLUGIN_EXCLUDES（cv2/numpy/playwright/PIL/pyautogui/pyscreeze/pymsgbox/pytweening/mouseinfo/pygetwindow/pynput/pytesseract）并移除 playwright 数据与 hiddenimports；⑥新增 scripts/build_plugins.py 从 .venv 打 zip（含 pyautogui 传递依赖与 dist-info，manifest.json+sha256）。
+- 文档：用户说明 `web/public/docs/client/plugins.md`（新增）、更新记录 `web/public/docs/updates/2026-09-12-client-new-plugin-architecture.md`（history.md 已加条目）、方案文档阶段 2 状态同步。
+- 验证：一次性自测 15 项全过（状态机/激活 no-op/zip 校验 7 项含越级路径拒绝与覆盖安装回滚/下载源缺省提示/桌面守卫/对话框实例化，跑完已删除）；py_compile 全过；主程序 PyInstaller 构建结果见更新记录补充。
+- 遗留：插件首次安装需重启生效（后续可改调用期动态导入）；下载源待维护方部署托管地址；打包排除后需完整回归 Agent 桌面/Web 链路；Portable spec 未单独构建验证；OCR 仍需系统装 Tesseract。后续修复：build_plugins.py 的 dist-info 硬编码版本改为按发行包名动态解析，并修复 rsplit('-') 切在 dist-info 连字符上的匹配缺陷；desktop-test.zip 实构建 63.4MB（numpy 2.5.2/pillow 12.3.0）且回环安装验证通过。
+
+## [2026-09-12] FEATURE | client_new mitmproxy 抓包性能优化三项 + 分阶段优化/迁移方案落地
+
+- 背景：系统代理模式下全机器流量过代理出现请求排队慢；定位三个瓶颈——每条流量全量构造 FlowItem 上报 UI、mock 探测每请求新建 httpx.AsyncClient（每条重建 TLS 握手）、UI 每条流量逐条触发表格插入+统计+选中恢复致 UI 线程饱和。
+- 实现：①入口过滤 `flow_filter_enabled/flow_filter_pattern`（mock_handle 请求钩子最前判断，命中完全放行不记录不 mock 不延迟；`.` 开头后缀匹配忽略大小写剔除 query，否则子串匹配；设置弹窗接入，update 命令热生效）；②MockHandle 实例级 AsyncClient 复用（连接池 50/keepalive 20/30s 过期，探测前清 cookie，跨 loop 自动重建，helper/proxy_core 会话结束 aclose）；③新增 `ui/widgets/flow_event_buffer.py` 缓冲层（250ms 定时器制批量 flush，超 500 条立即落盘，断点流量旁路先 flush 存量再立即写入保证顺序与放行即时性；模型新增 add_flows/update_flows 整块操作单次 changed 信号；修复批量插入裁剪超限缺陷——原 _trim_before_add 只裁现有行；移除逐条 debug 日志）。
+- 文档：用户说明 `web/public/docs/client/mitm-proxy.md`（新增）、更新记录 `web/public/docs/updates/2026-09-12-client-new-mitm-performance-optimization.md`（history.md 已加条目）、分阶段方案 `wiki/features/client-new-optimization-and-go-migration-plan.md`（代理优化→插件化瘦身→pywebview UI→Go 迁移 POC 四阶段及评估结论）。
+- 验证：一次性自测脚本 25 项全过（过滤 11 + 批量写入 6 + 缓冲层 8，跑完已删除）；改动文件 py_compile 与 helper/proxy_core 导入通过；uvx ruff 53 处告警中 48 处为存量基线（项目无 ruff 强制配置），新增 5 处为周边一致的 BLE001。
+- 遗留：过滤默认开启，存量用户升级后静态资源不再出现在列表（可关闭）；刷新间隔 250ms 固定值未做成配置；真实抓包链路（local/系统代理连真实应用）未手工回归。
+
+## [2026-09-11] FEATURE | AI 结果回帖消息形态开关与卡片字段白名单
+
+- 需求：卡片化落地后补充两项配置——①显式开关控制回帖用文本还是卡片（模板留空时不再固定卡片）；②卡片模式下按配置字段裁剪区块。
+- 实现：`aiResultFollowUp` 新增 `messageStyle`（card 默认 / text，仅 `template` 留空时生效；配置自定义模板始终纯文本，非法值回退 card）与 `cardFields`（白名单取值对齐 `TicketAiResultReplyCardService.CARD_FIELD_KEYS` 九项，留空全量展示、无效字段剔除、全无效回退全量、字段已配置但载荷为空不渲染、失败卡片「失败原因」始终保留）。归一化在 `TicketSyncConfigService._normalize_ai_result_follow_up_config`，白名单校验复用卡片服务 `normalize_card_fields`（该服务为纯格式化，无循环依赖）。`send_ai_result_thread_reply` 按形态判定并透传白名单，回帖日志增加 message_style 便于排查。
+- 前端：`syncAutomation` 配置页「AI 分析结果话题回帖」组新增「消息形态」单选与「卡片展示字段」多选；字段多选仅形态为卡片时显示（v-if 隐藏不清空，符合配置页联动显示规范）；push_config 模式随组禁用；`useSyncConfig.js` 默认值/加载/保存三处同步。
+- 文档：`web/public/docs/ticket-sync-automation.md` 配置表新增两行并重写消息形态说明、更新记录 `web/public/docs/updates/2026-09-11-ai-reply-style-switch.md`（history.md 已加条目）、wiki flows 11.2 行同步。
+- 验证：新增 10 测试（形态判定 4 + 卡片白名单 6），`tests/test_ticket_ai_result_follow_up.py` 42 用例 + 12 子测试全过；`scripts/test_ai_result_card_push.py` 新增 trimmed 场景并经 `.env.dev` 群机器人 webhook 真实发送字段裁剪卡片（仅结论/根因/建议），飞书 `code=0`；改动文件 ruff 通过（config_service 11 处 E501 为存量基线）。
+- 遗留：卡片字段白名单与卡片新区块（如后续新增展示字段）需保持 `CARD_FIELD_KEYS` 与前端选项同步，暂无单一事实源联动机制。
+
+## [2026-09-11] FEATURE | AI 分析结果回帖卡片化（结论/根因/修复建议分区块展示）
+
+- 需求：AI 结果话题回帖（`groupPush.aiResultFollowUp`）原为一条纯文本，工单号/标题/结论/根因/修复建议/置信度/链接挤在一块，群内阅读不友好，要求改为卡片式区分展示。
+- 实现：新增纯格式化子服务 `modules/ticket/service/sync/ticket_ai_result_reply_card_service.py`（`TicketAiResultReplyCardService`，无 DB/无网络副作用）——成功卡片绿头：工单信息（两列字段、工单号带链接）+「结论/根因分析/修复建议」独立区块 + 可选「依据/风险项/后续动作」（载荷中存在才渲染，空字段不出 `-` 占位）+ 置信度备注（小数转百分比）+「查看工单」按钮；失败卡片红头：工单信息 +「失败原因」；单区块超 3000 字符截断防撑爆 30k 卡片上限。`TicketSyncNotifyService.send_feishu_thread_reply` 新增可选 `card` 参数（interactive 回帖），评论同步等既有调用方不传、行为不变。
+- 形态判定：`aiResultFollowUp.template` 留空（内置默认）→ 卡片；配置自定义模板 → 保持纯文本（自定义模板依赖文本变量拼装，卡片无法表达，零兼容性破坏）。sendOn/幂等占坑/锚点/无锚点策略/replyInThread 全部不变。
+- 文档：`web/public/docs/ticket-sync-automation.md`（消息形态说明段落）、更新记录 `web/public/docs/updates/2026-09-11-ai-reply-card-message.md`（history.md 已加条目）、wiki flows 11.2 行补消息形态语义。
+- 验证：新增 `scripts/test_ai_result_card_push.py` 经 `.env.dev` 群机器人 webhook 真实发送成功/失败样例卡片，飞书返回 `code=0` 渲染正常（webhook 关键词校验需命中 `TRunner`，脚本已内置；正式链路走应用身份回帖无该限制）；`tests/test_ticket_ai_result_follow_up.py` 32 用例 + 12 子测试全过；改动文件 ruff 通过。webhook 渠道验证卡片结构渲染，正式回帖卡片 JSON 与其完全一致（reply 接口对 interactive 为飞书标准能力）。
+- 遗留：卡片形态无配置项开关（模板留空即卡片）；如需"默认也走文本"的回退，配置任意自定义模板即可。
+
+## [2026-09-11] FIX | 机台编号提取正则修复与唯一候选覆盖策略取消（INC00001952225 提示词修正不生效）
+
+- 触发：用户修正 `aiSyncExtract` 提示词后模型已正确返回 `posNo=2`，但重新提取落库仍为 56，告警"模型POS=2与原文唯一机台候选POS=56不一致，已采用原文值"，`identify`/`log_pull_hints`/自动拉日志全部使用错误机台。生产库直查工单 `extra_data.ai_sync_extract`（cacheHit=False 证明提示词已生效）+ 本机复现正则定位。
+- 根因（两点叠加）：① `_extract_all_explicit_machine_nos` 的"数字在前 POS 在后"分支匹配到标题 `[08/09 23:56 POS#2 ]` 中时间 23:56 的分钟（`:56 POS`），且消耗掉 POS token 使 finditer 无法再匹配紧随其后的 `POS#2`，唯一候选变成 56；② `_reconcile_machine_no_with_source` 的"原文唯一候选与模型冲突时硬覆盖模型值"分支把正则候选当真值，而正则每次提取重新执行，提示词修正的结果到不了落库层。
+- 修复（配套两项）：① 正则三处调整——编号数字排除时间语境（后跟 `数字+冒号+数字` 含回溯绕过防护、前置紧邻冒号）、前置分支 POS 后加负向前瞻不吞后跟编号的 POS token、顺带修复 `N号POS` 分支数字组未捕获的存量缺陷；② 策略改为模型优先、正则仅兜底——模型值有效但不在候选中（不论数量）统一保留模型值并告警，仅模型值无效/未填写时用候选兜底，两个冲突分支合并。
+- 文档：`web/public/docs/ticket-sync-automation.md`（归一化策略段落重写）、更新记录 `web/public/docs/updates/2026-09-11-ticket-ai-extract-machine-regex-and-priority-fix.md`（history.md 已加条目）。
+- 验证：`tests/test_ticket_sync_ai_extract_safety.py` 16 用例全过（新增 INC00001952225 时间劫持回归、纯时间语境、`N号POS` 捕获 3 用例，原"唯一候选纠正"用例改写）；正则 11 场景脚本验证全符合预期；ruff 通过；全量 25 failed + 11 errors 经 stash 对比确认为分支存量问题。
+- 遗留：存量已写错 posNo 的工单（如 INC00001952225 的 56）需等下次外部同步事件重提取或人工修正；提示词变更会使提取缓存（sourceHash+promptHash）自然失效。"手动设置不覆盖自动提取"的字段级 provenance/manual_overrides 机制未在本次实施，为后续独立需求。
+
+## [2026-09-09] FIX | 自动AI分析复用记录开关语义修复（INC00001939452 未自动分析）
+
+- 触发：用户反馈 INC00001939452（ticket_id=2048348852915200）日志已拉取成功但未自动执行 AI 分析，分析为手动触发。用 `incident_capture.py --skip-vm` 拉取服务端日志 + 生产库直查 `ticket_event`/`ticket_log_pull_record`/`sys_config`/工单 `extra_data.sync_state.automation.steps` 定位。
+- 时间线还原：10:18/10:21 jiqing.shi 手工提交日志拉取（记录快照 `autoAiEnabled=false`）成功；10:22:03 bitable_pull 自动化执行，场景开关 `autoAiAnalysisOnBitablePull=true`、`logPullDefaults.autoAiEnabled=true`、条件 `not_successful+processing_two` 全部满足，但 log_pull 步骤命中"已存在相同拉取参数且成功的日志记录，跳过自动拉取并复用记录[2048350213553152]"，复用分支调用 `trigger_auto_ai_analysis` 时按被复用记录自身快照判断开关（false）→ 返回"未启用自动AI"跳过。`.env.prod` 与本问题无关（无自动 AI 开关，开关全部在 `sys_config` `ticket.sync.automation`）。
+- 根因：场景级配置（自动化是否自动分析）与记录级快照（该记录创建时是否勾选自动AI）在"复用他人手工成功记录"场景下语义冲突，复用分支以记录快照为准导致场景配置失效。
+- 修复：`TicketLogPullService.trigger_auto_ai_analysis/_trigger_auto_ai_analysis` 新增可选覆盖参数 `force_enabled/condition_override/agent_code_override/provider_code_override`（不传时行为不变，日志拉取自身链路仍按记录快照）；`ticket_sync_automation_service` 两处复用分支（命中相同参数成功记录 `:876`、仅自动AI复用最近成功记录 `:949`）传入本次自动化的场景配置覆盖值；`TicketAutoAiAnalysisConditionService` 抽出 `normalize_condition` 供覆盖条件归一化。
+- 文档：`web/public/docs/ticket-sync-automation.md`（自动AI条件段落补复用记录语义说明）、更新记录 `web/public/docs/updates/2026-09-09-auto-ai-reuse-record-switch-override.md`（history.md 已加条目）。
+- 验证：新增 2 个回归测试（复用分支透传覆盖参数、触发服务按覆盖开关对未勾选自动AI的手工记录正常提交），连同既有同步自动化复用/日志拉取守卫/AI finalize 场景测试共 33 用例全通过；改动文件 ruff 通过。测试公共打桩补 `get_similarity_config`/`build_ticket_text`（前日新增的相似检索链路使旧测试缺桩，属配套修复）。
+- 遗留：本次改动涉及 `ticket_sync_automation_service.py:673` 附近的相似检索调用为工作区既有未提交改动，测试失败经确认与本次无关后仅在测试桩层修复，该未提交改动需随本分支一并交付。
+
 ## [2026-09-08] FIX | Agent 孤儿租约启动清理 + AI 回传协议瘦身（第三次 OOM 与"一直分析中"修复）
 
 - 触发：2026-09-08 10:35 生产 fastapi 第三次被 cgroup OOM Kill（前日修复的 cgroup v1 oom_kill 采集首次实录 =1）。同日用户反馈 INC00001934853 / INC00001933577 "已分析完成，重试一直显示 AI 分析中"。
@@ -2453,3 +2600,32 @@ updated: 2026-08-25
 - 修复：`_format_samples`/`_labels`/`_append_metric` 增加 `with_role` 维度：machine 与 cgroup 指标强制剥离 `role`；`qtr_process_*` 与 `qtr_task_*` 强制携带 `role`。`role` 引入时间经 VM 数据回溯确认约为 2026-08-27（扩展指标上线），该日期前的历史序列存在覆盖问题。
 - 附带发现：VM 中存在 `machine=home`（instance=TEST，无 role）的旧环境数据，已于 2026-09-03 左右停止推送；`machine=dev` 仅存在于 30 天前，均为历史遗留非当前链路。
 - 验证：新增 `test_machine_level_metrics_do_not_carry_role_label` 与 `test_legacy_mode_samples_exclude_extended_metrics` 两个回归用例，tests/test_memory_metrics.py 7 个用例全部通过；ruff 无新增问题。
+
+## [2026-09-13] FEATURE | 插件在线下载 Gitee 按版本回退
+
+- 背景：插件化后「在线下载」依赖手动配置 `download_base_url`，留空即不可用；而主程序更新检查早已走 Gitee releases API，插件包（含与主程序 Python 版本绑定的 .pyd）本就应与主程序同版本发布。
+- 方案：`plugins/manager.py` 的 `download_and_install` 改为两级下载源——配置了 `download_base_url` 优先用配置源（内网/私有托管兼容不变）；未配置时从 Gitee releases 中按 tag 与 `version.py` 版本归一化精确匹配 release，下载其中 `{插件名}.zip` 附件（`{插件名}.zip.sha256` 存在则强校验）。找不到版本 release 或缺附件时给出明确提示（等待发版/配置下载源/本地安装）。
+- 结构：新增 `utils/gitee_release.py` 共享 util（API 地址常量、`normalize_release_version`、`fetch_release_list`/`fetch_release_list_sync`、`find_release_by_version`、`find_release_asset`）；`utils/common.py` 删除 `_RELEASES_API_URL`/`_fetch_release_list`/`_normalize_version_tuple`，更新检查与 `download_new_app` 调用方同步切换，无旧入口残留。
+- UI：`plugin_manager_dialog.py` 移除「在线下载」的"先配下载源"前置拦截，占位文案更新。
+- 发版约定：release tag 与 version.py 版本号一致（v 前缀可选），同一 release 上传三个插件 zip 及可选 .sha256（`scripts/build_plugins.py` 产出）。
+- 验证：新增 `client_new/tests/test_gitee_release.py`（归一化/release 匹配/附件定位含异常分支）通过；真实 Gitee 实测——当前 1.1.1.0 无对应 release（最新 v1.1.0.0）时提示正确，v1.1.0.0 的 release 定位与附件读取正常；ruff（I001/ISC004/F）通过；`plugins.manager`/`utils.common`/`plugin_manager_dialog` 导入链正常。
+- 风险：manifest 未记录构建时应用/Python 版本，版本配对依赖同 release 发布约定；Gitee 附件单文件上限需关注（desktop-test.zip 已 64MB）；releases 接口 per_page=20，积压超 20 个 release 且目标版本不在其中会匹配不到。
+- 文档：用户说明 `web/public/docs/client/plugins.md` 已同步，更新记录 `web/public/docs/updates/2026-09-13-client-new-plugin-gitee-release-download.md`，history.md 已加 2026-09-13 段。
+
+## [2026-09-13] FEATURE | 插件包 manifest 版本兼容信息与跨版本回退下载
+
+- 背景：上一轮 Gitee 按版本下载落地后，版本配对完全依赖"同 release 发布"约定，manifest 未记录构建时 Python/应用版本，客户端无法自行判断插件包可否安装。技术分层：Python 版本是硬约束（.pyd 只兼容构建时 CPython 大.小版本）；应用版本是软约定（插件包是第三方依赖，同 release 发版的价值是"一起测试过"的组合背书）。
+- 方案：`build_plugins.py` manifest 新增 `python_version`（如 3.11）与 `app_version`（读 version.py）；`plugins/manager.py` 新增 `_manifest_compatibility_error`，`install_from_zip` 在解压/替换前强校验 Python 版本，不兼容拒绝（在线/配置源/本地三路径统一生效，字段缺失跳过以兼容旧包）；manifest `app_version` 与当前不同时仅在成功消息中软提示。Gitee 下载策略放宽：`_resolve_gitee_plugin_urls` 改为同版本 release 优先、缺附件时按最新在前回退其他 release，回退来源在安装结果中注明，Python 兼容由安装前校验兜底。
+- 验证：新增 `tests/test_plugin_manifest_compat.py`（匹配/不匹配/字段缺失与异常跳过）通过；端到端构造 python_version=3.8 的 zip 被 install_from_zip 正确拒绝且不动插件目录；本地构建 web-test 产物 manifest 含 python_version=3.14/app_version=1.1.1.0；真实 Gitee 冒烟（当前版本无 release 且各 release 均无附件）回退扫描与失败提示正确；ruff（I001/ISC004/F/E9）通过。
+- 风险：跨版本回退安装的组合未经一起测试，主程序对库的调用方式可能与旧插件包库版本不兼容（业务功能会明确报错，可重装配套版本）；build_plugins.py 必须用与打包主程序相同的虚拟环境（client_new/.venv）执行，否则产物 python_version 与 exe 运行时不一致会被强校验拦下。
+- 文档：用户说明 `web/public/docs/client/plugins.md` 已同步（在线下载策略/Python 兼容校验/跨版本安装 FAQ），更新记录 `web/public/docs/updates/2026-09-13-client-new-plugin-manifest-compat.md`，history.md 2026-09-13 段已更新。
+
+## [2026-09-13] FEATURE | 插件安装新增 Pip 模式（内置 Python 运行时）
+
+- 背景：插件内容本质是三方依赖库，用户希望支持从 PyPI 源直接 pip 安装（可自定义源、默认国内源）。关键前提：PyInstaller 打包不带 pip 模块，冻结进程无法直接 pip——需先给客户端配 Python 执行环境。与用户确认采用方案 A（内置嵌入式 Python，约 +10~15MB 体积，开箱即用；备选的按需下载/仅源码态方案因体验或价值不足未选）。
+- 运行时：新增 `scripts/setup_pip_runtime.py`（华为云镜像下载 embeddable Python 3.14.6 → `client_new/runtime/python/`，启用 ._pth 的 import site，get-pip.py 清华源引导 pip，幂等支持 --force）；两个 spec 在 runtime/python 存在时自动打入 datas（rglob 手工展开，Tree 的目标路径不符合 datas 二元组约定），缺失时跳过并提示。
+- 安装链路：`PluginConfigModel.pip_index_url`（默认清华源）+ 界面「Pip 源」行 + 每行「Pip安装」按钮；`_locate_pip_python`（exe 目录 → _MEIPASS → 当前解释器自带 pip 兜底）；`install_from_pip` 执行 `pip install --target <暂存目录> -i <源> <锁版本清单>`，成功后 `_check_modules_in_dir`（find_spec 不导入）校验模块、补写 manifest（install_mode=pip）、复用新抽取的 `_replace_plugin_dir` 原子替换（zip/pip 两路共用，含备份回滚）。超时 15 分钟。
+- 锁版本：新增 `plugins/pip_pins.py`，由 `build_plugins.py` 每次构建自动从 venv 实际版本生成（PLUGIN_PIP_REQUIREMENTS，随代码提交），保证 pip 安装与插件 zip 同一组测试过的版本；传递依赖由 pip 解析（未逐个锁定）。
+- 验证：运行时准备实跑通过（pip 26.2.1）；真实冒烟——内置运行时经清华源 --target 安装 playwright==1.62.0（cp314 wheel 含传递依赖），模块校验无缺失；单测与 ruff 通过；QTRClientNewPortable 全量打包通过，确认 `_internal/runtime/python/python.exe` 打入。`.gitignore` 新增 `client_new/runtime/`（脚本可重建）。
+- 风险：单文件版 onefile 解压时间略增；传递依赖小版本未逐个锁定；杀毒软件拦截 runtime/python 时 Pip 安装失败（可回退其他安装方式）。
+- 文档：`web/public/docs/client/plugins.md`（新增方式二 Pip 安装 + FAQ）、更新记录 `2026-09-13-client-new-plugin-pip-install.md`、history.md 已更新。

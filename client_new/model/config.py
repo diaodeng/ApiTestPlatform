@@ -52,6 +52,14 @@ class MitmProxyConfigModel(BaseModel):
     breakpoint_pattern: str = ""
     flow_record_limit: int = 500
 
+    # 流量记录过滤：命中规则的流量完全放行，不写入 UI 列表、不参与 mock 探测与延迟
+    # 规则以逗号或换行分隔，以 . 开头按路径后缀匹配，否则按路径子串匹配
+    flow_filter_enabled: bool = True
+    flow_filter_pattern: str = (
+        ".png,.jpg,.jpeg,.gif,.webp,.bmp,.ico,.css,.js,.map,"
+        ".woff,.woff2,.ttf,.otf,.eot,.svg,.mp4,.mp3,.webm,.avi"
+    )
+
     model_config = {
         "extra": "allow"  # 允许未知字段
     }
@@ -61,6 +69,13 @@ class PaymentMockConfigModel(BaseModel):
     mock_files: str = ""
     back_dir: str = ""
     back_data: dict = dict()
+
+
+class PluginConfigModel(BaseModel):
+    """插件管理配置"""
+
+    download_base_url: str = ""  # 插件包下载源根地址，留空表示未配置（走 Gitee 按版本回退下载）
+    install_dir: str = ""  # 插件安装根目录，留空使用默认目录（exe/项目目录下 storage/plugins）
 
 
 class StartConfigModel(BaseModel):

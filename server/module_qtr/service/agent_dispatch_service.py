@@ -15,6 +15,7 @@ from module_qtr.service.agent_service import send_message as agent_send_message
 from module_qtr.util.agent_dispatch_config import (
     AGENT_AI_ANALYSIS_ACTIVE_LEASE_BUFFER_SECONDS,
     AGENT_AI_ANALYSIS_ACTIVE_PREFIX,
+    AGENT_AI_ANALYSIS_DISCONNECT_REQUEUE_LIMIT,
     AGENT_AI_ANALYSIS_LOCK_PREFIX,
     AGENT_AI_ANALYSIS_LOCK_TTL_SECONDS,
     AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_CONFIG_KEY,
@@ -612,6 +613,20 @@ class AgentDispatchService:
         if cached_response:
             return cached_response
 
+        # 提交时 Agent 已离线：立即失败并返回明确原因，不再进入队列空转到总超时，
+        # 避免"AI 分析中"假象（INC00001967826 类问题：排队等待一小时才超时）。
+        if agent_code not in connected_agents:
+            logger.warning(
+                f"AI 分析请求提交失败：Agent 离线 | agent_code={agent_code}, request_id={request_id}"
+            )
+            return handle_response(
+                (
+                    AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                    None,
+                    f"Agent[{agent_code}] 当前离线，AI 分析任务未下发，请确认 Agent 已连接后重试",
+                )
+            )
+
         request_timeout = max(float(timeout_seconds or 120), 1.0)
         lease_seconds = max(int(request_timeout) + AGENT_AI_ANALYSIS_ACTIVE_LEASE_BUFFER_SECONDS, 600)
         deadline = time.monotonic() + request_timeout
@@ -631,6 +646,7 @@ class AgentDispatchService:
         request_message = None
         next_queue_renew_at = 0.0
         next_wait_log_at = 0.0
+        disconnect_requeue_count = 0
 
         while True:
             now_mono = time.monotonic()
@@ -664,8 +680,21 @@ class AgentDispatchService:
                 next_queue_renew_at = now_mono + AGENT_AI_ANALYSIS_QUEUED_LEASE_RENEW_INTERVAL_SECONDS
 
             if agent_code not in connected_agents:
-                await asyncio.sleep(AGENT_AI_ANALYSIS_POLL_INTERVAL_SECONDS)
-                continue
+                # 排队期间 Agent 掉线：立即失败，不再空转等待到总超时。
+                await redis.lrem(cls._queue_key(agent_code), 0, request_id)
+                await redis.hdel(cls._active_key(agent_code), request_id)
+                await cls._mark_state(redis, request_id, agent_code, "failed", state_message)
+                logger.warning(
+                    f"AI 分析请求排队期间 Agent 离线，立即失败 | "
+                    f"agent_code={agent_code}, request_id={request_id}"
+                )
+                return handle_response(
+                    (
+                        AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                        None,
+                        f"Agent[{agent_code}] 排队期间连接断开，AI 分析任务未执行，请稍后重试",
+                    )
+                )
 
             max_concurrent_tasks = await cls._resolve_max_concurrent_tasks(redis)
             admitted = await cls._try_admit_request(
@@ -718,8 +747,28 @@ class AgentDispatchService:
                     timeout_seconds=remaining_timeout_seconds,
                 )
                 if response.status_code == AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value:
+                    disconnect_requeue_count += 1
+                    if disconnect_requeue_count >= AGENT_AI_ANALYSIS_DISCONNECT_REQUEUE_LIMIT:
+                        # 连续多次转发失败说明连接已不可用（如注册表中残留僵尸连接），
+                        # 直接失败并给出明确原因，不再"入队-失败-再入队"空转到总超时。
+                        await redis.hdel(cls._active_key(agent_code), request_id)
+                        await redis.lrem(cls._queue_key(agent_code), 0, request_id)
+                        await cls._mark_state(redis, request_id, agent_code, "failed", state_message)
+                        logger.warning(
+                            f"Agent[{agent_code}] 连续 {disconnect_requeue_count} 次转发失败，AI 分析请求判定失败 | "
+                            f"request_id={request_id}"
+                        )
+                        return handle_response(
+                            (
+                                AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                                None,
+                                f"Agent[{agent_code}] 连接不可用（连续 {disconnect_requeue_count} 次转发失败），"
+                                f"AI 分析任务未执行，请稍后重试",
+                            )
+                        )
                     logger.info(
-                        f"Agent[{agent_code}] 连接已断开，AI 分析请求重新入队，request_id={request_id}"
+                        f"Agent[{agent_code}] 连接已断开，AI 分析请求重新入队 | "
+                        f"request_id={request_id}, requeue_count={disconnect_requeue_count}"
                     )
                     await redis.hdel(cls._active_key(agent_code), request_id)
                     await redis.lpush(cls._queue_key(agent_code), request_id)
@@ -733,6 +782,7 @@ class AgentDispatchService:
                     next_wait_log_at = 0.0
                     await asyncio.sleep(AGENT_AI_ANALYSIS_POLL_INTERVAL_SECONDS)
                     continue
+                disconnect_requeue_count = 0
                 await cls._store_result(redis, request_id, response)
                 await cls._mark_state(redis, request_id, agent_code, "completed", state_message)
                 logger.info(
@@ -745,9 +795,18 @@ class AgentDispatchService:
                 await redis.hdel(cls._active_key(agent_code), request_id)
                 await cls._mark_state(redis, request_id, agent_code, "cancelled", state_message)
                 logger.warning(
-                    f"AI 分析请求被取消 | agent_code={agent_code}, request_id={request_id}, error={exc}"
+                    f"AI 分析请求因 Agent 连接断开被取消 | agent_code={agent_code}, request_id={request_id}, "
+                    f"error={exc}"
                 )
-                return handle_response((AgentResponseEnum.TASK_CANCELLED.value, None, str(exc.args)))
+                # 专用错误码标识"连接中途断开"：区别于用户主动取消，工单侧据此进入
+                # pending_recovery 状态等待 Agent 重连补交结果，而不是直接判定失败。
+                return handle_response(
+                    (
+                        AgentResponseEnum.AGENT_CONNECTION_LOST.value,
+                        None,
+                        f"Agent[{agent_code}] 连接中断，任务执行被取消，等待 Agent 补交结果恢复",
+                    )
+                )
             except Exception as exc:
                 await redis.hdel(cls._active_key(agent_code), request_id)
                 await redis.lrem(cls._queue_key(agent_code), 0, request_id)

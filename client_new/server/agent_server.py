@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import traceback
 import uuid
 from collections import defaultdict
@@ -26,6 +27,13 @@ MAX_MESSAGE_SIZE = DEFAULT_MESSAGE_SIZE
 EVENT_CHUNK_TYPE = "event_chunk"
 # 心跳间隔（秒）
 HEARTBEAT_INTERVAL = 30
+# 心跳看门狗静默阈值（秒）：服务端每 HEARTBEAT_INTERVAL 秒发一次 ping，正常链路下
+# 至少每 30 秒能收到一条消息。超过阈值仍未收到任何消息，说明连接已静默死亡
+# （机器睡眠、网络中断等半开场景）：此时 recv 不会抛异常、界面仍显示运行中，
+# 必须主动断开并走既有重连链路自愈，而不是等 TCP 重传超时（可达十几分钟以上）。
+HEARTBEAT_WATCHDOG_SILENCE_SECONDS = 90
+# 看门狗检查间隔（秒）
+HEARTBEAT_WATCHDOG_CHECK_INTERVAL_SECONDS = 15
 
 request_all_chunk = defaultdict(str)
 
@@ -302,6 +310,9 @@ class WebSocketClient:
         self.loop = None
         self.websocket_client_thread = None
         self.manual_stop = False
+        # 心跳看门狗状态：最后一次收到服务端消息的单调时间戳与看门狗任务句柄
+        self._last_received_at = 0.0
+        self._watchdog_task: asyncio.Task | None = None
 
         self.before_request_call = before_request_call
         self.after_request_call = after_request_call
@@ -339,12 +350,17 @@ class WebSocketClient:
             self.websocket = await websockets.connect(self.uri, max_size=None)
             logger.info(f"服务链接成功：{self.uri}")
             self._notify_status("connected", f"服务连接成功：{self.uri}")
+            # 连接建立即重置收信时间并启动看门狗，静默死链可在阈值内被发现
+            self._last_received_at = time.monotonic()
+            self._start_watchdog()
             # 连接建立后先补交断连期间未送达的响应，再进入正常消息循环。
             await self._flush_pending_responses()
             self.retry_num = 0
             async with httpx.AsyncClient(verify=False) as http_client:
                 while self.running:
                     message = await self.websocket.recv()
+                    # 任何消息（含 ping）都视为链路存活的证据，刷新看门狗计时
+                    self._last_received_at = time.monotonic()
                     msg = json.loads(message)
                     if msg["type"] == "ping":
                         self.status = True
@@ -400,6 +416,10 @@ class WebSocketClient:
             )
             await self.reconnect()
         finally:
+            # 连接退出（断连/重连/人工停止）时停止看门狗，重连成功后会重新启动
+            if self._watchdog_task is not None and not self._watchdog_task.done():
+                self._watchdog_task.cancel()
+            self._watchdog_task = None
             close_code, close_reason = _get_websocket_close_info(self.websocket)
             logger.info(
                 f"Agent WebSocket 退出：uri={self.uri}, close_code={close_code}, close_reason={close_reason}, "
@@ -690,6 +710,51 @@ class WebSocketClient:
     # 更新状态标签的函数
     def update_status(self, status):
         self.status = status
+
+    def _start_watchdog(self):
+        """启动（或重启）心跳看门狗任务；旧任务仍存活时先取消，避免重复看门狗叠加。"""
+        if self._watchdog_task is not None and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+
+    async def _watchdog_loop(self):
+        """
+        心跳看门狗循环：超过阈值未收到服务端任何消息（含 ping）即判定链路死亡。
+
+        半开连接上 recv 永远阻塞、send 只进缓冲区不报错，只有主动断开才能
+        触发既有异常分支自动重连。执行中的 AI Worker 在后台线程不受影响，
+        其结果经待补交机制（_send_response_with_recovery）在重连后回传。
+        """
+        try:
+            while self.running and not self.manual_stop:
+                await asyncio.sleep(HEARTBEAT_WATCHDOG_CHECK_INTERVAL_SECONDS)
+                if self.websocket is None:
+                    continue
+                silent_seconds = time.monotonic() - self._last_received_at
+                if silent_seconds > HEARTBEAT_WATCHDOG_SILENCE_SECONDS:
+                    logger.warning(
+                        f"心跳看门狗触发：{silent_seconds:.0f} 秒未收到服务端消息，"
+                        f"判定连接已死亡，主动断开并重连: {self.uri}"
+                    )
+                    self._notify_status(
+                        "error",
+                        f"超过 {HEARTBEAT_WATCHDOG_SILENCE_SECONDS} 秒未收到服务端心跳，正在自动重连",
+                    )
+                    await self._abort_connection()
+                    return
+        except asyncio.CancelledError:
+            pass
+
+    async def _abort_connection(self):
+        """
+        非人工停止的强制断开：仅关闭当前 socket 让 recv 抛出异常，
+        走既有异常分支自动重连；区别于 send_close（会置 manual_stop=True 导致不再重试）。
+        """
+        try:
+            if _is_websocket_open(self.websocket):
+                await self.websocket.close(code=1011, reason="heartbeat watchdog")
+        except Exception as exc:
+            logger.warning(f"心跳看门狗关闭连接异常: {exc}")
 
     async def send_heart(self):
         """向服务端发送心跳"""

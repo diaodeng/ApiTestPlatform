@@ -9,8 +9,6 @@ import traceback
 from dataclasses import asdict
 from pathlib import Path
 
-import tornado.httpserver
-import tornado.ioloop
 from loguru import logger
 from mitmproxy import master as mitm_master
 from mitmproxy.options import Options
@@ -36,6 +34,10 @@ class ManagedWebMaster(WebMaster):
         self._http_server: tornado.httpserver.HTTPServer | None = None
 
     async def running(self):
+        # tornado 已拆入 proxy 插件（主程序打包不含），仅在 mitmweb 模式运行到这里时导入
+        import tornado.httpserver
+        import tornado.ioloop
+
         tornado.ioloop.IOLoop.current()
 
         if self._http_server is None:
@@ -165,6 +167,7 @@ class HelperRuntime:
         self._config: MitmProxyConfigModel | None = None
         self._stop_requested = False
         self._breakpoint_manager = BreakpointManager()
+        self._mock_handle: MockHandle | None = None
         self._start_loop_thread()
 
     @property
@@ -449,12 +452,12 @@ class HelperRuntime:
                 with_dumper=False,
             )
 
-        master.addons.add(
-            MockHandle(
-                flow_dispatcher=self._dispatch_flow,
-                breakpoint_manager=self._breakpoint_manager,
-            )
+        mock_handle = MockHandle(
+            flow_dispatcher=self._dispatch_flow,
+            breakpoint_manager=self._breakpoint_manager,
         )
+        master.addons.add(mock_handle)
+        self._mock_handle = mock_handle
         return master
 
     async def _run_session(self, config: MitmProxyConfigModel):
@@ -523,6 +526,18 @@ class HelperRuntime:
                     detail=traceback.format_exc(),
                 )
             finally:
+                # 代理会话结束，释放 mock 探测复用的连接池
+                mock_handle = self._mock_handle
+                self._mock_handle = None
+                if mock_handle is not None:
+                    try:
+                        await mock_handle.aclose_client()
+                    except Exception as e:
+                        self.protocol.send(
+                            "error",
+                            message=f"关闭 mock 探测客户端失败: {e}",
+                        )
+
                 with self._lock:
                     self._master = None
                     self._session_future = None

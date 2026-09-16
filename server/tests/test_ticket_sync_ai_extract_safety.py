@@ -77,17 +77,59 @@ def test_sync_extract_keeps_model_pos_when_model_value_matches_one_source_candid
     assert warnings == []
 
 
-def test_sync_extract_corrects_model_pos_when_source_has_single_candidate():
-    """原文只有一个机台候选且与模型结果冲突时，用原文唯一候选纠正。"""
+def test_sync_extract_time_prefix_does_not_hijack_pos_token():
+    """时间语境不得劫持 POS token，正则候选必须包含真实机台号。
+
+    对应 INC00001952225 案例：标题 "[08/09 23:56 POS#2 ] ..." 中，旧正则的
+    "数字在前 POS 在后" 分支先匹配到 ":56 POS" 并消耗掉 POS token，导致 "POS#2"
+    永远无法成为候选，唯一候选变成时间分钟 56。
+    """
+    pos_no, sco_no, warnings = TicketLightAiService._normalize_sync_extract_machine_numbers(
+        {"posNo": "2", "scoNo": None},
+        "[08/09 23:56 POS#2 ] Store 0546因同事收完大數後做日結點算死機",
+        "",
+        {},
+    )
+    assert pos_no == 2
+    assert sco_no is None
+    assert warnings == []
+
+
+def test_sync_extract_ignores_time_only_context_machine_candidates():
+    """纯时间语境（HH:mm 紧邻 POS 但无编号）不得产生机台候选。"""
+    pos_no, sco_no, warnings = TicketLightAiService._normalize_sync_extract_machine_numbers(
+        {"posNo": "2", "scoNo": None},
+        "",
+        "同事在 23:56 POS 死机後重啟，POS 23:56 做了日結",
+        {},
+    )
+    assert pos_no == 2
+    assert sco_no is None
+    assert warnings == []
+
+
+def test_sync_extract_number_before_label_pattern_captures_machine_no():
+    """"N号POS" 形态的编号必须进入候选（历史版本该分支数字组未捕获，永远取不到值）。"""
+    candidates = TicketLightAiService._extract_all_explicit_machine_nos("2号POS死機", "POS")
+    assert candidates == [2]
+
+
+def test_sync_extract_keeps_model_pos_when_conflicts_with_single_candidate():
+    """模型值有效但与原文唯一候选冲突时，保留模型值并告警，不再用候选硬覆盖。
+
+    正则候选可能来自时间/金额/单号等误提取，不具备语义判断能力；模型可随提示词
+    进化，若被正则反向覆盖，提示词修正将永远无法生效（INC00001952225 教训）。
+    模型无效值的兜底纠正由 test_sync_extract_prefers_explicit_pos_semantics_over_model_amount 覆盖。
+    """
     pos_no, sco_no, warnings = TicketLightAiService._normalize_sync_extract_machine_numbers(
         {"posNo": "44", "scoNo": None},
         "",
         "Transaction Details: POS#02, 28/07, 15:33",
         {},
     )
-    assert pos_no == 2
+    assert pos_no == 44
     assert sco_no is None
-    assert warnings == ["模型POS=44与原文唯一机台候选POS=2不一致，已采用原文值"]
+    assert warnings == ["模型POS=44不在原文机台候选[2]中，已保留模型值，请人工复核"]
 
 
 def test_sync_extract_fills_missing_model_pos_from_source_candidate():

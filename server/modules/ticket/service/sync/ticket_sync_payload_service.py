@@ -69,6 +69,9 @@ class TicketSyncPayloadService:
             "group_push_processing_at": sync_state.get("group_push_processing_at"),
             "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
             "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
+            # 2026-09 拆表说明：话题锚点已迁移到独立表 ticket_group_push_anchor，
+            # 回帖幂等已迁移到 ticket_ai_analysis_task.result_replied_at 列，
+            # 不再存于 sync_state，避免同步更新链路读改写时被白名单重建静默擦除。
             # 最近一次入库同步场景（external_sync/remote_pull/bitable_pull/manual_create），
             # 供 AI 终态等异步回调还原触发场景，历史数据为空由调用方按来源推断。
             "sync_scene": str(sync_state.get("sync_scene") or "").strip(),

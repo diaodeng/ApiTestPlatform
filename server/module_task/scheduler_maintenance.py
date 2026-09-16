@@ -888,3 +888,36 @@ def scan_log_pull_records(*args, **kwargs):
         f"pending={result.get('pending', 0)}"
     )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.scan_pending_recovery_ai_tasks")
+def scan_pending_recovery_ai_tasks(*args, **kwargs):
+    """
+    工单 AI 分析连接中断恢复扫描任务。
+
+    周期性执行：扫描 pending_recovery（连接中断等待补交）状态的 AI 分析任务，
+    Agent 补交结果已写入 Redis 结果缓存时重新排队恢复写回；超过恢复期限仍无
+    结果时置为失败并发送失败通知。任务本身只负责停止标记检查、会话创建和服务
+    调用，业务逻辑见 TicketAiRecoveryService。
+
+    :return: 扫描摘要字典。
+    """
+    from modules.ticket.service.ai.ticket_ai_recovery_service import TicketAiRecoveryService
+
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    result: dict[str, Any] = {}
+    try:
+        with SessionLocal() as db:
+            result = TicketAiRecoveryService.scan_pending_recovery_tasks(db)
+    except Exception as exc:
+        logger.exception(f"工单AI分析恢复扫描任务执行失败: error={exc}")
+        raise
+    if result.get("scanned", 0):
+        logger.info(
+            f"工单AI分析恢复扫描完成 | scanned={result.get('scanned', 0)} "
+            f"recovered={result.get('recovered', 0)} expired={result.get('expired', 0)} "
+            f"waiting={result.get('waiting', 0)} failed={result.get('failed', 0)}"
+        )
+    return result

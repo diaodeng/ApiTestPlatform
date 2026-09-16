@@ -14,6 +14,7 @@ from module_hrm.entity.vo.common_vo import CrudResponseModel
 from modules.ticket.service.stats.ticket_custom_statistics_definition_service import (
     TicketCustomStatisticsDefinitionService,
 )
+from modules.ticket.service.sync.ticket_ai_result_reply_card_service import TicketAiResultReplyCardService
 from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_ai_config_service import TicketSyncAiConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
@@ -411,6 +412,15 @@ class TicketSyncConfigService:
                 # 无话题锚点时的处理策略：skip 记日志跳过（默认，防止对已有群消息的工单重复发送）；
                 # send_then_reply 先补发一条工单信息消息建立话题再回帖。
                 "noAnchorStrategy": "skip",
+                # 幂等粒度：false 任务级（默认，同一任务只回一次，多次分析多次回帖）；
+                # true 工单级（该工单只要回帖成功过一次，后续分析不再回帖）。
+                "oncePerTicket": False,
+                # 消息形态（仅回帖模板留空时生效）：card 飞书卡片（默认）/ text 默认纯文本模板；
+                # 配置了自定义回帖模板时始终按模板发纯文本。
+                "messageStyle": "card",
+                # 卡片模式展示字段白名单（取值见 TicketAiResultReplyCardService.CARD_FIELD_KEYS）；
+                # 留空默认全量展示，配置后只渲染对应区块。
+                "cardFields": [],
             },
         }
 
@@ -429,12 +439,19 @@ class TicketSyncConfigService:
         no_anchor_strategy = str(config.get("noAnchorStrategy") or "skip").strip().lower()
         if no_anchor_strategy not in {"skip", "send_then_reply"}:
             no_anchor_strategy = "skip"
+        message_style = str(config.get("messageStyle") or "card").strip().lower()
+        if message_style not in {"card", "text"}:
+            message_style = "card"
         return {
             "enabled": bool(config.get("enabled")),
             "sendOn": send_on,
             "replyInThread": bool(config.get("replyInThread", True)),
             "template": str(config.get("template") or "").strip(),
             "noAnchorStrategy": no_anchor_strategy,
+            "oncePerTicket": bool(config.get("oncePerTicket", False)),
+            "messageStyle": message_style,
+            # 卡片展示字段白名单；无效字段剔除，留空表示默认全量展示。
+            "cardFields": TicketAiResultReplyCardService.normalize_card_fields(config.get("cardFields")),
         }
 
     # --- migrated from TicketSyncService._default_message_sync_config ---

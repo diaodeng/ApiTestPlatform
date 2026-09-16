@@ -1,5 +1,7 @@
 .DS_Store
 node_modules/
+# 构建产物不再入库（qtr-webui 走 dist-release 分支发布，见 ops/publish-dist.sh）
+dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

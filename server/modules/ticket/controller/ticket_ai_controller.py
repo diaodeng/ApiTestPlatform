@@ -220,6 +220,40 @@ async def cancel_ticket_ai_analysis_task(
 
 
 @ticketAiController.post(
+    "/{ticket_id:int}/ai-analysis/tasks/{task_id}/reply-resend",
+    dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
+)
+@log_decorator(title="工单AI结果回帖补发", business_type=1)
+async def resend_ticket_ai_result_reply(
+    request: Request,
+    ticket_id: int,
+    task_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """
+    手动补发 AI 分析结果回帖到工单群话题接口。
+
+    面向"分析已完成但结果未回帖"的任务（锚点丢失的历史工单、发送失败、当时配置未开启），
+    不重新执行分析，直接读取任务持久化结果渲染发送；已回帖任务拒绝重复补发。
+    :param request: 请求对象
+    :param ticket_id: 工单ID
+    :param task_id: AI 分析任务ID
+    :param query_db: 数据库会话
+    :param current_user: 当前登录用户
+    :return: 补发结果
+    """
+    try:
+        result = await run_in_threadpool(
+            TicketAiAnalysisService.resend_result_reply_services, query_db, ticket_id, task_id, current_user
+        )
+        return ResponseUtil.success(data=result) if result.is_success else ResponseUtil.failure(msg=result.message)
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketAiController.post(
     "/{ticket_id:int}/ai-analysis",
     dependencies=[Depends(CheckUserInterfaceAuth("ticket:ai:analysis:run"))],
 )

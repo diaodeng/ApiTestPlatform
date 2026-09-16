@@ -7,7 +7,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from modules.ticket.dao.ticket_dao import TicketDao
+from modules.ticket.dao.ticket_group_push_anchor_dao import TicketGroupPushAnchorDao
 from modules.ticket.entity.do.ticket_do import Ticket
+from modules.ticket.entity.do.ticket_group_push_anchor_do import TicketGroupPushAnchor
 from modules.ticket.service.collaboration.ticket_comment_core_service import TicketCommentCoreService
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
 from modules.ticket.service.sync.ticket_sync_notify_service import TicketSyncNotifyService
@@ -524,20 +526,6 @@ class TicketMessageSyncService:
         return match.group(0).strip() if match else ""
 
     @classmethod
-    def _iter_ticket_group_message_refs(cls, ticket: Ticket) -> list[dict[str, Any]]:
-        """
-        读取工单已记录的飞书群消息锚点。
-        :param ticket: 工单对象
-        :return: 消息锚点列表
-        """
-        extra_data = ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
-        raw_meta = extra_data.get(cls.META_KEY)
-        meta = raw_meta if isinstance(raw_meta, dict) else {}
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        raw_refs = sync_state.get("group_push_message_refs")
-        refs = raw_refs if isinstance(raw_refs, list) else []
-        return [item for item in refs if isinstance(item, dict)]
-
     @classmethod
     def _match_ticket_by_message_context(
         cls,
@@ -550,6 +538,8 @@ class TicketMessageSyncService:
     ) -> Ticket | None:
         """
         根据飞书消息上下文匹配本地工单。
+        2026-09 拆表：锚点存于 ticket_group_push_anchor 独立表，按消息值索引查询，
+        替代原"全表扫描工单逐单解析 extra_data JSON"的 O(全表) 实现。
         :param db: 数据库会话
         :param chat_id: 飞书群 chat_id
         :param root_id: 飞书根消息 ID
@@ -562,22 +552,31 @@ class TicketMessageSyncService:
             candidates.append(root_id)
         if thread_id:
             candidates.append(thread_id)
-        if chat_id:
-            candidates.append(chat_id)
         if candidates:
-            rows = db.query(Ticket).filter(Ticket.del_flag == "0").all()
-            for ticket in rows:
-                for ref in cls._iter_ticket_group_message_refs(ticket):
-                    ref_values = {
-                        str(ref.get("messageId") or "").strip(),
-                        str(ref.get("rootId") or "").strip(),
-                        str(ref.get("threadId") or "").strip(),
+            candidate_set = {str(item).strip() for item in candidates if item}
+            matched_ticket_ids = TicketGroupPushAnchorDao.match_ticket_ids_by_message_values(db, candidates)
+            for matched_ticket_id in matched_ticket_ids:
+                ticket = (
+                    db.query(Ticket)
+                    .filter(Ticket.ticket_id == matched_ticket_id, Ticket.del_flag == "0")
+                    .first()
+                )
+                if not ticket:
+                    continue
+                # 逐锚点校验：命中值（messageId/rootId/threadId）匹配且群一致才认定归属，
+                # 防止跨群消息 ID 撞库误匹配；语义与拆表前逐 ref 匹配一致。
+                for anchor in TicketGroupPushAnchorDao.list_anchors_by_ticket_id(db, matched_ticket_id):
+                    anchor_values = {
+                        str(anchor.message_id or "").strip(),
+                        str(anchor.root_id or "").strip(),
+                        str(anchor.thread_id or "").strip(),
                     }
-                    ref_chat_id = str(ref.get("chatId") or ref.get("receiveId") or "").strip()
-                    if ref_chat_id and chat_id and ref_chat_id != chat_id:
+                    if not (anchor_values & candidate_set):
                         continue
-                    if any(candidate and candidate in ref_values for candidate in candidates):
-                        return ticket
+                    anchor_chat_id = str(anchor.chat_id or "").strip()
+                    if anchor_chat_id and chat_id and anchor_chat_id != chat_id:
+                        continue
+                    return ticket
         ticket_no = cls._extract_ticket_no_from_text(text)
         if ticket_no:
             return TicketDao.get_ticket_by_no(db, ticket_no)
@@ -754,17 +753,23 @@ class TicketMessageSyncService:
             return {"skipped": True, "reason": str(exc), "recordId": record_id}
 
     @classmethod
-    def _resolve_feishu_reply_anchor(cls, ticket: Ticket) -> str:
+    def _resolve_feishu_reply_anchor(cls, db: Session, ticket: Ticket) -> str:
         """
-        从工单群推送锚点中解析可回复的飞书消息 ID。
+        从工单群推送锚点表解析可回复的飞书消息 ID（取最新一条锚点）。
+        2026-09 拆表：锚点从 extra_data JSON 迁移到 ticket_group_push_anchor 独立表。
+        :param db: 数据库会话
         :param ticket: 工单对象
         :return: 根消息 ID 或消息 ID；缺失返回空字符串
         """
-        refs = cls._iter_ticket_group_message_refs(ticket)
-        if not refs:
+        anchor = (
+            db.query(TicketGroupPushAnchor)
+            .filter(TicketGroupPushAnchor.ticket_id == ticket.ticket_id)
+            .order_by(TicketGroupPushAnchor.create_time.desc(), TicketGroupPushAnchor.id.desc())
+            .first()
+        )
+        if not anchor:
             return ""
-        latest = refs[-1]
-        return str(latest.get("rootId") or latest.get("messageId") or "").strip()
+        return str(anchor.root_id or anchor.message_id or "").strip()
 
     @classmethod
     def sync_local_comment_outbound(
@@ -806,7 +811,7 @@ class TicketMessageSyncService:
         if bool(message_config.get("syncTicketCommentToFeishuThread")):
             group_config = sync_config.get("groupPush") if isinstance(sync_config.get("groupPush"), dict) else {}
             app_id, app_secret = TicketSyncNotifyService.resolve_feishu_auth(group_config)
-            anchor_message_id = cls._resolve_feishu_reply_anchor(ticket)
+            anchor_message_id = cls._resolve_feishu_reply_anchor(db, ticket)
             if not anchor_message_id:
                 feishu_result = {"skipped": True, "reason": "missing_group_message_anchor"}
             elif not app_id or not app_secret:

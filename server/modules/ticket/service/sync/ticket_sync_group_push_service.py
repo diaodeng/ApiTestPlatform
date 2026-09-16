@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from modules.ticket.dao.ticket_ai_dao import TicketAiDao
 from modules.ticket.dao.ticket_dao import TicketDao
+from modules.ticket.dao.ticket_group_push_anchor_dao import TicketGroupPushAnchorDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.enums.ticket_enums import TicketAiAnalysisStatus
+from modules.ticket.service.sync.ticket_ai_result_reply_card_service import TicketAiResultReplyCardService
 from modules.ticket.service.sync.ticket_automation_scope_service import TicketAutomationScopeService
 from modules.ticket.service.sync.ticket_sync_condition_evaluator import evaluate_ticket_condition
 from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
@@ -62,6 +64,10 @@ class TicketSyncGroupPushService:
             "group_push_processing_at": sync_state.get("group_push_processing_at"),
             "group_push_processing_scene": sync_state.get("group_push_processing_scene"),
             "group_push_processing_revision": sync_state.get("group_push_processing_revision"),
+            # 2026-09 拆表说明：话题锚点（group_push_message_refs）已迁移到独立表
+            # ticket_group_push_anchor，回帖幂等（ai_result_reply_task_ids）已迁移到
+            # ticket_ai_analysis_task.result_replied_at 列，二者不再存于 sync_state，
+            # 避免外部同步更新等链路读改写 extra_data 时被白名单重建静默擦除。
             # 最近一次入库同步场景，AI 终态回调据此还原真实触发场景。
             "sync_scene": str(sync_state.get("sync_scene") or "").strip(),
         }
@@ -269,50 +275,6 @@ class TicketSyncGroupPushService:
         return meta
 
     @classmethod
-    def append_group_push_message_refs(
-        cls,
-        meta: dict[str, Any],
-        message_refs: list[dict[str, Any]] | None,
-    ) -> dict[str, Any]:
-        """
-        记录群推送成功发送后的飞书消息 ID，供后续评论回帖定位话题。
-        :param meta: 同步元数据
-        :param message_refs: 飞书发送返回的消息明细
-        :return: 更新后的同步元数据
-        """
-        if not isinstance(message_refs, list) or not message_refs:
-            return meta
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        existing_refs = sync_state.get("group_push_message_refs")
-        if not isinstance(existing_refs, list):
-            existing_refs = []
-        existing_message_ids = {
-            str(item.get("messageId") or item.get("message_id") or "").strip()
-            for item in existing_refs
-            if isinstance(item, dict)
-        }
-        for item in message_refs:
-            if not isinstance(item, dict):
-                continue
-            message_id = str(item.get("messageId") or item.get("message_id") or "").strip()
-            if not message_id or message_id in existing_message_ids:
-                continue
-            existing_refs.append(
-                {
-                    "messageId": message_id,
-                    "rootId": str(item.get("rootId") or item.get("root_id") or message_id).strip(),
-                    "threadId": str(item.get("threadId") or item.get("thread_id") or "").strip(),
-                    "chatId": str(item.get("chatId") or item.get("chat_id") or item.get("receiveId") or "").strip(),
-                    "receiveId": str(item.get("receiveId") or item.get("receive_id") or "").strip(),
-                    "receiveIdType": str(item.get("receiveIdType") or item.get("receive_id_type") or "").strip(),
-                    "sentAt": SyncUtil.now_iso(),
-                }
-            )
-            existing_message_ids.add(message_id)
-        sync_state["group_push_message_refs"] = existing_refs[-20:]
-        meta["sync_state"] = sync_state
-        return meta
-
     @classmethod
     def mark_group_push_processing(
         cls,
@@ -428,7 +390,14 @@ class TicketSyncGroupPushService:
                     scene=scene,
                     revision=int(meta.get("revision") or 0),
                 )
-            meta = cls.append_group_push_message_refs(meta, message_refs)
+            # 锚点写独立表（ticket_group_push_anchor），不进 sync_state JSON，
+            # 与状态更新同事务提交；message_id 去重与单工单上限由 DAO 保证。
+            if message_refs:
+                inserted_anchors = TicketGroupPushAnchorDao.insert_anchors(db, ticket_id, message_refs)
+                if inserted_anchors:
+                    logger.info(
+                        f"群推送锚点已写入: ticket_id={ticket_id}, scene={scene}, inserted={inserted_anchors}"
+                    )
             if acquire_lock or clear_lock or mark_sent_once or message_refs:
                 refreshed_extra_data = cls.attach_meta(extra_data, meta)
                 TicketDao.update_ticket(
@@ -961,73 +930,22 @@ class TicketSyncGroupPushService:
         return False
 
     @classmethod
-    def is_ai_result_replied(
-        cls,
-        meta: dict[str, Any],
-        *,
-        task_id: int | None,
-    ) -> bool:
+    def _collect_ai_result_reply_targets(cls, db: Session, ticket_id: int) -> list[dict[str, Any]]:
         """
-        判断指定 AI 任务是否已回帖过分析结果（按 task_id 幂等）。
-        :param meta: 同步元数据
-        :param task_id: AI任务ID
-        :return: 是否已回帖
+        从群推送锚点表收集回帖目标（按 chatId 去重，工单信息发到几个群就回几个群）。
+        2026-09 拆表：锚点从 sync_state JSON 迁移到 ticket_group_push_anchor 独立表。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 去重后的锚点列表（messageId/rootId/threadId/chatId）
         """
-        if not task_id:
-            return False
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        replied_ids = sync_state.get("ai_result_reply_task_ids")
-        if not isinstance(replied_ids, list):
-            return False
-        replied_keys = {str(item) for item in replied_ids}
-        return str(task_id) in replied_keys
-
-    @classmethod
-    def mark_ai_result_replied(
-        cls,
-        meta: dict[str, Any],
-        *,
-        task_id: int | None,
-    ) -> dict[str, Any]:
-        """
-        标记 AI 任务已回帖分析结果（按 task_id 幂等，保留最近 50 条防止元数据无限增长）。
-        :param meta: 同步元数据
-        :param task_id: AI任务ID
-        :return: 更新后的同步元数据
-        """
-        if not task_id:
-            return meta
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        replied_ids = sync_state.get("ai_result_reply_task_ids")
-        if not isinstance(replied_ids, list):
-            replied_ids = []
-        task_key = str(task_id)
-        if task_key not in {str(item) for item in replied_ids}:
-            replied_ids.append(task_key)
-        sync_state["ai_result_reply_task_ids"] = replied_ids[-50:]
-        meta["sync_state"] = sync_state
-        return meta
-
-    @classmethod
-    def _collect_ai_result_reply_targets(cls, meta: dict[str, Any]) -> list[dict[str, Any]]:
-        """
-        从群推送锚点收集回帖目标（按 chatId 去重，工单信息发到几个群就回几个群）。
-        :param meta: 同步元数据
-        :return: 去重后的锚点列表
-        """
-        sync_state = meta.get("sync_state") if isinstance(meta.get("sync_state"), dict) else {}
-        refs = sync_state.get("group_push_message_refs")
-        if not isinstance(refs, list):
-            return []
+        anchors = TicketGroupPushAnchorDao.list_anchors_by_ticket_id(db, ticket_id)
         targets: list[dict[str, Any]] = []
         seen_chat_ids: set[str] = set()
-        for ref in refs:
-            if not isinstance(ref, dict):
-                continue
-            message_id = str(ref.get("messageId") or "").strip()
+        for anchor in anchors:
+            message_id = str(anchor.message_id or "").strip()
             if not message_id:
                 continue
-            chat_id = str(ref.get("chatId") or ref.get("receiveId") or "").strip()
+            chat_id = str(anchor.chat_id or "").strip()
             if chat_id and chat_id in seen_chat_ids:
                 continue
             if chat_id:
@@ -1035,8 +953,8 @@ class TicketSyncGroupPushService:
             targets.append(
                 {
                     "messageId": message_id,
-                    "rootId": str(ref.get("rootId") or message_id).strip() or message_id,
-                    "threadId": str(ref.get("threadId") or "").strip(),
+                    "rootId": str(anchor.root_id or "").strip() or message_id,
+                    "threadId": str(anchor.thread_id or "").strip(),
                     "chatId": chat_id,
                 }
             )
@@ -1161,7 +1079,7 @@ class TicketSyncGroupPushService:
             )
             return ({"skipped": True, "skipReason": decision_reason, "taskId": ai_task_id}, ticket, meta)
 
-        if cls.is_ai_result_replied(meta, task_id=ai_task_id):
+        if ai_task_id and TicketAiDao.is_result_replied(db, ai_task_id):
             logger.info(
                 f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id}, "
                 f"reason=该AI任务已回帖过"
@@ -1169,7 +1087,24 @@ class TicketSyncGroupPushService:
             return ({"skipped": True, "skipReason": "该AI任务已回帖过", "taskId": ai_task_id}, ticket, meta)
 
         config = follow_up_config if isinstance(follow_up_config, dict) else {}
-        targets = cls._collect_ai_result_reply_targets(meta)
+        # 工单级幂等（oncePerTicket）：该工单回帖成功过一次后不再回帖；
+        # 手动指定"本次回帖"（override=on）是明确意图，跳过该限制。
+        if (
+            str(override or "").strip().lower() != "on"
+            and bool(config.get("oncePerTicket"))
+            and TicketAiDao.has_any_result_replied(db, ticket.ticket_id)
+        ):
+            logger.info(
+                f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"reason=该工单已回帖过（oncePerTicket）"
+            )
+            return (
+                {"skipped": True, "skipReason": "该工单已回帖过（oncePerTicket）", "taskId": ai_task_id},
+                ticket,
+                meta,
+            )
+
+        targets = cls._collect_ai_result_reply_targets(db, ticket.ticket_id)
         if not targets:
             no_anchor_strategy = str(config.get("noAnchorStrategy") or "skip").strip().lower()
             if no_anchor_strategy != "send_then_reply":
@@ -1206,7 +1141,7 @@ class TicketSyncGroupPushService:
                     ticket,
                     meta,
                 )
-            targets = cls._collect_ai_result_reply_targets(meta)
+            targets = cls._collect_ai_result_reply_targets(db, ticket.ticket_id)
             if not targets:
                 logger.warning(
                     f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
@@ -1237,6 +1172,22 @@ class TicketSyncGroupPushService:
                 meta,
             )
 
+        # 抢占式幂等：发送前先占坑（条件 UPDATE，并发下只有一个写者能标记成功）并立即提交，
+        # 防止两个终态回调并发判定"未回帖"后重复发送；占坑失败说明已被并发处理，跳过。
+        if ai_task_id:
+            if not TicketAiDao.mark_result_replied(db, ai_task_id):
+                db.rollback()
+                logger.info(
+                    f"AI结果话题回帖跳过: ticket_no={ticket.ticket_no}, task_id={ai_task_id}, "
+                    f"reason=占坑失败（该AI任务已被并发回帖处理）"
+                )
+                return (
+                    {"skipped": True, "skipReason": "该AI任务已回帖过", "taskId": ai_task_id},
+                    ticket,
+                    meta,
+                )
+            db.commit()
+
         content = TicketSyncNotifyService.build_ai_result_reply_content(
             ticket=ticket,
             follow_up_config=config,
@@ -1244,6 +1195,23 @@ class TicketSyncGroupPushService:
             ai_result_payload=ai_result_payload,
             ai_error_message=ai_error_message,
         )
+        # 消息形态：用户配置了自定义回帖模板时保持纯文本（尊重既有自定义行为）；
+        # 模板留空时按 messageStyle 开关决定——card（默认）发飞书卡片，text 发默认纯文本模板。
+        reply_card: dict[str, Any] | None = None
+        if not str(config.get("template") or "").strip():
+            message_style = str(config.get("messageStyle") or "card").strip().lower()
+            if message_style == "card":
+                reply_card = TicketAiResultReplyCardService.build_ai_result_reply_card(
+                    ticket=ticket,
+                    ai_task_status=ai_task_status,
+                    ai_result_payload=ai_result_payload,
+                    ai_error_message=ai_error_message,
+                    card_fields=config.get("cardFields") if isinstance(config.get("cardFields"), list) else None,
+                )
+            logger.info(
+                f"AI结果话题回帖消息形态: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
+                f"ai_task_status={ai_task_status}, message_style={message_style}"
+            )
         reply_in_thread = bool(config.get("replyInThread", True))
         success_count = 0
         reply_refs: list[dict[str, Any]] = []
@@ -1255,6 +1223,7 @@ class TicketSyncGroupPushService:
                     message_id=target["messageId"],
                     content=content,
                     reply_in_thread=reply_in_thread,
+                    card=reply_card,
                 )
                 success_count += 1
                 reply_refs.append(
@@ -1273,8 +1242,36 @@ class TicketSyncGroupPushService:
             f"AI结果话题回帖完成: ticket_no={ticket.ticket_no}, task_id={ai_task_id or '-'}, "
             f"ai_task_status={ai_task_status}, target_count={len(targets)}, success_count={success_count}"
         )
-        meta = cls.mark_ai_result_replied(meta, task_id=ai_task_id)
-        ticket = cls.persist_sync_meta(db, ticket=ticket, meta=meta, update_by="system")
+        if not ai_task_id:
+            # 无任务ID（历史调用路径）没有占坑，直接返回结果。
+            return (
+                {
+                    "skipped": False,
+                    "taskId": ai_task_id,
+                    "targetCount": len(targets),
+                    "successCount": success_count,
+                    "replyRefs": reply_refs,
+                },
+                ticket,
+                meta,
+            )
+        if success_count > 0:
+            # 占坑成功且至少一个群发送成功：补写覆盖群审计列后提交。
+            replied_chat_ids = ",".join(
+                str(item.get("chatId") or "").strip()
+                for item in reply_refs
+                if str(item.get("chatId") or "").strip()
+            )[:512]
+            TicketAiDao.update_result_replied_chat_ids(db, ai_task_id, replied_chat_ids)
+            db.commit()
+        else:
+            # 全部群发送失败：释放占坑，允许后续重试或手动补发再次回帖。
+            TicketAiDao.release_result_replied(db, ai_task_id)
+            db.commit()
+            logger.warning(
+                f"AI结果话题回帖全部发送失败已释放幂等占坑: ticket_no={ticket.ticket_no}, "
+                f"task_id={ai_task_id}, target_count={len(targets)}"
+            )
         return (
             {
                 "skipped": False,
@@ -1401,10 +1398,12 @@ class TicketSyncGroupPushService:
                 scene=manual_scene,
                 revision=int(meta.get("revision") or 0),
             )
-            meta = cls.append_group_push_message_refs(
-                meta,
-                result.get("feishuMessageRefs") if isinstance(result.get("feishuMessageRefs"), list) else None,
+            # 锚点写独立表，不进 sync_state JSON；与去重状态同事务提交。
+            message_refs = (
+                result.get("feishuMessageRefs") if isinstance(result.get("feishuMessageRefs"), list) else None
             )
+            if message_refs:
+                TicketGroupPushAnchorDao.insert_anchors(db, ticket.ticket_id, message_refs)
             ticket = cls.persist_sync_meta(
                 db,
                 ticket=ticket,

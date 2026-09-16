@@ -23,6 +23,8 @@ related_files:
 
 # 新版 PySide6 客户端
 
+> **状态更新（2026-09-13）**：界面层已由 PySide6 迁移到 pywebview，服务层全部保留复用，见 [新版客户端 pywebview 界面](../components/new-client-webview-ui.md)。本文档中涉及页面/对话框/控制器的描述仅作历史参考。
+
 新版客户端是基于 PySide6 的桌面应用，围绕主窗口、服务层和页面层拆分功能，覆盖 Agent、POS、SQLite 查询、mitmproxy、日志与关于页面。
 
 ```mermaid

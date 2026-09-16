@@ -33,7 +33,7 @@ from module_admin.service.ai_prompt_template_service import AiPromptTemplateServ
 from module_admin.service.ai_provider_capability_service import AiProviderCapabilityService
 from module_hrm.dao.agent_dao import AgentDao
 from module_hrm.entity.do.project_do import HrmProject
-from module_hrm.enums.enums import QtrDataStatusEnum, TstepTypeEnum
+from module_hrm.enums.enums import AgentResponseEnum, QtrDataStatusEnum, TstepTypeEnum
 from module_qtr.service.agent_dispatch_service import AgentDispatchService
 from module_qtr.service.agent_service import HandleResponse
 from module_qtr.util.agent_dispatch_config import AGENT_AI_ANALYSIS_MAX_CONCURRENT_TASKS_CONFIG_KEY
@@ -105,6 +105,9 @@ class TicketAiAnalysisService:
     LOG_WINDOW_MISSING_STRATEGIES = {"server_extract", "agent_extract"}
     DEFAULT_CONTEXT_LOG_MAX_CHARS = 800_000
     SNAPSHOT_OWNER_MAX_LENGTH = 100
+    # 连接中断恢复期限的额外缓冲（秒）：恢复截止时间 = 任务超时 + 本缓冲，
+    # 覆盖 Agent 断连重连与 Worker 收尾回传所需的最长时间
+    PENDING_RECOVERY_EXTRA_SECONDS = 15 * 60
     ACTIVE_STATUSES = {
         TicketAiAnalysisStatus.CREATED.value,
         TicketAiAnalysisStatus.RUNNING.value,
@@ -2909,9 +2912,13 @@ class TicketAiAnalysisService:
         }
         if status != TicketAiAnalysisStatus.SUCCESS.value:
             update_data["success_fingerprint"] = None
-        # 活跃锁维护：终态释放；活跃态按调用方传入的指纹占锁（未传则同样释放，
-        # 兼容无指纹的历史任务）。并发同指纹占锁冲突由唯一索引兜底。
-        if status in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
+        # 活跃锁维护：终态释放；活跃态（含恢复等待 pending_recovery）按调用方传入的指纹占锁
+        # （未传则同样释放，兼容无指纹的历史任务）。并发同指纹占锁冲突由唯一索引兜底。
+        if status in (
+            TicketAiAnalysisStatus.CREATED.value,
+            TicketAiAnalysisStatus.RUNNING.value,
+            TicketAiAnalysisStatus.PENDING_RECOVERY.value,
+        ):
             update_data["active_lock"] = active_lock_fingerprint
         else:
             update_data["active_lock"] = None
@@ -3264,6 +3271,14 @@ class TicketAiAnalysisService:
         ticket = TicketDao.get_ticket_by_id(db, ticket_id)
         if not ticket:
             return CrudResponseModel(is_success=False, message="AI分析任务不存在")
+        if task.status == TicketAiAnalysisStatus.PENDING_RECOVERY.value:
+            # 恢复等待中的任务不允许重试：补交结果随时可能到达并自动写回，
+            # 重新派发会与客户端仍在执行的 Worker 冲突；需要立即重跑请先取消。
+            return CrudResponseModel(
+                is_success=False,
+                message="任务正在等待 Agent 补交结果自动恢复，请稍候；如需立即重新执行请先取消任务",
+                result=CamelCaseUtil.transform_result(task),
+            )
         if task.status == TicketAiAnalysisStatus.SUCCESS.value and task.analysis_result:
             cls._record_reuse_event(
                 db,
@@ -3405,10 +3420,11 @@ class TicketAiAnalysisService:
         """
         协作式取消指定 AI 分析任务。
 
-        只允许取消 created/running 任务（终态任务无需取消，直接返回当前状态）。
+        只允许取消 created/running/pending_recovery 任务（终态任务无需取消，直接返回当前状态）。
         数据库状态先落为 canceled 并写审计与工单事件；执行中的任务再向 Agent
         发送取消通知，Agent 在 Worker 前后检查点感知后放弃继续执行/回传。
         Worker 若已完成，迟到结果由"回传后重读状态"逻辑丢弃写回（不覆盖取消态）。
+        恢复等待中的任务取消后同样进入终态，后续补交的迟到结果不再写回。
         :param db: 数据库会话
         :param ticket_id: 工单ID
         :param task_id: 任务ID
@@ -3418,7 +3434,11 @@ class TicketAiAnalysisService:
         task = TicketAiDao.get_task_by_id(db, task_id)
         if not task or task.ticket_id != ticket_id:
             return CrudResponseModel(is_success=False, message="AI分析任务不存在")
-        if task.status not in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
+        if task.status not in (
+            TicketAiAnalysisStatus.CREATED.value,
+            TicketAiAnalysisStatus.RUNNING.value,
+            TicketAiAnalysisStatus.PENDING_RECOVERY.value,
+        ):
             return CrudResponseModel(
                 is_success=True,
                 message="任务已结束，无需取消",
@@ -3807,6 +3827,9 @@ class TicketAiAnalysisService:
         Agent 在服务重启期间执行完成并通过补交机制回传了结果时，
         任务不标记失败，改为重新排队走正常执行流程——执行开头命中缓存
         结果直接补写回，任务最终成功，token 如实入库。
+        注意：pending_recovery（连接中断恢复等待）任务不在此处理——
+        其恢复期限由恢复扫描任务（TicketAiRecoveryService）负责判定，
+        启动时保持等待状态，Agent 重连补交后由扫描任务自动写回。
         :return: 无
         """
         with SessionLocal() as db:
@@ -3947,6 +3970,65 @@ class TicketAiAnalysisService:
                 observation,
                 status,
             )
+
+    @classmethod
+    def _enter_pending_recovery(
+        cls,
+        db: Session,
+        task: TicketAiAnalysisTask,
+        *,
+        agent_code: str,
+        timeout_sec: int,
+        audit_execution_id: int | None,
+    ) -> None:
+        """
+        Agent 连接中途断开时把任务置为 pending_recovery（连接中断，等待补交结果）。
+
+        该状态为非终态：不发送失败通知（网络闪断不是真实失败）；恢复期限写入任务
+        上下文 pendingRecoveryDeadline，恢复扫描任务按该期限决定自动写回或置败。
+        Agent 侧 Worker 在后台线程继续执行，完成后结果经待补交机制回传并写入
+        Redis 结果缓存，由恢复扫描任务重新排队走迟到结果写回（不重复消耗 token）。
+        :param db: 数据库会话
+        :param task: AI 分析任务
+        :param agent_code: Agent 编码
+        :param timeout_sec: 本次任务超时时间（秒）
+        :param audit_execution_id: 审计执行记录ID
+        :return: 无
+        """
+        task_id = task.task_id
+        recovery_deadline = datetime.now() + timedelta(
+            seconds=max(int(timeout_sec or cls.DEFAULT_WORKER_TIMEOUT), 60) + cls.PENDING_RECOVERY_EXTRA_SECONDS
+        )
+        context = dict(task.analysis_context) if isinstance(task.analysis_context, dict) else {}
+        context["pendingRecoveryDeadline"] = recovery_deadline.isoformat(timespec="seconds")
+        cls._log_task_step(
+            task_id,
+            "STATUS",
+            "Agent 连接中断，任务进入恢复等待",
+            agent_code=agent_code,
+            recovery_deadline=context["pendingRecoveryDeadline"],
+        )
+        cls._mark_task_status(
+            db,
+            task_id,
+            status=TicketAiAnalysisStatus.PENDING_RECOVERY.value,
+            status_desc="连接中断，等待Agent补交结果",
+            error_code="AI_AGENT_CONNECTION_LOST",
+            error_message="Agent 连接中断，等待 Agent 重连补交结果后自动恢复",
+            command_line=f"agent:{agent_code}",
+        )
+        TicketAiDao.update_task(db, task_id, {"analysis_context": context})
+        cls._update_execution_record(
+            db,
+            audit_execution_id,
+            status="running",
+            error_message="Agent 连接中断，等待补交结果恢复",
+        )
+        db.commit()
+        logger.info(
+            f"AI分析任务[{task_id}] Agent 连接中断，进入恢复等待 | "
+            f"agent_code={agent_code}, recovery_deadline={context['pendingRecoveryDeadline']}"
+        )
 
     @classmethod
     def _load_recovered_agent_response(
@@ -4180,9 +4262,13 @@ class TicketAiAnalysisService:
         # 手动触发时快照在任务上下文里的"结果回帖"三态选择；自动触发快照缺失时按跟随全局处理。
         task_context = task.analysis_context if isinstance(task.analysis_context, dict) else {}
         follow_up_override = str(task_context.get("aiResultFollowUpOverride") or "").strip().lower()
-        # 执行入口状态白名单：只允许新建和重试后的任务进入执行，
+        # 执行入口状态白名单：只允许新建、重试后的任务和恢复等待中的任务进入执行，
         # 防止并发失败者（canceled）或其它终态任务被误排队后再次执行、重复消耗模型调用。
-        if task.status not in (TicketAiAnalysisStatus.CREATED.value, TicketAiAnalysisStatus.RUNNING.value):
+        if task.status not in (
+            TicketAiAnalysisStatus.CREATED.value,
+            TicketAiAnalysisStatus.RUNNING.value,
+            TicketAiAnalysisStatus.PENDING_RECOVERY.value,
+        ):
             cls._log_task_step(
                 task_id,
                 "LOAD",
@@ -4408,6 +4494,11 @@ class TicketAiAnalysisService:
         if recovered_response is not None:
             cls._process_recovered_success(db, task, ticket, recovered_response, audit_execution_id)
             return
+        if recovered_response is None and task.status == TicketAiAnalysisStatus.PENDING_RECOVERY.value:
+            # 恢复等待中且尚无补交结果：保持 pending_recovery 继续等待，不派发新尝试，
+            # 避免与客户端仍在执行的 Worker 并发跑同一任务（Agent 端会拒绝并发同任务执行）。
+            cls._log_task_step(task_id, "LOAD", "恢复等待中，尚未收到 Agent 补交结果，继续等待")
+            return
         cls._log_task_step(
             task_id,
             "STATUS",
@@ -4538,6 +4629,18 @@ class TicketAiAnalysisService:
                     status=TicketAiAnalysisStatus.CANCELED.value,
                     task_id=task_id,
                     follow_up_override=follow_up_override,
+                )
+                return
+
+            # Agent 连接中途断开：区别于真实执行失败，任务进入 pending_recovery
+            # 等待 Agent 重连后补交结果自动写回，恢复扫描任务负责超期置败兜底。
+            if getattr(agent_response, "status_code", None) == AgentResponseEnum.AGENT_CONNECTION_LOST.value:
+                cls._enter_pending_recovery(
+                    db,
+                    task,
+                    agent_code=agent_code,
+                    timeout_sec=timeout_sec,
+                    audit_execution_id=audit_execution_id,
                 )
                 return
 
@@ -4805,3 +4908,105 @@ class TicketAiAnalysisService:
                     stage="ai_analysis",
                 )
             return
+
+    # ---- AI 结果回帖手动补发（2026-09 阶段二）----
+
+    REPLY_RESEND_ALLOWED_STATUSES = {
+        TicketAiAnalysisStatus.SUCCESS.value,
+        TicketAiAnalysisStatus.FAILED.value,
+    }
+
+    @classmethod
+    def resend_result_reply_services(
+        cls,
+        db: Session,
+        ticket_id: int,
+        task_id: int,
+        current_user: CurrentUserModel,
+    ) -> CrudResponseModel:
+        """
+        手动补发 AI 分析结果回帖到工单群话题。
+
+        面向"分析已完成但结果未回帖"的任务（锚点丢失的历史工单、回帖发送失败、
+        当时配置未开启等场景）；不重新执行分析，直接读取任务持久化结果渲染发送。
+        补发视为明确手动意图：跳过回帖总开关与 sendOn 时机匹配、跳过工单级幂等，
+        但保留任务级幂等（已回帖过的任务拒绝重复补发）与无锚点策略判定。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :param task_id: AI任务ID
+        :param current_user: 当前登录用户
+        :return: 补发结果
+        """
+        from modules.ticket.service.sync.ticket_sync_config_service import TicketSyncConfigService
+        from modules.ticket.service.sync.ticket_sync_group_push_service import TicketSyncGroupPushService
+
+        task = TicketAiDao.get_task_by_id(db, task_id)
+        if not task or task.ticket_id != ticket_id:
+            return CrudResponseModel(is_success=False, message="AI分析任务不存在")
+        ticket = TicketDao.get_ticket_by_id(db, ticket_id)
+        if not ticket:
+            return CrudResponseModel(is_success=False, message="工单不存在或已删除")
+        if task.status not in cls.REPLY_RESEND_ALLOWED_STATUSES:
+            return CrudResponseModel(
+                is_success=False,
+                message=f"任务状态为 {task.status}，仅分析成功或失败的任务支持补发回帖",
+            )
+        if TicketAiDao.is_result_replied(db, task_id):
+            return CrudResponseModel(
+                is_success=False,
+                message="该任务结果已回帖过，无需补发；如需再次通知请重新提交分析",
+            )
+        config = TicketSyncConfigService.load_sync_config(db)
+        group_config = config.get("groupPush") if isinstance(config.get("groupPush"), dict) else {}
+        raw_follow_up = (
+            group_config.get("aiResultFollowUp")
+            if isinstance(group_config.get("aiResultFollowUp"), dict)
+            else {}
+        )
+        # 手动补发为明确意图：强制 enabled+sendOn=always（终态非取消即匹配），
+        # 保留 replyInThread/template/noAnchorStrategy 等形式配置跟随当前全局配置。
+        follow_up_config = {**raw_follow_up, "enabled": True, "sendOn": "always"}
+        meta = TicketSyncGroupPushService.build_meta(
+            ticket.extra_data if isinstance(ticket.extra_data, dict) else {}
+        )
+        result, _, _ = TicketSyncGroupPushService.send_ai_result_thread_reply(
+            db,
+            ticket=ticket,
+            meta=meta,
+            follow_up_config=follow_up_config,
+            ai_task_status=str(task.status or ""),
+            ai_task_id=task_id,
+            ai_result_payload=task.analysis_result if isinstance(task.analysis_result, dict) else None,
+            ai_error_message=str(getattr(task, "error_message", "") or ""),
+            override="on",
+            sync_scene=TicketSyncGroupPushService.resolve_sync_scene_from_meta(meta),
+        )
+        operator = cls._user_name(current_user) if current_user else "system"
+        TicketDao.add_event(
+            db,
+            TicketEvent(
+                ticket_id=ticket_id,
+                event_type=TicketEventType.AI_ANALYZED.value,
+                operator_id=cls._user_id(current_user) if current_user else None,
+                operator_name=operator,
+                content=(
+                    f"手动补发AI结果回帖: task_id={task_id}, "
+                    f"{'成功' if result.get('successCount') else '未成功'}"
+                    + (f", 原因={result.get('skipReason')}" if result.get("skipped") else "")
+                ),
+                create_time=datetime.now(),
+            ),
+        )
+        db.commit()
+        if bool(result.get("skipped")):
+            return CrudResponseModel(
+                is_success=False,
+                message=f"回帖未发送: {result.get('skipReason') or '-'}",
+            )
+        success_count = int(result.get("successCount") or 0)
+        if success_count <= 0:
+            return CrudResponseModel(is_success=False, message="回帖发送失败，请检查群锚点与飞书凭证后重试")
+        return CrudResponseModel(
+            is_success=True,
+            message=f"回帖已补发到 {success_count} 个群",
+        )
