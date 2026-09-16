@@ -160,7 +160,7 @@ class CredentialBindingSaveModel(CredentialBaseModel):
 
     binding_name: str = Field(min_length=1, max_length=128)
     credential_id: str
-    business_type: Literal["web_case", "ticket_log_pull", "ticket_remote_sync"]
+    business_type: Literal["web_case", "ticket_log_pull", "ticket_remote_sync", "external_data_query"]
     projection_type: Literal["playwright_storage", "http_cookie", "http_header"]
     target_url: str = ""
     target_host_patterns: list[str] = Field(default_factory=list)
@@ -191,7 +191,7 @@ class CredentialBindingQueryModel(CredentialBaseModel):
 class CredentialBindingOptionQueryModel(CredentialBaseModel):
     """绑定选项查询参数；业务类型使用 camelCase 对外暴露。"""
 
-    business_type: Literal["web_case", "ticket_log_pull", "ticket_remote_sync"]
+    business_type: Literal["web_case", "ticket_log_pull", "ticket_remote_sync", "external_data_query"]
 
 
 class CredentialRefreshRequestModel(CredentialBaseModel):

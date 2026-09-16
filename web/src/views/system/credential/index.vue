@@ -120,6 +120,7 @@ const sharingModes = [
 ]
 const businessTypes = [
   { value: 'ticket_remote_sync', label: '远端工单同步' }, { value: 'ticket_log_pull', label: '工单日志拉取' }, { value: 'web_case', label: 'Web 用例' },
+  { value: 'external_data_query', label: '大数据查询' },
 ]
 const bindingProjections = computed(() => bindingForm.businessType === 'web_case'
   ? [{ value: 'playwright_storage', label: 'Playwright storageState' }]

@@ -7,6 +7,15 @@
 统一凭证管理页面只维护凭证和业务绑定，不提供日志拉取外部环境的编辑入口。日志拉取的环境地址、Origin、商家等配置继续通过系统参数维护，参数键为 `ticket.logPull.external`；其中每个环境只填写 `credentialBindingId` 引用统一凭证，不填写 Cookie、Authorization 或 API Key。
 
 > 业务绑定新增和编辑是两条独立操作；点击“新增绑定”时会清空上一次编辑留下的绑定主键，因此同一业务、同一投影类型也可以继续新增多条绑定记录。
+## 大数据查询
+
+大数据查询（Unidata）业务场景用于托管外部大数据查询服务的认证信息，目前仅支持「纳入统一凭证、创建 HTTP Header 投影绑定」，暂未接通到具体的查询执行链路。
+
+- **凭证类型**：`http_api_key` 或 `http_header`，认证方式选「手工」，关闭自动刷新。
+- **敏感字段示例**：`{"headerName":"Authorization","headerValue":"Bearer unid***TnZw"}`（`Bearer` 后保留一个空格）。
+- **业务绑定**：业务场景选「大数据查询」（`external_data_query`），投影方式选 `http_header`。
+- `workbenchCode` 属非敏感请求参数，不在敏感快照中维护；查询执行时在请求侧拼接。目标域白名单建议配置到对应环境域名（如 UAT `uatopen-d.rta-os.com`），Prod 环境单独建绑定并配生产域名，避免凭证被投影到非预期站点。
+
 ## 远端工单同步
 
 远端同步配置的 `credentialBindingId` 必填。请创建 `http_api_key` 或 `http_header` 凭证，敏感字段示例为 `{"headerName":"X-API-Key","headerValue":"你的密钥"}`，认证方式选"手工"，关闭自动刷新；再创建 `ticket_remote_sync`、`http_header` 绑定。
