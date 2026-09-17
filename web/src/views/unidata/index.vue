@@ -2,6 +2,15 @@
   <div class="app-container unidata-page">
     <!-- 顶部工具栏：数据源 / 引擎 / 行数 / 超时 -->
     <el-card shadow="never" class="toolbar-card">
+      <el-alert
+        v-if="!sources.length && !sourcesLoading"
+        title="暂未配置大数据查询数据源"
+        description="请在「系统管理 → 参数设置」中维护 unidata.query.sources（sources[].code/name/baseUrl/workbenchCode/credentialBindingId），保存后刷新本页。"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="source-alert"
+      />
       <div class="toolbar">
         <div class="toolbar-item">
           <span class="toolbar-label">数据源</span>
@@ -105,6 +114,7 @@ import QueryResultTable from './components/QueryResultTable.vue'
 const { proxy } = getCurrentInstance()
 
 const sources = ref([])
+const sourcesLoading = ref(false)
 const activeSource = ref('')
 const engine = ref('')
 const engineLoading = ref(false)
@@ -146,6 +156,7 @@ function filterNode(value, data) {
 
 /* 加载启用的大数据数据源，默认选中第一个并联动加载引擎与库树。 */
 function loadSources() {
+  sourcesLoading.value = true
   return listUnidataSources().then(response => {
     sources.value = response.data || []
     if (sources.value.length && !activeSource.value) {
@@ -153,7 +164,9 @@ function loadSources() {
       loadEngines()
       refreshTree()
     }
-  })
+  }).catch(error => {
+    proxy.$modal.msgError(error?.message || '加载数据源失败，请检查后端服务')
+  }).finally(() => { sourcesLoading.value = false })
 }
 
 function onSourceChange(code) {
@@ -190,6 +203,8 @@ function refreshTree() {
 /* el-tree 懒加载：第 0 层库 -> 第 1 层表（分块）-> 第 2 层字段（名称/类型/备注）。 */
 function loadNode(node, resolve) {
   if (node.level === 0) {
+    // 数据源未就绪时直接返回空，避免拼出 /unidata/sources//databases 的 404 请求
+    if (!activeSource.value) { resolve([]); return }
     dbLoading.value = true
     listUnidataDatabases(activeSource.value)
       .then(response => {
@@ -290,6 +305,7 @@ loadSources()
 <style scoped>
 .unidata-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 120px); }
 .toolbar-card :deep(.el-card__body) { padding: 12px 16px; }
+.source-alert { margin-bottom: 10px; }
 .toolbar { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 .toolbar-item { display: flex; align-items: center; gap: 8px; }
 .toolbar-label { color: var(--el-text-color-secondary); font-size: 13px; }
