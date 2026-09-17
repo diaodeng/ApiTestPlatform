@@ -310,6 +310,19 @@ async def get_ticket_summary(request: Request, ticket_id: int, query_db: Session
 
 
 @ticketCrudController.get(
+    "/{ticket_id:int}/edit-detail", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
+)
+async def get_ticket_edit_detail(request: Request, ticket_id: int, query_db: Session = Depends(get_db)):
+    """获取工单编辑回填数据，仅包含编辑表单字段，不读取消息、快照、相似工单和提示词。"""
+    try:
+        result = await run_in_threadpool(TicketReadService.get_edit_detail, query_db, ticket_id)
+        return ResponseUtil.success(data=result) if result else ResponseUtil.failure(msg="工单不存在")
+    except Exception as e:
+        logger.exception(e)
+        return ResponseUtil.error(msg=str(e))
+
+
+@ticketCrudController.get(
     "/{ticket_id:int}/similar-tickets", dependencies=[Depends(CheckUserInterfaceAuth("ticket:ticket:query"))]
 )
 async def get_ticket_similar_tickets(

@@ -12,6 +12,7 @@ from modules.ticket.dao.ticket_dao import TicketDao
 from modules.ticket.dao.ticket_issue_dao import TicketIssueDao
 from modules.ticket.entity.do.ticket_do import Ticket
 from modules.ticket.entity.vo.ticket_read_vo import (
+    TicketEditModel,
     TicketMessagePageItemModel,
     TicketMessagesPageResponseModel,
     TicketSimilarItemModel,
@@ -161,6 +162,59 @@ class TicketReadService:
                 data[key] = cls._stringify_id(data[key])
         logger.info(f"工单轻量概览查询完成 | ticket_id={ticket_id} 未加载消息快照相似度提示词")
         return TicketSummaryModel.model_validate(data)
+
+    @classmethod
+    def get_edit_detail(cls, db: Session, ticket_id: int) -> TicketEditModel | None:
+        """
+        查询工单编辑回填数据。
+        只保留编辑表单需要的字段：工单本体 + 版本标签 + 项目/模块业务码 + 最近一次日志拉取摘要；
+        不读取消息、快照、相似检索和 AI 提示词分层，保证编辑弹窗快速打开。
+        :param db: 数据库会话
+        :param ticket_id: 工单ID
+        :return: 工单编辑回填模型
+        """
+        ticket = TicketDao.get_ticket_by_id(db, ticket_id)
+        if not ticket:
+            logger.info(f"工单编辑详情未查询到工单 | ticket_id={ticket_id}")
+            return None
+        data = CamelCaseUtil.transform_result(ticket)
+        # 项目名称兜底与原始描述还原，装饰口径与全量详情保持一致
+        project_name = str(data.get("projectName") or data.get("merchantName") or "").strip()
+        data["projectName"] = project_name
+        data["merchantName"] = data.get("merchantName") or project_name
+        extra_data = data.get("extraData") or {}
+        description = str(data.get("description") or "").strip()
+        origin_description = str(
+            extra_data.get("origin_description") or extra_data.get("original_description") or ""
+        ).strip()
+        if not origin_description and "【AI翻译】" in description:
+            origin_description = description.split("【AI翻译】", 1)[0].strip()
+        data["originalDescription"] = origin_description or description
+        data["aiTranslation"] = extra_data.get("ai_translation") or ""
+        TicketVersionService.attach_ticket_version_labels(db, [data])
+        cls._attach_relation_codes(db, data, ticket)
+        # 最近一次日志拉取摘要：单条摘要表查询，供日志拉取记录页预填兜底使用
+        data["latestLogPull"] = TicketLogPullService.get_latest_summary(db, ticket_id)
+        # 主键与关联 ID 统一转字符串，避免前端 Number 精度失真；更新模型负责解析回整数
+        for key in (
+            "ticketId",
+            "projectId",
+            "moduleId",
+            "categoryId",
+            "issueId",
+            "reporterId",
+            "currentAssigneeId",
+            "firstLineAssigneeId",
+            "internalOwnerId",
+            "affectedVersionId",
+            "plannedFixVersionId",
+            "fixedVersionId",
+            "releasedVersionId",
+        ):
+            if key in data:
+                data[key] = cls._stringify_id(data[key])
+        logger.info(f"工单编辑详情查询完成 | ticket_id={ticket_id} 未加载消息快照相似度提示词")
+        return TicketEditModel.model_validate(data)
 
     @classmethod
     def _project_similar_item(cls, item: dict[str, Any]) -> TicketSimilarItemModel:

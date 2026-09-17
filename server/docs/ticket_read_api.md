@@ -10,6 +10,7 @@
   - 结果缓存：`status != error` 的查询结果按 `工单ID + limit + 相似度配置指纹` 缓存到 Redis（键前缀 `ticket:similar-result`，TTL 5 分钟；`CACHE_BACKEND=memory` 时降级为进程内缓存）。缓存命中时不执行向量扫描；`error` 结果不缓存。工单向量刷新（`vectorize_ticket_for_scene` 各场景）和相似案例状态变更后主动失效该工单的缓存。Redis 不可用时自动降级为直查，不影响接口可用性。
 - `GET /ticket/{ticket_id}/messages/page?limit=20`：按需读取最近协同消息。`limit` 默认 20，最大 100。响应 `data` 为 `{ items, limit, hasMore }`。
 - `GET /ticket/{ticket_id}/snapshots/page?limit=10`：按需读取最近 ACR 快照。`limit` 默认 10，最大 100。响应 `data` 为 `{ items, limit, hasMore }`，快照按版本倒序返回。
+- `GET /ticket/{ticket_id}/edit-detail`：工单编辑回填专用轻量接口。只返回编辑表单需要的字段：工单本体、项目/模块业务码、四类版本 ID 与展示名、处理人、问题分类、工单类型、`tags`、`categoryName`、`problemPatternVerified`、`extraData`（前端从中还原日志拉取/自动翻译配置）、`originalDescription`/`aiTranslation`，以及最近一次日志拉取摘要。不读取消息、快照、相似工单、AI 提示词分层和 Token 统计。工单列表编辑弹窗与日志拉取管理页预填使用该接口；全部主键与关联 ID 以字符串返回，更新时由 `TicketUpdateModel` 解析回整数。
 
 所有接口使用登录态和现有工单查询/消息查询权限。不存在的工单沿用 `ResponseUtil.failure` 返回“工单不存在”。工单、Issue、消息和快照的 BIGINT 主键以字符串返回，避免浏览器整数精度丢失。
 

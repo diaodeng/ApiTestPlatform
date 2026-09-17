@@ -523,7 +523,7 @@ import {
   createTicketLogPullRecord,
   downloadTicketLogPull,
   downloadTicketLogPullStoreConfigTemplate,
-  getTicket,
+  getTicketEditDetail,
   getTicketLogPullVendorStoreOptions,
   listTicket,
   listTicketLogPullStoreConfigs,
@@ -1090,7 +1090,8 @@ function handleCreateTicketChange(ticketId) {
     createForm.value.aiProviderCode = ''
     return
   }
-  getTicket(ticketId).then(response => {
+  // 使用轻量编辑详情接口预填：只读取 extraData 与最近拉取摘要，避免加载消息快照相似工单
+  getTicketEditDetail(ticketId).then(response => {
     applyTicketLogPullPrefill(response.data || {})
   }).catch(() => {})
 }

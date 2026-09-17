@@ -176,6 +176,73 @@ class TicketAiTokenSummaryModel(BaseModel):
     success_task_count: int = 0
 
 
+class TicketEditModel(BaseModel):
+    """
+    工单编辑回填模型，只包含编辑表单需要的字段。
+    说明：
+    - 主键与关联 ID 统一序列化为字符串，避免 BIGINT 超出 JavaScript 安全整数范围导致前端精度失真；
+      更新接口的 TicketUpdateModel 按 Pydantic 宽松模式负责把字符串解析回整数。
+    - 不包含消息、快照、相似工单、AI 提示词分层等编辑表单用不到的数据。
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ticket_id: str
+    ticket_no: str | None = None
+    ticket_url: str | None = None
+    title: str | None = None
+    description: str | None = None
+    original_description: str | None = None
+    ai_translation: str | None = None
+    project_id: str | None = None
+    project_name: str | None = None
+    project_code: str | None = None
+    merchant_name: str | None = None
+    module_id: str | None = None
+    module_name: str | None = None
+    module_code: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    issue_type_id: str | None = None
+    issue_type_name: str | None = None
+    status: str | None = None
+    customer_priority: str | None = None
+    internal_priority: str | None = None
+    severity: str | None = None
+    source: str | None = None
+    reporter_id: str | None = None
+    reporter_name: str | None = None
+    current_assignee_id: str | None = None
+    current_assignee_name: str | None = None
+    first_line_assignee_id: str | None = None
+    first_line_assignee_name: str | None = None
+    internal_owner_id: str | None = None
+    internal_owner_name: str | None = None
+    is_problem: bool | None = None
+    root_cause_type: str | None = None
+    solution_type: str | None = None
+    resolution_code: str | None = None
+    resolution_name: str | None = None
+    problem_pattern_code: str | None = None
+    problem_pattern_name: str | None = None
+    problem_pattern_verified: bool | None = None
+    issue_id: str | None = None
+    affected_version_id: str | None = None
+    affected_version: str | None = None
+    planned_fix_version_id: str | None = None
+    planned_fix_version: str | None = None
+    fixed_version_id: str | None = None
+    fixed_version: str | None = None
+    released_version_id: str | None = None
+    released_version: str | None = None
+    version_key: str | None = None
+    root_cause: str | None = None
+    solution: str | None = None
+    tags: dict[str, Any] | list[str] | None = None
+    extra_data: dict[str, Any] | None = Field(default=None, description="工单扩展上下文，编辑表单从中还原自动化配置")
+    latest_log_pull: dict[str, Any] | None = None
+
+
 class TicketSummaryModel(BaseModel):
     """工单轻量概览响应模型，只保留基础、版本、Issue、关系码和必要摘要。"""
 
