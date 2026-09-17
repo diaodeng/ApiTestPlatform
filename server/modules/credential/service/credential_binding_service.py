@@ -91,7 +91,7 @@ class CredentialBindingService:
                 return "Web 用例绑定必须使用 playwright_storage 投影"
             if credential.credential_type != "browser_storage":
                 return "Web 用例绑定必须引用 browser_storage 凭证"
-        elif model.business_type in {"ticket_log_pull", "ticket_remote_sync"}:
+        elif model.business_type in {"ticket_log_pull", "ticket_remote_sync", "external_data_query"}:
             if model.projection_type not in {"http_header", "http_cookie"}:
                 return "工单业务绑定必须使用 HTTP Header 或 Cookie 投影"
         if model.writeback_enabled and model.business_type != "web_case":
