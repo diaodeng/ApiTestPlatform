@@ -62,7 +62,7 @@ class UnidataGatewayService:
         真实原因在 message 中（如权限不足、仅支持单条 SELECT），此处转译为
         带 cause 的 ValueError，由上层控制器转成友好错误。
         """
-        response = client.request(method, path, **kwargs)
+        response = cls._request_with_network_guard(client, method, path, **kwargs)
         if response.status_code != 200:
             message = cls._extract_error_message(response)
             logger.warning(
@@ -75,6 +75,27 @@ class UnidataGatewayService:
             logger.warning(f"Unidata 业务失败: url={response.request.url} code={payload.get('code')} message={message}")
             raise ValueError(f"Unidata 业务失败：{message}")
         return payload
+
+    @staticmethod
+    def _request_with_network_guard(client: httpx.Client, method: str, path: str, **kwargs):
+        """执行请求并把网络层异常（连接失败/DNS/超时）翻译为带指引的业务错误。
+
+        部署服务器与 Unidata 网关不在同一网络区域时会抛 httpx.ConnectError 等，
+        不翻译的话控制器会返回 500，运维无法从提示定位是网络不通。
+        """
+        try:
+            return client.request(method, path, **kwargs)
+        except httpx.HTTPError as exc:
+            request_url = ""
+            try:
+                request_url = str(exc.request.url)
+            except AttributeError:
+                request_url = path
+            logger.warning(f"Unidata 请求网络异常: url={request_url} error={type(exc).__name__}: {exc}")
+            raise ValueError(
+                f"无法访问 Unidata 网关（{type(exc).__name__}），"
+                f"请检查部署服务器到 Unidata baseUrl 的网络连通性与 DNS：{exc}"
+            ) from exc
 
     @staticmethod
     def _extract_error_message(response: httpx.Response) -> str:

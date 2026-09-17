@@ -183,6 +183,24 @@ def test_list_columns_rejects_invalid_full_name():
         UnidataQueryService.list_columns(db=None, source_code="uat", table_full_name="dim_supplier")
 
 
+def test_gateway_translates_network_error():
+    """部署服务器连不上 Unidata 网关时应转为带指引的业务错误，而不是裸 500。"""
+    import httpx
+
+    request = httpx.Request("GET", "https://uatopen-d.rta-os.com/api/v1/assets/table-privileges/my")
+
+    class _BrokenTransport(httpx.BaseTransport):
+        def handle_request(self, inner_request):
+            raise httpx.ConnectError("connection refused", request=inner_request)
+
+    client = httpx.Client(transport=_BrokenTransport(), base_url="https://uatopen-d.rta-os.com")
+    try:
+        with pytest.raises(ValueError, match="无法访问 Unidata 网关"):
+            UnidataGatewayService.list_database_permissions(client, "ddw_trade")
+    finally:
+        client.close()
+
+
 def test_gateway_translates_upstream_error():
     import httpx
 
