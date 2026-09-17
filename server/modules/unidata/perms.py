@@ -42,16 +42,28 @@ def _menu(
 
 
 MENU_DEFS: tuple[MenuConfig, ...] = (
+    # 顶级目录：路由组装器只给顶级 M 目录加 "/" 前缀和 Layout 组件，顶级 C 菜单会导致
+    # vue-router "Invalid path" 报错（项目内所有 C 菜单均挂在 M 目录下，保持同一约定）。
+    _menu(
+        "unidata.root",
+        "大数据",
+        "M",
+        None,
+        path="bigdata",
+        icon="chart",
+        order=9,
+        remark="大数据工具目录",
+    ),
     _menu(
         "unidata.query",
         "大数据查询",
         "C",
-        None,
+        "unidata.root",
         perm="unidata:query:list",
-        path="unidata",
+        path="query",
         component="unidata/index",
         icon="chart",
-        order=9,
+        order=1,
         remark="大数据（Unidata）只读查询：数据源切换、权限库表浏览与 SQL 执行",
     ),
 )
