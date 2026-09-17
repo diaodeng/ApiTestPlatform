@@ -20,6 +20,9 @@ _MAX_PAGES = 20
 _HTTP_TIMEOUT_BUFFER_SECONDS = 30
 # 引擎探测用 SQL 的 Unidata 侧超时秒数（探测应快速失败）
 _PROBE_TIMEOUT_SECONDS = 30
+# 连接建立超时：TCP 握手本应秒级完成；部署服务器网络不通（丢包）时 10 秒内快速失败，
+# 而不是跟随 600 秒的读超时把请求挂起十几分钟
+_CONNECT_TIMEOUT_SECONDS = 10.0
 
 
 class UnidataGatewayService:
@@ -47,11 +50,21 @@ class UnidataGatewayService:
 
     @classmethod
     def _build_client(cls, base_url: str, auth_headers: dict[str, str], timeout_seconds: float) -> httpx.Client:
-        """构造带鉴权头的 HTTP 客户端。"""
+        """构造带鉴权头的 HTTP 客户端。
+
+        timeout_seconds 是读超时（覆盖 SQL 执行的长耗时）；连接建立单独用短超时，
+        避免部署服务器网络不通时请求长时间挂起。
+        """
+        timeout = httpx.Timeout(
+            connect=_CONNECT_TIMEOUT_SECONDS,
+            read=timeout_seconds,
+            write=_HTTP_TIMEOUT_BUFFER_SECONDS,
+            pool=_HTTP_TIMEOUT_BUFFER_SECONDS,
+        )
         return httpx.Client(
             base_url=base_url,
             headers=auth_headers,
-            timeout=timeout_seconds,
+            timeout=timeout,
         )
 
     @classmethod
