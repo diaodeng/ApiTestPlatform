@@ -187,8 +187,6 @@ def test_gateway_translates_network_error():
     """部署服务器连不上 Unidata 网关时应转为带指引的业务错误，而不是裸 500。"""
     import httpx
 
-    request = httpx.Request("GET", "https://uatopen-d.rta-os.com/api/v1/assets/table-privileges/my")
-
     class _BrokenTransport(httpx.BaseTransport):
         def handle_request(self, inner_request):
             raise httpx.ConnectError("connection refused", request=inner_request)
