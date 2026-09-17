@@ -20,7 +20,11 @@ unidataController = APIRouter(prefix="/unidata", dependencies=[Depends(LoginServ
 @unidataController.get("/sources")
 async def list_sources(request: Request, query_db: Session = Depends(get_db)):
     """获取启用的大数据查询数据源下拉选项。"""
-    return ResponseUtil.success(data=await run_in_threadpool(UnidataQueryService.list_source_options, query_db))
+    try:
+        data = await run_in_threadpool(UnidataQueryService.list_source_options, query_db)
+    except ValueError as exc:
+        return ResponseUtil.failure(msg=str(exc))
+    return ResponseUtil.success(data=data)
 
 
 @unidataController.get("/sources/{source_code}/databases")
