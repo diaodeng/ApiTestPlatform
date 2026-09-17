@@ -113,11 +113,11 @@ async def refresh_credential(request: Request, credential_id: int, model: Creden
 
 
 @credentialController.post("/{credential_id}/test-login-flow", dependencies=[Depends(CheckUserInterfaceAuth("system:credential:refresh"))])
-@log_decorator(title="统一凭证登录流程测试", business_type=2)
+@log_decorator(title="统一凭证认证流程测试", business_type=2)
 async def test_credential_login_flow(request: Request, credential_id: int, model: CredentialFlowTestModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
-    """测试多步登录链认证流程；真实执行各步骤但无论成功与否都不写回凭证密文。"""
+    """测试多步登录/刷新链认证流程；真实执行各步骤但无论成功与否都不写回凭证密文。"""
     try:
-        result = await run_in_threadpool(CredentialLoginChainService.test_login_flow, query_db, credential_id, model.otp_code)
+        result = await run_in_threadpool(CredentialLoginChainService.test_auth_flow, query_db, credential_id, model.flow_type, model.otp_code)
     except ValueError as exc:
         return ResponseUtil.failure(msg=str(exc))
     return ResponseUtil.success(msg=result["message"], data=result)

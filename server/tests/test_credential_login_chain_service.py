@@ -65,7 +65,7 @@ def test_login_chain_extracts_ticket_and_persists_set_cookie():
             {"Set-Cookie": "UYBFEWAEE=new-session-value; Domain=erp.example.test; Path=/; HttpOnly"},
         )
 
-    new_secret, details = CredentialLoginChainService.execute_login_chain(
+    new_secret, details = CredentialLoginChainService.execute_step_chain(
         _erp_style_secret(),
         _erp_style_steps(),
         otp_type="totp",
@@ -108,7 +108,7 @@ def test_login_chain_carries_step1_set_cookie_into_step2_request():
             "persistOutputs": True,
         },
     ]
-    new_secret, _ = CredentialLoginChainService.execute_login_chain(
+    new_secret, _ = CredentialLoginChainService.execute_step_chain(
         {"headerName": "Cookie", "headerValue": ""}, steps, transport=httpx.MockTransport(handler)
     )
     assert new_secret["headerValue"] == "FINAL=yes"
@@ -139,7 +139,7 @@ def test_login_chain_supports_regex_transform():
             "persistOutputs": True,
         },
     ]
-    CredentialLoginChainService.execute_login_chain(
+    CredentialLoginChainService.execute_step_chain(
         {"headerName": "Cookie", "headerValue": ""},
         steps,
         transport=httpx.MockTransport(handler),
@@ -160,7 +160,7 @@ def test_login_chain_fails_at_step_and_reports_step_index():
     steps[1]["successAssertions"] = [{"source": "json:code", "operator": "equals", "expected": "success"}]
 
     with pytest.raises(ValueError) as exc_info:
-        CredentialLoginChainService.execute_login_chain(
+        CredentialLoginChainService.execute_step_chain(
             _erp_style_secret(), steps, otp_type="totp", transport=httpx.MockTransport(handler)
         )
     assert "登录链第2步" in str(exc_info.value)
@@ -171,7 +171,7 @@ def test_login_chain_fails_when_transient_variable_missing():
     """第一步响应中没有可提取的 ticket 时立即终止，不允许后续步骤带着空值请求。"""
     steps = _erp_style_steps()
     with pytest.raises(ValueError) as exc_info:
-        CredentialLoginChainService.execute_login_chain(
+        CredentialLoginChainService.execute_step_chain(
             _erp_style_secret(),
             steps,
             otp_type="totp",
@@ -191,7 +191,7 @@ def test_login_chain_requires_persist_outputs_step():
         },
     ]
     with pytest.raises(ValueError) as exc_info:
-        CredentialLoginChainService.execute_login_chain(
+        CredentialLoginChainService.execute_step_chain(
             {},
             steps,
             transport=httpx.MockTransport(lambda request: _json_response({"result": "t-1"})),
@@ -215,21 +215,14 @@ def test_login_chain_rejects_reference_to_later_step_output():
         },
     ]
     with pytest.raises(ValueError) as exc_info:
-        CredentialLoginChainService.execute_login_chain(
+        CredentialLoginChainService.execute_step_chain(
             {}, steps, transport=httpx.MockTransport(lambda request: _json_response({}))
         )
     assert "不存在的变量" in str(exc_info.value)
 
 
-def test_login_step_model_rejects_when_condition_and_invalid_output():
-    """条件步骤（when）暂未支持；输出变量名与来源语法非法时直接拒绝。"""
-    with pytest.raises(ValueError):
-        CredentialLoginStepModel.model_validate(
-            {
-                "url": "https://erp.example.test/a",
-                "when": {"source": "json:code", "operator": "equals", "expected": "x"},
-            },
-        )
+def test_login_step_model_rejects_invalid_output_and_condition_variable():
+    """输出/来源语法、请求体类型、步骤 id 与条件变量命名空间非法时直接拒绝；when 现已支持结构化条件。"""
     with pytest.raises(ValueError):
         CredentialLoginStepModel.model_validate(
             {"url": "https://erp.example.test/a", "outputs": {"1bad": "json:code"}}
@@ -246,6 +239,203 @@ def test_login_step_model_rejects_when_condition_and_invalid_output():
         CredentialLoginStepModel.model_validate(
             {"url": "https://erp.example.test/a", "method": "GET", "bodyType": "form", "body": {"a": "1"}}
         )
+    with pytest.raises(ValueError):
+        CredentialLoginStepModel.model_validate(
+            {"url": "https://erp.example.test/a", "when": {"variable": "response.code", "operator": "exists"}}
+        )
+    with pytest.raises(ValueError):
+        CredentialLoginStepModel.model_validate(
+            {"url": "https://erp.example.test/a", "id": "1bad"}
+        )
+    with pytest.raises(ValueError):
+        CredentialLoginStepModel.model_validate(
+            {"url": "https://erp.example.test/a", "id": "123"}
+        )
+
+
+def test_login_chain_skips_step_when_condition_not_met():
+    """混合账号场景：第一步直接返回会话 Cookie（无 OTP 挑战）时，条件步骤被跳过，第一步输出即最终凭证。"""
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/doLogin":
+            return _json_response(
+                {"code": "success", "result": "http://erp.example.test/"},
+                {"Set-Cookie": "UYBFEWAEE=direct-session; Path=/"},
+            )
+        return _json_response({"code": "success"})
+
+    steps = [
+        {
+            "id": "login",
+            "url": "https://erp.example.test/doLogin",
+            "method": "POST",
+            "bodyType": "none",
+            "outputs": {"result": "json:result", "header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+            "persistOutputs": True,
+        },
+        {
+            "id": "otp",
+            "url": "https://erp.example.test/doOtp",
+            "method": "POST",
+            "bodyType": "none",
+            "when": {"variable": "step.login.result", "operator": "contains", "value": "otp?"},
+            "outputs": {"header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+            "persistOutputs": True,
+        },
+    ]
+    new_secret, details = CredentialLoginChainService.execute_step_chain(
+        {"headerName": "Cookie", "headerValue": ""},
+        steps,
+        transport=httpx.MockTransport(handler),
+    )
+    assert new_secret["headerValue"] == "UYBFEWAEE=direct-session"
+    assert details[1]["skipped"] is True
+    assert requests == ["/doLogin"]
+
+
+def test_login_chain_executes_conditional_step_when_challenge_present():
+    """带 OTP 挑战时条件步骤正常执行，覆盖"部分账号需要 OTP"的混合场景。"""
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/doLogin":
+            return _json_response({"code": "success", "result": "otp?ticket=t-9"})
+        return _json_response({"code": "success"}, {"Set-Cookie": "UYBFEWAEE=otp-session; Path=/"})
+
+    steps = [
+        {
+            "id": "login",
+            "url": "https://erp.example.test/doLogin",
+            "method": "POST",
+            "bodyType": "none",
+            "outputs": {"result": "json:result", "header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+            "persistOutputs": True,
+        },
+        {
+            "id": "otp",
+            "url": "https://erp.example.test/doOtp",
+            "method": "POST",
+            "bodyType": "none",
+            "when": {"variable": "step.login.result", "operator": "contains", "value": "otp?"},
+            "outputs": {"header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+            "persistOutputs": True,
+        },
+    ]
+    new_secret, details = CredentialLoginChainService.execute_step_chain(
+        {"headerName": "Cookie", "headerValue": ""},
+        steps,
+        transport=httpx.MockTransport(handler),
+    )
+    assert new_secret["headerValue"] == "UYBFEWAEE=otp-session"
+    assert requests == ["/doLogin", "/doOtp"]
+    assert details[1]["skipped"] is False
+
+
+def test_login_chain_supports_semantic_step_id_reference():
+    """步骤可配置语义化 id，后续步骤通过 ${step.<id>.变量} 引用。"""
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.read().decode())
+        if request.url.path == "/a":
+            return _json_response({"result": "abc-123"}, {"Set-Cookie": "S=1; Path=/"})
+        return _json_response({"ok": True}, {"Set-Cookie": "S=1; Path=/"})
+
+    steps = [
+        {
+            "id": "login",
+            "url": "https://erp.example.test/a",
+            "method": "POST",
+            "bodyType": "none",
+            "outputs": {"ticket": "json:result"},
+        },
+        {
+            "url": "https://erp.example.test/b",
+            "method": "POST",
+            "bodyType": "form",
+            "body": {"ticket": "${step.login.ticket}"},
+            "outputs": {"header.cookie.S": "cookie:S"},
+            "persistOutputs": True,
+        },
+    ]
+    CredentialLoginChainService.execute_step_chain(
+        {"headerName": "Cookie", "headerValue": ""},
+        steps,
+        transport=httpx.MockTransport(handler),
+    )
+    assert "ticket=abc-123" in requests[1]
+
+
+def test_login_chain_fails_when_referencing_skipped_step_output():
+    """引用被条件跳过步骤的输出时，渲染阶段明确报错而不是把占位符原样发给服务端。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response({"code": "success", "result": "home"})
+
+    steps = [
+        {
+            "id": "login",
+            "url": "https://erp.example.test/a",
+            "method": "POST",
+            "bodyType": "none",
+            "when": {"variable": "secret.otpSecret", "operator": "exists"},
+            "outputs": {"ticket": "json:result"},
+        },
+        {
+            "url": "https://erp.example.test/b",
+            "method": "POST",
+            "bodyType": "form",
+            "body": {"ticket": "${step.login.ticket}"},
+            "outputs": {"header.cookie.S": "cookie:S"},
+            "persistOutputs": True,
+        },
+    ]
+    with pytest.raises(ValueError) as exc_info:
+        CredentialLoginChainService.execute_step_chain(
+            {"headerName": "Cookie", "headerValue": ""},
+            steps,
+            transport=httpx.MockTransport(handler),
+        )
+    assert "被条件跳过" in str(exc_info.value)
+
+
+def test_auth_config_accepts_when_condition_and_step_ids():
+    """认证配置支持 when 条件与语义化步骤 id，并校验条件变量引用。"""
+    steps = [
+        {
+            "id": "login",
+            "url": "https://erp.example.test/a",
+            "method": "POST",
+            "bodyType": "none",
+            "outputs": {"result": "json:result"},
+        },
+        {
+            "id": "otp",
+            "url": "https://erp.example.test/b",
+            "method": "POST",
+            "bodyType": "none",
+            "when": {"variable": "step.login.result", "operator": "contains", "value": "otp?"},
+            "outputs": {"header.cookie.S": "cookie:S"},
+            "persistOutputs": True,
+        },
+    ]
+    model = CredentialAuthConfigModel.model_validate({"loginSteps": steps})
+    assert model.login_steps[1].when.variable == "step.login.result"
+
+    broken = [
+        {"id": "login", "url": "https://erp.example.test/a", "method": "POST", "bodyType": "none"},
+        {
+            "url": "https://erp.example.test/b",
+            "method": "POST",
+            "bodyType": "none",
+            "when": {"variable": "step.otp.result", "operator": "exists"},
+        },
+    ]
+    with pytest.raises(ValueError):
+        CredentialAuthConfigModel.model_validate({"loginSteps": broken})
 
 
 def test_auth_config_accepts_camel_case_login_steps_and_validates_references():
@@ -297,13 +487,17 @@ def test_refresh_credential_http_login_uses_login_chain(monkeypatch):
     monkeypatch.setattr(
         "modules.credential.service.credential_refresh_service.encrypt_secret", lambda secret: "encrypted"
     )
-    monkeypatch.setattr("modules.credential.service.credential_refresh_service.mask_secret", lambda secret: "masked")
+    monkeypatch.setattr(
+        "modules.credential.service.credential_refresh_service.mask_secret", lambda secret: "masked"
+    )
 
-    def fake_execute_login_chain(secret, login_steps, otp_type="none", otp_code=None, transport=None):
+    def fake_execute_step_chain(
+        secret, login_steps, otp_type="none", otp_code=None, transport=None, action_label="登录链"
+    ):
         chain_calls.append({"otp_type": otp_type, "otp_code": otp_code, "step_count": len(login_steps)})
         return new_secret, [{"index": 1}, {"index": 2}]
 
-    monkeypatch.setattr(CredentialLoginChainService, "execute_login_chain", staticmethod(fake_execute_login_chain))
+    monkeypatch.setattr(CredentialLoginChainService, "execute_step_chain", staticmethod(fake_execute_step_chain))
 
     class FakeDb:
         def commit(self):

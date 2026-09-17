@@ -5,4 +5,5 @@
 -- MySQL DDL 会隐式提交，请在维护窗口执行。
 
 ALTER TABLE auth_credential_auth_config
-    ADD COLUMN login_steps JSON NULL COMMENT '多步登录链配置；为空时回退单步登录模板';
+    ADD COLUMN login_steps JSON NULL COMMENT '多步登录链配置；为空时回退单步登录模板',
+    ADD COLUMN refresh_steps JSON NULL COMMENT '多步刷新链配置；为空时回退单步刷新模板';

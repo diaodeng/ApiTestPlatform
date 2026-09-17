@@ -46,15 +46,44 @@ class CredentialResponseAssertionModel(CredentialBaseModel):
         return self
 
 
-class CredentialLoginStepModel(CredentialBaseModel):
-    """多步登录链中的单个步骤配置。
+class CredentialStepConditionModel(CredentialBaseModel):
+    """步骤执行条件：条件不满足时跳过该步骤，用于兼容"部分账号需要 OTP、部分不需要"的站点。
 
-    请求模板（url、headers、body）支持 ${secret.字段} 与 ${step.N.变量} 两类占位符；
-    outputs 声明本步骤从响应提取的变量：persist_outputs=False 时仅进入本次执行上下文
-    （供后续步骤以 ${step.N.变量} 引用，链结束即丢弃），persist_outputs=True 时按
-    响应映射规则写回凭证密文（支持 header.cookie、header.cookie.名称、cookies.名称、普通字段）。
+    variable 支持 `step.N.变量`、`step.<步骤id>.变量`（引用更早步骤的输出）和 `secret.字段`
+    （引用凭证敏感字段，如 secret.otpSecret 是否存在）。
     """
 
+    variable: str = Field(min_length=1, max_length=128)
+    operator: Literal["equals", "not_equals", "contains", "not_contains", "exists", "not_empty"] = "exists"
+    value: Any = None
+    message: str = Field(default="", max_length=200)
+
+    @model_validator(mode="after")
+    def validate_condition(self):
+        """约束条件变量命名空间与操作符期望值。"""
+        self.variable = self.variable.strip()
+        namespace = self.variable.split(".", 1)[0] if "." in self.variable else ""
+        if namespace not in {"step", "secret"} or "." not in self.variable:
+            raise ValueError("条件变量必须以 step. 或 secret. 开头，例如 step.1.result 或 secret.otpSecret")
+        value_required = {"equals", "not_equals", "contains", "not_contains"}
+        if self.operator in value_required and self.value is None:
+            raise ValueError(f"条件操作符 {self.operator} 必须填写比较值")
+        if self.operator in value_required and self.value is not None:
+            if not isinstance(self.value, (str, int, float, bool)):
+                raise ValueError("条件比较值仅支持字符串、数字或布尔值")
+        return self
+
+
+class CredentialLoginStepModel(CredentialBaseModel):
+    """多步登录/刷新链中的单个步骤配置。
+
+    请求模板（url、headers、body）支持 ${secret.字段}、${step.N.变量} 和 ${step.<id>.变量}
+    三类占位符；outputs 声明本步骤从响应提取的变量：persist_outputs=False 时仅进入本次执行
+    上下文（链结束即丢弃），persist_outputs=True 时按响应映射规则写回凭证密文。
+    when 条件不满足时跳过本步骤（及其输出），用于同一站点混合"需要/不需要 OTP"的账号。
+    """
+
+    id: str = Field(default="", max_length=64)
     name: str = Field(default="", max_length=64)
     url: str = Field(min_length=1, max_length=1000)
     method: Literal["GET", "POST", "PUT", "PATCH"] = "POST"
@@ -64,8 +93,8 @@ class CredentialLoginStepModel(CredentialBaseModel):
     success_assertions: list[CredentialResponseAssertionModel] = Field(default_factory=list)
     outputs: dict[str, str] = Field(default_factory=dict)
     persist_outputs: bool = False
-    # 预留条件步骤位；第一版只支持线性流程，配置了 when 直接报错，避免用户误以为已生效。
-    when: dict[str, Any] | None = None
+    # 条件步骤：条件不满足时跳过本步骤；省略表示无条件执行。
+    when: CredentialStepConditionModel | None = None
 
     @field_validator("headers", mode="before")
     @classmethod
@@ -127,12 +156,17 @@ class CredentialLoginStepModel(CredentialBaseModel):
             self.outputs[output_key] = normalized
         return self
 
-    @field_validator("when")
+    @field_validator("id")
     @classmethod
-    def reject_when_condition(cls, value):
-        """条件步骤暂未支持，显式拒绝避免静默忽略配置。"""
-        if value is not None:
-            raise ValueError("登录链暂不支持条件步骤（when），请保持线性流程")
+    def validate_step_id(cls, value: str) -> str:
+        """步骤 id 用于语义化变量引用（${step.<id>.变量}）；不允许纯数字以免与序号引用混淆。"""
+        value = value.strip()
+        if not value:
+            return ""
+        if not LOGIN_STEP_VARIABLE_NAME_PATTERN.match(value):
+            raise ValueError(f"步骤 id {value} 不合法，仅允许字母开头的字母数字下划线")
+        if value.isdigit():
+            raise ValueError("步骤 id 不能是纯数字，纯数字会被当作步骤序号")
         return value
 
     @model_validator(mode="after")
@@ -145,16 +179,26 @@ class CredentialLoginStepModel(CredentialBaseModel):
         return self
 
 
-def validate_login_step_references(steps: list[CredentialLoginStepModel]) -> None:
-    """校验多步登录链的跨步骤变量引用。
+# ${step.N.变量} / ${step.<id>.变量} 的引用语法；N 为从 1 开始的步骤序号，id 为语义化步骤标识。
+STEP_VARIABLE_REFERENCE_PATTERN = re.compile(r"\$\{step\.([^}.]+)\.([A-Za-z_][A-Za-z0-9_]*)\}")
 
-    ${step.N.变量} 只允许引用序号更小（更早执行）步骤声明过的输出变量，
-    防止保存配置时留下执行期必然失败的引用。仅扫描 url、headers 和 body 中的字符串。
+
+def validate_login_step_references(steps: list[CredentialLoginStepModel]) -> None:
+    """校验多步登录/刷新链的跨步骤变量引用。
+
+    ${step.N.变量} / ${step.<id>.变量} 只允许引用序号或 id 更小（更早执行）步骤声明过的输出变量；
+    `when` 条件变量允许引用更早步骤输出或 secret 字段。防止保存配置时留下执行期必然失败的引用。
     """
+    ids_seen: set[str] = set()
     for index, step in enumerate(steps, start=1):
+        # 可用变量：更早步骤的输出，按序号和语义 id 两种方式引用。
         available: set[str] = set()
         for earlier_index in range(1, index):
-            available.update(f"step.{earlier_index}.{name}" for name in steps[earlier_index - 1].outputs)
+            earlier = steps[earlier_index - 1]
+            for name in earlier.outputs:
+                available.add(f"step.{earlier_index}.{name}")
+                if earlier.id:
+                    available.add(f"step.{earlier.id}.{name}")
         for template in _iter_step_templates(step):
             if not isinstance(template, str):
                 continue
@@ -162,11 +206,23 @@ def validate_login_step_references(steps: list[CredentialLoginStepModel]) -> Non
                 reference = match.group(1).strip()
                 if reference.startswith("secret."):
                     continue
-                if reference not in available:
-                    raise ValueError(
-                        f"登录步骤 {index} 引用了不存在的变量 ${{{reference}}}；"
-                        f"步骤只能引用更早步骤声明的输出变量（如 ${{step.1.ticket}}）"
-                    )
+                if reference in available:
+                    continue
+                raise ValueError(
+                    f"登录步骤 {index} 引用了不存在的变量 ${{{reference}}}；"
+                    "步骤只能引用更早步骤声明的输出变量（如 ${step.1.ticket} 或 ${step.login.ticket}）"
+                )
+        if step.when:
+            when_variable = step.when.variable
+            if not (when_variable.startswith("secret.") or when_variable in available):
+                raise ValueError(
+                    f"登录步骤 {index} 的执行条件引用了不存在的变量 {when_variable}；"
+                    "条件变量只能引用更早步骤的输出（step.N.变量 或 step.<id>.变量）或凭证字段（secret.字段）"
+                )
+        if step.id:
+            if step.id in ids_seen:
+                raise ValueError(f"步骤 id {step.id} 重复，步骤 id 必须唯一")
+            ids_seen.add(step.id)
 
 
 def _iter_step_templates(step: CredentialLoginStepModel):
@@ -205,6 +261,7 @@ class CredentialAuthConfigModel(CredentialBaseModel):
     refresh_response_mapping: dict[str, Any] = Field(default_factory=dict)
     refresh_success_assertions: list[CredentialResponseAssertionModel] = Field(default_factory=list)
     login_steps: list[CredentialLoginStepModel] = Field(default_factory=list)
+    refresh_steps: list[CredentialLoginStepModel] = Field(default_factory=list)
     browser_start_url: str = ""
     otp_type: Literal["none", "totp", "sms", "email", "manual"] = "none"
     target_host_patterns: list[str] = Field(default_factory=list)
@@ -229,10 +286,10 @@ class CredentialAuthConfigModel(CredentialBaseModel):
         """数据库旧记录中的断言 JSON NULL 统一转换为空列表。"""
         return [] if value is None else value
 
-    @field_validator("login_steps", mode="before")
+    @field_validator("login_steps", "refresh_steps", mode="before")
     @classmethod
     def normalize_nullable_login_steps(cls, value):
-        """数据库旧记录中的多步登录链 JSON NULL 统一转换为空列表。"""
+        """数据库旧记录中的多步链 JSON NULL 统一转换为空列表。"""
         return [] if value is None else value
 
     @field_validator("target_host_patterns", mode="before")
@@ -241,10 +298,10 @@ class CredentialAuthConfigModel(CredentialBaseModel):
         """数据库旧记录中的域名范围 NULL 统一转换为空列表。"""
         return [] if value is None else value
 
-    @field_validator("login_steps")
+    @field_validator("login_steps", "refresh_steps")
     @classmethod
     def validate_login_steps(cls, value: list[CredentialLoginStepModel]) -> list[CredentialLoginStepModel]:
-        """限制登录链长度，并校验跨步骤变量引用的合法性。"""
+        """限制多步链长度，并校验跨步骤变量引用的合法性。"""
         if len(value) > LOGIN_STEP_MAX_COUNT:
             raise ValueError(f"多步登录链最多支持 {LOGIN_STEP_MAX_COUNT} 个步骤")
         validate_login_step_references(value)
@@ -275,10 +332,12 @@ class CredentialSaveModel(CredentialBaseModel):
             raise ValueError("开启自动刷新时必须设置刷新间隔")
         if self.auto_refresh_enabled and self.auth_mode == "http_login" and self.auth_config.otp_type not in {"none", "totp"}:
             raise ValueError("短信、邮箱或人工确认 OTP 不能由定时任务自动完成")
-        if self.auto_refresh_enabled and self.auth_mode == "http_login" and not self.auth_config.login_url and not self.auth_config.login_steps:
-            raise ValueError("HTTP 登录自动刷新必须配置登录地址或多步登录链")
-        if self.auto_refresh_enabled and self.auth_mode == "http_refresh" and not self.auth_config.refresh_url:
-            raise ValueError("HTTP 刷新必须配置刷新地址")
+        if self.auto_refresh_enabled and self.auth_mode == "http_login":
+            if not self.auth_config.login_url and not self.auth_config.login_steps:
+                raise ValueError("HTTP 登录自动刷新必须配置登录地址或多步登录链")
+        if self.auto_refresh_enabled and self.auth_mode == "http_refresh":
+            if not self.auth_config.refresh_url and not self.auth_config.refresh_steps:
+                raise ValueError("HTTP 刷新必须配置刷新地址或多步刷新链")
         return self
 
 
@@ -368,8 +427,9 @@ class CredentialRefreshRequestModel(CredentialBaseModel):
 
 
 class CredentialFlowTestModel(CredentialBaseModel):
-    """多步登录链流程测试请求；只执行认证链，不写回凭证。"""
+    """多步登录/刷新链流程测试请求；只执行认证链，不写回凭证。"""
 
+    flow_type: Literal["login", "refresh"] = "login"
     otp_code: str | None = Field(default=None, min_length=1, max_length=32)
 
 

@@ -54,6 +54,7 @@ class AuthCredentialAuthConfig(Base):
     refresh_response_mapping = Column(JSON, nullable=True, comment="刷新响应映射")
     refresh_success_assertions = Column(JSON, nullable=True, comment="刷新成功断言")
     login_steps = Column(JSON, nullable=True, comment="多步登录链配置；为空时回退单步登录模板")
+    refresh_steps = Column(JSON, nullable=True, comment="多步刷新链配置；为空时回退单步刷新模板")
     browser_start_url = Column(String(1000, collation="utf8_general_ci"), nullable=False, default="", comment="浏览器登录起始地址")
     otp_type = Column(String(32, collation="utf8_general_ci"), nullable=False, default="none", comment="OTP类型")
     target_host_patterns = Column(JSON, nullable=True, comment="允许投影的目标域名模式")

@@ -8,6 +8,7 @@ export const addCredential = (data) => request({ url: '/system/credentials', met
 export const updateCredential = (id, data) => request({ url: `/system/credentials/${id}`, method: 'put', data })
 export const delCredential = (id) => request({ url: `/system/credentials/${id}`, method: 'delete' })
 export const refreshCredential = (id, data) => request({ url: `/system/credentials/${id}/refresh`, method: 'post', data })
+export const testCredentialAuthFlow = (id, data) => request({ url: `/system/credentials/${id}/test-login-flow`, method: 'post', data })
 export const listCredentialBindings = (params) => request({ url: '/system/credentials/bindings', method: 'get', params })
 export const listCredentialBindingOptions = (businessType) => request({ url: '/system/credentials/binding-options', method: 'get', params: { businessType } })
 export const addCredentialBinding = (data) => request({ url: '/system/credentials/bindings', method: 'post', data })

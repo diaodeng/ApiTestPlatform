@@ -44,8 +44,9 @@ class CredentialRefreshService:
         refresh_url = str(getattr(config, "refresh_url", "") or "").strip() if config else ""
         login_url = str(getattr(config, "login_url", "") or "").strip() if config else ""
         login_steps = list(getattr(config, "login_steps", None) or []) if config else []
-        if credential.auth_mode == "http_refresh" and not refresh_url:
-            return {"success": False, "message": "未配置 HTTP 刷新地址", "status": "invalid_config"}
+        refresh_steps = list(getattr(config, "refresh_steps", None) or []) if config else []
+        if credential.auth_mode == "http_refresh" and not refresh_url and not refresh_steps:
+            return {"success": False, "message": "未配置 HTTP 刷新地址或多步刷新链", "status": "invalid_config"}
         if credential.auth_mode == "http_login" and not login_url and not login_steps:
             return {"success": False, "message": "未配置 HTTP 登录地址或多步登录链", "status": "invalid_config"}
         lease_token = ""
@@ -308,7 +309,9 @@ class CredentialRefreshService:
     ) -> dict[str, Any]:
         """执行 HTTP 登录：配置了多步登录链时走链式执行，否则走单步登录模板。"""
         if login_steps:
-            new_secret, _ = CredentialLoginChainService.execute_login_chain(secret, login_steps, otp_type, otp_code)
+            new_secret, _ = CredentialLoginChainService.execute_step_chain(
+                secret, login_steps, otp_type, otp_code, action_label="登录链"
+            )
             return new_secret
         return cls._execute_http_auth_step(
             str(getattr(config, "login_url", "") or "").strip(),
@@ -322,6 +325,32 @@ class CredentialRefreshService:
         )
 
     @classmethod
+    def _execute_http_refresh(
+        cls,
+        config,
+        refresh_steps: list[Any],
+        secret: dict[str, Any],
+        otp_type: str,
+        otp_code: str | None,
+    ) -> dict[str, Any]:
+        """执行 HTTP 刷新：配置了多步刷新链时走链式执行，否则走单步刷新模板。"""
+        if refresh_steps:
+            new_secret, _ = CredentialLoginChainService.execute_step_chain(
+                secret, refresh_steps, otp_type, otp_code, action_label="刷新链"
+            )
+            return new_secret
+        return cls._execute_http_auth_step(
+            str(getattr(config, "refresh_url", "") or "").strip(),
+            cls._request_config(config, "http_refresh"),
+            secret,
+            otp_type,
+            otp_code,
+            cls._response_success_assertions(config, "http_refresh"),
+            cls._response_mapping(config, "http_refresh"),
+            "HTTP 刷新",
+        )
+
+    @classmethod
     def _execute_http_refresh_with_login_fallback(
         cls,
         config,
@@ -331,20 +360,9 @@ class CredentialRefreshService:
         credential_id: int,
     ) -> dict[str, Any]:
         """先刷新，失败后自动登录兜底，再用登录后的新凭证重试刷新。"""
-        refresh_request_config = cls._request_config(config, "http_refresh")
-        refresh_assertions = cls._response_success_assertions(config, "http_refresh")
-        refresh_mapping = cls._response_mapping(config, "http_refresh")
+        refresh_steps = list(getattr(config, "refresh_steps", None) or [])
         try:
-            return cls._execute_http_auth_step(
-                config.refresh_url,
-                refresh_request_config,
-                secret,
-                otp_type,
-                otp_code,
-                refresh_assertions,
-                refresh_mapping,
-                "HTTP 刷新",
-            )
+            return cls._execute_http_refresh(config, refresh_steps, secret, otp_type, otp_code)
         except Exception as refresh_exc:
             login_url = str(getattr(config, "login_url", "") or "").strip()
             login_steps = list(getattr(config, "login_steps", None) or [])
@@ -356,15 +374,6 @@ class CredentialRefreshService:
             except Exception as login_exc:
                 raise ValueError(f"HTTP 刷新失败且登录兜底失败：原始刷新失败={refresh_exc}；登录失败={login_exc}") from login_exc
             try:
-                return cls._execute_http_auth_step(
-                    config.refresh_url,
-                    refresh_request_config,
-                    login_secret,
-                    otp_type,
-                    otp_code,
-                    refresh_assertions,
-                    refresh_mapping,
-                    "HTTP 刷新",
-                )
+                return cls._execute_http_refresh(config, refresh_steps, login_secret, otp_type, otp_code)
             except Exception as retry_exc:
                 raise ValueError(f"HTTP 刷新在登录兜底后仍然失败：原始刷新失败={refresh_exc}；登录后重试失败={retry_exc}") from retry_exc

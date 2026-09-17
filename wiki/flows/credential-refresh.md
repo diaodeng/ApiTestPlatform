@@ -15,7 +15,7 @@ related_files:
 
 定时任务只刷新开启自动刷新且已到间隔或临近过期的 HTTP 凭证；静态手工凭证和浏览器人工登录明确跳过。手工录入的 Cookie、Header 或 Token 可以选择 `http_refresh`，刷新器会把当前凭证注入请求，不需要账号密码。刷新前获取凭证级独占租约，释放租约后才提交事务。对于 `http_refresh` 且同时配置了 `login_url` 或 `login_steps` 的凭证，服务端会先按刷新接口续期；如果刷新失败，则自动执行登录，再用登录得到的新凭证重试刷新。前端编辑页会在 `http_refresh` 模式下额外提供“兜底登录接口”配置入口，方便直接维护刷新和登录两段请求。登录和刷新两次请求都会继续携带当前凭证中的附加 Header、附加 Cookie 和模板变量。
 
-`http_login` 凭证配置了 `login_steps`（多步登录链）时，登录改由 `credential_login_chain_service` 执行：整条链共用一个 `httpx.Client`（步骤间 Set-Cookie 自动进入 Cookie Jar 延续），每步独立断言，`persistOutputs=false` 的输出是临时步骤变量（如一次性 ticket，通过 `${step.N.变量}` 引用，链结束即丢弃），`persistOutputs=true` 的输出按响应映射规则写回凭证；任意一步失败即终止整链且不写回。`login_steps` 为空时回退单步登录模板，存量凭证行为不变。响应提取的公共能力（来源读取、`url_query`/`regex` 加工、断言、Cookie 写回、TOTP、请求日志脱敏）统一下沉在 `credential_http_util`，供单步刷新与多步链共用。
+`http_login` 凭证配置了 `login_steps`（多步登录链）时，登录改由 `credential_login_chain_service` 执行：整条链共用一个 `httpx.Client`（步骤间 Set-Cookie 自动进入 Cookie Jar 延续），每步独立断言，`persistOutputs=false` 的输出是临时步骤变量（如一次性 ticket，通过 `${step.N.变量}` 或 `${step.<id>.变量}` 引用，链结束即丢弃），`persistOutputs=true` 的输出按响应映射规则写回凭证（普通字段输出同时注册为步骤变量）；任意一步失败即终止整链且不写回。`http_refresh` 凭证配置 `refresh_steps` 时刷新同样走链。步骤支持 `when` 条件（变量来自步骤输出或 secret 字段），条件不满足时跳过该步骤，兼容混合"需要/不需要 OTP"的账号；引用被跳过步骤的输出在渲染期明确报错。`login_steps`/`refresh_steps` 为空时回退单步模板，存量凭证行为不变。响应提取的公共能力（来源读取、`url_query`/`regex` 加工、断言、Cookie 写回、TOTP、请求日志脱敏）统一下沉在 `credential_http_util`，供单步刷新与多步链共用。前端编辑弹窗提供"多步认证链"开关、步骤编辑器（`CredentialStepsEditor.vue`）、流程预览与"测试登录/刷新流程"入口。
 
 ```mermaid
 graph TD
@@ -51,9 +51,10 @@ graph TD
 | 变量渲染 | 每步请求前渲染 `${secret.字段}` 与 `${step.N.变量}`；TOTP 在每步执行前按 RFC 6238 重新生成，避免长链跨 30 秒窗口 |
 | 请求 | 按 `bodyType` 发送 `none`/`form`/`json`/`multipart`；multipart 的 boundary 由 httpx 生成，用户手填的 `Content-Type` 被忽略 |
 | 断言 | 先校验 HTTP 2xx，再按本步 `successAssertions` 逐条校验；失败抛出带步骤序号的异常并终止整链 |
-| 临时输出 | `persistOutputs=false` 的输出写入执行上下文，提取不到立即终止（不允许后续步骤带空值请求）；这些值不会写入凭证密文 |
-| 写回输出 | `persistOutputs=true` 的输出走响应映射写回（`header.cookie[.名称]`、`cookies[.名称]`、普通字段）；全部步骤完成后才由刷新主流程做乐观锁写回 |
-| 兜底 | `http_refresh` 刷新失败且配置了 `login_steps` 时，兜底登录同样走多步链 |
+| 临时输出 | `persistOutputs=false` 的输出写入执行上下文（同时注册序号与语义 id 两种引用键），提取不到立即终止（不允许后续步骤带空值请求）；这些值不会写入凭证密文 |
+| 写回输出 | `persistOutputs=true` 的输出走响应映射写回（`header.cookie[.名称]`、`cookies[.名称]`、普通字段）；普通字段输出同时注册为步骤变量供后续步骤的模板与 when 条件引用；全部步骤完成后才由刷新主流程做乐观锁写回 |
+| 条件 | 步骤可配置 `when`（变量支持 `step.N.变量`、`step.<id>.变量`、`secret.字段`），条件不满足时跳过该步骤及其输出；引用被跳过步骤的输出在渲染期报错，不会把占位符原样发出 |
+| 兜底 | `http_refresh` 刷新失败且配置了 `login_steps` 或 `login_url` 时，兜底登录后用新凭证重试刷新（刷新同样支持多步链） |
 
 参见：[统一凭证数据模型](../entities/data-models/credential-management.md)、[凭证接口契约](../contracts/credential-api.md)。
 

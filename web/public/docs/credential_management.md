@@ -135,48 +135,56 @@ HTTP 登录或 HTTP 刷新的响应先通过 HTTP 状态码校验：只有 `2xx`
 
 ### 多步登录链（两步及以上认证）
 
-有些系统的登录需要多个步骤，例如“账号密码登录 → 服务端返回一次性 ticket → 用 TOTP 验证码换回会话 Cookie”。单步登录模板表达不了“第二步的参数来自第一步响应”这类流程，此时可以为 HTTP 登录凭证配置**多步登录链**（`authConfig.loginSteps`，编辑接口按 camelCase 提交，目前通过接口或后续版本的可视化编辑器配置）。
+有些系统的登录需要多个步骤，例如“账号密码登录 → 服务端返回一次性 ticket → 用 TOTP 验证码换回会话 Cookie”。单步登录模板表达不了“第二步的参数来自第一步响应”这类流程，此时可以开启**多步认证链**。
 
-配置后，定时刷新和手工刷新会按顺序执行整条链；`HTTP 刷新` 的兜底登录同样走多步链。**多步登录链为空时完全沿用原有单步登录模板**，已有凭证无需任何改动。
+**入口**：编辑弹窗选择“HTTP 登录重新获取”后，登录接口配置区顶部有“**多步认证链**”开关；打开后展示认证流程预览和步骤编辑卡片（“HTTP 刷新”模式的刷新接口段同样支持开启，配置多步刷新链；兜底登录接口不支持多步）。步骤支持添加、删除、上移、下移；底部“**测试登录/刷新流程**”按钮（已保存的凭证）会真实执行整条链并弹出逐步结果，**测试过程不写回凭证**。
+
+**执行语义**：配置后，定时刷新和手工刷新会按顺序执行整条链；`HTTP 刷新` 的兜底登录同样走多步链。**多步认证链关闭或为空时完全沿用原有单步登录/刷新模板**，已有凭证无需任何改动。开启多步链后，对应段的单接口配置（地址、模板、断言、提取）会整体置空，关闭开关恢复显示原值。
 
 每个步骤包含以下配置：
 
 | 字段 | 说明 |
 |---|---|
-| `name` | 步骤名称（可选），用于日志和测试结果展示。 |
+| `name` | 步骤名称（可选），用于流程预览、日志和测试结果展示。 |
+| `id` | 步骤标识（可选，如 `login`），后续步骤可用 `${step.login.变量}` 语义化引用；也可直接用序号 `${step.1.变量}`。不能是纯数字。 |
 | `url` / `method` | 步骤请求地址与方法，地址必须以 `http://` 或 `https://` 开头。 |
 | `bodyType` | 请求体类型：`none` / `form`（表单）/ `json` / `multipart`。multipart 的 boundary 由系统自动生成，不需要也不应该手填 `Content-Type`。 |
 | `headers` / `body` | 步骤请求头与请求体，支持下面的占位符。 |
-| `successAssertions` | 本步骤独立成断言，规则与“成功断言”一致；任意一步失败整链终止。 |
+| `successAssertions` | 本步骤独立成功断言，规则与“成功断言”一致；任意一步失败整链终止。 |
 | `outputs` | 本步骤从响应提取的变量。 |
-| `persistOutputs` | `false`（默认）时输出为**临时步骤变量**，仅供后续步骤引用，认证结束即丢弃，不会写入凭证；`true` 时输出按“响应提取规则”写回凭证密文。 |
+| `persistOutputs` | `false`（默认）时输出为**临时步骤变量**，仅供后续步骤引用，认证结束即丢弃，不会写入凭证；`true` 时输出按“响应提取规则”写回凭证密文（其中普通字段名的输出同时可作为后续步骤的变量引用）。 |
+| `when` | 执行条件（可选）：条件不满足时跳过本步骤。用于同一站点混合“需要/不需要 OTP”的账号，例如 `step.login.result 包含 otp?` 时才执行 OTP 步骤。 |
 
 占位符与提取来源：
 
 - `${secret.字段名}`：引用凭证敏感字段（与单步模板一致），TOTP 验证码用 `${secret.otp}`，系统在**每个步骤执行前**按当前时间窗口重新生成。
-- `${step.N.变量名}`：引用第 N 步提取的临时变量（N 从 1 开始，只能引用更早的步骤）。
+- `${step.N.变量名}` 或 `${step.步骤标识.变量名}`：引用第 N 步（或指定标识步骤）提取的变量（只能引用更早的步骤）。
 - 提取来源在原有 `json:路径`、`header:名称`、`cookie:名称`、`cookies` 基础上，支持追加一次加工：`json:result|url_query:ticket`（把来源值当作 URL 提取查询参数）、`json:result|regex:ticket=([0-9a-f-]+)`（按正则提取，有捕获组时取第 1 组）。
+- 条件变量支持 `step.N.变量` / `step.标识.变量` 和 `secret.字段`（如 `secret.otpSecret` 是否存在）。
 
-以“账密 + TOTP 两步登录”为例（对应 `rta-os` ERP 场景）：
+以“账密 + TOTP 两步登录”为例（对应 `rta-os` ERP 场景，并可兼容无需 OTP 的账号）：
 
 ```json
 "loginSteps": [
   {
+    "id": "login",
     "name": "账号密码登录",
     "url": "https://erp.example.com/doLogin",
     "method": "POST",
     "bodyType": "form",
     "body": {"account": "${secret.username}", "pwd": "${secret.password}", "remember": "1"},
     "successAssertions": [{"source": "json:code", "operator": "equals", "expected": "success"}],
-    "outputs": {"ticket": "json:result|url_query:ticket"},
-    "persistOutputs": false
+    "outputs": {"result": "json:result", "header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+    "persistOutputs": true
   },
   {
+    "id": "otp",
     "name": "TOTP 验证",
     "url": "https://erp.example.com/doOtp",
     "method": "POST",
     "bodyType": "multipart",
-    "body": {"ticket": "${step.1.ticket}", "google_code": "${secret.otp}"},
+    "body": {"ticket": "${step.login.ticket}", "google_code": "${secret.otp}"},
+    "when": {"variable": "step.login.result", "operator": "contains", "value": "otp?"},
     "successAssertions": [{"source": "json:code", "operator": "equals", "expected": "success"}],
     "outputs": {"header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
     "persistOutputs": true
@@ -184,20 +192,21 @@ HTTP 登录或 HTTP 刷新的响应先通过 HTTP 状态码校验：只有 `2xx`
 ]
 ```
 
+上面的配置同时兼容两类账号：响应返回 `otp?ticket=...` 时执行第二步用 TOTP 换取会话；直接返回跳转地址时第二步被条件跳过，第一步提取到的 Cookie 即最终凭证。
+
 **执行语义与注意事项**：
 
 - 整条链共用一个会话：第一步响应的 `Set-Cookie`（如 WAF 下发的 `acw_tc`）会自动带入后续请求。
 - 临时变量（如 ticket）是一次性的：任何一步失败整链作废重跑，不做单步重试；ticket 不会出现在凭证密文中。
-- 链中至少要有一个 `persistOutputs=true` 的步骤提取到新凭证，否则视为登录失败并保留旧快照。
+- 链中至少要有一个**执行且提取到内容**的“写回凭证”步骤，否则视为登录失败并保留旧快照。
+- 引用了被条件跳过步骤的输出时，执行会明确报错（不会把 `${step...}` 占位符原样发给目标系统）。
 - 全部步骤成功后才按版本号写回凭证，与单步刷新一致；步骤数上限 5 个。
 - 保存配置时会校验变量引用（只能引用更早步骤声明的输出）、来源语法和请求体类型（GET 不允许携带请求体）。
-- 临时验证码场景（短信、邮箱、人工 OTP）无法由定时任务自动完成，仅 TOTP 支持全自动登录链。
-
-**测试登录流程**：调用 `POST /system/credentials/{id}/test-login-flow`（权限同手工刷新，body 可传 `{"otpCode": "123456"}`，TOTP 场景可不传），系统会真实执行整条链并返回每一步的状态码、耗时、提取到的变量名和最终写回的凭证字段名；**无论成功与否都不会写回凭证密文**，可用于保存前验证配置和排查 TOTP 时间偏差等问题。
+- 临时验证码场景（短信、邮箱、人工 OTP）无法由定时任务自动完成，仅 TOTP 支持全自动登录链；手工测试时可在“测试登录流程”按钮旁输入本次验证码。
 
 ## 刷新与并发
 
-静态 API Key 选择 `manual`，不会参加刷新任务。HTTP 登录/刷新凭证可开启自动刷新并设定间隔；`manual` 不能开启自动刷新，需要"手工录入初始值 + 自动续期"时请选择 `HTTP 刷新`。如果 HTTP 刷新同时配置了登录地址，服务端会先按刷新请求续期，刷新失败后自动执行登录，再用登录得到的新凭证重试刷新；人工保存或刷新写回使用版本号，发生冲突时不会覆盖新版本。
+静态 API Key 选择 `manual`，不会参加刷新任务。HTTP 登录/刷新凭证可开启自动刷新并设定间隔；`manual` 不能开启自动刷新，需要"手工录入初始值 + 自动续期"时请选择 `HTTP 刷新`。如果 HTTP 刷新同时配置了登录地址（或多步登录链），服务端会先按刷新请求（或多步刷新链）续期，刷新失败后自动执行登录，再用登录得到的新凭证重试刷新；人工保存或刷新写回使用版本号，发生冲突时不会覆盖新版本。
 
 **自动刷新跳过原因**：定时刷新任务只处理"开启自动刷新"的凭证。未开启的凭证每次都会被跳过，并且对于 HTTP 登录/刷新模式但未开启自动刷新的凭证，系统**每天最多记录一条**"凭证未开启自动刷新"的操作审计日志提醒。凭证列表页提供"自动刷新"列，可以直接看到每个凭证是否开启、刷新间隔和最近一次刷新时间。
 

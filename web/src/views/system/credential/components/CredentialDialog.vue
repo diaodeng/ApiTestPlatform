@@ -624,7 +624,31 @@
                 </el-col>
               </el-row>
             </template>
-            <el-collapse class="credential-collapse">
+            <el-form-item v-if="editor.label !== '兜底登录接口'" label="多步认证链">
+              <el-switch v-model="chainEnabled[editor.kind]" />
+              <span class="unit-text"
+                >开启后按顺序执行多个认证步骤（如账密登录 → 提取 ticket → TOTP → 保存
+                Cookie），替代下方单接口配置；兜底登录接口不支持多步</span
+              >
+            </el-form-item>
+            <CredentialStepsEditor
+              v-show="editor.label !== '兜底登录接口' && chainEnabled[editor.kind]"
+              :ref="(element) => setStepsEditorRef(editor.kind, element)"
+              v-model:enabled="chainEnabled[editor.kind]"
+              :kind-label="editor.kind === 'login' ? '登录' : '刷新'"
+            />
+            <el-form-item v-if="editor.label !== '兜底登录接口' && chainEnabled[editor.kind] && form.credentialId" label=" ">
+              <el-button type="primary" plain :loading="flowTesting" @click="testAuthFlow(editor.kind)">
+                测试{{ editor.kind === 'login' ? '登录' : '刷新' }}流程
+              </el-button>
+              <el-input
+                v-if="['sms', 'email', 'manual'].includes(form.authConfig.otpType)"
+                v-model="flowTestOtpCode"
+                placeholder="本次测试的验证码"
+                style="width: 200px; margin-left: 8px"
+              />
+            </el-form-item>
+            <el-collapse v-show="editor.label === '兜底登录接口' || !chainEnabled[editor.kind]" class="credential-collapse">
               <el-collapse-item title="请求信息">
                 <el-alert type="info" :closable="false" show-icon class="section-alert">
                   <template #title
@@ -1289,12 +1313,44 @@
       ><el-button @click="visible = false">取消</el-button
       ><el-button type="primary" :loading="saving" @click="save">保存</el-button></template
     >
+
+    <!-- 多步认证链流程测试结果弹窗：展示每步执行明细，测试过程不写回凭证 -->
+    <el-dialog v-model="flowTestVisible" title="认证流程测试结果" width="640px" append-to-body>
+      <template v-if="flowTestResult">
+        <el-alert type="success" :closable="false" show-icon :title="flowTestResult.message" />
+        <el-table :data="flowTestResult.steps || []" size="small" class="flow-test-table">
+          <el-table-column prop="index" label="步骤" width="60" />
+          <el-table-column prop="name" label="名称" min-width="120" />
+          <el-table-column label="结果" min-width="220">
+            <template #default="{ row }">
+              <template v-if="row.skipped">已跳过（{{ row.skipReason }}）</template>
+              <template v-else>
+                HTTP {{ row.status }} · {{ row.elapsedMs }}ms
+                <span v-if="row.outputs && row.outputs.length">· {{ row.persistOutputs ? '写回' : '输出' }}：{{ row.outputs.join('、') }}</span>
+              </template>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-if="flowTestResult.updatedFields && flowTestResult.updatedFields.length" class="flow-test-fields">
+          本次将更新凭证字段：{{ flowTestResult.updatedFields.join('、') }}（实际写回以保存并刷新后为准，本次测试未写回）
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="flowTestVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </el-dialog>
 </template>
 
 <script setup>
   import { Delete, Plus } from '@element-plus/icons-vue';
-  import { addCredential, getCredentialSecret, updateCredential } from '@/api/system/credential';
+  import {
+    addCredential,
+    getCredentialSecret,
+    testCredentialAuthFlow,
+    updateCredential,
+  } from '@/api/system/credential';
+  import CredentialStepsEditor from './CredentialStepsEditor.vue';
 
   const emit = defineEmits(['saved']);
   const { proxy } = getCurrentInstance();
@@ -1369,6 +1425,35 @@
   });
   const loginRequest = reactive(emptyRequest());
   const refreshRequest = reactive(emptyRequest());
+  /* 多步认证链：按接口段（login/refresh）独立开关；开启后由步骤编辑器替代单接口配置。 */
+  const chainEnabled = reactive({ login: false, refresh: false });
+  const stepsEditorRefs = {};
+  const flowTesting = ref(false);
+  const flowTestOtpCode = ref('');
+  const flowTestVisible = ref(false);
+  const flowTestResult = ref(null);
+
+  function setStepsEditorRef(kind, element) {
+    if (element) stepsEditorRefs[kind] = element;
+    else delete stepsEditorRefs[kind];
+  }
+
+  /** 测试多步认证链：真实执行各步骤并展示逐步明细，测试过程不写回凭证。 */
+  async function testAuthFlow(kind) {
+    try {
+      flowTesting.value = true;
+      const response = await testCredentialAuthFlow(form.credentialId, {
+        flowType: kind,
+        otpCode: flowTestOtpCode.value || null,
+      });
+      flowTestResult.value = response?.data || null;
+      flowTestVisible.value = true;
+    } catch (error) {
+      proxy.$modal.msgError(error?.message || '认证流程测试失败');
+    } finally {
+      flowTesting.value = false;
+    }
+  }
   const emptyForm = () => ({
     credentialId: '',
     revision: 0,
@@ -1425,7 +1510,7 @@
       sensitive.headerName.trim().toLowerCase() === 'cookie'
   );
   const templateVariables = [
-    { value: '${secret.username}', label: '登录用户优化页面交互大小规律.md名' },
+    { value: '${secret.username}', label: '登录用户名' },
     { value: '${secret.password}', label: '登录密码' },
     { value: '${secret.otp}', label: 'OTP 验证码' },
     { value: '${secret.token}', label: '当前 Token' },
@@ -1568,8 +1653,20 @@
     targetHostsText.value = (form.authConfig.targetHostPatterns || []).join(', ');
     resetRequest(loginRequest, form.authConfig, 'login');
     resetRequest(refreshRequest, form.authConfig, 'refresh');
+    /* 多步认证链状态与步骤内容回填：已保存过步骤才默认开启，避免误导单接口用户。 */
+    const savedLoginSteps = form.authConfig.loginSteps || [];
+    const savedRefreshSteps = form.authConfig.refreshSteps || [];
+    chainEnabled.login = form.authMode === 'http_login' && savedLoginSteps.length > 0;
+    chainEnabled.refresh = form.authMode === 'http_refresh' && savedRefreshSteps.length > 0;
+    flowTestOtpCode.value = '';
+    flowTestResult.value = null;
     if (form.authMode === 'http_login' || form.authMode === 'http_refresh')
       ensureLoginRequestDefaults();
+    nextTick(() => {
+      if (stepsEditorRefs.login) stepsEditorRefs.login.loadSteps(chainEnabled.login ? savedLoginSteps : []);
+      if (stepsEditorRefs.refresh)
+        stepsEditorRefs.refresh.loadSteps(chainEnabled.refresh ? savedRefreshSteps : []);
+    });
     visible.value = true;
     /* 编辑时从后端获取解密后的凭证明文并回填到表单，敏感字段默认 mask 可通过眼睛图标查看 */
     if (row?.credentialId) {
@@ -1794,22 +1891,29 @@
       if (form.autoRefreshEnabled && !supportsAutoRefresh.value)
         return proxy.$modal.msgError('当前更新方式不支持自动刷新');
       const secret = buildSecret();
+      /* 多步链开启时段的单接口配置整体置空，避免两套配置同时存在产生歧义；关闭后恢复编辑器原值。 */
+      const loginChainActive = form.authMode === 'http_login' && chainEnabled.login;
+      const refreshChainActive = form.authMode === 'http_refresh' && chainEnabled.refresh;
       const authConfig = {
         ...form.authConfig,
         targetHostPatterns: targetHostsText.value
           .split(',')
           .map((v) => v.trim())
           .filter(Boolean),
-        loginUrl: loginRequest.url,
-        refreshUrl: refreshRequest.url,
-        loginMethod: loginRequest.method,
-        refreshMethod: refreshRequest.method,
-        loginRequestTemplate: buildRequest(loginRequest),
-        refreshRequestTemplate: buildRequest(refreshRequest),
-        loginResponseMapping: buildMapping(loginRequest),
-        refreshResponseMapping: buildMapping(refreshRequest),
-        loginSuccessAssertions: buildAssertions(loginRequest),
-        refreshSuccessAssertions: buildAssertions(refreshRequest),
+        loginUrl: loginChainActive ? '' : loginRequest.url,
+        refreshUrl: refreshChainActive ? '' : refreshRequest.url,
+        loginMethod: loginChainActive ? 'POST' : loginRequest.method,
+        refreshMethod: refreshChainActive ? 'POST' : refreshRequest.method,
+        loginRequestTemplate: loginChainActive ? {} : buildRequest(loginRequest),
+        refreshRequestTemplate: refreshChainActive ? {} : buildRequest(refreshRequest),
+        loginResponseMapping: loginChainActive ? {} : buildMapping(loginRequest),
+        refreshResponseMapping: refreshChainActive ? {} : buildMapping(refreshRequest),
+        loginSuccessAssertions: loginChainActive ? [] : buildAssertions(loginRequest),
+        refreshSuccessAssertions: refreshChainActive ? [] : buildAssertions(refreshRequest),
+        loginSteps:
+          loginChainActive && stepsEditorRefs.login ? stepsEditorRefs.login.buildSteps() : [],
+        refreshSteps:
+          refreshChainActive && stepsEditorRefs.refresh ? stepsEditorRefs.refresh.buildSteps() : [],
       };
       validateRequestTemplateVariables(authConfig, secret);
       validateResponseMappingTargets(authConfig);
@@ -1906,6 +2010,14 @@
     min-width: 0;
   }
   .unit-text {
+    color: var(--el-text-color-secondary);
+    font-size: 13px;
+  }
+  .flow-test-table {
+    margin-top: 12px;
+  }
+  .flow-test-fields {
+    margin-top: 12px;
     color: var(--el-text-color-secondary);
     font-size: 13px;
   }
