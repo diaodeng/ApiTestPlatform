@@ -8,12 +8,15 @@ source_type: code
 
 数据库旧记录中的认证请求模板、响应映射和目标域名 JSON 字段允许为 `NULL`，接口读取时会分别归一为空对象或空列表，不要求人工回填历史记录。认证配置新增 `loginSuccessAssertions` 和 `refreshSuccessAssertions`，每项使用固定的来源（`status`、`json:`、`header:`、`cookie:`）和操作符，不支持脚本或任意表达式。
 
+认证配置支持 `loginSteps`（多步登录链），元素结构见 `CredentialLoginStepModel`：`url`/`method`/`bodyType`（`none`/`form`/`json`/`multipart`，multipart 的 boundary 由服务端生成）/`headers`/`body`/`successAssertions`/`outputs`/`persistOutputs`。请求模板支持 `${secret.字段}` 与 `${step.N.变量}`；`outputs` 的来源支持 `json:路径|url_query:参数名`、`json:路径|regex:正则` 一次加工。`persistOutputs=false` 的输出是临时步骤变量（如一次性 ticket），不会写入凭证密文；`persistOutputs=true` 的输出按响应映射规则写回凭证。`loginSteps` 为空时回退单步登录模板，`http_login` 自动刷新允许以 `loginSteps` 替代 `loginUrl`。
+
 | 接口 | 作用 |
 |---|---|
 | GET /system/credentials | 查询凭证 |
 | POST /system/credentials | 新建凭证并加密 secret |
 | PUT /system/credentials/{id} | 按 expectedRevision 更新 |
 | POST /system/credentials/{id}/refresh | 手工触发 HTTP 刷新 |
+| POST /system/credentials/{id}/test-login-flow | 测试多步登录链：真实执行各步骤并返回逐步明细（状态码、耗时、输出变量名、写回字段名），无论成功与否都不写回凭证密文 |
 | /bindings | 管理业务凭证绑定 |
 | /binding-options | 获取业务配置下拉项 |
 | POST /bindings/{id}/writeback | 在绑定允许、本地缓存启用且版本一致时回写浏览器 storageState |

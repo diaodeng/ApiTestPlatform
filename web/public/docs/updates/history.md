@@ -5,6 +5,9 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 
+## 2026-09-17
+- 统一凭证新增多步登录链能力：支持"账密登录 → 提取一次性 ticket → TOTP → Set-Cookie"两步及以上全自动认证（`authConfig.loginSteps`），步骤间共享会话 Cookie、multipart 请求体、`url_query`/`regex` 提取加工、临时变量与凭证写回分离，任一步失败保留旧快照；新增 `POST /system/credentials/{id}/test-login-flow` 流程测试接口（不写回凭证）；需执行 `server/sql/20260917_credential_login_steps.sql`。旧单步登录配置行为不变。详见：[多步登录链](2026-09-17-credential-multi-step-login.md)，用户说明：[统一凭证管理](../credential_management.md)。
+
 ## 2026-09-15
 - 日志拉取管理页自动拉取记录整行错位修复：`ac45a758` 新增"拉取人"列时模板调用了未定义的 `getPullSourceSceneLabel`（实际导入名为 `getLogPullSourceSceneLabel`），自动拉取记录（`pullSource=automation`）渲染"拉取人"单元格 tooltip 分支时行渲染函数抛 TypeError，生产构建下该行"拉取人" `<td>` 被渲染为注释占位节点、后续单元格整体左移一格且文字重叠（人工记录走 `v-else` 分支不受影响）；修正函数名一行修复，已用真实构建产物+模拟后端复现并验证新版后端/旧版后端/旧版后端系统账号三种数据场景均正常。详见：[日志拉取管理列错位修复](2026-09-15-log-pull-record-column-shift-fix.md)，用户说明：[日志拉取使用说明](../ticket_log_pull.md)。
 
