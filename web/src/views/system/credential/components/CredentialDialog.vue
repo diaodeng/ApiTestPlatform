@@ -1,677 +1,496 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="form.credentialId ? '编辑凭证' : '新增凭证'"
-    width="880px"
+    :title="''"
+    width="1280px"
+    top="5vh"
     append-to-body
     destroy-on-close
+    class="credential-dialog"
   >
-    <el-form :model="form" label-width="126px">
-      <el-divider content-position="left">基本信息</el-divider>
-      <el-form-item label="凭证名称" required
-        ><el-input v-model="form.credentialName"
-      /></el-form-item>
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item>
-            <template #label
-              >凭证类型<PromptButton width="520"
-                ><div class="credential-help">
-                  <div class="credential-help-title">凭证类型说明</div>
-                  <table class="credential-help-table">
-                    <thead>
-                      <tr>
-                        <th>类型</th>
-                        <th>用途</th>
-                        <th>填写内容</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>浏览器状态</td>
-                        <td>Web 用例 Playwright 自动化</td>
-                        <td>录制/执行后的 storageState JSON</td>
-                      </tr>
-                      <tr>
-                        <td>HTTP Cookie</td>
-                        <td>带 Cookie 的 HTTP 请求</td>
-                        <td>Cookie 字符串，如 SESSION=xxx; tenant=prod</td>
-                      </tr>
-                      <tr>
-                        <td>HTTP Token</td>
-                        <td>JWT/Bearer Token 等</td>
-                        <td>Header 名 + 值前缀 + Token 值</td>
-                      </tr>
-                      <tr>
-                        <td>API Key</td>
-                        <td>固定密钥</td>
-                        <td>Header 名 + 密钥值</td>
-                      </tr>
-                      <tr>
-                        <td>HTTP Header</td>
-                        <td>自定义请求头</td>
-                        <td>Header 名 + 自定义值</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div class="credential-help-note">
-                    一个凭证只能选择一种类型，对应一组认证信息。
-                  </div>
-                </div></PromptButton
-              ></template
-            >
-            <el-select v-model="form.credentialType" style="width: 100%"
-              ><el-option
-                v-for="item in credentialTypes"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-            /></el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item>
-            <template #label
-              >更新方式<PromptButton width="560"
-                ><div class="credential-help">
-                  <div class="credential-help-title">更新方式说明</div>
-                  <table class="credential-help-table">
-                    <thead>
-                      <tr>
-                        <th>方式</th>
-                        <th>适用场景</th>
-                        <th>自动刷新</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>手工录入</td>
-                        <td>长期有效的 API Key / 静态 Token</td>
-                        <td>不支持</td>
-                      </tr>
-                      <tr>
-                        <td>HTTP 登录</td>
-                        <td>需要账号密码登录获取凭证</td>
-                        <td>支持（TOTP 可自动）</td>
-                      </tr>
-                      <tr>
-                        <td>HTTP 刷新</td>
-                        <td>
-                          用现有 Cookie/Header
-                          调刷新接口续期；可配置兜底登录接口，刷新失败后自动登录并重试
-                        </td>
-                        <td>支持</td>
-                      </tr>
-                      <tr>
-                        <td>浏览器人工登录</td>
-                        <td>人工在浏览器中登录</td>
-                        <td>不支持</td>
-                      </tr>
-                      <tr>
-                        <td>浏览器刷新</td>
-                        <td>浏览器自动刷新状态</td>
-                        <td>视实现而定</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div class="credential-help-note">
-                    手工录入初始值后想自动续期，请选择"HTTP 刷新"并按需配置刷新接口和兜底登录接口。
-                  </div>
-                </div></PromptButton
-              ></template
-            >
-            <el-select v-model="form.authMode" style="width: 100%"
-              ><el-option
-                v-for="item in authModes"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-            /></el-select>
-          </el-form-item>
-        </el-col>
-      </el-row>
+    <div class="credential-editor">
+      <div class="editor-head">
+        <div class="editor-head-main">
+          <div class="editor-kicker">统一凭证管理</div>
+          <div class="editor-title">
+            {{ form.credentialId ? '编辑凭证' : '新增凭证' }}
+            <el-tag v-if="form.enabled" size="small" type="success">已启用</el-tag>
+            <el-tag v-else size="small" type="info">已停用</el-tag>
+          </div>
+          <div class="editor-subtitle">
+            配置凭证内容、认证流程和生命周期。现有后端字段与保存逻辑保持不变。
+          </div>
+        </div>
+        <div class="editor-head-meta">
+          <span v-if="form.credentialId">Revision {{ form.revision }}</span>
+          <span v-else>新建凭证</span>
+        </div>
+      </div>
 
-      <el-divider content-position="left">凭证内容</el-divider>
-      <el-alert type="info" :closable="false" show-icon class="section-alert">
-        <template #title
-          >编辑时会从服务端获取已保存凭证并回填，敏感字段默认掩码显示，点击右侧眼睛图标可查看明文。将已保存的字段清空后保存会从凭证中删除该字段。</template
+      <div class="editor-steps">
+        <button
+          v-for="item in [
+            { key: 'basic', no: '1', title: '基本信息', desc: '名称与凭证类型' },
+            { key: 'auth', no: '2', title: '认证方式', desc: '账号、OTP 与认证流程' },
+            { key: 'request', no: '3', title: '获取 / 刷新', desc: '请求、断言与响应提取' },
+            { key: 'lifecycle', no: '4', title: '生命周期', desc: '自动维护与使用策略' },
+          ]"
+          :key="item.key"
+          type="button"
+          class="editor-step"
+          :class="{ active: activeSection === item.key }"
+          @click="setSection(item.key)"
         >
-      </el-alert>
-      <template v-if="form.credentialType === 'http_cookie'">
-        <el-form-item>
-          <template #label
-            >Cookie<PromptButton width="460"
-              ><div class="credential-help">
-                <div class="credential-help-title">Cookie 填写说明</div>
-                <p>完整的 Cookie 字符串，多个键值对用 <b>分号+空格</b> 分隔。</p>
-                <div class="credential-help-code">SESSION=abc123; tenant=prod; locale=zh-CN</div>
-                <p>系统会将其解析为多个键值对，并在请求时自动携带。</p>
-              </div></PromptButton
-            ></template
-          >
-          <el-input
-            v-model="sensitive.cookie"
-            type="textarea"
-            :rows="3"
-            placeholder="例如 SESSION=xxx; tenant=prod"
-          />
-        </el-form-item>
-      </template>
-      <template
-        v-else-if="form.credentialType === 'http_header' || form.credentialType === 'http_api_key'"
-      >
-        <el-row :gutter="16">
-          <el-col :span="10">
-            <el-form-item>
-              <template #label
-                >Header 名称<PromptButton placement="top" width="380"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">Header 名称说明</div>
-                    <p>请求头的键名，最终发送为 <b>{名称}: {值}</b>。</p>
-                    <div class="credential-help-code">X-API-Key / Authorization / X-Auth-Token</div>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input v-model="sensitive.headerName" placeholder="例如 X-API-Key" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="14">
-            <el-form-item>
-              <template #label
-                >Header 值<PromptButton placement="top" width="380"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">Header 值说明</div>
-                    <p>请求头的值，即密钥或令牌内容。一个凭证只对应 <b>一组</b> Header 键值对。</p>
-                    <div class="credential-help-code">sk-xxxx / eyJhbGci...</div>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input
-                v-model="sensitive.headerValue"
-                type="password"
-                show-password
-                autocomplete="new-password"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </template>
-      <template v-else-if="form.credentialType === 'http_token'">
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <el-form-item>
-              <template #label
-                >Header 名称<PromptButton placement="top" width="380"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">Header 名称说明</div>
-                    <p>认证请求头的键名，通常是 <b>Authorization</b>。</p>
-                    <div class="credential-help-code">Authorization</div>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input v-model="sensitive.headerName" placeholder="Authorization" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item>
-              <template #label
-                >值前缀<PromptButton placement="top" width="400"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">值前缀说明</div>
-                    <p>Token 类型前缀，系统自动拼接为 <b>{值前缀}{Token}</b>。</p>
-                    <div class="credential-help-code">Bearer （注意末尾空格）</div>
-                    <p>最终请求头示例：<b>Authorization: Bearer eyJhbG...</b></p>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input v-model="sensitive.valuePrefix" placeholder="Bearer " />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item>
-              <template #label
-                >Token<PromptButton placement="top" width="380"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">Token 说明</div>
-                    <p>实际的令牌值，<b>不含前缀</b>。系统会与值前缀拼接后放入请求头。</p>
-                    <div class="credential-help-code">eyJhbGciOiJIUzI1NiIs...</div>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input
-                v-model="sensitive.token"
-                type="password"
-                show-password
-                autocomplete="new-password"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </template>
-      <el-form-item v-else label="storageState"
-        ><el-input
-          v-model="storageStateText"
-          type="textarea"
-          :rows="5"
-          placeholder='Playwright storageState，例如 {"cookies":[],"origins":[]}'
-      /></el-form-item>
-      <el-collapse
-        v-if="form.credentialType !== 'browser_storage'"
-        v-model="advancedPanels"
-        class="credential-collapse"
-      >
-        <el-collapse-item name="additional-auth" title="附加认证信息（可选）">
-          <el-alert
-            type="info"
-            :closable="false"
-            show-icon
-            class="section-alert"
-            title="主凭证保持上方类型对应的单一字段。这里仅用于补充 CSRF、租户等额外 Header 或额外 Cookie；不需要时无需展开配置。"
-          />
-          <el-alert
-            v-if="hasCookieHeaderPrimary"
-            type="warning"
-            :closable="false"
-            show-icon
-            class="section-alert"
-            title="主 Header 已使用 Cookie，不能新增或编辑结构化附加 Cookie。若下方存在历史附加 Cookie，请点击删除图标清理后再保存。"
-          />
-          <el-form-item label="附加 Header">
-            <div class="key-value-list">
-              <div
-                v-for="(item, index) in additionalHeaders"
-                :key="`header-${index}`"
-                class="key-value-row"
-              >
-                <el-input v-model="item.name" placeholder="名称，例如 X-CSRF-Token" />
-                <el-input
-                  v-model="item.value"
-                  type="password"
-                  show-password
-                  autocomplete="new-password"
-                  placeholder="值"
-                />
-                <el-button
-                  :icon="Delete"
-                  circle
-                  plain
-                  type="danger"
-                  title="删除附加 Header"
-                  @click="additionalHeaders.splice(index, 1)"
-                />
-              </div>
-              <el-button :icon="Plus" plain @click="additionalHeaders.push({ name: '', value: '' })"
-                >添加 Header</el-button
-              >
-            </div>
-          </el-form-item>
-          <el-form-item label="附加 Cookie">
-            <div class="key-value-list">
-              <div
-                v-for="(item, index) in additionalCookies"
-                :key="`cookie-${index}`"
-                class="key-value-row"
-              >
-                <el-input
-                  v-model="item.name"
-                  placeholder="名称，例如 CSRF-TOKEN"
-                  :disabled="hasCookieHeaderPrimary"
-                />
-                <el-input
-                  v-model="item.value"
-                  type="password"
-                  show-password
-                  autocomplete="new-password"
-                  placeholder="值"
-                  :disabled="hasCookieHeaderPrimary"
-                />
-                <el-button
-                  :icon="Delete"
-                  circle
-                  plain
-                  type="danger"
-                  title="删除附加 Cookie"
-                  @click="additionalCookies.splice(index, 1)"
-                />
-              </div>
-              <el-button
-                :icon="Plus"
-                plain
-                :disabled="hasCookieHeaderPrimary"
-                @click="additionalCookies.push({ name: '', value: '' })"
-                >添加 Cookie</el-button
-              >
-            </div>
-          </el-form-item>
-          <el-form-item>
-            <template #label
-              >其他敏感字段 JSON<PromptButton width="500"
-                ><div class="credential-help">
-                  <div class="credential-help-title">其他敏感字段说明</div>
-                  <p>存放主体凭证之外的固定敏感值，同样会加密保存。</p>
-                  <p>额外 Header 和 Cookie 请使用上方字段，不要重复写入 JSON。</p>
-                  <p>常见用途：</p>
-                  <ul>
-                    <li>刷新令牌：<code>{"refreshToken": "xxx"}</code></li>
-                    <li>其他密钥：<code>{"clientSecret": "xxx"}</code></li>
-                  </ul>
-                  <p>请求模板中可引用：<code>${secret.refreshToken}</code></p>
-                </div></PromptButton
-              ></template
-            >
-            <el-input
-              v-model="advancedSecretText"
-              type="textarea"
-              :rows="3"
-              placeholder='可选，例如 {"refreshToken":"...","clientSecret":"..."}；固定敏感值会加密保存'
-            />
-          </el-form-item>
-        </el-collapse-item>
-      </el-collapse>
+          <span class="editor-step-no">{{ item.no }}</span>
+          <span class="editor-step-copy">
+            <b>{{ item.title }}</b>
+            <small>{{ item.desc }}</small>
+          </span>
+        </button>
+      </div>
 
-      <template v-if="showLoginConfig">
-        <el-divider content-position="left">登录账号</el-divider>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item>
-              <template #label
-                >用户名<PromptButton placement="top" width="440"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">登录用户名说明</div>
-                    <p>目标系统的登录账号，会被加密保存。</p>
-                    <p>在请求模板中通过 <b>${secret.username}</b> 引用。</p>
-                    <p>来源：由用户自行填写目标系统的登录账号。</p>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input v-model="sensitive.username" autocomplete="off" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item>
-              <template #label
-                >密码<PromptButton placement="top" width="440"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">登录密码说明</div>
-                    <p>目标系统的登录密码，会被加密保存。</p>
-                    <p>在请求模板中通过 <b>${secret.password}</b> 引用。</p>
-                    <p>来源：由用户自行填写目标系统的登录密码。</p>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input
-                v-model="sensitive.password"
-                type="password"
-                show-password
-                autocomplete="new-password"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item>
-              <template #label
-                >OTP 类型<PromptButton placement="top" width="460"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">OTP（一次性密码）类型说明</div>
-                    <table class="credential-help-table">
-                      <thead>
-                        <tr>
-                          <th>类型</th>
-                          <th>说明</th>
-                          <th>自动刷新可用</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td>不需要</td>
-                          <td>登录不要求二次验证</td>
-                          <td>是</td>
-                        </tr>
-                        <tr>
-                          <td>TOTP 自动生成</td>
-                          <td>基于时间的一次性密码，需填写 TOTP 密钥</td>
-                          <td>是</td>
-                        </tr>
-                        <tr>
-                          <td>短信验证码</td>
-                          <td>需人工接收短信</td>
-                          <td>否</td>
-                        </tr>
-                        <tr>
-                          <td>邮箱验证码</td>
-                          <td>需人工查收邮件</td>
-                          <td>否</td>
-                        </tr>
-                        <tr>
-                          <td>人工确认</td>
-                          <td>需人工手动确认</td>
-                          <td>否</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <p>验证码通过 <b>${secret.otp}</b> 注入请求体。</p>
-                  </div></PromptButton
-                ></template
-              >
-              <el-select v-model="form.authConfig.otpType" style="width: 100%"
-                ><el-option
-                  v-for="item in otpTypes"
+      <div class="editor-body">
+        <!-- 1. 基本信息 -->
+        <section v-show="activeSection === 'basic'" class="editor-section">
+          <div class="section-heading">
+            <div>
+              <h3>基本信息</h3>
+              <p>先确定这份凭证是什么，以及它保存什么类型的认证信息。</p>
+            </div>
+          </div>
+
+          <el-form :model="form" label-position="top" class="clean-form">
+            <div class="field-card">
+              <el-form-item label="凭证名称" required>
+                <el-input
+                  v-model="form.credentialName"
+                  size="large"
+                  placeholder="例如：ERP 生产环境登录凭证"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+            </div>
+
+            <div class="field-card">
+              <div class="field-label">凭证类型</div>
+              <div class="choice-grid credential-type-grid">
+                <button
+                  v-for="item in credentialTypes"
                   :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-              /></el-select>
-            </el-form-item>
-          </el-col>
-          <el-col v-if="form.authConfig.otpType === 'totp'" :span="12">
-            <el-form-item>
-              <template #label
-                >TOTP 密钥<PromptButton placement="top" width="440"
-                  ><div class="credential-help">
-                    <div class="credential-help-title">TOTP 密钥说明</div>
-                    <p>
-                      目标系统提供的 TOTP 共享密钥（通常是一串 Base32
-                      编码的字符串）。系统会基于此密钥按标准 RFC 6238 算法自动生成 6 位验证码。
-                    </p>
-                    <div class="credential-help-code">JBSWY3DPEHPK3PXP</div>
-                  </div></PromptButton
-                ></template
-              >
-              <el-input
-                v-model="sensitive.otpSecret"
-                type="password"
-                show-password
-                autocomplete="new-password"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </template>
+                  type="button"
+                  class="choice-card"
+                  :class="{ active: form.credentialType === item.value }"
+                  @click="form.credentialType = item.value"
+                >
+                  <span class="choice-radio"></span>
+                  <span>
+                    <b>{{ item.label }}</b>
+                    <small>
+                      {{
+                        {
+                          browser_storage: 'Playwright 浏览器会话状态',
+                          http_cookie: 'Cookie 会话凭证',
+                          http_token: 'JWT / Bearer 等 Token',
+                          http_api_key: '固定 API Key',
+                          http_header: '自定义 Header 凭证',
+                        }[item.value]
+                      }}
+                    </small>
+                  </span>
+                </button>
+              </div>
+            </div>
 
-      <template v-if="requestEditors.length">
-        <el-alert
-          v-if="form.authMode === 'http_refresh'"
-          type="success"
-          :closable="false"
-          show-icon
-          class="section-alert"
-          title="HTTP 刷新模式下会同时配置两段请求：刷新接口和兜底登录接口。刷新失败后会先执行登录，再用登录后的新凭证重试刷新。"
-        />
-        <el-collapse class="credential-collapse">
-          <el-collapse-item
-            v-for="editor in requestEditors"
-            :key="editor.kind"
-            :title="editor.label"
-          >
-            <template v-if="editor.label === '兜底登录接口'">
-              <el-divider content-position="left">登录账号</el-divider>
-              <el-row :gutter="16">
-                <el-col :span="12">
-                  <el-form-item>
-                    <template #label
-                      >用户名<PromptButton placement="top" width="440"
-                        ><div class="credential-help">
-                          <div class="credential-help-title">登录用户名说明</div>
-                          <p>目标系统的登录账号，会被加密保存。</p>
-                          <p>在请求模板中通过 <b>${secret.username}</b> 引用。</p>
-                          <p>来源：由用户自行填写目标系统的登录账号。</p>
-                        </div></PromptButton
-                      ></template
-                    >
-                    <el-input v-model="sensitive.username" autocomplete="off" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item>
-                    <template #label
-                      >密码<PromptButton placement="top" width="440"
-                        ><div class="credential-help">
-                          <div class="credential-help-title">登录密码说明</div>
-                          <p>目标系统的登录密码，会被加密保存。</p>
-                          <p>在请求模板中通过 <b>${secret.password}</b> 引用。</p>
-                          <p>来源：由用户自行填写目标系统的登录密码。</p>
-                        </div></PromptButton
-                      ></template
-                    >
-                    <el-input
-                      v-model="sensitive.password"
-                      type="password"
-                      show-password
-                      autocomplete="new-password"
-                    />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-              <el-row :gutter="16">
-                <el-col :span="12">
-                  <el-form-item>
-                    <template #label
-                      >OTP 类型<PromptButton placement="top" width="460"
-                        ><div class="credential-help">
-                          <div class="credential-help-title">OTP（一次性密码）类型说明</div>
-                          <table class="credential-help-table">
-                            <thead>
-                              <tr>
-                                <th>类型</th>
-                                <th>说明</th>
-                                <th>自动刷新可用</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr>
-                                <td>不需要</td>
-                                <td>登录不要求二次验证</td>
-                                <td>是</td>
-                              </tr>
-                              <tr>
-                                <td>TOTP 自动生成</td>
-                                <td>基于时间的一次性密码，需填写 TOTP 密钥</td>
-                                <td>是</td>
-                              </tr>
-                              <tr>
-                                <td>短信验证码</td>
-                                <td>需人工接收短信</td>
-                                <td>否</td>
-                              </tr>
-                              <tr>
-                                <td>邮箱验证码</td>
-                                <td>需人工查收邮件</td>
-                                <td>否</td>
-                              </tr>
-                              <tr>
-                                <td>人工确认</td>
-                                <td>需人工手动确认</td>
-                                <td>否</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                          <p>验证码通过 <b>${secret.otp}</b> 注入请求体。</p>
-                        </div></PromptButton
-                      ></template
-                    >
-                    <el-select v-model="form.authConfig.otpType" style="width: 100%"
-                      ><el-option
-                        v-for="item in otpTypes"
-                        :key="item.value"
-                        :label="item.label"
-                        :value="item.value"
-                    /></el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col v-if="form.authConfig.otpType === 'totp'" :span="12">
-                  <el-form-item>
-                    <template #label
-                      >TOTP 密钥<PromptButton placement="top" width="440"
-                        ><div class="credential-help">
-                          <div class="credential-help-title">TOTP 密钥说明</div>
-                          <p>
-                            目标系统提供的 TOTP 共享密钥（通常是一串 Base32
-                            编码的字符串）。系统会基于此密钥按标准 RFC 6238 算法自动生成 6
-                            位验证码。
-                          </p>
-                          <div class="credential-help-code">JBSWY3DPEHPK3PXP</div>
-                        </div></PromptButton
-                      ></template
-                    >
-                    <el-input
-                      v-model="sensitive.otpSecret"
-                      type="password"
-                      show-password
-                      autocomplete="new-password"
-                    />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </template>
-            <el-form-item v-if="editor.label !== '兜底登录接口'" label="多步认证链">
-              <el-switch v-model="chainEnabled[editor.kind]" />
-              <span class="unit-text"
-                >开启后按顺序执行多个认证步骤（如账密登录 → 提取 ticket → TOTP → 保存
-                Cookie），替代下方单接口配置；兜底登录接口不支持多步</span
+            <div class="field-card">
+              <div class="field-card-head">
+                <div>
+                  <div class="field-label">凭证内容</div>
+                  <div class="field-hint">敏感值会按现有逻辑加密保存，编辑时支持掩码回显。</div>
+                </div>
+              </div>
+
+              <template v-if="form.credentialType === 'http_cookie'">
+                <el-form-item label="Cookie">
+                  <el-input
+                    v-model="sensitive.cookie"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="例如 SESSION=xxx; tenant=prod"
+                  />
+                </el-form-item>
+              </template>
+
+              <template
+                v-else-if="
+                  form.credentialType === 'http_header' || form.credentialType === 'http_api_key'
+                "
               >
-            </el-form-item>
-            <CredentialStepsEditor
-              v-show="editor.label !== '兜底登录接口' && chainEnabled[editor.kind]"
-              :ref="(element) => setStepsEditorRef(editor.kind, element)"
-              v-model:enabled="chainEnabled[editor.kind]"
-              :kind-label="editor.kind === 'login' ? '登录' : '刷新'"
-            />
-            <el-form-item v-if="editor.label !== '兜底登录接口' && chainEnabled[editor.kind] && form.credentialId" label=" ">
-              <el-button type="primary" plain :loading="flowTesting" @click="testAuthFlow(editor.kind)">
-                测试{{ editor.kind === 'login' ? '登录' : '刷新' }}流程
-              </el-button>
-              <el-input
-                v-if="['sms', 'email', 'manual'].includes(form.authConfig.otpType)"
-                v-model="flowTestOtpCode"
-                placeholder="本次测试的验证码"
-                style="width: 200px; margin-left: 8px"
-              />
-            </el-form-item>
-            <el-collapse v-show="editor.label === '兜底登录接口' || !chainEnabled[editor.kind]" class="credential-collapse">
-              <el-collapse-item title="请求信息">
-                <el-alert type="info" :closable="false" show-icon class="section-alert">
-                  <template #title
-                    >请求模板可引用已加密保存的
-                    <code>${secret.变量名}</code>。使用各输入框右侧的“插入变量”时，光标在 JSON
-                    字符串外会自动补全双引号；保存前会校验变量格式和可用性。<code
-                      >${secret.headerValue}</code
+                <div class="two-col">
+                  <el-form-item label="Header 名称">
+                    <el-input
+                      v-model="sensitive.headerName"
+                      placeholder="例如 X-API-Key / Authorization"
+                    />
+                  </el-form-item>
+                  <el-form-item label="Header 值">
+                    <el-input
+                      v-model="sensitive.headerValue"
+                      type="password"
+                      show-password
+                      autocomplete="new-password"
+                      placeholder="密钥或令牌内容"
+                    />
+                  </el-form-item>
+                </div>
+              </template>
+
+              <template v-else-if="form.credentialType === 'http_token'">
+                <div class="three-col">
+                  <el-form-item label="Header 名称">
+                    <el-input v-model="sensitive.headerName" placeholder="Authorization" />
+                  </el-form-item>
+                  <el-form-item label="值前缀">
+                    <el-input v-model="sensitive.valuePrefix" placeholder="Bearer " />
+                  </el-form-item>
+                  <el-form-item label="Token">
+                    <el-input
+                      v-model="sensitive.token"
+                      type="password"
+                      show-password
+                      autocomplete="new-password"
+                      placeholder="Token 值"
+                    />
+                  </el-form-item>
+                </div>
+              </template>
+
+              <template v-else>
+                <el-form-item label="storageState">
+                  <el-input
+                    v-model="storageStateText"
+                    type="textarea"
+                    :rows="6"
+                    placeholder='Playwright storageState，例如 {"cookies":[],"origins":[]}'
+                  />
+                </el-form-item>
+              </template>
+            </div>
+
+            <div v-if="form.credentialType !== 'browser_storage'" class="advanced-card">
+              <button
+                type="button"
+                class="advanced-head"
+                @click="advancedVisible.basic = !advancedVisible.basic"
+              >
+                <span>
+                  <b>附加认证信息</b>
+                  <small>CSRF、租户 Header / Cookie、refreshToken 等固定敏感字段</small>
+                </span>
+                <span class="advanced-toggle">{{ advancedVisible.basic ? '收起' : '展开' }}</span>
+              </button>
+
+              <div v-show="advancedVisible.basic" class="advanced-body">
+                <el-alert
+                  v-if="hasCookieHeaderPrimary"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  title="主 Header 已使用 Cookie，不能同时配置结构化附加 Cookie。"
+                  class="compact-alert"
+                />
+
+                <el-form-item label="附加 Header">
+                  <div class="kv-list">
+                    <div
+                      v-for="(item, index) in additionalHeaders"
+                      :key="`header-${index}`"
+                      class="kv-row"
                     >
-                    为高级用法，直接读取 HTTP Header / API Key 的主 Header 值；通常请优先使用
-                    <code>${secret.cookie}</code>、<code>${secret.token}</code>
-                    等语义变量。</template
+                      <el-input v-model="item.name" placeholder="名称，例如 X-CSRF-Token" />
+                      <el-input
+                        v-model="item.value"
+                        type="password"
+                        show-password
+                        autocomplete="new-password"
+                        placeholder="值"
+                      />
+                      <el-button
+                        :icon="Delete"
+                        text
+                        type="danger"
+                        @click="additionalHeaders.splice(index, 1)"
+                        >删除</el-button
+                      >
+                    </div>
+                    <el-button
+                      :icon="Plus"
+                      plain
+                      @click="additionalHeaders.push({ name: '', value: '' })"
+                      >添加 Header</el-button
+                    >
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="附加 Cookie">
+                  <div class="kv-list">
+                    <div
+                      v-for="(item, index) in additionalCookies"
+                      :key="`cookie-${index}`"
+                      class="kv-row"
+                    >
+                      <el-input
+                        v-model="item.name"
+                        placeholder="名称，例如 CSRF-TOKEN"
+                        :disabled="hasCookieHeaderPrimary"
+                      />
+                      <el-input
+                        v-model="item.value"
+                        type="password"
+                        show-password
+                        autocomplete="new-password"
+                        placeholder="值"
+                        :disabled="hasCookieHeaderPrimary"
+                      />
+                      <el-button
+                        :icon="Delete"
+                        text
+                        type="danger"
+                        @click="additionalCookies.splice(index, 1)"
+                        >删除</el-button
+                      >
+                    </div>
+                    <el-button
+                      :icon="Plus"
+                      plain
+                      :disabled="hasCookieHeaderPrimary"
+                      @click="additionalCookies.push({ name: '', value: '' })"
+                      >添加 Cookie</el-button
+                    >
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="其他敏感字段 JSON">
+                  <el-input
+                    v-model="advancedSecretText"
+                    type="textarea"
+                    :rows="4"
+                    placeholder='例如 {"refreshToken":"...","clientSecret":"..."}'
+                  />
+                  <div class="field-hint">请求模板可通过 ${secret.refreshToken} 等变量引用。</div>
+                </el-form-item>
+              </div>
+            </div>
+          </el-form>
+        </section>
+
+        <!-- 2. 认证方式 -->
+        <section v-show="activeSection === 'auth'" class="editor-section">
+          <div class="section-heading">
+            <div>
+              <h3>认证方式</h3>
+              <p>
+                选择凭证如何获得。HTTP 登录可以配置多步认证链，例如“账密 → ticket → OTP → Cookie”。
+              </p>
+            </div>
+          </div>
+
+          <el-form :model="form" label-position="top" class="clean-form">
+            <div class="field-card">
+              <div class="field-label">更新方式</div>
+              <div class="choice-grid auth-grid">
+                <button
+                  v-for="item in authModes"
+                  :key="item.value"
+                  type="button"
+                  class="choice-card auth-choice"
+                  :class="{ active: form.authMode === item.value }"
+                  @click="form.authMode = item.value"
+                >
+                  <span class="choice-radio"></span>
+                  <span>
+                    <b>{{ item.title }}</b>
+                    <small>{{ item.desc }}</small>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="showLoginConfig" class="field-card">
+              <div class="field-card-head">
+                <div>
+                  <div class="field-label">登录账号</div>
+                  <div class="field-hint">
+                    账号信息只配置一次，登录接口和兜底登录接口共享这些变量。
+                  </div>
+                </div>
+              </div>
+
+              <div class="two-col">
+                <el-form-item label="用户名">
+                  <el-input
+                    v-model="sensitive.username"
+                    autocomplete="off"
+                    placeholder="目标系统登录账号"
+                  />
+                </el-form-item>
+                <el-form-item label="密码">
+                  <el-input
+                    v-model="sensitive.password"
+                    type="password"
+                    show-password
+                    autocomplete="new-password"
+                    placeholder="目标系统登录密码"
+                  />
+                </el-form-item>
+              </div>
+
+              <div class="two-col">
+                <el-form-item label="OTP 类型">
+                  <el-select v-model="form.authConfig.otpType" style="width: 100%">
+                    <el-option
+                      v-for="item in otpTypes"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item v-if="form.authConfig.otpType === 'totp'" label="TOTP 密钥">
+                  <el-input
+                    v-model="sensitive.otpSecret"
+                    type="password"
+                    show-password
+                    autocomplete="new-password"
+                    placeholder="Base32，例如 JBSWY3DPEHPK3PXP"
+                  />
+                </el-form-item>
+              </div>
+
+              <div class="variable-hint">
+                <span>可在请求模板中使用</span>
+                <code>${secret.username}</code>
+                <code>${secret.password}</code>
+                <code>${secret.otp}</code>
+              </div>
+            </div>
+
+            <div v-if="isHttpMode" class="flow-intro">
+              <div class="flow-intro-icon">↳</div>
+              <div>
+                <b>{{
+                  form.authMode === 'http_refresh' ? '刷新优先，登录兜底' : 'HTTP 认证流程'
+                }}</b>
+                <p>
+                  {{
+                    form.authMode === 'http_refresh'
+                      ? '刷新失败时会执行登录配置；登录成功后可重新获取并重试刷新。'
+                      : '单接口模式适合简单登录，多步模式适合 OTP、ticket、二次验证等有状态认证。'
+                  }}
+                </p>
+              </div>
+            </div>
+          </el-form>
+        </section>
+
+        <!-- 3. 获取 / 刷新 -->
+        <section v-show="activeSection === 'request'" class="editor-section">
+          <div class="section-heading">
+            <div>
+              <h3>获取 / 刷新</h3>
+              <p>把“请求 → 成功判断 → 输出”放在同一个认证单元里，减少来回查找。</p>
+            </div>
+          </div>
+
+          <template v-if="requestEditors.length">
+            <div v-for="editor in requestEditors" :key="editor.kind" class="request-card">
+              <div class="request-card-head">
+                <div class="request-title">
+                  <span class="request-status-dot"></span>
+                  <div>
+                    <b>{{ editor.label }}</b>
+                    <small>{{
+                      editor.kind === 'login' ? '获取新的登录凭证' : '使用当前凭证续期'
+                    }}</small>
+                  </div>
+                </div>
+                <el-tag v-if="chainEnabled[editor.kind]" type="success" size="small"
+                  >多步认证链</el-tag
+                >
+                <el-tag v-else type="info" size="small">单接口</el-tag>
+              </div>
+
+              <template v-if="editor.label === '兜底登录接口'">
+                <div class="fallback-note">
+                  兜底登录与主登录共用上方账号、OTP 配置，不需要重复填写；兜底登录同样支持多步认证链（与
+                  HTTP 登录共用同一份多步链配置），刷新失败时按链式流程重新登录。
+                </div>
+              </template>
+
+              <div class="chain-switch-row">
+                <div>
+                  <b>使用多步认证链</b>
+                  <span>适用于“账密登录 → ticket → OTP → Cookie”等流程</span>
+                </div>
+                <el-switch v-model="chainEnabled[editor.kind]" />
+              </div>
+
+              <CredentialStepsEditor
+                v-show="chainEnabled[editor.kind]"
+                :ref="(element) => setStepsEditorRef(editor.kind, element)"
+                v-model:enabled="chainEnabled[editor.kind]"
+                :kind-label="editor.kind === 'login' ? '登录' : '刷新'"
+              />
+
+              <div v-if="chainEnabled[editor.kind] && form.credentialId" class="flow-test-row">
+                <el-button
+                  type="primary"
+                  plain
+                  :loading="flowTesting"
+                  @click="testAuthFlow(editor.kind)"
+                >
+                  测试{{ editor.kind === 'login' ? '登录' : '刷新' }}流程
+                </el-button>
+                <el-input
+                  v-if="['sms', 'email', 'manual'].includes(form.authConfig.otpType)"
+                  v-model="flowTestOtpCode"
+                  placeholder="本次测试验证码"
+                  style="width: 220px"
+                />
+              </div>
+
+              <div v-show="!chainEnabled[editor.kind]" class="single-request">
+                <div class="request-tabs">
+                  <button
+                    type="button"
+                    :class="{ active: requestTabs[editor.kind] === 'request' }"
+                    @click="setRequestTab(editor.kind, 'request')"
                   >
-                </el-alert>
-                <el-row :gutter="16">
-                  <el-col :span="7"
-                    ><el-form-item label="请求方法"
-                      ><el-select v-model="editor.request.method" style="width: 100%"
-                        ><el-option
-                          v-for="method in requestMethods"
-                          :key="method"
-                          :value="method" /></el-select></el-form-item
-                  ></el-col>
-                  <el-col :span="17">
+                    请求
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: requestTabs[editor.kind] === 'assertions' }"
+                    @click="setRequestTab(editor.kind, 'assertions')"
+                  >
+                    成功判断 <em>{{ editor.request.assertions.length }}</em>
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: requestTabs[editor.kind] === 'mappings' }"
+                    @click="setRequestTab(editor.kind, 'mappings')"
+                  >
+                    响应提取 <em>{{ editor.request.mappings.length }}</em>
+                  </button>
+                </div>
+
+                <div v-show="requestTabs[editor.kind] === 'request'" class="request-panel">
+                  <div class="two-col request-top">
+                    <el-form-item label="请求方法">
+                      <el-select v-model="editor.request.method" style="width: 100%">
+                        <el-option v-for="method in requestMethods" :key="method" :value="method" />
+                      </el-select>
+                    </el-form-item>
                     <el-form-item label="接口地址" required>
                       <div class="url-editor">
                         <el-input
@@ -685,660 +504,425 @@
                         <el-button
                           v-if="editor.kind === 'login'"
                           plain
-                          title="将 JSON 请求体恢复为默认的账号密码模板"
                           @click="restoreLoginBodyTemplate"
-                          >恢复默认模板</el-button
+                          >恢复模板</el-button
                         >
                       </div>
                     </el-form-item>
-                  </el-col>
-                </el-row>
-                <el-form-item>
-                  <template #label
-                    >请求 Header<PromptButton placement="top" width="440"
-                      ><div class="credential-help">
-                        <div class="credential-help-title">请求 Header 说明</div>
-                        <p>
-                          JSON 对象格式，额外的 HTTP 请求头。系统会自动携带当前凭证的
-                          Cookie/Header，无需在此重复填写。
-                        </p>
-                        <div class="credential-help-code">{"Content-Type":"application/json"}</div>
-                      </div></PromptButton
-                    ></template
-                  >
-                  <div class="template-editor">
-                    <el-input
-                      :ref="(element) => setTemplateInputRef(`${editor.kind}:headersText`, element)"
-                      v-model="editor.request.headersText"
-                      type="textarea"
-                      :rows="2"
-                      placeholder='JSON，例如 {"Content-Type":"application/json"}'
-                    />
-                    <el-dropdown
-                      trigger="click"
-                      @command="
-                        (variable) => insertTemplateVariable(`${editor.kind}:headersText`, variable)
-                      "
-                    >
-                      <el-button plain>插入变量</el-button>
-                      <template #dropdown
-                        ><el-dropdown-menu
-                          ><el-dropdown-item
-                            v-for="variable in templateVariables"
-                            :key="variable.value"
-                            :command="variable.value"
-                            :divided="variable.advanced"
-                            ><code>{{ variable.value }}</code
-                            >（{{ variable.label
-                            }}<template v-if="variable.advanced">，高级用法</template
-                            >）</el-dropdown-item
-                          ></el-dropdown-menu
-                        ></template
-                      >
-                    </el-dropdown>
                   </div>
-                </el-form-item>
-                <el-form-item>
-                  <template #label
-                    >查询参数<PromptButton placement="top" width="400"
-                      ><div class="credential-help">
-                        <div class="credential-help-title">查询参数说明</div>
-                        <p>JSON 对象格式，URL 查询字符串参数。</p>
-                        <div class="credential-help-code">{"tenant":"prod", "source":"api"}</div>
-                      </div></PromptButton
-                    ></template
-                  >
-                  <div class="template-editor">
-                    <el-input
-                      :ref="(element) => setTemplateInputRef(`${editor.kind}:queryText`, element)"
-                      v-model="editor.request.queryText"
-                      type="textarea"
-                      :rows="2"
-                      placeholder='JSON，例如 {"tenant":"prod"}'
-                    />
-                    <el-dropdown
-                      trigger="click"
-                      @command="
-                        (variable) => insertTemplateVariable(`${editor.kind}:queryText`, variable)
-                      "
-                    >
-                      <el-button plain>插入变量</el-button>
-                      <template #dropdown
-                        ><el-dropdown-menu
-                          ><el-dropdown-item
-                            v-for="variable in templateVariables"
-                            :key="variable.value"
-                            :command="variable.value"
-                            :divided="variable.advanced"
-                            ><code>{{ variable.value }}</code
-                            >（{{ variable.label
-                            }}<template v-if="variable.advanced">，高级用法</template
-                            >）</el-dropdown-item
-                          ></el-dropdown-menu
-                        ></template
-                      >
-                    </el-dropdown>
-                  </div>
-                </el-form-item>
-                <el-form-item>
-                  <template #label
-                    >JSON 请求体<PromptButton placement="top" width="520"
-                      ><div class="credential-help">
-                        <div class="credential-help-title">JSON 请求体说明</div>
-                        <p>
-                          JSON 对象格式，用于
-                          <b>application/json</b> 类型的请求。可使用占位符引用加密字段：
-                        </p>
-                        <table class="credential-help-table">
-                          <thead>
-                            <tr>
-                              <th>占位符</th>
-                              <th>说明</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td><code>${secret.username}</code></td>
-                              <td>登录用户名</td>
-                            </tr>
-                            <tr>
-                              <td><code>${secret.password}</code></td>
-                              <td>登录密码</td>
-                            </tr>
-                            <tr>
-                              <td><code>${secret.otp}</code></td>
-                              <td>OTP 验证码（自动生成或手工输入）</td>
-                            </tr>
-                            <tr>
-                              <td><code>${secret.token}</code></td>
-                              <td>当前存储的 Token 值</td>
-                            </tr>
-                            <tr>
-                              <td><code>${secret.cookie}</code></td>
-                              <td>
-                                当前完整 Cookie；主 Header 名称为 Cookie 时自动读取其 Header 值
-                              </td>
-                            </tr>
-                            <tr>
-                              <td><code>${secret.headerValue}</code></td>
-                              <td>
-                                <b>高级用法</b>：直接读取 HTTP Header / API Key 的主 Header 值
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <p>占位符变量来自凭证 secret 中的字段名，系统发送请求前会自动替换。</p>
-                      </div></PromptButton
-                    ></template
-                  >
-                  <div class="template-editor">
-                    <el-input
-                      :ref="(element) => setTemplateInputRef(`${editor.kind}:bodyText`, element)"
-                      v-model="editor.request.bodyText"
-                      type="textarea"
-                      :rows="4"
-                      :placeholder="editor.bodyPlaceholder"
-                    />
-                    <el-dropdown
-                      trigger="click"
-                      @command="
-                        (variable) => insertTemplateVariable(`${editor.kind}:bodyText`, variable)
-                      "
-                    >
-                      <el-button plain>插入变量</el-button>
-                      <template #dropdown
-                        ><el-dropdown-menu
-                          ><el-dropdown-item
-                            v-for="variable in templateVariables"
-                            :key="variable.value"
-                            :command="variable.value"
-                            :divided="variable.advanced"
-                            ><code>{{ variable.value }}</code
-                            >（{{ variable.label
-                            }}<template v-if="variable.advanced">，高级用法</template
-                            >）</el-dropdown-item
-                          ></el-dropdown-menu
-                        ></template
-                      >
-                    </el-dropdown>
-                  </div>
-                </el-form-item>
-                <el-form-item>
-                  <template #label
-                    >表单请求体<PromptButton placement="top" width="460"
-                      ><div class="credential-help">
-                        <div class="credential-help-title">表单请求体说明</div>
-                        <p>
-                          JSON 对象格式，用于 <b>application/x-www-form-urlencoded</b> 请求。支持与
-                          JSON 请求体相同的占位符引用。
-                        </p>
-                        <div class="credential-help-code">
-                          {"username":"${secret.username}","password":"${secret.password}"}
-                        </div>
-                      </div></PromptButton
-                    ></template
-                  >
-                  <div class="template-editor">
-                    <el-input
-                      :ref="(element) => setTemplateInputRef(`${editor.kind}:dataText`, element)"
-                      v-model="editor.request.dataText"
-                      type="textarea"
-                      :rows="3"
-                      placeholder='仅 application/x-www-form-urlencoded 使用，例如 {"username":"${secret.username}"}'
-                    />
-                    <el-dropdown
-                      trigger="click"
-                      @command="
-                        (variable) => insertTemplateVariable(`${editor.kind}:dataText`, variable)
-                      "
-                    >
-                      <el-button plain>插入变量</el-button>
-                      <template #dropdown
-                        ><el-dropdown-menu
-                          ><el-dropdown-item
-                            v-for="variable in templateVariables"
-                            :key="variable.value"
-                            :command="variable.value"
-                            :divided="variable.advanced"
-                            ><code>{{ variable.value }}</code
-                            >（{{ variable.label
-                            }}<template v-if="variable.advanced">，高级用法</template
-                            >）</el-dropdown-item
-                          ></el-dropdown-menu
-                        ></template
-                      >
-                    </el-dropdown>
-                  </div>
-                </el-form-item>
-              </el-collapse-item>
-            </el-collapse>
 
-            <el-collapse class="credential-collapse">
-              <el-collapse-item name="assert" title="成功断言">
-                <el-alert type="info" :closable="false" show-icon class="section-alert">
-                  <template #title>
-                    HTTP 状态码为 2xx 后，所有已配置断言都必须通过，才会提取并写回凭证。未配置时仅按
-                    HTTP 状态码和响应提取结果判断。
-                    <PromptButton placement="top" width="560" :teleported="true"
-                      ><div class="credential-help">
-                        <div class="credential-help-title">成功断言说明</div>
-                        <p>断言用于判断接口业务是否真正成功，和响应提取规则分开配置。</p>
-                        <table class="credential-help-table">
-                          <thead>
-                            <tr>
-                              <th>来源</th>
-                              <th>示例</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td>HTTP 状态码</td>
-                              <td><code>status</code></td>
-                            </tr>
-                            <tr>
-                              <td>JSON 字段</td>
-                              <td><code>json:code</code>、<code>json:data.success</code></td>
-                            </tr>
-                            <tr>
-                              <td>响应头</td>
-                              <td><code>header:X-Result</code></td>
-                            </tr>
-                            <tr>
-                              <td>标准响应 Cookie</td>
-                              <td><code>cookie:SESSION</code></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <p>
-                          期望值必须是合法 JSON：字符串填写 <code>"0000"</code>，数字填写
-                          <code>0</code>，布尔值填写 <code>true</code>，集合填写
-                          <code>[200,201]</code>。
-                        </p>
-                        <div class="credential-help-note">
-                          例如：来源 <code>json:code</code>、操作符 <code>等于</code>、期望值
-                          <code>"0000"</code>。任一断言失败都会保留旧凭证。
-                        </div>
-                      </div></PromptButton
-                    >
-                  </template>
-                </el-alert>
-                <div
-                  v-for="(item, index) in editor.request.assertions"
-                  :key="`assertion-${index}`"
-                  class="assertion-row"
-                >
-                  <el-input v-model="item.source" placeholder="来源，例如 json:code、status" />
-                  <el-select v-model="item.operator" placeholder="操作符"
-                    ><el-option
-                      v-for="operator in assertionOperators"
-                      :key="operator.value"
-                      :label="operator.label"
-                      :value="operator.value"
-                  /></el-select>
-                  <el-input
-                    v-model="item.expectedText"
-                    :disabled="['exists', 'not_empty'].includes(item.operator)"
-                    placeholder='期望值，例如 "0000"、true、[200,201]'
-                  />
-                  <el-input v-model="item.message" placeholder="失败提示（可选）" />
-                  <el-button
-                    :icon="Delete"
-                    circle
-                    plain
-                    type="danger"
-                    title="删除成功断言"
-                    @click="editor.request.assertions.splice(index, 1)"
-                  />
+                  <div class="template-block">
+                    <div class="template-label">请求 Header</div>
+                    <div class="template-editor">
+                      <el-input
+                        :ref="
+                          (element) => setTemplateInputRef(`${editor.kind}:headersText`, element)
+                        "
+                        v-model="editor.request.headersText"
+                        type="textarea"
+                        :rows="3"
+                        placeholder='JSON，例如 {"Content-Type":"application/json"}'
+                      />
+                      <el-dropdown
+                        trigger="click"
+                        @command="
+                          (variable) =>
+                            insertTemplateVariable(`${editor.kind}:headersText`, variable)
+                        "
+                      >
+                        <el-button plain>插入变量</el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item
+                              v-for="variable in templateVariables"
+                              :key="variable.value"
+                              :command="variable.value"
+                            >
+                              <code>{{ variable.value }}</code
+                              >（{{ variable.label }}）
+                            </el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
+                    </div>
+                  </div>
+
+                  <div class="template-block">
+                    <div class="template-label">查询参数</div>
+                    <div class="template-editor">
+                      <el-input
+                        :ref="(element) => setTemplateInputRef(`${editor.kind}:queryText`, element)"
+                        v-model="editor.request.queryText"
+                        type="textarea"
+                        :rows="3"
+                        placeholder='JSON，例如 {"tenant":"prod"}'
+                      />
+                      <el-dropdown
+                        trigger="click"
+                        @command="
+                          (variable) => insertTemplateVariable(`${editor.kind}:queryText`, variable)
+                        "
+                      >
+                        <el-button plain>插入变量</el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item
+                              v-for="variable in templateVariables"
+                              :key="variable.value"
+                              :command="variable.value"
+                            >
+                              <code>{{ variable.value }}</code
+                              >（{{ variable.label }}）
+                            </el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
+                    </div>
+                  </div>
+
+                  <div class="template-block">
+                    <div class="template-label">JSON 请求体</div>
+                    <div class="template-editor">
+                      <el-input
+                        :ref="(element) => setTemplateInputRef(`${editor.kind}:bodyText`, element)"
+                        v-model="editor.request.bodyText"
+                        type="textarea"
+                        :rows="5"
+                        :placeholder="editor.bodyPlaceholder"
+                      />
+                      <el-dropdown
+                        trigger="click"
+                        @command="
+                          (variable) => insertTemplateVariable(`${editor.kind}:bodyText`, variable)
+                        "
+                      >
+                        <el-button plain>插入变量</el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item
+                              v-for="variable in templateVariables"
+                              :key="variable.value"
+                              :command="variable.value"
+                            >
+                              <code>{{ variable.value }}</code
+                              >（{{ variable.label }}）
+                            </el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
+                    </div>
+                  </div>
+
+                  <div class="template-block">
+                    <div class="template-label">表单请求体</div>
+                    <div class="template-editor">
+                      <el-input
+                        :ref="(element) => setTemplateInputRef(`${editor.kind}:dataText`, element)"
+                        v-model="editor.request.dataText"
+                        type="textarea"
+                        :rows="4"
+                        placeholder='仅 application/x-www-form-urlencoded 使用，例如 {"username":"${secret.username}"}'
+                      />
+                      <el-dropdown
+                        trigger="click"
+                        @command="
+                          (variable) => insertTemplateVariable(`${editor.kind}:dataText`, variable)
+                        "
+                      >
+                        <el-button plain>插入变量</el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item
+                              v-for="variable in templateVariables"
+                              :key="variable.value"
+                              :command="variable.value"
+                            >
+                              <code>{{ variable.value }}</code
+                              >（{{ variable.label }}）
+                            </el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
+                    </div>
+                  </div>
                 </div>
-                <el-button
-                  :icon="Plus"
-                  plain
-                  @click="editor.request.assertions.push(emptyAssertion())"
-                  >添加成功断言</el-button
-                >
-              </el-collapse-item>
-            </el-collapse>
 
-            <el-collapse class="credential-collapse">
-              <el-collapse-item name="get_response" title="响应提取">
-                <el-alert type="info" :closable="false" show-icon class="section-alert">
-                  <template #title>
-                    把响应中的新值写回凭证字段。
-                    <PromptButton placement="top" width="580" :teleported="true">
-                      <div class="credential-help">
-                        <div class="credential-help-title">响应提取规则详细说明</div>
-                        <p>
-                          <b>凭证字段</b
-                          >（左）：要写入的凭证位置。只有配置了规则的目标才会更新；可以配置多条规则，分别更新
-                          Header、Token 和结构化 Cookie。
-                        </p>
-                        <table class="credential-help-table">
-                          <thead>
-                            <tr>
-                              <th>凭证字段</th>
-                              <th>对应凭证类型</th>
-                              <th>写入方式</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td>token</td>
-                              <td>HTTP Token</td>
-                              <td>直接替换 Token 值</td>
-                            </tr>
-                            <tr>
-                              <td>header.cookie</td>
-                              <td>HTTP Header（Header 名为 Cookie）</td>
-                              <td>覆盖整个 Cookie Header，未包含的 Cookie 会丢失</td>
-                            </tr>
-                            <tr>
-                              <td>header.cookie.UYBFEWAEE</td>
-                              <td>HTTP Header（Header 名为 Cookie）</td>
-                              <td>只替换该 Cookie；原 Header 没有该项时追加</td>
-                            </tr>
-                            <tr>
-                              <td>cookies</td>
-                              <td>HTTP Cookie / 其他敏感字段</td>
-                              <td>覆盖整个结构化 Cookie 对象</td>
-                            </tr>
-                            <tr>
-                              <td>cookies.SESSION</td>
-                              <td>HTTP Cookie / 其他敏感字段</td>
-                              <td>只更新结构化 Cookie 中的 SESSION，其他项保留</td>
-                            </tr>
-                            <tr>
-                              <td>headerValue / headerName</td>
-                              <td>API Key / HTTP Header</td>
-                              <td>直接替换整个字段</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <p style="margin-top: 10px">
-                          <b>来源</b>（右）：从响应中提取值的路径，格式为 <b>类型:路径</b>：
-                        </p>
-                        <table class="credential-help-table">
-                          <thead>
-                            <tr>
-                              <th>格式</th>
-                              <th>含义</th>
-                              <th>示例</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td>json:路径</td>
-                              <td>从 JSON 响应体提取</td>
-                              <td>json:data.accessToken</td>
-                            </tr>
-                            <tr>
-                              <td>header:名称</td>
-                              <td>
-                                从单个响应头提取；header:set-cookie 读取唯一原始 Set-Cookie 值
-                              </td>
-                              <td>header:X-Auth-Token</td>
-                            </tr>
-                            <tr>
-                              <td>header:set-cookie[n]</td>
-                              <td>从多条原始 Set-Cookie 中按序号选择一条，序号从 1 开始</td>
-                              <td>header:set-cookie[1]</td>
-                            </tr>
-                            <tr>
-                              <td>cookie:名称</td>
-                              <td>从标准 Set-Cookie 中提取单个 Cookie 值</td>
-                              <td>cookie:SESSION</td>
-                            </tr>
-                            <tr>
-                              <td>cookies</td>
-                              <td>提取全部标准 Set-Cookie 为对象</td>
-                              <td>cookies</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <p style="margin-top: 10px"><b>Cookie 更新示例：</b></p>
-                        <table class="credential-help-table">
-                          <thead>
-                            <tr>
-                              <th>凭证字段</th>
-                              <th>来源</th>
-                              <th>行为</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td>header.cookie.UYBFEWAEE</td>
-                              <td>header:set-cookie</td>
-                              <td>
-                                适用于响应 <code>Set-Cookie: new_value</code>，将 new_value 写入
-                                Cookie 内 UYBFEWAEE 项
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>header.cookie.SESSION</td>
-                              <td>cookie:SESSION</td>
-                              <td>
-                                适用于标准响应 <code>Set-Cookie: SESSION=new_value; Path=/</code>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>cookies</td>
-                              <td>cookies</td>
-                              <td>以响应中全部标准 Set-Cookie 覆盖现有结构化 Cookie 对象</td>
-                            </tr>
-                            <tr>
-                              <td>cookies.SESSION</td>
-                              <td>cookie:SESSION</td>
-                              <td>仅更新结构化 Cookie 中的 SESSION</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <div class="credential-help-note">
-                          <p><b>关键约束：</b></p>
-                          <ul>
-                            <li>
-                              <b>header.cookie</b> 和 <b>header.cookie.名称</b> 仅在 Header 名称为
-                              Cookie 时有效，大小写不敏感
-                            </li>
-                            <li>
-                              <b>header.cookie</b> 会覆盖整串 Cookie
-                              Header，属于高风险操作；优先使用 <b>header.cookie.名称</b> 更新单项
-                            </li>
-                            <li>
-                              响应含多条 Set-Cookie 时不能直接用
-                              <b>header:set-cookie</b> 写入单个值；请使用
-                              <b>header:set-cookie[1]</b> 这类序号规则明确选择一条，或用
-                              <b>cookie:名称</b> 读取标准 Cookie
-                            </li>
-                            <li>
-                              <b>cookies ← cookies</b> 会覆盖整组结构化 Cookie；响应没有标准
-                              Set-Cookie 时不会以空对象覆盖旧值
-                            </li>
-                            <li>未配置规则的字段不会自动更新，包括响应中的 Set-Cookie</li>
-                            <li>提取结果会与旧凭证合并，未提取的字段保留原值</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </PromptButton>
-                  </template>
-                </el-alert>
-                <div
-                  v-for="(item, index) in editor.request.mappings"
-                  :key="index"
-                  class="mapping-row"
-                >
-                  <div class="mapping-target">
+                <div v-show="requestTabs[editor.kind] === 'assertions'" class="request-panel">
+                  <div class="panel-tip">
+                    HTTP 状态码为 2xx 后，所有配置的断言必须通过，才会提取并写回凭证。
+                  </div>
+                  <div
+                    v-for="(item, index) in editor.request.assertions"
+                    :key="`assertion-${index}`"
+                    class="assertion-card-row"
+                  >
                     <el-input
-                      v-model="item.target"
-                      placeholder="凭证字段，例如 token、header.cookie.SESSION、cookies.SESSION"
+                      v-model="item.source"
+                      placeholder="来源，如 json:code、status、cookie:SESSION"
                     />
-                    <el-tag v-if="item.target.trim() === 'header.cookie'" type="danger" size="small"
-                      >高风险：覆盖整个 Cookie Header</el-tag
+                    <el-select v-model="item.operator" placeholder="操作符">
+                      <el-option
+                        v-for="operator in assertionOperators"
+                        :key="operator.value"
+                        :label="operator.label"
+                        :value="operator.value"
+                      />
+                    </el-select>
+                    <el-input
+                      v-model="item.expectedText"
+                      :disabled="['exists', 'not_empty'].includes(item.operator)"
+                      placeholder='期望值，例如 "success"、true'
+                    />
+                    <el-input v-model="item.message" placeholder="失败提示（可选）" />
+                    <el-button
+                      :icon="Delete"
+                      text
+                      type="danger"
+                      @click="editor.request.assertions.splice(index, 1)"
+                      >删除</el-button
                     >
                   </div>
-                  <el-input
-                    v-model="item.source"
-                    placeholder="来源，例如 json:data.accessToken、header:X-Auth-Token、cookie:SESSION"
-                  />
                   <el-button
-                    :icon="Delete"
-                    circle
+                    :icon="Plus"
                     plain
-                    type="danger"
-                    title="删除映射"
-                    @click="editor.request.mappings.splice(index, 1)"
-                  />
+                    @click="editor.request.assertions.push(emptyAssertion())"
+                    >添加成功断言</el-button
+                  >
                 </div>
-                <el-button
-                  :icon="Plus"
-                  plain
-                  @click="editor.request.mappings.push({ target: '', source: '' })"
-                  >添加提取规则</el-button
-                >
-              </el-collapse-item>
-            </el-collapse>
-          </el-collapse-item>
-        </el-collapse>
-      </template>
 
-      <el-collapse class="credential-collapse">
-        <el-collapse-item name="status_fresh" title="刷新与状态">
-          <el-form-item>
-            <template #label
-              >自动刷新<PromptButton placement="top" width="420"
-                ><div class="credential-help">
-                  <div class="credential-help-title">自动刷新说明</div>
-                  <p>开启后定时任务会按间隔自动调用登录或刷新接口更新凭证。</p>
-                  <p><b>仅"HTTP 登录"和"HTTP 刷新"支持自动刷新。</b></p>
-                  <p>
-                    刷新间隔至少 60 秒。建议根据凭证有效期设置，如 Token 有效期 30 分钟则设 1500
-                    秒。
-                  </p>
-                </div></PromptButton
-              ></template
-            >
-            <el-switch
-              v-model="form.autoRefreshEnabled"
-              :disabled="!supportsAutoRefresh"
-            /><el-input-number
-              v-if="form.autoRefreshEnabled"
-              v-model="form.refreshIntervalSec"
-              :min="60"
-              class="ml8"
-            /><span v-if="form.autoRefreshEnabled" class="ml8 unit-text">秒</span>
-          </el-form-item>
-          <el-form-item>
-            <template #label
-              >并发策略<PromptButton width="460"
-                ><div class="credential-help">
-                  <div class="credential-help-title">并发策略说明</div>
-                  <table class="credential-help-table">
-                    <thead>
-                      <tr>
-                        <th>策略</th>
-                        <th>说明</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>共享读取</td>
-                        <td>多个任务可同时使用凭证，互不影响</td>
-                      </tr>
-                      <tr>
-                        <td>刷新时独占</td>
-                        <td>刷新期间锁定凭证，其他任务等待</td>
-                      </tr>
-                      <tr>
-                        <td>使用期间独占</td>
-                        <td>使用和刷新期间均锁定凭证</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div class="credential-help-note">
-                    会使同账号会话失效的系统建议选择"刷新时独占"或"使用期间独占"。
+                <div v-show="requestTabs[editor.kind] === 'mappings'" class="request-panel">
+                  <div class="panel-tip">
+                    只配置需要更新的字段。未配置字段保留旧值；优先使用结构化 Cookie 单项更新。
                   </div>
-                </div></PromptButton
-              ></template
-            >
-            <el-select v-model="form.sharingMode" style="width: 100%"
-              ><el-option
-                v-for="item in sharingModes"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-            /></el-select>
-          </el-form-item>
-          <el-form-item>
-            <template #label
-              >允许域名<PromptButton placement="top" width="420"
-                ><div class="credential-help">
-                  <div class="credential-help-title">允许域名说明</div>
-                  <p>凭证允许被投影到的目标域名模式，多个用英文逗号分隔。</p>
-                  <div class="credential-help-code">*.example.com, api.example.com, 192.168.*</div>
-                  <p>支持通配符 <b>*</b>，留空表示不限制域名。</p>
-                </div></PromptButton
-              ></template
-            >
-            <el-input
-              v-model="targetHostsText"
-              placeholder="多个域名用英文逗号分隔，例如 *.example.com"
-            />
-          </el-form-item>
-          <el-form-item>
-            <template #label
-              >到期时间<PromptButton placement="top" width="440"
-                ><div class="credential-help">
-                  <div class="credential-help-title">到期时间说明</div>
-                  <p>凭证的预期到期时间，仅用于定时任务临期提醒，可留空。</p>
-                  <p>
-                    开启自动刷新后，到期前 5
-                    分钟内也会触发一次刷新；未开启自动刷新的凭证到期后会被业务直接拒绝使用。
-                  </p>
-                  <p>留空表示不设置到期时间。</p>
-                </div></PromptButton
-              ></template
-            >
-            <el-date-picker
-              v-model="form.expireTime"
-              type="datetime"
-              placeholder="留空表示不设置"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              style="width: 100%"
-            />
-          </el-form-item>
-          <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
-          <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
-        </el-collapse-item>
-      </el-collapse>
-    </el-form>
-    <template #footer
-      ><el-button @click="visible = false">取消</el-button
-      ><el-button type="primary" :loading="saving" @click="save">保存</el-button></template
-    >
+                  <div
+                    v-for="(item, index) in editor.request.mappings"
+                    :key="index"
+                    class="mapping-card-row"
+                  >
+                    <div>
+                      <el-input
+                        v-model="item.target"
+                        placeholder="凭证字段，如 token / header.cookie.SESSION / cookies.SESSION"
+                      />
+                      <el-tag
+                        v-if="item.target.trim() === 'header.cookie'"
+                        type="danger"
+                        size="small"
+                        >覆盖整串 Cookie</el-tag
+                      >
+                    </div>
+                    <el-input
+                      v-model="item.source"
+                      placeholder="来源，如 json:data.accessToken / cookie:SESSION / cookies"
+                    />
+                    <el-button
+                      :icon="Delete"
+                      text
+                      type="danger"
+                      @click="editor.request.mappings.splice(index, 1)"
+                      >删除</el-button
+                    >
+                  </div>
+                  <el-button
+                    :icon="Plus"
+                    plain
+                    @click="editor.request.mappings.push({ target: '', source: '' })"
+                    >添加提取规则</el-button
+                  >
+                </div>
 
-    <!-- 多步认证链流程测试结果弹窗：展示每步执行明细，测试过程不写回凭证 -->
-    <el-dialog v-model="flowTestVisible" title="认证流程测试结果" width="640px" append-to-body>
-      <template v-if="flowTestResult">
-        <el-alert type="success" :closable="false" show-icon :title="flowTestResult.message" />
-        <el-table :data="flowTestResult.steps || []" size="small" class="flow-test-table">
-          <el-table-column prop="index" label="步骤" width="60" />
-          <el-table-column prop="name" label="名称" min-width="120" />
-          <el-table-column label="结果" min-width="220">
-            <template #default="{ row }">
-              <template v-if="row.skipped">已跳过（{{ row.skipReason }}）</template>
-              <template v-else>
-                HTTP {{ row.status }} · {{ row.elapsedMs }}ms
-                <span v-if="row.outputs && row.outputs.length">· {{ row.persistOutputs ? '写回' : '输出' }}：{{ row.outputs.join('、') }}</span>
-              </template>
-            </template>
-          </el-table-column>
-        </el-table>
-        <div v-if="flowTestResult.updatedFields && flowTestResult.updatedFields.length" class="flow-test-fields">
-          本次将更新凭证字段：{{ flowTestResult.updatedFields.join('、') }}（实际写回以保存并刷新后为准，本次测试未写回）
+                <div class="request-advanced">
+                  <button
+                    type="button"
+                    @click="
+                      requestAdvancedVisible[editor.kind] = !requestAdvancedVisible[editor.kind]
+                    "
+                  >
+                    <span>变量与 Cookie 高级说明</span>
+                    <span>{{ requestAdvancedVisible[editor.kind] ? '收起' : '展开' }}</span>
+                  </button>
+                  <div v-show="requestAdvancedVisible[editor.kind]" class="request-advanced-body">
+                    <p>
+                      凭证变量：<code>${secret.username}</code>、<code>${secret.password}</code>、<code>${secret.otp}</code>、<code>${secret.token}</code>、<code>${secret.cookie}</code>。
+                    </p>
+                    <p>
+                      多条 Set-Cookie 可使用 <code>cookie:名称</code> 或
+                      <code>header:set-cookie[n]</code> 提取；<code>header.cookie</code> 会覆盖整个
+                      Cookie Header，属于高风险写法。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div v-else class="empty-request">
+            <div class="empty-request-icon">✓</div>
+            <b>当前认证方式不需要 HTTP 请求</b>
+            <p>浏览器人工登录、浏览器刷新和手工录入在生命周期区域统一管理。</p>
+          </div>
+        </section>
+
+        <!-- 4. 生命周期 -->
+        <section v-show="activeSection === 'lifecycle'" class="editor-section">
+          <div class="section-heading">
+            <div>
+              <h3>生命周期</h3>
+              <p>定义凭证多久维护一次、谁可以同时使用，以及允许投影到哪些目标。</p>
+            </div>
+          </div>
+
+          <el-form :model="form" label-position="top" class="clean-form">
+            <div class="summary-card">
+              <div class="summary-label">当前生命周期策略</div>
+              <div class="summary-title">{{ lifecycleStrategy.label }}</div>
+              <div class="summary-desc">{{ lifecycleStrategy.desc }}</div>
+            </div>
+
+            <div class="field-card">
+              <div class="two-col">
+                <el-form-item label="自动维护登录状态">
+                  <div class="switch-line">
+                    <el-switch v-model="form.autoRefreshEnabled" :disabled="!supportsAutoRefresh" />
+                    <span>{{
+                      supportsAutoRefresh ? '按周期执行认证流程' : '当前更新方式不支持自动维护'
+                    }}</span>
+                  </div>
+                </el-form-item>
+                <el-form-item v-if="form.autoRefreshEnabled" label="维护间隔">
+                  <div class="number-line">
+                    <el-input-number v-model="form.refreshIntervalSec" :min="60" />
+                    <span>秒</span>
+                  </div>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="field-card">
+              <div class="two-col">
+                <el-form-item label="并发策略">
+                  <el-select v-model="form.sharingMode" style="width: 100%">
+                    <el-option
+                      v-for="item in sharingModes"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="到期时间">
+                  <el-date-picker
+                    v-model="form.expireTime"
+                    type="datetime"
+                    placeholder="留空表示不设置"
+                    value-format="YYYY-MM-DD HH:mm:ss"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </div>
+              <el-form-item label="允许域名">
+                <el-input
+                  v-model="targetHostsText"
+                  placeholder="多个域名用英文逗号分隔，例如 *.example.com, api.example.com"
+                />
+              </el-form-item>
+            </div>
+
+            <div class="advanced-card">
+              <button
+                type="button"
+                class="advanced-head"
+                @click="advancedVisible.lifecycle = !advancedVisible.lifecycle"
+              >
+                <span>
+                  <b>其他设置</b>
+                  <small>启用状态与备注</small>
+                </span>
+                <span class="advanced-toggle">{{
+                  advancedVisible.lifecycle ? '收起' : '展开'
+                }}</span>
+              </button>
+              <div v-show="advancedVisible.lifecycle" class="advanced-body">
+                <el-form-item label="启用">
+                  <el-switch v-model="form.enabled" />
+                </el-form-item>
+                <el-form-item label="备注">
+                  <el-input
+                    v-model="form.remark"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="记录凭证用途、账号范围或维护注意事项"
+                  />
+                </el-form-item>
+              </div>
+            </div>
+          </el-form>
+        </section>
+      </div>
+
+      <div class="editor-footer">
+        <div class="footer-left">
+          <el-tag
+            v-if="form.authMode === 'http_login' && chainEnabled.login"
+            type="success"
+            size="small"
+            >登录链已启用</el-tag
+          >
+          <el-tag
+            v-if="form.authMode === 'http_refresh' && chainEnabled.refresh"
+            type="success"
+            size="small"
+            >刷新链已启用</el-tag
+          >
+          <span class="footer-summary">{{ credentialResultSummary }}</span>
         </div>
-      </template>
-      <template #footer>
-        <el-button @click="flowTestVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
+        <div class="footer-actions">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button
+            v-if="
+              form.credentialId &&
+              isHttpMode &&
+              ((form.authMode === 'http_login' && chainEnabled.login) ||
+                (form.authMode === 'http_refresh' && chainEnabled.refresh))
+            "
+            plain
+            :loading="flowTesting"
+            @click="testAuthFlow(form.authMode === 'http_login' ? 'login' : 'refresh')"
+            >测试认证流程</el-button
+          >
+          <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+        </div>
+      </div>
+
+      <!-- 流程测试结果 -->
+      <el-dialog v-model="flowTestVisible" title="认证流程测试结果" width="680px" append-to-body>
+        <template v-if="flowTestResult">
+          <el-alert type="success" :closable="false" show-icon :title="flowTestResult.message" />
+          <div class="test-timeline">
+            <div v-for="row in flowTestResult.steps || []" :key="row.index" class="test-step">
+              <span class="test-step-no">{{ row.index }}</span>
+              <div class="test-step-main">
+                <b>{{ row.name }}</b>
+                <span v-if="row.skipped">已跳过（{{ row.skipReason }}）</span>
+                <span v-else>HTTP {{ row.status }} · {{ row.elapsedMs }}ms</span>
+                <small v-if="row.outputs && row.outputs.length"
+                  >{{ row.persistOutputs ? '写回' : '输出' }}：{{ row.outputs.join('、') }}</small
+                >
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="flowTestResult.updatedFields && flowTestResult.updatedFields.length"
+            class="test-fields"
+          >
+            本次将更新：{{ flowTestResult.updatedFields.join('、') }}（测试不会实际写回凭证）
+          </div>
+        </template>
+        <template #footer>
+          <el-button @click="flowTestVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
+    </div>
   </el-dialog>
 </template>
 
@@ -1384,11 +968,36 @@
     { value: 'http_header', label: 'HTTP Header' },
   ];
   const authModes = [
-    { value: 'manual', label: '手工录入，不自动更新' },
-    { value: 'http_login', label: 'HTTP 登录重新获取' },
-    { value: 'http_refresh', label: '携带现有凭证刷新（可配兜底登录）' },
-    { value: 'browser_login', label: '浏览器人工登录' },
-    { value: 'browser_refresh', label: '浏览器刷新' },
+    {
+      value: 'manual',
+      label: '手工录入，不自动更新',
+      title: '手工录入',
+      desc: '固定 Token / API Key，不自动更新',
+    },
+    {
+      value: 'http_login',
+      label: 'HTTP 登录重新获取',
+      title: 'HTTP 自动登录',
+      desc: '调用登录接口获取凭证，支持多步认证链与 TOTP',
+    },
+    {
+      value: 'http_refresh',
+      label: 'HTTP 刷新（可配兜底登录）',
+      title: 'HTTP 刷新',
+      desc: '用现有 Cookie/Header 调接口续期，可配兜底登录',
+    },
+    {
+      value: 'browser_login',
+      label: '浏览器人工登录',
+      title: '浏览器人工登录',
+      desc: 'Agent 打开页面人工登录后回写状态',
+    },
+    {
+      value: 'browser_refresh',
+      label: '浏览器刷新',
+      title: '浏览器刷新',
+      desc: 'Agent 自动刷新浏览器状态',
+    },
   ];
   const otpTypes = [
     { value: 'none', label: '不需要' },
@@ -1433,6 +1042,30 @@
   const flowTestVisible = ref(false);
   const flowTestResult = ref(null);
 
+  // UI-only state：不改变后端数据结构，仅控制新的分区/标签交互。
+  const activeSection = ref('basic');
+  const requestTabs = reactive({ login: 'request', refresh: 'request' });
+  const advancedVisible = reactive({ basic: false, lifecycle: false });
+  const requestAdvancedVisible = reactive({ login: false, refresh: false });
+
+  function setSection(section) {
+    activeSection.value = section;
+  }
+
+  function setRequestTab(kind, tab) {
+    requestTabs[kind] = tab;
+  }
+
+  function resetUiState() {
+    activeSection.value = 'basic';
+    requestTabs.login = 'request';
+    requestTabs.refresh = 'request';
+    requestAdvancedVisible.login = false;
+    requestAdvancedVisible.refresh = false;
+    advancedVisible.basic = false;
+    advancedVisible.lifecycle = false;
+  }
+
   function setStepsEditorRef(kind, element) {
     if (element) stepsEditorRefs[kind] = element;
     else delete stepsEditorRefs[kind];
@@ -1473,6 +1106,50 @@
   const supportsAutoRefresh = computed(() =>
     ['http_login', 'http_refresh'].includes(form.authMode)
   );
+  /* 生命周期策略：由"获取方式 + 是否自动维护"共同决定，向用户解释当前组合的实际行为。 */
+  const lifecycleStrategy = computed(() => {
+    if (!supportsAutoRefresh.value)
+      return {
+        label: '人工维护',
+        desc: '凭证由人工录入或浏览器人工登录获取，平台不自动更新，请注意凭证有效期。',
+      };
+    if (!form.autoRefreshEnabled)
+      return {
+        label: '仅手工获取',
+        desc: '可在编辑保存或手工刷新时更新凭证；未开启自动维护时到期后业务将无法使用。',
+      };
+    if (form.authMode === 'http_login')
+      return {
+        label: '定时重新认证',
+        desc: `每 ${form.refreshIntervalSec || 0} 秒重新执行登录流程（含多步认证链），适合无刷新接口的系统。`,
+      };
+    return {
+      label: '刷新优先，登录兜底',
+      desc: `每 ${form.refreshIntervalSec || 0} 秒先执行刷新${
+        chainEnabled.refresh ? '链' : ''
+      }，失败后自动执行登录${chainEnabled.login ? '链' : ''}再重试刷新。`,
+    };
+  });
+  /* 凭证结果摘要：告诉用户认证成功后系统实际保存哪些内容。 */
+  const credentialResultSummary = computed(() => {
+    if (form.authMode === 'http_login') {
+      if (chainEnabled.login) return '按认证流程中开启"写回凭证"的步骤输出保存（见流程预览）';
+      const targets = loginRequest.mappings
+        .filter((item) => item.target.trim())
+        .map((item) => item.target.trim());
+      return targets.length ? targets.join('、') : '未配置响应提取规则（登录后不会更新凭证内容）';
+    }
+    if (form.authMode === 'http_refresh') {
+      if (chainEnabled.refresh) return '按刷新流程中开启"写回凭证"的步骤输出保存（见流程预览）';
+      const targets = refreshRequest.mappings
+        .filter((item) => item.target.trim())
+        .map((item) => item.target.trim());
+      return targets.length ? targets.join('、') : '未配置响应提取规则（刷新后不会更新凭证内容）';
+    }
+    if (form.credentialType === 'browser_storage')
+      return '浏览器 storageState（由 Agent 登录后回写）';
+    return '凭证内容区手工录入的字段';
+  });
   const showLoginConfig = computed(() => form.authMode === 'http_login');
   // HTTP 登录和 HTTP 刷新都复用同一组请求编辑器；http_refresh 会同时展示刷新接口和兜底登录接口。
   const requestEditors = computed(() => {
@@ -1636,6 +1313,7 @@
     });
   }
   function open(row) {
+    resetUiState();
     Object.assign(form, emptyForm(), row || {}, {
       authConfig: { ...emptyForm().authConfig, ...(row?.authConfig || {}) },
     });
@@ -1653,17 +1331,20 @@
     targetHostsText.value = (form.authConfig.targetHostPatterns || []).join(', ');
     resetRequest(loginRequest, form.authConfig, 'login');
     resetRequest(refreshRequest, form.authConfig, 'refresh');
-    /* 多步认证链状态与步骤内容回填：已保存过步骤才默认开启，避免误导单接口用户。 */
+    /* 多步认证链状态与步骤内容回填：已保存过步骤才默认开启，避免误导单接口用户。
+       loginSteps 在 http_login 模式是主登录链，在 http_refresh 模式是兜底登录链，两种模式都回填。 */
     const savedLoginSteps = form.authConfig.loginSteps || [];
     const savedRefreshSteps = form.authConfig.refreshSteps || [];
-    chainEnabled.login = form.authMode === 'http_login' && savedLoginSteps.length > 0;
+    chainEnabled.login =
+      ['http_login', 'http_refresh'].includes(form.authMode) && savedLoginSteps.length > 0;
     chainEnabled.refresh = form.authMode === 'http_refresh' && savedRefreshSteps.length > 0;
     flowTestOtpCode.value = '';
     flowTestResult.value = null;
     if (form.authMode === 'http_login' || form.authMode === 'http_refresh')
       ensureLoginRequestDefaults();
     nextTick(() => {
-      if (stepsEditorRefs.login) stepsEditorRefs.login.loadSteps(chainEnabled.login ? savedLoginSteps : []);
+      if (stepsEditorRefs.login)
+        stepsEditorRefs.login.loadSteps(chainEnabled.login ? savedLoginSteps : []);
       if (stepsEditorRefs.refresh)
         stepsEditorRefs.refresh.loadSteps(chainEnabled.refresh ? savedRefreshSteps : []);
     });
@@ -1892,7 +1573,10 @@
         return proxy.$modal.msgError('当前更新方式不支持自动刷新');
       const secret = buildSecret();
       /* 多步链开启时段的单接口配置整体置空，避免两套配置同时存在产生歧义；关闭后恢复编辑器原值。 */
-      const loginChainActive = form.authMode === 'http_login' && chainEnabled.login;
+      /* 多步链开启时段的单接口配置整体置空，避免两套配置同时存在产生歧义；关闭后恢复编辑器原值。
+         loginSteps 在 http_refresh 模式下是兜底登录链，因此 loginChainActive 覆盖两种 HTTP 模式。 */
+      const loginChainActive =
+        ['http_login', 'http_refresh'].includes(form.authMode) && chainEnabled.login;
       const refreshChainActive = form.authMode === 'http_refresh' && chainEnabled.refresh;
       const authConfig = {
         ...form.authConfig,
@@ -1937,164 +1621,673 @@
 </script>
 
 <style scoped>
-  .section-alert {
-    margin-bottom: 16px;
-  }
-  .template-editor {
-    width: 100%;
+  .credential-editor {
+    --editor-border: var(--el-border-color-light);
+    --editor-muted: var(--el-text-color-secondary);
+    --editor-soft: var(--el-fill-color-light);
+    --editor-radius: 10px;
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    flex-direction: column;
+    height: min(86vh, 820px);
+    min-height: 620px;
+    background: var(--el-bg-color);
+    color: var(--el-text-color-primary);
+    overflow: hidden;
   }
-  .template-editor > .el-input {
-    flex: 1;
-    min-width: 0;
-  }
-  .template-editor :deep(.el-dropdown) {
+
+  .editor-head {
     flex: 0 0 auto;
-    margin-top: 2px;
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 20px 28px 16px;
+    border-bottom: 1px solid var(--editor-border);
   }
-  .credential-collapse {
+  .editor-kicker {
+    font-size: 12px;
+    color: var(--el-color-primary);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .editor-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin-top: 4px;
-    margin-bottom: 16px;
+    font-size: 22px;
+    font-weight: 650;
   }
-  .url-editor {
-    width: 100%;
-    display: flex;
-    align-items: flex-start;
+  .editor-subtitle,
+  .editor-head-meta {
+    color: var(--editor-muted);
+    font-size: 13px;
+  }
+  .editor-subtitle {
+    margin-top: 6px;
+  }
+  .editor-head-meta {
+    padding-top: 4px;
+    white-space: nowrap;
+  }
+
+  .editor-steps {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 12px 28px;
     gap: 8px;
+    background: var(--editor-soft);
+    border-bottom: 1px solid var(--editor-border);
   }
-  .url-editor > .el-input {
-    flex: 1;
+  .editor-step {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+  }
+  .editor-step:hover {
+    background: var(--el-bg-color);
+  }
+  .editor-step.active {
+    background: var(--el-bg-color);
+    border-color: var(--el-color-primary-light-5);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .editor-step-no {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--el-fill-color);
+    color: var(--editor-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .editor-step.active .editor-step-no {
+    background: var(--el-color-primary);
+    color: #fff;
+  }
+  .editor-step-copy {
     min-width: 0;
   }
-  .url-editor > .el-button {
-    flex: 0 0 auto;
+  .editor-step-copy b,
+  .editor-step-copy small {
+    display: block;
   }
-  .key-value-list {
+  .editor-step-copy b {
+    font-size: 13px;
+  }
+  .editor-step-copy small {
+    margin-top: 2px;
+    color: var(--editor-muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .editor-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 24px 28px 32px;
+    background: var(--el-bg-color-page);
+  }
+  .editor-section {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .section-heading {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .section-heading h3 {
+    margin: 0;
+    font-size: 18px;
+  }
+  .section-heading p {
+    margin: 5px 0 0;
+    color: var(--editor-muted);
+    font-size: 13px;
+  }
+
+  .clean-form :deep(.el-form-item) {
+    margin-bottom: 16px;
+  }
+  .field-card,
+  .request-card,
+  .advanced-card,
+  .summary-card {
+    background: var(--el-bg-color);
+    border: 1px solid var(--editor-border);
+    border-radius: var(--editor-radius);
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .field-card-head,
+  .request-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .field-label {
+    font-size: 14px;
+    font-weight: 650;
+    margin-bottom: 4px;
+  }
+  .field-hint,
+  .request-card-head small {
+    color: var(--editor-muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .choice-grid {
+    display: grid;
+    gap: 10px;
+  }
+  .credential-type-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .auth-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .choice-card {
+    appearance: none;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    padding: 13px;
+    border: 1px solid var(--editor-border);
+    background: var(--el-bg-color);
+    border-radius: 9px;
+    cursor: pointer;
+    color: inherit;
+    transition: 0.15s ease;
+  }
+  .choice-card:hover {
+    border-color: var(--el-color-primary-light-5);
+  }
+  .choice-card.active {
+    border-color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+  }
+  .choice-radio {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--el-border-color);
+    border-radius: 50%;
+    margin-top: 2px;
+    position: relative;
+  }
+  .choice-card.active .choice-radio {
+    border-color: var(--el-color-primary);
+    box-shadow:
+      inset 0 0 0 3px var(--el-bg-color),
+      0 0 0 1px var(--el-color-primary);
+    background: var(--el-color-primary);
+  }
+  .choice-card b,
+  .choice-card small {
+    display: block;
+  }
+  .choice-card b {
+    font-size: 13px;
+  }
+  .choice-card small {
+    margin-top: 4px;
+    color: var(--editor-muted);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.2fr;
+    gap: 16px;
+  }
+  .variable-hint,
+  .flow-intro,
+  .fallback-note,
+  .panel-tip {
+    border-radius: 8px;
+    background: var(--el-fill-color-light);
+    color: var(--editor-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 10px 12px;
+  }
+  .variable-hint {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    background: var(--el-fill-color-darker);
+    border-radius: 4px;
+    padding: 2px 5px;
+    font-size: 11px;
+  }
+
+  .advanced-card {
+    padding: 0;
+    overflow: hidden;
+  }
+  .advanced-head {
     width: 100%;
+    border: 0;
+    background: transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+    padding: 15px 18px;
+    cursor: pointer;
+    color: inherit;
+  }
+  .advanced-head b,
+  .advanced-head small {
+    display: block;
+  }
+  .advanced-head small {
+    margin-top: 3px;
+    color: var(--editor-muted);
+    font-size: 11px;
+  }
+  .advanced-toggle {
+    color: var(--el-color-primary);
+    font-size: 12px;
+  }
+  .advanced-body {
+    border-top: 1px solid var(--editor-border);
+    padding: 18px 20px 4px;
+  }
+
+  .kv-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
-  .key-value-row {
-    width: 100%;
+  .kv-row {
     display: grid;
-    grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.4fr) 32px;
+    grid-template-columns: 1fr 1.4fr auto;
     gap: 8px;
     align-items: center;
   }
-  .assertion-row {
-    width: 100%;
-    display: grid;
-    grid-template-columns: minmax(120px, 1.2fr) 110px minmax(120px, 1fr) minmax(120px, 1fr) 32px;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-  .mapping-row {
-    display: grid;
-    grid-template-columns: 1fr 1.4fr 32px;
-    gap: 8px;
-    margin-bottom: 8px;
-    align-items: center;
-  }
-  .mapping-target {
+
+  .flow-intro {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
+    gap: 12px;
+    margin-bottom: 14px;
   }
-  .mapping-target .el-input {
+  .flow-intro-icon {
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--el-color-primary-light-8);
+    color: var(--el-color-primary);
+    font-weight: 700;
+  }
+  .flow-intro p {
+    margin: 3px 0 0;
+  }
+
+  .request-card {
+    padding: 0;
+    overflow: hidden;
+  }
+  .request-card-head {
+    margin: 0;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--editor-border);
+  }
+  .request-title {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .request-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--el-color-success);
+  }
+  .request-title b,
+  .request-title small {
+    display: block;
+  }
+  .request-title small {
+    margin-top: 2px;
+    color: var(--editor-muted);
+    font-size: 11px;
+  }
+  .chain-switch-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    background: var(--el-fill-color-light);
+    border-bottom: 1px solid var(--editor-border);
+  }
+  .chain-switch-row b,
+  .chain-switch-row span {
+    display: block;
+  }
+  .chain-switch-row span {
+    color: var(--editor-muted);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .flow-test-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--editor-border);
+  }
+  .single-request {
+    padding: 0 18px 18px;
+  }
+  .request-tabs {
+    display: flex;
+    gap: 2px;
+    margin: 0 -18px 18px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--editor-border);
+  }
+  .request-tabs button {
+    border: 0;
+    background: transparent;
+    padding: 11px 12px;
+    color: var(--editor-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+  }
+  .request-tabs button.active {
+    color: var(--el-color-primary);
+    border-bottom-color: var(--el-color-primary);
+    font-weight: 600;
+  }
+  .request-tabs em {
+    font-style: normal;
+    font-size: 10px;
+    background: var(--el-fill-color);
+    border-radius: 10px;
+    padding: 1px 5px;
+    margin-left: 4px;
+  }
+  .request-panel {
+    min-height: 100px;
+  }
+  .request-top {
+    margin-top: 4px;
+  }
+  .url-editor,
+  .template-editor {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .url-editor > .el-input,
+  .template-editor > .el-input {
     flex: 1;
     min-width: 0;
   }
-  .unit-text {
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
+  .template-block {
+    margin-top: 14px;
   }
-  .flow-test-table {
-    margin-top: 12px;
-  }
-  .flow-test-fields {
-    margin-top: 12px;
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
-  }
-  .credential-help {
-    max-width: 100%;
-  }
-  .credential-help-title {
-    font-weight: 600;
-    font-size: 14px;
-    margin-bottom: 8px;
-    color: #303133;
-  }
-  .credential-help p {
-    margin: 0 0 8px;
-    line-height: 1.6;
-    color: #606266;
-  }
-  .credential-help ul {
-    margin: 0 0 8px;
-    padding-left: 18px;
-    color: #606266;
-  }
-  .credential-help ul li {
-    line-height: 1.6;
-  }
-  .credential-help-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 8px;
-    font-size: 13px;
-  }
-  .credential-help-table th,
-  .credential-help-table td {
-    border: 1px solid #ebeef5;
-    padding: 6px 10px;
-    text-align: left;
-  }
-  .credential-help-table th {
-    background: #f5f7fa;
-    color: #303133;
-    font-weight: 600;
-  }
-  .credential-help-table td {
-    color: #606266;
-  }
-  .credential-help-code {
-    background: #f0f2f5;
-    border-radius: 4px;
-    padding: 4px 8px;
-    margin-bottom: 8px;
-    font-family: monospace;
+  .template-label {
     font-size: 12px;
-    color: #303133;
+    font-weight: 600;
+    margin-bottom: 6px;
   }
-  .credential-help-note {
-    margin-top: 8px;
-    padding: 8px 12px;
-    background: #fdf6ec;
-    border-left: 3px solid #e6a23c;
-    border-radius: 4px;
-    font-size: 13px;
-    color: #606266;
+  .assertion-card-row,
+  .mapping-card-row {
+    display: grid;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
   }
-  .credential-help-note p {
-    margin: 0;
+  .assertion-card-row {
+    grid-template-columns: 1.2fr 110px 1fr 1fr auto;
   }
-  .credential-help-note ul {
-    margin: 4px 0 0;
+  .mapping-card-row {
+    grid-template-columns: 1fr 1.3fr auto;
   }
-  @media (max-width: 768px) {
-    .key-value-row,
-    .assertion-row {
+  .mapping-card-row > div {
+    min-width: 0;
+  }
+  .mapping-card-row .el-tag {
+    margin-top: 4px;
+  }
+  .request-advanced {
+    margin-top: 18px;
+    border-top: 1px dashed var(--editor-border);
+  }
+  .request-advanced > button {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border: 0;
+    background: transparent;
+    color: var(--editor-muted);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .request-advanced-body {
+    padding: 0 0 4px;
+    color: var(--editor-muted);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .request-advanced-body p {
+    margin: 3px 0;
+  }
+
+  .empty-request {
+    text-align: center;
+    padding: 70px 20px;
+    color: var(--editor-muted);
+  }
+  .empty-request-icon {
+    width: 44px;
+    height: 44px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--el-color-success-light-9);
+    color: var(--el-color-success);
+    font-weight: 700;
+  }
+  .empty-request p {
+    font-size: 12px;
+  }
+
+  .summary-card {
+    background: var(--el-color-primary-light-9);
+    border-color: var(--el-color-primary-light-7);
+  }
+  .summary-label {
+    color: var(--editor-muted);
+    font-size: 12px;
+  }
+  .summary-title {
+    font-size: 17px;
+    font-weight: 650;
+    margin-top: 5px;
+  }
+  .summary-desc {
+    color: var(--editor-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    margin-top: 4px;
+  }
+  .switch-line,
+  .number-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+  }
+  .switch-line span,
+  .number-line span {
+    color: var(--editor-muted);
+    font-size: 12px;
+  }
+
+  .editor-footer {
+    flex: 0 0 auto;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 28px;
+    border-top: 1px solid var(--editor-border);
+    background: var(--el-bg-color);
+  }
+  .footer-left {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .footer-summary {
+    color: var(--editor-muted);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 500px;
+  }
+  .footer-actions {
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .test-timeline {
+    margin-top: 16px;
+  }
+  .test-step {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--editor-border);
+  }
+  .test-step-no {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--el-fill-color);
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex: 0 0 auto;
+  }
+  .test-step-main b,
+  .test-step-main span,
+  .test-step-main small {
+    display: block;
+  }
+  .test-step-main span {
+    color: var(--editor-muted);
+    font-size: 12px;
+    margin-top: 3px;
+  }
+  .test-step-main small {
+    color: var(--el-color-primary);
+    font-size: 11px;
+    margin-top: 3px;
+  }
+  .test-fields {
+    margin-top: 12px;
+    color: var(--editor-muted);
+    font-size: 12px;
+  }
+
+  .compact-alert {
+    margin-bottom: 14px;
+  }
+
+  @media (max-width: 1000px) {
+    .credential-type-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .auth-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .assertion-card-row {
+      grid-template-columns: 1fr 120px 1fr;
+    }
+    .mapping-card-row {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  @media (max-width: 760px) {
+    .editor-head,
+    .editor-body,
+    .editor-footer {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    .editor-steps {
+      padding: 8px 16px;
+      grid-template-columns: 1fr 1fr;
+    }
+    .editor-step-copy small {
+      display: none;
+    }
+    .credential-type-grid,
+    .auth-grid,
+    .two-col,
+    .three-col {
       grid-template-columns: 1fr;
     }
-    .key-value-row :deep(.el-button),
-    .assertion-row :deep(.el-button) {
-      justify-self: end;
+    .kv-row,
+    .assertion-card-row,
+    .mapping-card-row {
+      grid-template-columns: 1fr;
     }
+    .editor-footer {
+      align-items: flex-end;
+      flex-direction: column;
+    }
+    .footer-left {
+      width: 100%;
+    }
+  }
+
+  :deep(.credential-dialog .el-dialog__header) {
+    display: none;
+  }
+  :deep(.credential-dialog .el-dialog__body) {
+    padding: 0;
+  }
+  :deep(.credential-dialog .el-dialog__footer) {
+    display: none;
   }
 </style>

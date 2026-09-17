@@ -335,11 +335,54 @@ def merge_cookies_into_string(existing: str, new_cookies: dict[str, str]) -> str
     return "; ".join(f"{k}={v}" for k, v in pairs)
 
 
+def build_secret_headers(secret: dict[str, Any], include_cookie_header: bool = False) -> dict[str, str]:
+    """组装凭证默认携带的请求 Header：附加 Header + 主 Header（含 valuePrefix 拼接）。
+
+    include_cookie_header=False（多步链默认）时排除 Cookie 类 Header：
+    显式 Cookie 请求头会覆盖 httpx Cookie Jar，破坏步骤间会话延续，
+    Cookie 内容应改由 additional_header_cookies + secret_cookies 并入 Jar 携带。
+    """
+    result: dict[str, str] = {}
+    for key, value in (secret.get("headers") or {}).items():
+        name = str(key).strip()
+        if not name:
+            continue
+        if name.lower() == "cookie" and not include_cookie_header:
+            continue
+        result[name] = str(value)
+    header_name = str(secret.get("headerName") or secret.get("header_name") or "").strip()
+    header_value = str(
+        secret.get("headerValue") or secret.get("header_value") or secret.get("token") or secret.get("apiKey") or ""
+    ).strip()
+    value_prefix = str(secret.get("valuePrefix") or secret.get("value_prefix") or "")
+    if value_prefix and secret.get("token") and not header_value.startswith(value_prefix):
+        header_value = f"{value_prefix}{header_value}"
+    if header_name and header_value and (include_cookie_header or header_name.lower() != "cookie"):
+        result.setdefault(header_name, header_value)
+    return result
+
+
+def additional_header_cookies(secret: dict[str, Any]) -> dict[str, str]:
+    """解析附加 Header 中配置的 Cookie 项为键值对；多步链将其并入初始 Cookie Jar 而非显式 Header。"""
+    result: dict[str, str] = {}
+    for key, value in (secret.get("headers") or {}).items():
+        if str(key).strip().lower() != "cookie":
+            continue
+        parsed = SimpleCookie()
+        parsed.load(str(value))
+        result.update({name: morsel.value for name, morsel in parsed.items()})
+    return result
+
+
 def mask_request_for_log(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """脱敏刷新/登录请求日志，避免 Cookie、Token、密码、验证码、ticket 等凭证内容写入日志。"""
+    """脱敏刷新/登录请求日志，避免 Cookie、Token、密码、验证码、ticket 等凭证内容写入日志。
+
+    multipart 的 files 值是 (字段名, 值) 元组且全部属于登录表单敏感字段，整体只记录字段名；
+    headers 同理全部遮蔽，不按 Header 名称猜测敏感性。
+    """
     sensitive_names = {
         "authorization", "cookie", "set_cookie", "proxy_authorization", "password",
-        "passwd", "secret", "token", "api_key", "apikey", "otp", "google_code", "ticket",
+        "passwd", "pwd", "secret", "token", "api_key", "apikey", "otp", "google_code", "ticket",
     }
     sensitive_fragments = ("token", "secret", "password", "cookie", "api_key", "otp", "ticket")
 
@@ -347,8 +390,8 @@ def mask_request_for_log(kwargs: dict[str, Any]) -> dict[str, Any]:
         normalized_key = key.lower().replace("-", "_")
         if normalized_key in sensitive_names or any(name in normalized_key for name in sensitive_fragments):
             return "******"
-        if normalized_key == "headers" and isinstance(value, dict):
-            # 请求模板可把任意 secret 字段注入自定义 Header，日志中不再按 Header 名称猜测敏感性。
+        if normalized_key in {"headers", "files"} and isinstance(value, dict):
+            # files 为 multipart 表单字段（值多为验证码/ticket 等），与 headers 一致整体遮蔽值只留字段名。
             return {str(item_key): "******" for item_key in value}
         if isinstance(value, dict):
             return {str(item_key): mask(item_value, str(item_key)) for item_key, item_value in value.items()}

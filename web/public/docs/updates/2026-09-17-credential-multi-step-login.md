@@ -18,4 +18,11 @@
   - 顺带修复本地未提交改动中被误粘贴污染的"登录用户名"提示文案。
 - 重构：响应来源读取、断言校验、Cookie 写回、TOTP 生成、请求日志脱敏等公共能力下沉到 `modules/credential/util/credential_http_util.py`，单步刷新与多步链共用，无行为变化。
 - 已知边界：短信/邮箱/人工 OTP 无法定时自动完成（沿用既有校验）；ticket 一次性，任何一步失败整链重跑；步骤数上限 5。
+- **V2 信息架构（三期收尾）**：编辑页认证方式改为带场景说明的卡片选择；"刷新与状态"区升级为"生命周期与自动维护"，实时显示生命周期策略（人工维护 / 仅手工获取 / 定时重新认证 / 刷新优先登录兜底）与"认证成功后保存"凭证结果摘要。
+- **三期收尾设计决策**：Browser Step 暂缓——服务端无 Playwright 运行环境，浏览器登录/刷新由客户端 Agent 执行并回写 storageState，纳入服务端链需要跨端任务协同，出现真实需求前不做；refreshFlow 不单独建模，由对称的 `login_steps`/`refresh_steps` 两列等效达成，兜底语义保留在刷新服务编排层。
+- **兜底登录支持多步链（含 OTP）**：`HTTP 刷新` 模式的兜底登录接口段放开"多步认证链"开关——兜底登录与 HTTP 登录共用同一份 `loginSteps` 配置和执行引擎，刷新失败后的自动登录同样支持 TOTP 自动验证、multipart、条件步骤与语义化变量；后端路由本就支持，本次放开前端入口并放宽流程测试接口的模式校验（`http_refresh` 凭证可测试兜底登录链），顺带修复 `test_auth_flow` 内部漏传数据库会话的缺陷。注意：定时任务场景下兜底链的 `sms/email/manual` 验证码无人工输入来源（TOTP 可全自动），此时兜底会明确报错并保留旧快照。
+- **P1 修复（多步链安全与兼容）**：
+  - 多步链请求现在自动携带凭证的主 Header（含 `valuePrefix` 拼接，如 `Authorization: Bearer xxx`）与附加 Header，Token/Header 类凭证的多步刷新链因此可用；Cookie 类 Header 不显式发送而是并入 httpx Cookie Jar，避免覆盖步骤间会话延续。
+  - 凭证详情接口对 `login_steps`/`refresh_steps` 每个步骤的请求体与 Header 做脱敏，用户在步骤 body 里误填的字面量密码（如 `pwd`、`otp`、`ticket`）不再原样回显给查询权限用户；前端回填时把 `******` 还原为 `${secret.字段名}` 占位符，保存不会把掩码当真实值写回。
+  - 请求日志脱敏覆盖 multipart 的 `files` 字段：验证码、ticket 等 multipart 表单值整体遮蔽只保留字段名（原实现按 key 名匹配会漏掉自定义字段名的 tuple 值）。
 - 配置方法与完整示例见用户说明：[统一凭证管理](../credential_management.md)。

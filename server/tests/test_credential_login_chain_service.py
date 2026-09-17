@@ -508,3 +508,228 @@ def test_refresh_credential_http_login_uses_login_chain(monkeypatch):
     assert result == {"success": True, "message": "刷新成功", "status": "success"}
     assert chain_calls == [{"otp_type": "totp", "otp_code": None, "step_count": 2}]
     assert update_payloads[0]["secret_cipher_text"] == "encrypted"
+
+
+def test_refresh_fallback_executes_login_chain(monkeypatch):
+    """http_refresh 刷新失败后，兜底登录配置了 login_steps 时走多步登录链（支持 TOTP/OTP）。"""
+    refresh_url = 'https://example.test/refresh'
+    login_steps = [
+        {
+            'url': 'https://example.test/doLogin',
+            'method': 'POST',
+            'bodyType': 'none',
+            'outputs': {'header.cookie.SESSION': 'cookie:SESSION'},
+            'persistOutputs': True,
+        }
+    ]
+    config = SimpleNamespace(
+        refresh_url=refresh_url,
+        login_url='',
+        refresh_request_template={'method': 'POST'},
+        login_request_template={},
+        refresh_response_mapping={},
+        login_response_mapping={},
+        refresh_success_assertions=[],
+        login_success_assertions=[],
+        response_mapping={},
+        refresh_method='POST',
+        login_method='POST',
+        otp_type='totp',
+        login_steps=login_steps,
+        refresh_steps=[],
+    )
+    old_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=old'}
+    chain_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=chain'}
+    calls = {'auth_step': 0, 'chain': []}
+    final_secret = {'headerName': 'Cookie', 'headerValue': 'SESSION=final'}
+
+    def fake_execute_http_auth_step(url, request_config, secret, otp_type, otp_code, assertions, mapping, action_label):
+        assert url == refresh_url
+        calls['auth_step'] += 1
+        if calls['auth_step'] == 1:
+            raise ValueError('refresh failed')
+        # 登录链拿到新凭证后的重试刷新成功
+        assert secret == chain_secret
+        return final_secret
+
+    def fake_execute_step_chain(secret, steps, otp_type='none', otp_code=None, transport=None, action_label='登录链'):
+        calls['chain'].append(
+            {'otp_type': otp_type, 'step_count': len(steps), 'action_label': action_label}
+        )
+        return chain_secret, [{'index': 1, 'skipped': False}]
+
+    monkeypatch.setattr(CredentialRefreshService, '_execute_http_auth_step', fake_execute_http_auth_step)
+    monkeypatch.setattr(CredentialLoginChainService, 'execute_step_chain', staticmethod(fake_execute_step_chain))
+
+    result = CredentialRefreshService._execute_http_refresh_with_login_fallback(
+        config, old_secret, 'totp', None, 9
+    )
+
+    assert result == final_secret
+    assert calls['auth_step'] == 2
+    assert calls['chain'] == [{'otp_type': 'totp', 'step_count': 1, 'action_label': '登录链'}]
+
+
+def test_auth_flow_login_branch_allows_http_refresh_fallback(monkeypatch):
+    """http_refresh 凭证的登录链测试（即兜底登录链）不再被模式校验拒绝。"""
+    credential = SimpleNamespace(
+        enabled=True, auth_mode='http_refresh', credential_id=7, secret_cipher_text='cipher'
+    )
+    config = SimpleNamespace(
+        login_steps=[
+            {
+                'url': 'https://example.test/doLogin',
+                'method': 'POST',
+                'bodyType': 'none',
+                'outputs': {'header.cookie.SESSION': 'cookie:SESSION'},
+                'persistOutputs': True,
+            }
+        ],
+        otp_type='none',
+    )
+    monkeypatch.setattr(CredentialDao, 'get_credential', lambda db, credential_id: credential)
+    monkeypatch.setattr(CredentialDao, 'get_auth_config', lambda db, credential_id: config)
+    monkeypatch.setattr(
+        'modules.credential.service.credential_login_chain_service.decrypt_secret',
+        lambda cipher_text: {'headerName': 'Cookie', 'headerValue': ''},
+    )
+
+    def fake_execute_step_chain(secret, steps, otp_type='none', otp_code=None, transport=None, action_label='登录链'):
+        return {'headerName': 'Cookie', 'headerValue': 'SESSION=new'}, [{'index': 1, 'skipped': False}]
+
+    monkeypatch.setattr(CredentialLoginChainService, 'execute_step_chain', staticmethod(fake_execute_step_chain))
+
+    result = CredentialLoginChainService.test_auth_flow(None, 7, 'login')
+
+    assert result['success'] is True
+    assert result['flowType'] == 'login'
+    assert result['updatedFields'] == ['headerValue']
+
+
+def test_login_chain_injects_primary_and_additional_headers():
+    """链步骤自动携带凭证主 Header（含 valuePrefix 拼接）与附加 Header；步骤 Header 同名时优先。"""
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(dict(request.headers))
+        return _json_response({"ok": True}, {"Set-Cookie": "S=1; Path=/"})
+
+    steps = [
+        {
+            "url": "https://erp.example.test/a",
+            "method": "POST",
+            "bodyType": "none",
+            "headers": {"X-Step": "custom"},
+            "outputs": {"cookies.S": "cookie:S"},
+            "persistOutputs": True,
+        },
+    ]
+    secret = {
+        "headerName": "Authorization",
+        "headerValue": "raw-token",
+        "headers": {"X-Tenant": "prod"},
+    }
+    CredentialLoginChainService.execute_step_chain(
+        secret, steps, transport=httpx.MockTransport(handler)
+    )
+    assert captured[0]["authorization"] == "raw-token"
+    assert captured[0]["x-tenant"] == "prod"
+    assert captured[0]["x-step"] == "custom"
+
+
+def test_login_chain_token_header_uses_value_prefix_and_cookie_header_goes_to_jar():
+    """Token 凭证主 Header 拼接 valuePrefix；附加 Header 中的 Cookie 并入初始 Jar 而非显式 Header。"""
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(dict(request.headers))
+        return _json_response({"ok": True}, {"Set-Cookie": "S=1; Path=/"})
+
+    steps = [
+        {
+            "url": "https://erp.example.test/a",
+            "method": "POST",
+            "bodyType": "none",
+            "outputs": {"cookies.S": "cookie:S"},
+            "persistOutputs": True,
+        },
+    ]
+    secret = {
+        "headerName": "Authorization",
+        "valuePrefix": "Bearer ",
+        "token": "tok-123",
+        "headers": {"Cookie": "CSRF=abc; locale=zh"},
+    }
+    CredentialLoginChainService.execute_step_chain(
+        secret, steps, transport=httpx.MockTransport(handler)
+    )
+    assert captured[0]["authorization"] == "Bearer tok-123"
+    cookie_header = captured[0]["cookie"]
+    assert "CSRF=abc" in cookie_header
+    assert "locale=zh" in cookie_header
+
+
+def test_login_chain_explicit_cookie_header_in_step_is_merged_into_jar():
+    """步骤显式配置的 Cookie Header 并入 Jar 后从请求头移除，避免覆盖链内会话延续。"""
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(dict(request.headers))
+        if request.url.path == "/a":
+            return _json_response({"ok": True}, {"Set-Cookie": "SESSION=from-server; Path=/"})
+        return _json_response({"ok": True}, {"Set-Cookie": "S=1; Path=/"})
+
+    steps = [
+        {
+            "url": "https://erp.example.test/a",
+            "method": "POST",
+            "bodyType": "none",
+            "headers": {"Cookie": "manual=keep"},
+        },
+        {
+            "url": "https://erp.example.test/b",
+            "method": "POST",
+            "bodyType": "none",
+            "outputs": {"cookies.S": "cookie:S"},
+            "persistOutputs": True,
+        },
+    ]
+    CredentialLoginChainService.execute_step_chain(
+        {}, steps, transport=httpx.MockTransport(handler)
+    )
+    # 第一步：显式 Cookie 值进入 Jar 发出；第二步：Jar 同时含服务端下发的会话 Cookie
+    assert "manual=keep" in captured[0]["cookie"]
+    assert "SESSION=from-server" in captured[1]["cookie"]
+
+
+def test_mask_request_for_log_hides_multipart_file_values():
+    """multipart 请求日志：files 值（验证码/ticket 等）整体脱敏，只保留字段名。"""
+    from modules.credential.util.credential_http_util import mask_request_for_log
+
+    masked = mask_request_for_log(
+        {
+            "headers": {"x-requested-with": "XMLHttpRequest"},
+            "files": {"ticket": (None, "t-12345"), "google_code": (None, "618455")},
+        }
+    )
+    assert masked["files"] == {"ticket": "******", "google_code": "******"}
+    assert masked["headers"] == {"x-requested-with": "******"}
+
+
+def test_redact_step_config_hides_literal_password_in_body():
+    """详情接口脱敏多步链配置：body/headers 中字面量敏感值被遮蔽，提取规则保持原样。"""
+    from modules.credential.service.credential_service import CredentialService
+
+    step = {
+        "name": "登录",
+        "url": "https://erp.example.test/doLogin",
+        "headers": {"Cookie": "SESSION=literal", "X-Step": "keep"},
+        "body": {"account": "13800000000", "pwd": "md5-literal", "otp": "${secret.otp}"},
+        "outputs": {"ticket": "json:result|url_query:ticket"},
+        "persistOutputs": False,
+    }
+    redacted = CredentialService._redact_step_config(step)
+    assert redacted["body"] == {"account": "13800000000", "pwd": "******", "otp": "******"}
+    assert redacted["headers"] == {"Cookie": "******", "X-Step": "keep"}
+    assert redacted["outputs"] == {"ticket": "json:result|url_query:ticket"}
+    assert redacted["url"] == "https://erp.example.test/doLogin"

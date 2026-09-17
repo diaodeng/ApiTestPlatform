@@ -1,5 +1,6 @@
 import json
 import time
+from http.cookies import SimpleCookie
 from typing import Any
 
 import httpx
@@ -13,6 +14,8 @@ from modules.credential.entity.vo.credential_vo import (
     validate_login_step_references,
 )
 from modules.credential.util.credential_http_util import (
+    additional_header_cookies,
+    build_secret_headers,
     extract_response_secret,
     generate_totp,
     mask_request_for_log,
@@ -59,8 +62,11 @@ class CredentialLoginChainService:
         new_secret = dict(secret)
         persisted_any = False
         details: list[dict[str, Any]] = []
+        # Cookie Jar 初始化：凭证 Cookie + 附加 Header 中的 Cookie 项，保证链首请求即带上会话。
+        initial_cookies = secret_cookies(secret)
+        initial_cookies.update(additional_header_cookies(secret))
         # 整条链共用一个 Client：步骤间 Set-Cookie 自动进入 Cookie Jar 并在后续请求中携带。
-        with httpx.Client(cookies=secret_cookies(secret), timeout=30, transport=transport) as client:
+        with httpx.Client(cookies=initial_cookies, timeout=30, transport=transport) as client:
             for index, step in enumerate(steps, start=1):
                 if not cls._should_execute_step(step, secret, step_variables):
                     logger.info(f"{action_label}第{index}步条件不满足，跳过：{step.name or step.url}")
@@ -124,7 +130,7 @@ class CredentialLoginChainService:
             raise ValueError("凭证不存在")
         if not credential.enabled:
             raise ValueError("凭证未启用")
-        steps_config, config = cls._load_chain_config(credential, flow_type)
+        steps_config, config = cls._load_chain_config(db, credential, flow_type)
         if not steps_config:
             required = "login_steps" if flow_type == "login" else "refresh_steps"
             flow_label = "登录" if flow_type == "login" else "刷新"
@@ -146,12 +152,16 @@ class CredentialLoginChainService:
         }
 
     @classmethod
-    def _load_chain_config(cls, credential, flow_type: str) -> tuple[list[Any], Any]:
-        """按流程类型读取认证配置中的链配置，并校验凭证认证模式匹配。"""
-        config = CredentialDao.get_auth_config(credential.credential_id)
+    def _load_chain_config(cls, db: Session, credential, flow_type: str) -> tuple[list[Any], Any]:
+        """按流程类型读取认证配置中的链配置，并校验凭证认证模式匹配。
+
+        login_steps 在 http_login 模式下是主登录链，在 http_refresh 模式下是兜底登录链，
+        两种模式都允许测试登录链；refresh_steps 仅 http_refresh 模式使用。
+        """
+        config = CredentialDao.get_auth_config(db, credential.credential_id)
         if flow_type == "login":
-            if credential.auth_mode != "http_login":
-                raise ValueError("仅 HTTP 自动登录模式的凭证支持多步登录链测试")
+            if credential.auth_mode not in {"http_login", "http_refresh"}:
+                raise ValueError("仅 HTTP 登录或 HTTP 刷新（兜底登录）模式的凭证支持多步登录链测试")
             return list(getattr(config, "login_steps", None) or []) if config else [], config
         if flow_type == "refresh":
             if credential.auth_mode != "http_refresh":
@@ -239,11 +249,23 @@ class CredentialLoginChainService:
     ) -> httpx.Response:
         """渲染并执行单个步骤请求；请求日志统一脱敏。"""
         url = cls._render_template(step.url, secret, step_variables, index, action_label)
-        headers = {
-            str(k): cls._render_template(str(v), secret, step_variables, index, action_label)
-            for k, v in step.headers.items()
-        }
+        # 凭证默认 Header（附加 Header + 主 Header，Cookie 类除外）先行注入，
+        # 步骤自身 Header 同名时覆盖默认值；Token/API Key 类刷新链因此能带上当前凭证。
+        headers = build_secret_headers(secret)
+        headers.update(
+            {
+                str(k): cls._render_template(str(v), secret, step_variables, index, action_label)
+                for k, v in step.headers.items()
+            }
+        )
         kwargs: dict[str, Any] = {"headers": headers}
+        # 步骤显式配置的 Cookie Header 会覆盖 httpx Cookie Jar，破坏链内会话延续；
+        # 统一解析并入 Jar 后从 Header 中移除，保持"Cookie 一律走 Jar"的单一通道。
+        for header_key in list(headers):
+            if header_key.strip().lower() == "cookie":
+                parsed_cookie = SimpleCookie()
+                parsed_cookie.load(headers.pop(header_key))
+                client.cookies.update({name: morsel.value for name, morsel in parsed_cookie.items()})
         if step.method not in {"GET", "HEAD"} and step.body_type != "none":
             if step.body_type == "form":
                 body = cls._render_template(step.body or {}, secret, step_variables, index, action_label)

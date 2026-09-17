@@ -167,6 +167,8 @@ class CredentialService:
         auth_config_data = auth_config.model_dump(by_alias=False)
         for key in ("request_template", "login_request_template", "refresh_request_template"):
             auth_config_data[key] = cls._redact_config_value(auth_config_data.get(key) or {})
+        for key in ("login_steps", "refresh_steps"):
+            auth_config_data[key] = [cls._redact_step_config(step) for step in (auth_config_data.get(key) or [])]
         auth_config = CredentialAuthConfigModel.model_validate(auth_config_data)
         return CredentialModel(
             credentialId=str(row.credential_id), credentialName=row.credential_name, credentialType=row.credential_type,
@@ -181,7 +183,11 @@ class CredentialService:
     @staticmethod
     def _redact_config_value(value):
         """隐藏请求模板中的常见敏感字段，防止编辑详情接口泄露固定密码或密钥。"""
-        sensitive_names = {"password", "passwd", "secret", "token", "authorization", "cookie", "api_key", "apikey"}
+        sensitive_names = {
+            "password", "passwd", "pwd", "secret", "token", "authorization",
+            "cookie", "api_key", "apikey", "otp", "otp_secret", "otpsecret",
+            "google_code", "ticket",
+        }
         if isinstance(value, dict):
             return {
                 key: "******" if str(key).lower().replace("-", "_") in sensitive_names else CredentialService._redact_config_value(item)
@@ -190,3 +196,17 @@ class CredentialService:
         if isinstance(value, list):
             return [CredentialService._redact_config_value(item) for item in value]
         return value
+
+    @classmethod
+    def _redact_step_config(cls, step):
+        """脱敏多步认证链单个步骤的 Header 与请求体中的字面量敏感值。
+
+        步骤 outputs/assertions/when 是提取路径与断言配置，不含密文，保持原样返回；
+        body 中建议用 ${secret.字段} 占位符，用户误填字面量密码时详情接口不会回显。
+        """
+        if not isinstance(step, dict):
+            return step
+        redacted = dict(step)
+        redacted["headers"] = cls._redact_config_value(redacted.get("headers") or {})
+        redacted["body"] = cls._redact_config_value(redacted.get("body"))
+        return redacted

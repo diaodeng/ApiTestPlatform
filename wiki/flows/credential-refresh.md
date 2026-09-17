@@ -40,6 +40,8 @@ graph TD
 | 判断 | 根据 autoRefreshEnabled、刷新间隔、上次成功时间和过期时间窗口判断；跳过原因细分写入任务摘要：未开启自动刷新为 `auto_refresh_off`（HTTP 登录/刷新模式每天最多补一条 `auto_refresh_off` 操作审计日志提醒）、未到期未到间隔为 `not_due`、配置无效为 `invalid_config`、租约冲突为 `lease_conflict` |
 | 租约 | 锁定凭证聚合根行后获取短期独占刷新租约，避免并发刷新 |
 | 刷新 | 用认证配置和密文中的占位符组装请求；自动携带当前 Cookie/Header；当 HTTP Header 凭证的 Header 名称为 `Cookie` 时，`${secret.cookie}` 读取其 Header 值；`${secret.headerValue}` 作为直接读取主 Header 值的高级变量；`http_refresh` 若同时配置登录地址，刷新失败会自动登录并重试刷新；前端会为 `http_refresh` 同时展示刷新接口和兜底登录接口配置区 |
+| 多步链 Header | 链请求默认携带凭证主 Header（含 `valuePrefix` 拼接）与附加 Header，步骤自身 Header 同名时覆盖；Cookie 类 Header（主 Header 为 `Cookie` 或附加 Header 中的 `Cookie`）不显式发送，而是并入 httpx Cookie Jar，避免覆盖步骤间会话延续。Token/Header 类凭证的多步刷新链依赖此注入携带当前凭证 |
+| 多步链脱敏 | 详情接口对 `login_steps`/`refresh_steps` 每步的 body/headers 做字面量敏感值脱敏（前端回填时 `******` 还原为 `${secret.字段}`）；请求日志对 multipart 的 `files` 整体遮蔽值只留字段名 |
 | 业务成功 | HTTP 状态为 2xx 后，按登录或刷新各自的成功断言逐条校验；断言失败不会提取或写回，并保留旧快照 |
 | 提取 | 仅按显式响应提取规则写回，支持 JSON 字段、响应头、单个响应 Cookie 和全部标准 `Set-Cookie`；不会自动合并 Cookie |
 | 写回 | revision 一致才写入；冲突不覆盖 |
@@ -59,6 +61,12 @@ graph TD
 参见：[统一凭证数据模型](../entities/data-models/credential-management.md)、[凭证接口契约](../contracts/credential-api.md)。
 
 被引用：统一凭证数据模型、凭证接口契约。
+
+## V2 演进边界（三期收尾决策）
+
+- **步骤类型**：当前链引擎只支持 HTTP 步骤（含 TOTP 变量注入）。**Browser Step 暂缓**：服务端没有 Playwright 运行环境，浏览器登录/刷新由客户端 Agent 执行并通过 `writeback` 接口回写 storageState；把浏览器步骤纳入服务端链需要跨端任务协同（下发-等待-回写），在出现真实需求前不做。
+- **refreshFlow 建模**：不引入独立的 `authFlow { loginFlow, refreshFlow }` 数据结构，由对称的 `login_steps` / `refresh_steps` 两列等效达成；兜底语义（刷新失败回退登录）保持在刷新服务编排层。
+- **V2 信息架构**：编辑弹窗已落地认证方式卡片、生命周期策略说明（人工维护 / 仅手工获取 / 定时重新认证 / 刷新优先登录兜底）、凭证结果摘要与多步链流程预览；"左流程右配置"的整体布局重构仍不在当前范围。
 
 ## 编辑语义边界
 
