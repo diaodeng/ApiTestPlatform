@@ -10,9 +10,11 @@ from modules.credential.entity.do.credential_do import AuthCredentialOperationLo
 from modules.credential.service.credential_lease_service import CredentialLeaseService
 from modules.credential.service.credential_login_chain_service import CredentialLoginChainService
 from modules.credential.util.credential_http_util import (
+    describe_response_cookies,
     extract_response_secret,
     generate_totp,
     mask_request_for_log,
+    mask_response_for_log,
     secret_cookies,
     validate_response_success_assertions,
 )
@@ -288,7 +290,11 @@ class CredentialRefreshService:
     ) -> dict[str, Any]:
         """执行单次 HTTP 登录或刷新，并在成功后提取新凭证。"""
         response = cls._execute_http_request(url, request_config, secret, otp_type, otp_code, action_label)
-        logger.info(f"{action_label}响应状态：{response.status_code},响应cookies：{response.cookies},响应头：{response.headers},响应信息：{response.content.decode('utf-8')}")
+        logger.info(
+            f"{action_label}响应状态：{response.status_code},响应cookies：{describe_response_cookies(response)},"
+            f"响应头：{mask_request_for_log({'headers': dict(response.headers)})['headers']},"
+            f"响应信息：{mask_response_for_log(response.content)}"
+        )
         response.raise_for_status()
         validate_response_success_assertions(response, assertions)
         new_secret, extracted_any = extract_response_secret(secret, response, mapping)

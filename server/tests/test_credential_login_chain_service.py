@@ -716,20 +716,172 @@ def test_mask_request_for_log_hides_multipart_file_values():
     assert masked["headers"] == {"x-requested-with": "******"}
 
 
-def test_redact_step_config_hides_literal_password_in_body():
-    """详情接口脱敏多步链配置：body/headers 中字面量敏感值被遮蔽，提取规则保持原样。"""
+def test_redact_step_config_hides_literal_password_and_keeps_placeholder():
+    """详情接口脱敏：字面量敏感值遮蔽；${secret.*} 占位符原样回显以便编辑页正确显示。"""
     from modules.credential.service.credential_service import CredentialService
 
     step = {
         "name": "登录",
         "url": "https://erp.example.test/doLogin",
         "headers": {"Cookie": "SESSION=literal", "X-Step": "keep"},
-        "body": {"account": "13800000000", "pwd": "md5-literal", "otp": "${secret.otp}"},
+        "body": {
+            "account": "13800000000",
+            "pwd": "md5-literal",
+            "otp": "${secret.otp}",
+            "password": "${secret.password}",
+        },
         "outputs": {"ticket": "json:result|url_query:ticket"},
         "persistOutputs": False,
     }
     redacted = CredentialService._redact_step_config(step)
-    assert redacted["body"] == {"account": "13800000000", "pwd": "******", "otp": "******"}
+    assert redacted["body"] == {
+        "account": "13800000000",
+        "pwd": "******",
+        "otp": "${secret.otp}",
+        "password": "${secret.password}",
+    }
     assert redacted["headers"] == {"Cookie": "******", "X-Step": "keep"}
     assert redacted["outputs"] == {"ticket": "json:result|url_query:ticket"}
     assert redacted["url"] == "https://erp.example.test/doLogin"
+
+
+def test_validate_step_secret_references_rejects_missing_field():
+    """多步链步骤引用 secret 中不存在的字段（如误写 ${secret.pwd} 而字段是 password）保存时拒绝。"""
+    from modules.credential.entity.vo.credential_vo import CredentialAuthConfigModel
+    from modules.credential.service.credential_service import CredentialService
+
+    steps = [
+        {
+            "url": "https://erp.example.com/doLogin",
+            "method": "POST",
+            "bodyType": "form",
+            "body": {"account": "${secret.username}", "pwd": "${secret.pwd}"},
+            "outputs": {"header.cookie.S": "cookie:S"},
+            "persistOutputs": True,
+        }
+    ]
+    auth_config = CredentialAuthConfigModel.model_validate({"loginSteps": steps})
+    try:
+        CredentialService._validate_step_secret_references(auth_config, {"username": "a", "password": "b"})
+    except ValueError as exc:
+        assert "secret.pwd" in str(exc)
+        assert "登录链步骤 1" in str(exc)
+    else:
+        raise AssertionError("引用不存在的 secret 字段必须拒绝保存")
+
+    # 字段齐全时通过
+    CredentialService._validate_step_secret_references(auth_config, {"username": "a", "pwd": "b"})
+
+
+def test_validate_step_secret_references_allows_runtime_and_otp_variables():
+    """运行时变量（otp/cookie/token/headerValue）与历史别名不参与字段存在性校验。"""
+    from modules.credential.entity.vo.credential_vo import CredentialAuthConfigModel
+    from modules.credential.service.credential_service import CredentialService
+
+    steps = [
+        {
+            "id": "login",
+            "url": "https://erp.example.com/doLogin",
+            "method": "POST",
+            "bodyType": "form",
+            "body": {
+                "account": "${secret.username}",
+                "pwd": "${secret.password}",
+                "remember": 1,
+            },
+            "outputs": {"ticket": "json:result|url_query:ticket"},
+        },
+        {
+            "id": "otp",
+            "url": "https://erp.example.com/doOtp",
+            "method": "POST",
+            "bodyType": "multipart",
+            "body": {"ticket": "${step.login.ticket}", "google_code": "${secret.otp}"},
+            "outputs": {"header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+            "persistOutputs": True,
+        },
+    ]
+    auth_config = CredentialAuthConfigModel.model_validate({"loginSteps": steps})
+    # secret 只有 username/password/otpSecret（登录账号区），otp 是运行时变量应豁免
+    CredentialService._validate_step_secret_references(
+        auth_config, {"username": "a", "password": "b", "otpSecret": "JBSW"}
+    )
+
+    # 没有 otpSecret 时 ${secret.otp} 仍应拒绝（TOTP 无法生成）
+    try:
+        CredentialService._validate_step_secret_references(auth_config, {"username": "a", "password": "b"})
+    except ValueError as exc:
+        assert "secret.otp" in str(exc)
+    else:
+        raise AssertionError("没有 TOTP 密钥时引用 ${secret.otp} 必须拒绝保存")
+
+
+def test_update_credential_returns_failure_for_invalid_step_reference(monkeypatch):
+    """更新入口的 ${secret.*} 校验失败应返回业务 failure（中文信息），而不是抛 500。"""
+    credential = SimpleNamespace(
+        credential_id=5,
+        credential_type="http_header",
+        secret_cipher_text="cipher",
+    )
+
+    def fake_decrypt(cipher_text):
+        return {"headerName": "Cookie", "headerValue": "S=old"}
+
+    from modules.credential.service.credential_service import CredentialService
+
+    monkeypatch.setattr(CredentialDao, "get_credential", lambda db, credential_id: credential)
+    monkeypatch.setattr(
+        "modules.credential.service.credential_service.decrypt_secret", fake_decrypt
+    )
+    monkeypatch.setattr("modules.credential.service.credential_service.encrypt_secret", lambda s: "enc")
+    monkeypatch.setattr("modules.credential.service.credential_service.mask_secret", lambda s: "mask")
+
+    def fake_validate(auth_config, merged_secret):
+        raise ValueError("登录链步骤 2（otp登录）引用了 ${secret.otp}，但当前凭证没有填写对应的 otp 字段")
+
+    monkeypatch.setattr(
+        CredentialService, "_validate_step_secret_references", classmethod(lambda cls, ac, s: fake_validate(ac, s))
+    )
+
+    from modules.credential.entity.vo.credential_vo import CredentialUpdateModel
+
+    model = CredentialUpdateModel(
+        credentialName="生产数据",
+        credentialType="http_header",
+        authMode="http_refresh",
+        expectedRevision=2,
+        secret={"headerValue": "S=old"},
+        authConfig=CredentialAuthConfigModel(refreshUrl="https://x.test/refresh"),
+    )
+
+    class FakeDb:
+        def rollback(self):
+            pass
+
+    result = CredentialService.update_credential(FakeDb(), 5, model, SimpleNamespace(user=SimpleNamespace(user_name="op")))
+    assert result.is_success is False
+    assert "登录链步骤 2" in result.message
+    assert "otp" in result.message
+
+
+def test_redact_step_config_keeps_step_reference_placeholder():
+    """跨步骤引用（${step.*}）是引用声明而非密文，脱敏时原样回显。"""
+    from modules.credential.service.credential_service import CredentialService
+
+    step = {
+        "id": "otp",
+        "body": {"ticket": "${step.1.ticket}", "google_code": "${secret.otp}"},
+        "headers": {"X-Request-Id": "${step.1.requestId}"},
+        "outputs": {"header.cookie.UYBFEWAEE": "cookie:UYBFEWAEE"},
+        "persistOutputs": True,
+    }
+    redacted = CredentialService._redact_step_config(step)
+    assert redacted["body"] == {"ticket": "${step.1.ticket}", "google_code": "${secret.otp}"}
+    assert redacted["headers"] == {"X-Request-Id": "${step.1.requestId}"}
+
+    # 字面量 ticket/google_code 仍遮蔽
+    literal = {"body": {"ticket": "raw-ticket", "google_code": "618455"}}
+    assert CredentialService._redact_step_config(literal)["body"] == {
+        "ticket": "******",
+        "google_code": "******",
+    }

@@ -5,6 +5,9 @@ import httpx
 from modules.credential.dao.credential_dao import CredentialDao
 from modules.credential.entity.vo.credential_vo import CredentialAuthConfigModel, CredentialResponseAssertionModel
 from modules.credential.service.credential_lease_service import CredentialLeaseService
+from modules.credential.service.credential_refresh_service import CredentialRefreshService
+from modules.credential.service.credential_resolve_service import CredentialResolveService
+from modules.credential.service.credential_service import CredentialService
 from modules.credential.util.credential_http_util import (
     extract_response_secret,
     generate_totp,
@@ -12,9 +15,6 @@ from modules.credential.util.credential_http_util import (
     secret_cookies,
     validate_response_success_assertions,
 )
-from modules.credential.service.credential_refresh_service import CredentialRefreshService
-from modules.credential.service.credential_resolve_service import CredentialResolveService
-from modules.credential.service.credential_service import CredentialService
 
 
 def _response(payload=None, headers=None):
@@ -302,20 +302,28 @@ def test_template_secret_exposes_header_value_for_legacy_snake_case_field():
     assert template_secret["headerValue"] == "legacy-value"
 
 
-def test_mask_request_for_log_hides_cookie_and_password_values():
+def test_mask_request_for_log_applies_graduated_masking():
+    """分级掩码：密码/验证码全遮；Cookie/Token 保留首尾；占位符原样；短值整体遮蔽。"""
     masked = mask_request_for_log(
         {
             "headers": {"cookie": "SESSION=session-value", "origin": "https://example.test"},
-            "cookies": {"SESSION": "session-value"},
-            "json": {"password": "plain-password", "account": "alice"},
+            "cookies": {"SESSION": "session-value-long-enough"},
+            "json": {"password": "plain-password", "account": "alice", "otp": "${secret.otp}"},
+            "files": {"ticket": (None, "11d5677a-497e-4f53-9a78-f480e90af68720260918"), "google_code": (None, "618455")},
         }
     )
 
-    assert masked == {
-        "headers": {"cookie": "******", "origin": "******"},
-        "cookies": "******",
-        "json": {"password": "******", "account": "alice"},
-    }
+    # 密码/验证码全遮
+    assert masked["json"]["password"] == "******"
+    assert masked["json"]["otp"] == "${secret.otp}"  # 占位符原样
+    assert masked["json"]["account"] == "alice"
+    # Cookie/Token/ticket 保留首尾各 6 字符
+    assert masked["headers"]["cookie"] == "SESSIO****-value"
+    assert masked["cookies"]["SESSION"] == "sessio****enough"
+    assert masked["files"]["ticket"] == "11d567****260918"
+    assert masked["files"]["google_code"] == "******"  # 全遮字段
+    # headers 键值整体分级脱敏：非敏感名仍被遮蔽（响应头不按名猜测）
+    assert masked["headers"]["origin"] == "******"
 
 
 def test_totp_generation_is_six_digits():

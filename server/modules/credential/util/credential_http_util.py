@@ -374,29 +374,111 @@ def additional_header_cookies(secret: dict[str, Any]) -> dict[str, str]:
     return result
 
 
-def mask_request_for_log(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """脱敏刷新/登录请求日志，避免 Cookie、Token、密码、验证码、ticket 等凭证内容写入日志。
+# 部分掩码强度分级：全遮（密码/密钥/验证码类，部分泄露存在助记猜测风险）与
+# 首尾保留（Cookie/Token/ticket 类，保留首尾可判断"值是否为空/是否旧值残留/格式是否正确"）。
+MASK_FULL_FIELDS = {"password", "passwd", "pwd", "secret", "otp", "google_code", "otpsecret", "otp_secret", "api_key", "apikey"}
+MASK_PARTIAL_FIELDS = {"ticket", "cookie", "token", "authorization", "session", "set_cookie"}
+MASK_PARTIAL_FRAGMENTS = ("ticket", "token", "session")
+MASK_KEEP_HEAD = 6
+MASK_KEEP_TAIL = 6
 
-    multipart 的 files 值是 (字段名, 值) 元组且全部属于登录表单敏感字段，整体只记录字段名；
-    headers 同理全部遮蔽，不按 Header 名称猜测敏感性。
+
+def partial_mask(value: str, keep_head: int = MASK_KEEP_HEAD, keep_tail: int = MASK_KEEP_TAIL) -> str:
+    """保留首尾字符的部分掩码；过短值（<= keep_head+keep_tail）整体遮蔽，避免泄露大半内容。"""
+    text = str(value)
+    if len(text) <= keep_head + keep_tail:
+        return "******"
+    return f"{text[:keep_head]}****{text[-keep_tail:]}"
+
+
+def describe_response_cookies(response: httpx.Response) -> str:
+    """响应 Cookie 的可排查描述：保留 Cookie 名与部分值，替代 httpx 默认对象输出。"""
+    cookies = response_cookies(response)
+    if not cookies:
+        return "[]"
+    return "; ".join(f"{name}={partial_mask(value)}" for name, value in cookies.items())
+
+
+def mask_request_for_log(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """脱敏刷新/登录请求日志：敏感值按分级部分掩码，便于日志排查（确认值是否为空/旧值残留/格式正确）。
+
+    分级规则见 MASK_FULL_FIELDS / MASK_PARTIAL_FIELDS：
+    - 密码、密钥、验证码类全遮 ******；
+    - Cookie、Token、ticket 保留首尾各 6 字符；
+    - 值为 ${secret.*}/${step.*} 占位符（引用声明，不含密文）时原样显示；
+    - multipart 的 files 为 (字段名, 值) 元组，按字段名分级脱敏值；
+    - headers 的值按 Header 名称分级脱敏。
     """
-    sensitive_names = {
-        "authorization", "cookie", "set_cookie", "proxy_authorization", "password",
-        "passwd", "pwd", "secret", "token", "api_key", "apikey", "otp", "google_code", "ticket",
-    }
-    sensitive_fragments = ("token", "secret", "password", "cookie", "api_key", "otp", "ticket")
+    sensitive_names = set(MASK_FULL_FIELDS) | set(MASK_PARTIAL_FIELDS)
+    sensitive_fragments = MASK_PARTIAL_FRAGMENTS + ("password", "secret", "cookie", "api_key", "otp")
+
+    placeholder = re.compile(r"\$\{(?:secret|step\.[A-Za-z0-9]+)\.[A-Za-z_][A-Za-z0-9_]*\}")
+
+    def mask_value_by_key(value: Any, key: str) -> Any:
+        """按字段名分级脱敏单个值；multipart 的 (filename, value) 元组解包后对值掩码。"""
+        normalized = key.lower().replace("-", "_")
+        if isinstance(value, str) and placeholder.fullmatch(value.strip()):
+            return value
+        target = value[1] if isinstance(value, tuple) and len(value) >= 2 else value
+        if normalized in MASK_FULL_FIELDS or any(f in normalized for f in ("password", "secret", "api_key", "apikey", "otp")):
+            return "******"
+        if normalized in MASK_PARTIAL_FIELDS or any(f in normalized for f in MASK_PARTIAL_FRAGMENTS):
+            return partial_mask(str(target))
+        return "******"
 
     def mask(value: Any, key: str = "") -> Any:
         normalized_key = key.lower().replace("-", "_")
-        if normalized_key in sensitive_names or any(name in normalized_key for name in sensitive_fragments):
-            return "******"
-        if normalized_key in {"headers", "files"} and isinstance(value, dict):
-            # files 为 multipart 表单字段（值多为验证码/ticket 等），与 headers 一致整体遮蔽值只留字段名。
-            return {str(item_key): "******" for item_key in value}
+        if normalized_key in {"headers", "files", "cookies"} and isinstance(value, dict):
+            # headers 值按 Header 名称分级；files/cookies 同理，占位符原样。
+            return {str(item_key): mask_value_by_key(item_value, str(item_key)) for item_key, item_value in value.items()}
         if isinstance(value, dict):
             return {str(item_key): mask(item_value, str(item_key)) for item_key, item_value in value.items()}
         if isinstance(value, list):
             return [mask(item) for item in value]
+        if normalized_key in sensitive_names or any(name in normalized_key for name in sensitive_fragments):
+            return mask_value_by_key(value, key)
         return value
 
     return mask(kwargs)
+
+
+def mask_response_for_log(content: bytes | str) -> str:
+    """脱敏响应体日志：JSON 字符串值按部分掩码处理，键名与结构保持原样以便排查。
+
+    仅对形如 `键=值`/`"键":"值"` 的字符串值做部分掩码（键名命中敏感名单）；
+    非敏感键的值（如 code、msg、result）原样保留，保证"用户未登录"等业务信息可读。
+    """
+    import json as _json
+
+    text = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else str(content)
+    try:
+        payload = _json.loads(text)
+    except ValueError:
+        # 非 JSON 响应（如 text/plain）：只处理 key=value 形态，其余原样。
+        return re.sub(
+            r"(" + "|".join(sorted(MASK_PARTIAL_FIELDS | MASK_FULL_FIELDS)) + r")=([^\s&;]{7,})",
+            lambda m: f"{m.group(1)}={partial_mask(m.group(2))}",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    sensitive = set(MASK_FULL_FIELDS) | set(MASK_PARTIAL_FIELDS)
+
+    def redact(node: Any, key: str = "") -> Any:
+        normalized = key.lower().replace("-", "_").split(".")[-1]
+        if isinstance(node, dict):
+            return {k: redact(v, str(k)) for k, v in node.items()}
+        if isinstance(node, list):
+            return [redact(item, key) for item in node]
+        if isinstance(node, str) and (normalized in sensitive or any(f in normalized for f in MASK_PARTIAL_FRAGMENTS + ("password", "secret", "api_key"))):
+            if node in (None, ""):
+                return node
+            if normalized in MASK_FULL_FIELDS or any(f in normalized for f in ("password", "secret", "api_key", "otp")):
+                return "******"
+            return partial_mask(node)
+        return node
+
+    try:
+        return _json.dumps(redact(payload), ensure_ascii=False)
+    except (TypeError, ValueError):
+        return text

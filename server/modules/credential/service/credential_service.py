@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,11 @@ from modules.credential.entity.vo.credential_vo import (
 )
 from modules.credential.util.credential_secret_util import decrypt_secret, encrypt_secret, mask_secret
 from utils.log_util import logger
+
+# 完整的模板占位符（允许首尾空白）时不含密文，脱敏时原样回显：
+# ${secret.字段名} 引用凭证字段；${step.N.变量}/${step.步骤id.变量} 引用更早步骤的输出。
+# 两类都是"引用声明"而非真实值，遮蔽会导致编辑页无法回显用户配置。
+_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\$\{(?:secret|step\.[A-Za-z0-9]+)\.[A-Za-z_][A-Za-z0-9_]*\}")
 
 
 class CredentialService:
@@ -46,6 +52,12 @@ class CredentialService:
         """创建凭证和认证配置，凭证明文仅在本次请求内存在。"""
         now = datetime.now()
         user_name = current_user.user.user_name
+        # 多步链 ${secret.*} 引用校验：失败以业务失败返回（HTTP 200 + failure），
+        # 若让 ValueError 冒泡会变成 500，前端只能看到"系统接口500异常"而丢失具体原因。
+        try:
+            cls._validate_step_secret_references(model.auth_config, model.secret)
+        except ValueError as exc:
+            return CrudResponseModel(is_success=False, message=str(exc))
         try:
             row = CredentialDao.add_credential(
                 db,
@@ -99,6 +111,13 @@ class CredentialService:
             # 编辑页已回填明文，显式传空串的字段表示用户清空了该敏感项，合并前删除而不是保留旧值。
             cls._drop_empty_secret_fields(model.secret)
             merged_secret.update(model.secret)
+            # 多步链步骤模板中的 ${secret.*} 引用必须能在合并后的 secret 中解析，否则执行期原样发出。
+            # 校验失败以业务失败返回（HTTP 200 + failure）；ValueError 冒泡会变成 500，丢失具体原因。
+            try:
+                cls._validate_step_secret_references(model.auth_config, merged_secret)
+            except ValueError as exc:
+                db.rollback()
+                return CrudResponseModel(is_success=False, message=str(exc))
             values["secret_cipher_text"] = encrypt_secret(merged_secret)
             values["secret_mask"] = mask_secret(merged_secret)
         try:
@@ -123,6 +142,67 @@ class CredentialService:
         """
         for key in [key for key, value in secret.items() if value == ""]:
             secret.pop(key, None)
+
+    @classmethod
+    def _validate_step_secret_references(cls, auth_config, secret: dict) -> None:
+        """校验多步链步骤模板中 ${secret.字段} 引用是否能被渲染。
+
+        两类豁免（渲染引擎在执行时会自动注入或语义兼容，secret 里本就不存在同名字段）：
+        - 运行时变量：`otp`（TOTP/手工验证码，按 otpType 生成）、`cookie`/`token`（主 Header 值
+          或 Token 字段的语义别名）、`headerValue`（主 Header 值）；
+        - 历史兼容别名：`header_value` → `headerValue`、`otp_secret`/`otpsecret` → `otpSecret`。
+        引用其它不存在的字段（如把接口参数 pwd 误写成 ${secret.pwd} 而密文字段是 password）
+        会在执行期原样发给目标系统导致登录失败，因此在保存时拒绝。
+        仅扫描 url/headers/body。
+        """
+        steps = [
+            ("登录链", getattr(auth_config, "login_steps", None) or []),
+            ("刷新链", getattr(auth_config, "refresh_steps", None) or []),
+        ]
+        available = {str(key) for key in (secret or {}).keys()}
+        # 运行时变量：渲染前由引擎注入 secret 上下文，不需要用户在凭证中显式保存。
+        # cookie/token/headerValue 是主 Header/Token 字段的语义别名，始终可用；
+        # otp 仅在凭证保存了 TOTP 密钥（otpSecret）时可用——此时按 otpType 自动生成。
+        runtime_names = {"cookie", "token", "headerValue"}
+        # 历史兼容：这些别名渲染工具会归一为正式字段名。
+        alias_to_canonical = {"header_value": "headerValue", "otp_secret": "otpSecret", "otpsecret": "otpSecret"}
+        available = {alias_to_canonical.get(key, key) for key in available}
+        if "otpSecret" in available or "totpSecret" in available:
+            runtime_names.add("otp")
+        pattern = re.compile(r"\$\{secret\.([A-Za-z_][A-Za-z0-9_]*)\}")
+        for chain_label, chain_steps in steps:
+            for index, step in enumerate(chain_steps, start=1):
+                position = f"{chain_label}步骤 {index}"
+                step_name = getattr(step, "name", "") or ""
+                if step_name:
+                    position = f"{chain_label}步骤 {index}（{step_name}）"
+                templates = [
+                    getattr(step, "url", ""),
+                    getattr(step, "headers", {}) or {},
+                    getattr(step, "body", None),
+                ]
+                for template in templates:
+                    for match in cls._iter_secret_references(template, pattern):
+                        canonical = alias_to_canonical.get(match, match)
+                        if canonical in available or canonical in runtime_names or match in runtime_names:
+                            continue
+                        raise ValueError(
+                            f"{position}引用了 ${{secret.{match}}}，但当前凭证没有填写对应的 {match} 字段；"
+                            "请在登录账号区域或其他敏感字段中填写后，再以 ${secret.字段名} 方式引用"
+                        )
+
+    @classmethod
+    def _iter_secret_references(cls, value, pattern: re.Pattern):
+        """递归产出任意 JSON 结构中所有 ${secret.字段} 引用的字段名。"""
+        if isinstance(value, str):
+            for match in pattern.finditer(value):
+                yield match.group(1)
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from cls._iter_secret_references(item, pattern)
+        elif isinstance(value, list):
+            for item in value:
+                yield from cls._iter_secret_references(item, pattern)
 
     @staticmethod
     def _clear_primary_secret_fields(secret: dict) -> None:
@@ -182,15 +262,26 @@ class CredentialService:
 
     @staticmethod
     def _redact_config_value(value):
-        """隐藏请求模板中的常见敏感字段，防止编辑详情接口泄露固定密码或密钥。"""
+        """隐藏请求模板中的常见敏感字段，防止编辑详情接口泄露固定密码或密钥。
+
+        值为 ${secret.字段名} 占位符时不脱敏：占位符只是引用声明、不含密文，
+        回显给编辑页才能正确显示用户配置；仅字面量敏感值被遮蔽为 ******。
+        """
         sensitive_names = {
             "password", "passwd", "pwd", "secret", "token", "authorization",
             "cookie", "api_key", "apikey", "otp", "otp_secret", "otpsecret",
             "google_code", "ticket",
         }
+        if isinstance(value, str) and _TEMPLATE_PLACEHOLDER_PATTERN.fullmatch(value.strip()):
+            return value
         if isinstance(value, dict):
             return {
-                key: "******" if str(key).lower().replace("-", "_") in sensitive_names else CredentialService._redact_config_value(item)
+                key: (
+                    "******"
+                    if str(key).lower().replace("-", "_") in sensitive_names
+                    and not (isinstance(item, str) and _TEMPLATE_PLACEHOLDER_PATTERN.fullmatch(item.strip()))
+                    else CredentialService._redact_config_value(item)
+                )
                 for key, item in value.items()
             }
         if isinstance(value, list):

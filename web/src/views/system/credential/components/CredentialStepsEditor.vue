@@ -449,9 +449,10 @@
   }
 
   /**
-   * 详情接口会把步骤 Header/请求体中的字面量敏感值脱敏为 ******；
-   * 回填时还原为 ${secret.字段名} 占位符（与单步请求模板的回填约定一致），
-   * 避免保存时把 ****** 当作真实值写回凭证配置。
+   * 详情接口会把步骤 Header/请求体中的字面量敏感值脱敏为 ******。
+   * 还原策略：secret 中存在同名字段时还原为 ${secret.字段名} 占位符（正常引用）；
+   * secret 中没有该字段时保持 ****** 原样显示——盲目还原会产生执行期必然失败的
+   * 无效引用（如明文密码写在步骤配置里的场景），由用户重新填写或改用凭证变量。
    */
   function restoreRedacted(value) {
     if (Array.isArray(value)) return value.map(restoreRedacted);
@@ -459,9 +460,20 @@
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        item === '******' ? `\${secret.${key}}` : restoreRedacted(item),
+        item === '******' && hasSecretField(key)
+          ? `\${secret.${key}}`
+          : restoreRedacted(item),
       ])
     );
+  }
+
+  /* 凭证 secret 中已有的字段名集合（由父级在 loadSteps 前传入），用于判断脱敏值能否还原为引用。 */
+  let availableSecretKeys = new Set();
+  function setAvailableSecretKeys(keys) {
+    availableSecretKeys = new Set(keys || []);
+  }
+  function hasSecretField(key) {
+    return availableSecretKeys.has(key);
   }
 
   /** 从后端配置回填可编辑状态；payload 为 camelCase 步骤列表。 */

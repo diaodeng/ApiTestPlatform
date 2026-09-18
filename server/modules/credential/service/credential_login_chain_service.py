@@ -16,9 +16,11 @@ from modules.credential.entity.vo.credential_vo import (
 from modules.credential.util.credential_http_util import (
     additional_header_cookies,
     build_secret_headers,
+    describe_response_cookies,
     extract_response_secret,
     generate_totp,
     mask_request_for_log,
+    mask_response_for_log,
     read_response_value,
     response_cookies,
     secret_cookies,
@@ -86,8 +88,9 @@ class CredentialLoginChainService:
                 working_secret = cls._prepare_secret_with_otp(secret, otp_type, otp_code)
                 response = cls._execute_step_request(client, index, step, working_secret, step_variables, action_label)
                 logger.info(
-                    f"{action_label}第{index}步响应：status={response.status_code},cookies={response.cookies},"
-                    f"响应信息：{response.content.decode('utf-8', errors='replace')}"
+                    f"{action_label}第{index}步响应：status={response.status_code},"
+                    f"响应cookies={describe_response_cookies(response)},"
+                    f"响应信息：{mask_response_for_log(response.content)}"
                 )
                 cls._validate_step_assertions(index, step, response, action_label)
                 if step.persist_outputs:

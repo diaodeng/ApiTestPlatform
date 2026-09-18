@@ -321,7 +321,7 @@
                 <div>
                   <div class="field-label">登录账号</div>
                   <div class="field-hint">
-                    账号信息只配置一次，登录接口和兜底登录接口共享这些变量。
+                    {{ loginAccountHint }}
                   </div>
                 </div>
               </div>
@@ -372,6 +372,8 @@
                 <code>${secret.username}</code>
                 <code>${secret.password}</code>
                 <code>${secret.otp}</code>
+                <span>；接口参数名与变量名是两回事，如 rta-os 的参数应写
+                <code>"pwd": "${secret.password}"</code></span>
               </div>
             </div>
 
@@ -423,7 +425,12 @@
               <template v-if="editor.label === '兜底登录接口'">
                 <div class="fallback-note">
                   兜底登录与主登录共用上方账号、OTP 配置，不需要重复填写；兜底登录同样支持多步认证链（与
-                  HTTP 登录共用同一份多步链配置），刷新失败时按链式流程重新登录。
+                  HTTP 登录共用同一份多步链配置），刷新失败时按链式流程重新登录。账号、密码、TOTP
+                  密钥请在上方"登录账号"卡片填写（加密保存），步骤请求体中用
+                  <code>${secret.username}</code>、<code>${secret.password}</code>、<code
+                    >${secret.otp}</code
+                  >
+                  引用，不要在步骤配置里写明文密码——保存后明文会被脱敏且无法正确还原。
                 </div>
               </template>
 
@@ -1150,7 +1157,14 @@
       return '浏览器 storageState（由 Agent 登录后回写）';
     return '凭证内容区手工录入的字段';
   });
-  const showLoginConfig = computed(() => form.authMode === 'http_login');
+  // HTTP 登录与 HTTP 刷新都需要账号/OTP 配置：http_login 供主登录接口，http_refresh 供兜底登录。
+  const showLoginConfig = computed(() => isHttpMode.value);
+  /* 账号卡片文案按模式区分，明确这些变量供哪个接口使用。 */
+  const loginAccountHint = computed(() =>
+    form.authMode === 'http_refresh'
+      ? '账号信息只配置一次（加密保存），兜底登录接口使用这些变量；业务使用凭证时不会携带账号信息。'
+      : '账号信息只配置一次（加密保存），登录接口使用这些变量。'
+  );
   // HTTP 登录和 HTTP 刷新都复用同一组请求编辑器；http_refresh 会同时展示刷新接口和兜底登录接口。
   const requestEditors = computed(() => {
     if (form.authMode === 'http_login') {
@@ -1343,8 +1357,7 @@
     if (form.authMode === 'http_login' || form.authMode === 'http_refresh')
       ensureLoginRequestDefaults();
     nextTick(() => {
-      if (stepsEditorRefs.login)
-        stepsEditorRefs.login.loadSteps(chainEnabled.login ? savedLoginSteps : []);
+      if (stepsEditorRefs.login) stepsEditorRefs.login.loadSteps(chainEnabled.login ? savedLoginSteps : []);
       if (stepsEditorRefs.refresh)
         stepsEditorRefs.refresh.loadSteps(chainEnabled.refresh ? savedRefreshSteps : []);
     });
@@ -1354,7 +1367,19 @@
       getCredentialSecret(row.credentialId)
         .then((response) => {
           const secret = response?.data;
-          if (secret) populateFromSecret(secret);
+          if (secret) {
+            populateFromSecret(secret);
+            /* 同步 secret 字段名给步骤编辑器：脱敏值只有对应字段存在时才还原为 ${secret.xxx} 引用。 */
+            nextTick(() => {
+              const keys = [
+                ...preservedSecretKeys.value,
+                ...Object.keys(secret || {}),
+                ...Object.keys(sensitive).filter((key) => String(sensitive[key] || '').trim()),
+              ];
+              stepsEditorRefs.login?.setAvailableSecretKeys?.(keys);
+              stepsEditorRefs.refresh?.setAvailableSecretKeys?.(keys);
+            });
+          }
         })
         .catch(() => {
           /* 无权限或解密失败时保持字段为空，用户可手动填写 */
@@ -1446,9 +1471,13 @@
   }
   function validateRequestTemplateVariables(authConfig, secret) {
     const availableKeys = availableTemplateVariableKeys(secret);
+    /* 单步模板与多步链步骤（url/headers/body）统一校验 ${secret.*} 引用，
+       防止引用不存在的凭证字段（如把密码写成 ${secret.pwd} 但密文里只有 password）静默落库。 */
     const templates = [
       ['登录请求模板', authConfig.loginRequestTemplate],
       ['刷新请求模板', authConfig.refreshRequestTemplate],
+      ...buildChainTemplates(authConfig.loginSteps, '登录链'),
+      ...buildChainTemplates(authConfig.refreshSteps, '刷新链'),
     ];
     for (const [label, template] of templates) {
       const variables = [];
@@ -1464,6 +1493,20 @@
           );
       }
     }
+  }
+  /** 把多步链每个步骤的 url/headers/body 包装成可校验模板，location 带步骤定位。 */
+  function buildChainTemplates(steps, chainLabel) {
+    return (steps || []).map((step, index) => {
+      const position = `${chainLabel}步骤 ${index + 1}`;
+      return [
+        position,
+        {
+          url: step?.url || '',
+          headers: step?.headers || {},
+          body: step?.body ?? {},
+        },
+      ];
+    });
   }
   function validateResponseMappingTargets(authConfig) {
     if (!hasCookieHeaderPrimary.value) return;
