@@ -413,10 +413,39 @@
   }
 
   function parseJsonObject(text, label) {
-    const value = JSON.parse(text || '{}');
+    let value;
+    try {
+      value = JSON.parse(text || '{}');
+    } catch (error) {
+      // 浏览器 JSON.parse 的原始报错（如 Bad control character）对用户不可读，
+      // 转成带配置项定位的中文提示；常见原因是值里粘进了换行/制表符等控制字符。
+      throw new Error(`${label}不是合法 JSON：${describeJsonError(text)}`);
+    }
     if (!value || Array.isArray(value) || typeof value !== 'object')
       throw new Error(`${label}必须是 JSON 对象`);
     return value;
+  }
+
+  /** 解析 JSON 失败时给出可操作的原因描述，替代引擎原始英文报错。 */
+  function describeJsonError(text) {
+    const controlMatch = String(text || '').match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/);
+    if (controlMatch) {
+      const index = controlMatch.index ?? 0;
+      const line = String(text).slice(0, index).split('\n').length;
+      return `第 ${line} 行存在不可见控制字符（如换行/制表符被粘贴进字符串值内部），请把值改写为普通单行文本，或用 \\n 转义表示`;
+    }
+    return '请检查引号、逗号和括号是否完整';
+  }
+
+  /** 解析步骤请求体文本；null 表示无请求体，非法 JSON 抛带步骤定位的中文错误。 */
+  function parseStepBody(text, position) {
+    const source = String(text ?? '').trim();
+    if (!source) return null;
+    try {
+      return JSON.parse(source);
+    } catch (_error) {
+      throw new Error(`${position}的请求体不是合法 JSON：${describeJsonError(source)}`);
+    }
   }
 
   /**
@@ -478,7 +507,7 @@
       const body =
         step.bodyType === 'none' || step.method === 'GET'
           ? null
-          : JSON.parse(step.bodyText || 'null');
+          : parseStepBody(step.bodyText, position);
       if (['form', 'multipart'].includes(step.bodyType) && body !== null) {
         if (!body || Array.isArray(body) || typeof body !== 'object')
           throw new Error(`${position}的请求体必须是 JSON 对象（键值对）`);
