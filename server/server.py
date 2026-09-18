@@ -79,6 +79,8 @@ from modules.ticket.service.ai.ticket_ai_analysis_service import TicketAiAnalysi
 from modules.ticket.service.collaboration.ticket_feishu_event_listener_service import TicketFeishuEventListenerService
 from modules.ticket.service.core.ticket_service import TicketService
 from modules.ticket.service.log_pull.ticket_log_pull_service import TicketLogPullService
+from modules.unidata.controller.unidata_controller import unidataController
+from modules.unidata.perms import register as register_unidata_permission_defs
 from sub_applications.handle import handle_sub_applications
 from utils.common_util import worship
 from utils.log_util import logger
@@ -95,6 +97,7 @@ async def lifespan(app: FastAPI):
         register_hrm_permission_defs()
         register_ticket_permission_defs()
         register_metrics_permission_defs()
+        register_unidata_permission_defs()
         sync_registered_menus(app)
         with SessionLocal() as db:
             TicketService.init_default_workflow(db)
@@ -202,6 +205,7 @@ controller_list = [
     {"router": ticketAiTestController, "tags": ["工单AI测试"]},
     {"router": ticketConfigController, "tags": ["工单配置"]},
     {"router": ticketWebhookController, "tags": ["工单消息回调"]},
+    {"router": unidataController, "tags": ["大数据查询"]},
 ]
 
 for controller in controller_list:
