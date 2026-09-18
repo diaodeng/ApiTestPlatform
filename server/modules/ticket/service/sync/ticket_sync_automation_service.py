@@ -692,6 +692,7 @@ class TicketSyncAutomationService:
 
             if auto_log_pull:
                 runtime_config = TicketSyncAutomationInputService.resolve_runtime_config(
+                    db=db,
                     config=config,
                     automation=automation,
                     sync_object=sync_object,

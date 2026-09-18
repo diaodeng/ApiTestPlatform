@@ -5,6 +5,12 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 
+## 2026-09-18
+- 自动拉日志 AI 门店编码映射修复（生产 INC00001988278 排查产物）：AI 统一提取的门店是外部门店编码（如 8555），而运行参数合并优先级 AI 高于字段识别，会把已映射好的内部 org_no（如 558464）覆盖回外部编码，提交前按 org_no 校验门店配置失败，自动拉日志被记为"参数不完整"跳过、只能人工补拉；修复为合并前先将 AI 门店按门店配置（`sap_org_no → org_no`，仅唯一候选）映射为内部 org_no 再参与合并，映射失败保留原值由提交前校验拦截，自动化审计新增 `aiStoreMappedFrom` 保留 AI 原始编码。详见：[自动拉日志门店映射修复](2026-09-18-ticket-auto-log-pull-ai-store-mapping.md)，用户说明：[工单同步自动化](../ticket-sync-automation.md)、[日志拉取使用说明](../ticket_log_pull.md)。
+
+## 2026-09-17
+- 统一凭证新增多步认证链（第二、三期）：支持"账密登录 → 提取一次性 ticket → TOTP → Set-Cookie"两步及以上全自动认证（登录链 `loginSteps` / 刷新链 `refreshSteps`），步骤间共享会话 Cookie、multipart 请求体、`url_query`/`regex` 提取加工、语义化步骤 id、条件步骤（兼容部分账号需要 OTP 的混合场景）、临时变量与凭证写回分离，任一步失败保留旧快照；编辑页新增多步认证链开关、步骤编辑器、流程预览与"测试登录/刷新流程"按钮（真实执行、不写回凭证）；新增 `POST /system/credentials/{id}/test-login-flow` 接口；需执行 `server/sql/20260917_credential_login_steps.sql`。旧单步登录/刷新配置行为不变。详见：[多步认证链](2026-09-17-credential-multi-step-login.md)，用户说明：[统一凭证管理](../credential_management.md)。
+
 ## 2026-09-15
 - 日志拉取管理页自动拉取记录整行错位修复：`ac45a758` 新增"拉取人"列时模板调用了未定义的 `getPullSourceSceneLabel`（实际导入名为 `getLogPullSourceSceneLabel`），自动拉取记录（`pullSource=automation`）渲染"拉取人"单元格 tooltip 分支时行渲染函数抛 TypeError，生产构建下该行"拉取人" `<td>` 被渲染为注释占位节点、后续单元格整体左移一格且文字重叠（人工记录走 `v-else` 分支不受影响）；修正函数名一行修复，已用真实构建产物+模拟后端复现并验证新版后端/旧版后端/旧版后端系统账号三种数据场景均正常。详见：[日志拉取管理列错位修复](2026-09-15-log-pull-record-column-shift-fix.md)，用户说明：[日志拉取使用说明](../ticket_log_pull.md)。
 

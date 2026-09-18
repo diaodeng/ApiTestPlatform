@@ -8,6 +8,13 @@ from modules.credential.service.credential_lease_service import CredentialLeaseS
 from modules.credential.service.credential_refresh_service import CredentialRefreshService
 from modules.credential.service.credential_resolve_service import CredentialResolveService
 from modules.credential.service.credential_service import CredentialService
+from modules.credential.util.credential_http_util import (
+    extract_response_secret,
+    generate_totp,
+    mask_request_for_log,
+    secret_cookies,
+    validate_response_success_assertions,
+)
 
 
 def _response(payload=None, headers=None):
@@ -25,7 +32,7 @@ def test_extract_response_secret_supports_json_header_and_explicit_cookie_overwr
         {"X-Refresh-Version": "v2", "Set-Cookie": "SESSION=new-session; Path=/; HttpOnly"},
     )
 
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"cookie": "OLD=keep", "headers": {"X-Old": "keep"}},
         response,
         {
@@ -44,13 +51,13 @@ def test_extract_response_secret_supports_json_header_and_explicit_cookie_overwr
 
 def test_extract_response_secret_does_not_implicitly_merge_set_cookie():
     response = _response(headers={"Set-Cookie": "SESSION=new-session; Path=/"})
-    result, extracted = CredentialRefreshService._extract_response_secret({"cookies": {"OLD": "keep"}}, response, {})
+    result, extracted = extract_response_secret({"cookies": {"OLD": "keep"}}, response, {})
     assert extracted is False
     assert result == {"cookies": {"OLD": "keep"}}
 
 
 def test_extract_response_secret_does_not_clear_cookies_when_response_has_no_set_cookie():
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"cookies": {"OLD": "keep"}},
         _response({"ok": True}),
         {"cookies": "cookies"},
@@ -62,7 +69,7 @@ def test_extract_response_secret_does_not_clear_cookies_when_response_has_no_set
 
 def test_extract_response_secret_updates_named_cookie_in_cookie_header_from_raw_set_cookie():
     response = _response(headers={"Set-Cookie": "new-value"})
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"headerName": "Cookie", "headerValue": "dmall-locale=zh_HK; UYBFEWAEE=old-value; login_token=token"},
         response,
         {"header.cookie.UYBFEWAEE": "header:set-cookie"},
@@ -73,7 +80,7 @@ def test_extract_response_secret_updates_named_cookie_in_cookie_header_from_raw_
 
 def test_extract_response_secret_appends_named_cookie_when_not_present():
     response = _response(headers={"Set-Cookie": "new-value"})
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"headerName": "cookie", "headerValue": "SESSION=old"},
         response,
         {"header.cookie.UYBFEWAEE": "header:set-cookie"},
@@ -84,7 +91,7 @@ def test_extract_response_secret_appends_named_cookie_when_not_present():
 
 def test_extract_response_secret_rejects_structured_cookie_writeback_for_primary_cookie_header():
     try:
-        CredentialRefreshService._extract_response_secret(
+        extract_response_secret(
             {"headerName": "Cookie", "headerValue": "SESSION=old"},
             _response(headers={"Set-Cookie": "SESSION=new; Path=/"}),
             {"cookies.SESSION": "cookie:SESSION"},
@@ -96,7 +103,7 @@ def test_extract_response_secret_rejects_structured_cookie_writeback_for_primary
 
 
 def test_extract_response_secret_allows_header_authentication_with_structured_cookie_writeback():
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"headerName": "Authorization", "headerValue": "Bearer old"},
         _response(headers={"Set-Cookie": "SESSION=new; Path=/"}),
         {"cookies.SESSION": "cookie:SESSION"},
@@ -113,7 +120,7 @@ def test_extract_response_secret_rejects_multiple_raw_set_cookie_values():
         request=httpx.Request("POST", "https://example.test/refresh"),
     )
     try:
-        CredentialRefreshService._extract_response_secret(
+        extract_response_secret(
             {"headerName": "Cookie", "headerValue": "UYBFEWAEE=old-value"},
             response,
             {"header.cookie.UYBFEWAEE": "header:set-cookie"},
@@ -130,7 +137,7 @@ def test_extract_response_secret_selects_one_raw_set_cookie_by_one_based_index()
         headers=[("Set-Cookie", "first-value"), ("Set-Cookie", "second-value")],
         request=httpx.Request("POST", "https://example.test/refresh"),
     )
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"headerName": "Cookie", "headerValue": "UYBFEWAEE=old-value"},
         response,
         {"header.cookie.UYBFEWAEE": "header:set-cookie[2]"},
@@ -141,7 +148,7 @@ def test_extract_response_secret_selects_one_raw_set_cookie_by_one_based_index()
 
 def test_extract_response_secret_updates_named_structured_cookie():
     response = _response(headers={"Set-Cookie": "SESSION=new-session; Path=/"})
-    result, extracted = CredentialRefreshService._extract_response_secret(
+    result, extracted = extract_response_secret(
         {"cookies": {"SESSION": "old-session", "tenant": "prod"}},
         response,
         {"cookies.SESSION": "cookie:SESSION"},
@@ -153,7 +160,7 @@ def test_extract_response_secret_updates_named_structured_cookie():
 def test_response_success_assertions_require_every_rule_to_pass():
     response = _response({"code": "0000", "data": {"success": True}}, {"X-Result": "OK"})
 
-    CredentialRefreshService._validate_response_success_assertions(
+    validate_response_success_assertions(
         response,
         [
             {"source": "status", "operator": "in", "expected": [200, 201]},
@@ -164,7 +171,7 @@ def test_response_success_assertions_require_every_rule_to_pass():
     )
 
     try:
-        CredentialRefreshService._validate_response_success_assertions(
+        validate_response_success_assertions(
             response,
             [{"source": "json:code", "operator": "equals", "expected": "1001"}],
         )
@@ -175,7 +182,7 @@ def test_response_success_assertions_require_every_rule_to_pass():
 
 
 def test_secret_cookies_merges_primary_and_structured_cookies():
-    cookies = CredentialRefreshService._secret_cookies(
+    cookies = secret_cookies(
         {"cookie": "SESSION=primary; locale=zh-CN", "cookies": {"SESSION": "updated", "tenant": "prod"}}
     )
 
@@ -295,25 +302,33 @@ def test_template_secret_exposes_header_value_for_legacy_snake_case_field():
     assert template_secret["headerValue"] == "legacy-value"
 
 
-def test_mask_request_for_log_hides_cookie_and_password_values():
-    masked = CredentialRefreshService._mask_request_for_log(
+def test_mask_request_for_log_applies_graduated_masking():
+    """分级掩码：密码/验证码全遮；Cookie/Token 保留首尾；占位符原样；短值整体遮蔽。"""
+    masked = mask_request_for_log(
         {
             "headers": {"cookie": "SESSION=session-value", "origin": "https://example.test"},
-            "cookies": {"SESSION": "session-value"},
-            "json": {"password": "plain-password", "account": "alice"},
+            "cookies": {"SESSION": "session-value-long-enough"},
+            "json": {"password": "plain-password", "account": "alice", "otp": "${secret.otp}"},
+            "files": {"ticket": (None, "11d5677a-497e-4f53-9a78-f480e90af68720260918"), "google_code": (None, "618455")},
         }
     )
 
-    assert masked == {
-        "headers": {"cookie": "******", "origin": "******"},
-        "cookies": "******",
-        "json": {"password": "******", "account": "alice"},
-    }
+    # 密码/验证码全遮
+    assert masked["json"]["password"] == "******"
+    assert masked["json"]["otp"] == "${secret.otp}"  # 占位符原样
+    assert masked["json"]["account"] == "alice"
+    # Cookie/Token/ticket 保留首尾各 6 字符
+    assert masked["headers"]["cookie"] == "SESSIO****-value"
+    assert masked["cookies"]["SESSION"] == "sessio****enough"
+    assert masked["files"]["ticket"] == "11d567****260918"
+    assert masked["files"]["google_code"] == "******"  # 全遮字段
+    # headers 键值整体分级脱敏：非敏感名仍被遮蔽（响应头不按名猜测）
+    assert masked["headers"]["origin"] == "******"
 
 
 def test_totp_generation_is_six_digits():
-    assert CredentialRefreshService._generate_totp("JBSWY3DPEHPK3PXP").isdigit()
-    assert len(CredentialRefreshService._generate_totp("JBSWY3DPEHPK3PXP")) == 6
+    assert generate_totp("JBSWY3DPEHPK3PXP").isdigit()
+    assert len(generate_totp("JBSWY3DPEHPK3PXP")) == 6
 
 
 def test_auth_config_normalizes_nullable_database_json_fields():

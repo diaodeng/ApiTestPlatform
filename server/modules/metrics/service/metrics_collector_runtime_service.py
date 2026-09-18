@@ -96,8 +96,8 @@ class MetricsCollectorRuntimeService:
             logger.warning(f"加载采集服务配置失败: role={role}, error={exc}")
             raise
 
-    @staticmethod
-    def _refresh_memory_snapshot_config(db: Session) -> None:
+    @classmethod
+    def _refresh_memory_snapshot_config(cls, db: Session) -> None:
         """把数据库中的诊断快照配置热注入当前进程的采集线程。
 
         异常只记日志，绝不影响采集通道加载与主业务。

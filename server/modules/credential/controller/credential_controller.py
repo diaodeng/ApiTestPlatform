@@ -7,14 +7,25 @@ from module_admin.annotation.log_annotation import log_decorator
 from module_admin.aspect.interface_auth import CheckUserInterfaceAuth
 from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
-from modules.credential.entity.vo.credential_vo import CredentialBindingOptionQueryModel, CredentialBindingQueryModel, CredentialBindingSaveModel, CredentialOperationLogQueryModel, CredentialQueryModel, CredentialRefreshRequestModel, CredentialSaveModel, CredentialUpdateModel, CredentialWritebackModel
-from modules.credential.service.credential_binding_service import CredentialBindingService
+from modules.credential.entity.vo.credential_vo import (
+    CredentialBindingOptionQueryModel,
+    CredentialBindingQueryModel,
+    CredentialBindingSaveModel,
+    CredentialFlowTestModel,
+    CredentialOperationLogQueryModel,
+    CredentialQueryModel,
+    CredentialRefreshRequestModel,
+    CredentialSaveModel,
+    CredentialUpdateModel,
+    CredentialWritebackModel,
+)
 from modules.credential.service.credential_audit_service import CredentialAuditService
+from modules.credential.service.credential_binding_service import CredentialBindingService
+from modules.credential.service.credential_login_chain_service import CredentialLoginChainService
 from modules.credential.service.credential_refresh_service import CredentialRefreshService
 from modules.credential.service.credential_service import CredentialService
 from modules.credential.service.credential_writeback_service import CredentialWritebackService
 from utils.response_util import ResponseUtil
-
 
 credentialController = APIRouter(prefix="/system/credentials", dependencies=[Depends(LoginService.get_current_user)])
 
@@ -99,6 +110,17 @@ async def refresh_credential(request: Request, credential_id: int, model: Creden
         model.otp_code,
     )
     return ResponseUtil.success(msg=result["message"], data=result) if result["success"] else ResponseUtil.failure(msg=result["message"], data=result)
+
+
+@credentialController.post("/{credential_id}/test-login-flow", dependencies=[Depends(CheckUserInterfaceAuth("system:credential:refresh"))])
+@log_decorator(title="统一凭证认证流程测试", business_type=2)
+async def test_credential_login_flow(request: Request, credential_id: int, model: CredentialFlowTestModel, query_db: Session = Depends(get_db), current_user: CurrentUserModel = Depends(LoginService.get_current_user)):
+    """测试多步登录/刷新链认证流程；真实执行各步骤但无论成功与否都不写回凭证密文。"""
+    try:
+        result = await run_in_threadpool(CredentialLoginChainService.test_auth_flow, query_db, credential_id, model.flow_type, model.otp_code)
+    except ValueError as exc:
+        return ResponseUtil.failure(msg=str(exc))
+    return ResponseUtil.success(msg=result["message"], data=result)
 
 
 @credentialController.post("/bindings", dependencies=[Depends(CheckUserInterfaceAuth("system:credential:add"))])
