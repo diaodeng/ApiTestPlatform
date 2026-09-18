@@ -588,6 +588,15 @@
                   </div>
 
                   <div class="template-block">
+                    <div class="template-label">请求体类型</div>
+                    <el-radio-group v-model="editor.request.bodyKind" size="small">
+                      <el-radio-button value="json">JSON</el-radio-button>
+                      <el-radio-button value="form">表单</el-radio-button>
+                      <el-radio-button value="none">无请求体</el-radio-button>
+                    </el-radio-group>
+                  </div>
+
+                  <div v-if="editor.request.bodyKind === 'json'" class="template-block">
                     <div class="template-label">JSON 请求体</div>
                     <div class="template-editor">
                       <el-input
@@ -600,7 +609,8 @@
                       <el-dropdown
                         trigger="click"
                         @command="
-                          (variable) => insertTemplateVariable(`${editor.kind}:bodyText`, variable)
+                          (variable) =>
+                            insertTemplateVariable(`${editor.kind}:bodyText`, variable)
                         "
                       >
                         <el-button plain>插入变量</el-button>
@@ -620,7 +630,7 @@
                     </div>
                   </div>
 
-                  <div class="template-block">
+                  <div v-if="editor.request.bodyKind === 'form'" class="template-block">
                     <div class="template-label">表单请求体</div>
                     <div class="template-editor">
                       <el-input
@@ -628,12 +638,13 @@
                         v-model="editor.request.dataText"
                         type="textarea"
                         :rows="4"
-                        placeholder='仅 application/x-www-form-urlencoded 使用，例如 {"username":"${secret.username}"}'
+                        placeholder='application/x-www-form-urlencoded 键值对，例如 {"username":"${secret.username}"}'
                       />
                       <el-dropdown
                         trigger="click"
                         @command="
-                          (variable) => insertTemplateVariable(`${editor.kind}:dataText`, variable)
+                          (variable) =>
+                            insertTemplateVariable(`${editor.kind}:dataText`, variable)
                         "
                       >
                         <el-button plain>插入变量</el-button>
@@ -1036,6 +1047,8 @@
     queryText: '{}',
     bodyText: '{}',
     dataText: '{}',
+    // 请求体类型：json / form / none，仅控制编辑器显示与保存时清空另一端，后端渲染结构不变。
+    bodyKind: 'json',
     mappings: [],
     assertions: [],
   });
@@ -1258,9 +1271,20 @@
       queryText: jsonText(template.query || template.params),
       bodyText: jsonText(template.body),
       dataText: jsonText(template.data),
+      // 请求体类型按已保存模板推断：表单数据优先（后端渲染 data 优先于 body），无请求体则 none。
+      bodyKind: inferBodyKind(template),
       mappings: mappingRows(config?.[`${prefix}ResponseMapping`] || config?.responseMapping),
       assertions: assertionRows(config?.[`${prefix}SuccessAssertions`]),
     });
+  }
+  /** 按模板内容推断请求体类型；后端渲染 data 优先于 body，故表单有值即视为 form。 */
+  function inferBodyKind(template) {
+    const data = template?.data;
+    const body = template?.body;
+    if (data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length) return 'form';
+    if (body && typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length) return 'json';
+    if (typeof body === 'string' && body.trim()) return 'json';
+    return 'none';
   }
 
   /** 将解密后的 secret 字典回填到表单敏感字段，编辑时用于回显。 */
@@ -1434,11 +1458,13 @@
     });
   }
   function buildRequest(request) {
+    /* 请求体类型选择器：json/form 互斥（后端渲染 data 优先于 body，双端有值会产生二义），none 全清。 */
+    const bodyKind = request.bodyKind || 'json';
     return {
       headers: parseObject(request.headersText, '请求 Header'),
       query: parseObject(request.queryText, '查询参数'),
-      body: parseObject(request.bodyText, 'JSON 请求体'),
-      data: parseObject(request.dataText, '表单请求体'),
+      body: bodyKind === 'json' ? parseObject(request.bodyText, 'JSON 请求体') : {},
+      data: bodyKind === 'form' ? parseObject(request.dataText, '表单请求体') : {},
     };
   }
   function availableTemplateVariableKeys(secret) {
