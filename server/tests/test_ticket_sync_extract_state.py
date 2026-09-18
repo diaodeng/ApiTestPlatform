@@ -252,3 +252,90 @@ def test_automation_runtime_propagates_default_log_pull_environment():
         ticket_extra_data={"log_pull_hints": {"modifyTime": "2026-08-20"}},
     )
     assert runtime["environment"] == "PROD:PROD"
+
+
+class _FakeStoreQuery:
+    """模拟门店配置查询链，返回预置行。"""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeStoreDb:
+    """仅支持门店配置 query 链的最小数据库桩。"""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def query(self, model):
+        return _FakeStoreQuery(self._rows)
+
+
+def test_automation_runtime_maps_ai_store_code_to_org_no():
+    """AI 提取的外部门店编码必须先映射为 org_no 再参与合并，不得覆盖已映射门店（INC00001988278）。"""
+    from types import SimpleNamespace
+
+    sync_object = TicketExternalSyncUpsertModel.model_validate(
+        {
+            "ticketNo": "INC-STORE-AI-MAP",
+            "source": {"system": "test"},
+        }
+    )
+    store_row = SimpleNamespace(
+        org_no="558464",
+        sap_org_no="8555",
+        org_name="Guardian R&F Mall Johor Bahru[558464]",
+        modifid=1,
+        id=1,
+    )
+    runtime = TicketSyncAutomationInputService.resolve_runtime_config(
+        db=_FakeStoreDb([store_row]),
+        config={"logPullDefaults": {"environment": "PROD:PROD"}},
+        automation=None,
+        sync_object=sync_object,
+        detected={"vendorId": 58949, "storeId": "558464", "posNo": 2},
+        ticket_id=6,
+        ticket_extra_data={
+            "log_pull_hints": {"vendorId": 58949, "storeId": "558464", "posNo": 2},
+            "ai_sync_extract": {
+                "result": {"store": "8555", "posNo": "2", "logDate": "2026-09-16"},
+                "meta": {"success": True},
+            },
+        },
+    )
+    assert runtime["storeId"] == "558464"
+    assert runtime["aiStoreMappedFrom"] == "8555"
+
+
+def test_automation_runtime_keeps_ai_store_when_db_or_mapping_missing():
+    """无数据库会话或映射未命中时保留 AI 原值，行为与历史一致。"""
+    sync_object = TicketExternalSyncUpsertModel.model_validate(
+        {
+            "ticketNo": "INC-STORE-AI-NO-DB",
+            "source": {"system": "test"},
+        }
+    )
+    runtime = TicketSyncAutomationInputService.resolve_runtime_config(
+        config={},
+        automation=None,
+        sync_object=sync_object,
+        detected={"vendorId": 58949, "storeId": "558464"},
+        ticket_id=7,
+        ticket_extra_data={
+            "ai_sync_extract": {
+                "result": {"store": "8555"},
+                "meta": {"success": True},
+            },
+        },
+    )
+    assert runtime["storeId"] == "8555"
+    assert "aiStoreMappedFrom" not in runtime

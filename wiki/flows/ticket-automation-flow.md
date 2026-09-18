@@ -20,7 +20,7 @@ entry_points:
     path: /ticket/sync/automation/manual-run
     trigger: 在同步配置页按工单号手动补跑 bitable_pull 场景自动化
 created: 2026-05-22
-updated: 2026-09-05
+updated: 2026-09-18
 ---
 
 # 工单自动化链路流程
@@ -92,6 +92,7 @@ sequenceDiagram
 | 4 | `TicketService.create_ticket` 在保存工单后可同步创建日志拉取任务，并把自动化配置写入工单 `extra_data.ticket_automation` 便于追溯；日志拉取服务先查外部列表，已可下载时直接进入下载流程，否则提交申请后由后台周期任务批量探测（提交申请与轮询探测解耦，不再阻塞后台线程）。 |
 | 5 | 日志拉取下载解析阶段（`TicketLogPullService._process_download`）成功后读取记录中的 `_automation` 配置；该字段仅用于内部自动化联动，不参与外部平台轮询匹配。 |
 | 6 | 自动拉日志正式创建记录前，走同参数决策矩阵（`TicketLogPullAutomationDecisionService.decide`）：按工单、环境、商家、门店、POS、数据类型和实际日志范围等关键参数，取同参数**最新一条记录**（不限状态，`list_recent_records_by_pull_identity` + 签名比对）按状态决策——不存在或已取消则创建新拉取；进行中（created/submitting/polling/downloading/processing）则不创建并等待完成，场景要求 AI 而记录快照缺 `autoAiEnabled` 时只补缺失键合并 AI 配置到该记录；成功则复用，且按该记录的 `source_log_pull_record_id` 查最新 AI 任务，无任务才触发分析、已有成功/执行中任务或最近一次失败均跳过；失败（failed/exception）则静默跳过——不创建、不触发 AI、不发通知，仅写工单事件与自动化 meta 留痕（此前只查成功记录，失败记录永远匹配不到导致每次同步重复创建并重复通知）。失败静默靠人工解锁：修正参数后重新拉取产生的新记录成为最新决策依据。 |
+| 6.1 | 自动拉日志运行参数由 `TicketSyncAutomationInputService.resolve_runtime_config` 按"默认值 → 字段识别 → hints → 任务级 logPullConfig → AI 统一提取 → 任务级覆盖"优先级合并。AI 统一提取的门店是外部门店编码，2026-09-18 起在合并前会先按门店配置（`ticket_log_pull_store_config` 的 `sap_org_no → org_no`，商家取字段识别/hints/任务级配置，环境取"拉日志默认值"环境分组部分，仅唯一候选时映射成功）转换为内部 org_no 再参与合并，映射成功写入 `aiStoreMappedFrom` 供审计（回归场景 INC00001988278：此前 AI 的外部编码 8555 会覆盖字段识别已映射好的 org_no 558464，提交前门店校验失败导致自动拉日志被跳过）；映射失败保留原值，交由提交前门店校验拦截；`db=None` 的纯单元场景保持历史行为。 |
 | 7 | 自动拉日志创建前还会检查 `logPullDefaults.autoLogPullStopCondition`；该配置使用内部工作流状态编码多选，命中任一状态时，本次自动拉日志直接记为 `skipped`，不再创建新的自动日志任务，也不会继续发送无意义的“拉不动日志”失败通知。 |
 | 8 | 日志拉取成功后，服务端会先尝试从日志正文中直接提取版本号；提取正则来自日志拉取存储配置 `versionExtractPatterns`（可视化位置：同步自动化页「来源与拉取」→「存储与资源限制」），默认锚定 `ms_h/ms_l/ls_h/ls_l` 特征行，只取 `x.y.z` 起步版本号，避免误提取 `launcher_version`（启动器版本）与 OpenGL 解析版本；配置为空或全部非法时回退内置默认正则。若未找到版本号则发送通知并跳过后续 AI 分析。 |
 | 9 | 若自动化配置开启 AI 且存在 Agent 编码，服务端优先复用本轮成功日志；若本轮没有新建日志但工单下已有最近一次成功日志，也会直接复用该记录继续触发分析任务。复用触发时以本次自动化的场景级开关、分析条件与 Agent/Provider 为准覆盖被复用记录自身的快照（`trigger_auto_ai_analysis` 覆盖参数），避免复用他人手工创建且未勾选自动AI的成功记录时被记录快照误跳过（回归场景 INC00001939452）。自动拉日志复用成功记录时还会按记录级 `source_log_pull_record_id` 检查是否已有 AI 任务，已有成功/执行中任务或最近一次失败时跳过重复分析。若自动拉日志因为停止条件被跳过，则同链路自动 AI 也一并跳过。 |

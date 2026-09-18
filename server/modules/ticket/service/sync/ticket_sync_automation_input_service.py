@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from modules.ticket.entity.vo.ticket_vo import TicketExternalSyncUpsertModel
+from modules.ticket.service.sync.ticket_sync_field_mapping_service import TicketSyncFieldMappingService
 from modules.ticket.service.sync.ticket_sync_payload_service import TicketSyncPayloadService
 from modules.ticket.util.sync_util import SyncUtil
 from modules.ticket.util.ticket_store_resolution_util import TicketStoreResolutionUtil
+from utils.log_util import logger
 
 
 class TicketSyncAutomationInputService:
@@ -72,9 +76,69 @@ class TicketSyncAutomationInputService:
         return result
 
     @classmethod
+    def _map_ai_store_to_org_no(
+        cls,
+        db: Session,
+        *,
+        ai_result: dict[str, Any],
+        detected_config: dict[str, Any],
+        hints: dict[str, Any],
+        sync_config: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        """
+        将 AI 提取的外部门店编码按门店配置映射为日志接口 org_no（原地更新 ai_result）。
+
+        背景（回归场景 INC00001988278）：AI 统一提取的 store 是外部门店编码（如 8555），
+        而字段识别 detected.storeId 已通过门店配置映射为内部 org_no（如 558464）；
+        运行参数合并优先级 AI 高于 detected/hints，直接合并会用外部编码覆盖 org_no，
+        导致提交前门店校验失败、自动拉日志被跳过。
+
+        实现过程：
+        1. 商家ID优先取字段识别结果，其次已落库 hints 与任务级 logPullConfig；
+        2. 环境取 logPullDefaults.environment 的分组部分（冒号前），与 detect_fields 的门店映射口径一致；
+        3. 调用 resolve_store_by_external_value 按 sap_org_no → org_no 唯一候选映射；
+           商家未知或候选不唯一时返回原值，不视为映射成功，交由提交前门店校验拦截；
+        4. 映射成功时写入 aiStoreMappedFrom 保留原始编码，供自动化审计追溯。
+
+        :param db: 数据库会话
+        :param ai_result: AI 统一提取结果（原地修改 storeId）
+        :param detected_config: 字段识别结果
+        :param hints: 工单已落库的日志拉取提示快照
+        :param sync_config: 任务级日志拉取配置
+        :param config: 同步自动化全局配置
+        :return: 无
+        """
+        ai_store = str(ai_result.get("storeId") or "").strip()
+        if not ai_store:
+            return
+        vendor_id = (
+            SyncUtil.safe_int(detected_config.get("vendorId"))
+            or SyncUtil.safe_int(hints.get("vendorId"))
+            or SyncUtil.safe_int(sync_config.get("vendorId"))
+        )
+        environment = str(
+            (config.get("logPullDefaults") or {}).get("environment") or ""
+        ).strip().split(":", 1)[0].strip()
+        mapped_store_id, _ = TicketSyncFieldMappingService.resolve_store_by_external_value(
+            db,
+            vendor_id=vendor_id,
+            ticket_store=ai_store,
+            environment=environment,
+        )
+        if mapped_store_id and mapped_store_id != ai_store:
+            ai_result["aiStoreMappedFrom"] = ai_store
+            ai_result["storeId"] = mapped_store_id
+            logger.info(
+                f"自动拉日志运行参数：AI提取门店[{ai_store}]已按门店配置映射为org_no[{mapped_store_id}]，"
+                f"vendorId={vendor_id}, environment={environment or '未配置'}"
+            )
+
+    @classmethod
     def resolve_runtime_config(
         cls,
         *,
+        db: Session | None = None,
         config: dict[str, Any],
         automation: Any,
         sync_object: TicketExternalSyncUpsertModel,
@@ -82,7 +146,17 @@ class TicketSyncAutomationInputService:
         ticket_id: int,
         ticket_extra_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """按固定优先级合并自动拉日志运行参数。"""
+        """
+        按固定优先级合并自动拉日志运行参数。
+        :param db: 数据库会话，提供时会把 AI 提取的门店编码映射为内部 org_no；为 None 时跳过映射（仅测试场景）
+        :param config: 同步自动化全局配置
+        :param automation: 任务级自动化配置
+        :param sync_object: 外部同步模型
+        :param detected: 字段识别结果
+        :param ticket_id: 工单ID
+        :param ticket_extra_data: 工单已落库扩展字段
+        :return: 合并后的运行参数
+        """
         defaults = cls._canonicalize(config.get("logPullDefaults"))
         hints = {}
         if isinstance(ticket_extra_data, dict):
@@ -117,6 +191,19 @@ class TicketSyncAutomationInputService:
                         "modifyTime": result.get("logDate"),
                     }
                 )
+        # AI 提取的门店是外部门店编码，与字段识别映射出的内部 org_no 不同命名空间；
+        # 合并优先级 AI 高于 detected/hints，直接合并会用外部编码覆盖 org_no，
+        # 导致提交前门店校验失败而跳过自动拉日志（回归场景 INC00001988278）。
+        # 因此合并前先把 AI 门店按门店配置映射为 org_no，映射失败时保留原值交由校验拦截。
+        if db is not None and ai_result.get("storeId"):
+            cls._map_ai_store_to_org_no(
+                db,
+                ai_result=ai_result,
+                detected_config=detected_config,
+                hints=hints,
+                sync_config=sync_config,
+                config=config,
+            )
         source_store_code = TicketStoreResolutionUtil.resolve_source_store_code(
             log_pull_config=sync_object.log_pull_config,
             raw_payload=sync_object.raw_payload,
