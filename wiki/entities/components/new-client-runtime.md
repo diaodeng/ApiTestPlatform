@@ -21,6 +21,8 @@ related_files:
   - client_new/model/pos_network_model.py
   - client_new/models/pos_state.py
   - client_new/server/config.py
+  - client_new/services/agent_resource_storage.py
+  - client_new/services/agent_file_service.py
   - client_new/server/agent_server.py
   - client_new/utils/common.py
   - client_new/utils/logger.py

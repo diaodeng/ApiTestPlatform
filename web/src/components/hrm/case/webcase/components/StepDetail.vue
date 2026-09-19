@@ -167,6 +167,39 @@
               />
             </el-form-item>
           </el-col>
+          <el-col v-else-if="props.currentStep.actionType === 'upload_file'" :span="24">
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="资源键">
+                  <el-input
+                    v-model="props.currentStep.params.fileKey"
+                    placeholder="例如 price_tag"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="资源ID">
+                  <el-select
+                    v-model="props.currentStep.params.resourceIds"
+                    multiple
+                    filterable
+                    allow-create
+                    default-first-option
+                    collapse-tags
+                    collapse-tags-tooltip
+                    style="width: 100%"
+                    placeholder="输入资源ID后回车"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="4">
+                <el-form-item label="多文件">
+                  <el-switch v-model="props.currentStep.params.multiple" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <div class="locator-tip">仅填写资源键或资源ID，不要填写 Agent 本地绝对路径。</div>
+          </el-col>
           <el-col v-else-if="props.currentStep.actionType === 'press'" :span="24">
             <el-form-item label="按键值">
               <el-select

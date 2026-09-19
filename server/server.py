@@ -60,6 +60,8 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
+from modules.configuration_task.controller.resource_controller import resourceController
+from modules.configuration_task.perms import register as register_configuration_task_permission_defs
 from modules.credential.controller.credential_controller import credentialController
 from modules.metrics.controller.metrics_collector_controller import metricsCollectorController
 from modules.metrics.perms import register as register_metrics_permission_defs
@@ -98,6 +100,7 @@ async def lifespan(app: FastAPI):
         register_ticket_permission_defs()
         register_metrics_permission_defs()
         register_unidata_permission_defs()
+        register_configuration_task_permission_defs()
         sync_registered_menus(app)
         with SessionLocal() as db:
             TicketService.init_default_workflow(db)
@@ -170,6 +173,7 @@ controller_list = [
     {"router": jobController, "tags": ["系统监控-定时任务"]},
     {"router": serverController, "tags": ["系统监控-服务监控"]},
     {"router": metricsCollectorController, "tags": ["系统监控-资源采集服务"]},
+    {"router": resourceController, "tags": ["配置任务-资源管理"]},
     {"router": cacheController, "tags": ["系统监控-缓存监控"]},
     {"router": commonController, "tags": ["通用模块"]},
     {"router": projectController, "tags": ["HRM-项目管理"]},

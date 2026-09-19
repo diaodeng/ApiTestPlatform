@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover - optional dependency
     Frame = FrameLocator = Locator = Page = Any
 
 from services.playwright_browser_runtime import start_playwright_browser
+from services.agent_resource_storage import ManifestValidationError, ResourceManifestStore
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -1596,6 +1597,210 @@ _ACTIONS_WITHOUT_TARGET = {
     "assert_title_contains",
     "assert_url_contains",
 }
+
+# 单个 upload_file 步骤允许的最大文件数；即使运行参数被篡改也不能无限制注入文件。
+_MAX_UPLOAD_FILE_COUNT = 20
+
+
+class UploadFileResolutionError(RuntimeError):
+    """上传资源解析失败，错误消息只包含资源标识，不包含本地绝对路径。"""
+
+
+UploadResourceResolver = Callable[[list[str], dict[str, Any]], Any]
+
+
+def _normalize_upload_resource_ids(value: Any) -> list[str]:
+    """将 resourceId/resourceIds 归一化为去重后的非空字符串列表。"""
+    values = value if isinstance(value, list) else [value]
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if isinstance(item, dict):
+            item = item.get("resourceId") or item.get("resource_id") or item.get("id")
+        normalized = str(item or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _upload_resource_binding_ids(binding: Any) -> list[str]:
+    """从 fileKey 绑定值中提取资源 ID，不把绑定值中的路径当作资源路径。"""
+    if isinstance(binding, dict):
+        for key in ("resourceIds", "resource_ids", "resourceId", "resource_id", "id"):
+            ids = _normalize_upload_resource_ids(binding.get(key))
+            if ids:
+                return ids
+        return []
+    return _normalize_upload_resource_ids(binding)
+
+
+def _is_path_inside_root(candidate: Path, root: Path) -> bool:
+    """判断解析后的路径是否仍位于 Agent 受控资源根目录内。"""
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_manifest_path(raw_path: Any, root: Path | None, resource_id: str) -> Path:
+    """校验 manifest 返回的文件路径，拒绝越级、目录和不存在文件。"""
+    path_text = str(raw_path or "").strip()
+    if not path_text or root is None:
+        raise UploadFileResolutionError(f"资源 {resource_id} 未绑定受控文件")
+    candidate = Path(path_text)
+    try:
+        resolved_root = root.expanduser().resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise UploadFileResolutionError(f"资源 {resource_id} 不可用") from None
+    if not _is_path_inside_root(resolved_candidate, resolved_root):
+        raise UploadFileResolutionError(f"资源 {resource_id} 不在受控目录内")
+    if not resolved_candidate.is_file():
+        raise UploadFileResolutionError(f"资源 {resource_id} 不是可上传文件")
+    return resolved_candidate
+
+
+def _manifest_items(manifest: Any) -> dict[str, Any]:
+    """读取 manifest 的常见映射/列表形态，避免业务层依赖具体资源模型。"""
+    if isinstance(manifest, dict):
+        entries = manifest.get("resources") or manifest.get("entries")
+        if isinstance(entries, (dict, list)):
+            manifest = entries
+        else:
+            return manifest
+    if isinstance(manifest, list):
+        result: dict[str, Any] = {}
+        for item in manifest:
+            if not isinstance(item, dict):
+                continue
+            resource_id = str(
+                item.get("resourceId") or item.get("resource_id") or item.get("id") or ""
+            ).strip()
+            if resource_id:
+                result[resource_id] = item
+        return result
+    return {}
+
+
+def _resolve_manifest_upload_paths(
+    resource_ids: list[str], runtime_options: dict[str, Any]
+) -> list[Path]:
+    """通过 Agent manifest 解析资源，并只接受受控根目录下的路径。"""
+    manifest = runtime_options.get("resourceManifest")
+    if manifest is None:
+        manifest = runtime_options.get("resource_manifest")
+    application_root_value = (
+        runtime_options.get("resourceApplicationRoot")
+        or runtime_options.get("resource_application_root")
+    )
+    if manifest is None:
+        # Web 执行和文件协议运行在同一 Agent 进程时，默认读取同一份受控 manifest。
+        # 运行参数只传资源 ID，不需要携带本地绝对路径或 Python callable。
+        try:
+            store = ResourceManifestStore(
+                str(application_root_value).strip()
+                if str(application_root_value or "").strip()
+                else None
+            )
+            result: list[Path] = []
+            for resource_id in resource_ids:
+                item = store.get(resource_id)
+                if item is None:
+                    raise UploadFileResolutionError(f"资源 {resource_id} 未绑定或不存在")
+                try:
+                    path = store.resolve_locator(item.locator, item.resource_id)
+                except ManifestValidationError:
+                    raise UploadFileResolutionError(f"资源 {resource_id} 不可用") from None
+                if not path.is_file() or path.is_symlink():
+                    raise UploadFileResolutionError(f"资源 {resource_id} 不是可上传文件")
+                result.append(path)
+            return result
+        except UploadFileResolutionError:
+            raise
+        except (ManifestValidationError, OSError, RuntimeError):
+            raise UploadFileResolutionError("Agent 资源 manifest 不可用") from None
+
+    items = _manifest_items(manifest)
+    root_value = (
+        runtime_options.get("resourceRoot")
+        or runtime_options.get("resource_root")
+        or runtime_options.get("resourceStorageRoot")
+        or runtime_options.get("resource_storage_root")
+        or runtime_options.get("resourceTempRoot")
+        or runtime_options.get("resource_temp_root")
+    )
+    root = Path(str(root_value).strip()) if str(root_value or "").strip() else None
+    result = []
+    for resource_id in resource_ids:
+        entry = items.get(resource_id)
+        if entry is None:
+            raise UploadFileResolutionError(f"资源 {resource_id} 未绑定或不存在")
+        if isinstance(entry, str):
+            raw_path = entry
+        else:
+            entry_dict = _as_dict(entry)
+            raw_path = (
+                entry_dict.get("relativePath")
+                or entry_dict.get("relative_path")
+                or entry_dict.get("path")
+                or entry_dict.get("localPath")
+                or entry_dict.get("local_path")
+                or entry_dict.get("locator")
+            )
+        result.append(_validate_manifest_path(raw_path, root, resource_id))
+    return result
+
+
+def _resolve_upload_file_paths(
+    params: dict[str, Any],
+    runtime_options: dict[str, Any],
+    resolver: UploadResourceResolver | None = None,
+) -> list[Path]:
+    """解析 upload_file 的受控文件路径，绝不读取 params.filePath。"""
+    nested_runtime = _as_dict(params.get("runtimeOptions") or params.get("runtime_options"))
+    effective_runtime = {**nested_runtime, **_as_dict(runtime_options)}
+    file_key = str(params.get("fileKey") or params.get("file_key") or "").strip()
+    bindings = effective_runtime.get("resourceBindings") or effective_runtime.get("resource_bindings")
+    if not isinstance(bindings, dict):
+        bindings = params.get("resourceBindings") or params.get("resource_bindings")
+    resource_ids = _upload_resource_binding_ids(bindings.get(file_key)) if file_key and isinstance(bindings, dict) else []
+    if not resource_ids:
+        resource_ids = _normalize_upload_resource_ids(
+            params.get("resourceIds") or params.get("resource_ids")
+        )
+    if not resource_ids:
+        identifier = file_key or "resourceIds"
+        raise UploadFileResolutionError(f"文件资源 {identifier} 未绑定")
+    if len(resource_ids) > _MAX_UPLOAD_FILE_COUNT:
+        raise UploadFileResolutionError(f"文件资源 {file_key or resource_ids[0]} 数量超过限制")
+
+    active_resolver = resolver
+    if active_resolver is None:
+        candidate_resolver = effective_runtime.get("resourceResolver") or effective_runtime.get("resource_resolver")
+        if callable(candidate_resolver):
+            active_resolver = candidate_resolver
+    if callable(active_resolver):
+        try:
+            resolved = active_resolver(resource_ids, effective_runtime)
+        except TypeError:
+            resolved = active_resolver(resource_ids)
+        raw_paths = resolved.values() if isinstance(resolved, dict) else resolved
+        raw_paths = raw_paths if isinstance(raw_paths, (list, tuple, set)) else [raw_paths]
+        paths = [Path(str(item).strip()) for item in raw_paths if str(item or "").strip()]
+        if len(paths) != len(resource_ids):
+            raise UploadFileResolutionError(f"文件资源 {file_key or resource_ids[0]} 不可用")
+        for path in paths:
+            try:
+                if not path.is_absolute() or not path.resolve(strict=True).is_file():
+                    raise OSError
+            except (OSError, RuntimeError):
+                raise UploadFileResolutionError(f"文件资源 {file_key or resource_ids[0]} 不可用") from None
+        return [path.resolve() for path in paths]
+    return _resolve_manifest_upload_paths(resource_ids, effective_runtime)
+
 
 _LOCATOR_TYPE_WEIGHT = {
     "test_id": 0,
@@ -3877,6 +4082,7 @@ class WebTestService:
                     action_type,
                     params,
                     timeout_ms=timeout_ms,
+                    runtime_options=runtime_options,
                 ),
                 timeout=timeout_ms / 1000.0,
             )
@@ -4535,6 +4741,7 @@ class WebTestService:
         params: dict[str, Any],
         *,
         timeout_ms: int,
+        runtime_options: dict[str, Any] | None = None,
     ) -> None:
         if action_type == "goto":
             await page.goto(str(params.get("url") or ""), timeout=timeout_ms)
@@ -4551,6 +4758,16 @@ class WebTestService:
                 page,
                 params=params,
                 maximize=False,
+            )
+            return
+        if action_type == "upload_file":
+            upload_paths = _resolve_upload_file_paths(params, _as_dict(runtime_options))
+            multiple = _as_bool(params.get("multiple"), False)
+            if not multiple and len(upload_paths) > 1:
+                raise UploadFileResolutionError("上传动作未启用多文件")
+            await locator.set_input_files(
+                [str(path) for path in upload_paths],
+                timeout=timeout_ms,
             )
             return
         if action_type in {"sleep", "wait"}:

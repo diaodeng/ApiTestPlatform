@@ -305,6 +305,21 @@ export function useCaseEditorManager(options) {
         if (actionType === "fill") {
             return { value: data.value ?? "", thinkTimeMs };
         }
+        if (actionType === "upload_file") {
+            const resourceIds = Array.isArray(data.resourceIds)
+                ? data.resourceIds
+                : data.resourceIds
+                  ? [data.resourceIds]
+                  : [];
+            return {
+                fileKey: `${data.fileKey ?? data.file_key ?? ""}`.trim(),
+                resourceIds: resourceIds
+                    .map((item) => `${item ?? ""}`.trim())
+                    .filter(Boolean),
+                multiple: data.multiple === true || data.multiple === "true",
+                thinkTimeMs,
+            };
+        }
         if (actionType === "press") {
             return { key: data.key || "Enter", thinkTimeMs };
         }
@@ -543,6 +558,16 @@ export function useCaseEditorManager(options) {
         }
         if (step.actionType === "fill") {
             return appendThinkTime(step.params?.value || "-");
+        }
+        if (step.actionType === "upload_file") {
+            const fileKey = `${step.params?.fileKey || ""}`.trim();
+            const resourceCount = Array.isArray(step.params?.resourceIds)
+                ? step.params.resourceIds.filter((item) => `${item ?? ""}`.trim()).length
+                : 0;
+            const modeText = step.params?.multiple === true ? "多文件" : "单文件";
+            return appendThinkTime(
+                `${fileKey || "未设置资源键"} / ${modeText} / ${resourceCount}个资源`,
+            );
         }
         if (step.actionType === "press") {
             return appendThinkTime(step.params?.key || "-");
@@ -1101,6 +1126,18 @@ export function useCaseEditorManager(options) {
         }
         if (step.actionType === "fill") {
             return withThinkTime({ value: step.params.value ?? "" });
+        }
+        if (step.actionType === "upload_file") {
+            const resourceIds = Array.isArray(step.params?.resourceIds)
+                ? step.params.resourceIds
+                      .map((item) => `${item ?? ""}`.trim())
+                      .filter(Boolean)
+                : [];
+            return withThinkTime({
+                fileKey: `${step.params?.fileKey ?? ""}`.trim(),
+                resourceIds,
+                multiple: step.params?.multiple === true,
+            });
         }
         if (step.actionType === "press") {
             return withThinkTime({ key: step.params.key || "Enter" });

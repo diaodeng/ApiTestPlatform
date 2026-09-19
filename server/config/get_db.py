@@ -61,6 +61,11 @@ async def init_create_table():
     应用启动时初始化数据库连接
     """
     logger.info("初始化数据库连接...")
+    # 资源领域模型在 server.py 导入链中加载；这里保留显式导入，兼容直接调用初始化函数的场景。
+    from modules.configuration_task.entity.do import (
+        resource_object_do as _configuration_task_resource_object_do,  # noqa: F401
+    )
+
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
     _ensure_ticket_log_pull_ticket_id_nullable()

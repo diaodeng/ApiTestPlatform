@@ -34,6 +34,7 @@ export const actionOptions = [
   { label: '双击元素', value: 'double_click' },
   { label: '悬停元素', value: 'hover' },
   { label: '填写内容', value: 'fill' },
+  { label: '上传文件', value: 'upload_file' },
   { label: '清空输入', value: 'clear' },
   { label: '键盘按键', value: 'press' },
   { label: '勾选元素', value: 'check' },

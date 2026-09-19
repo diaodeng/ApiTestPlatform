@@ -60,6 +60,8 @@ WebSocket 大消息按 5KB 分片传输，控制器使用两个进程内注册�
 
 - [模块全景图](../../concepts/module-landscape.md)
 - [HTTP API 入口流程](../../flows/http-api-entrypoint.md)
+- [配置任务文件协议](../../contracts/configuration-task-file-protocol.md)
+- [配置任务复用 Web 录制与执行](../../flows/configuration-task-web-reuse.md)
 
 ## 被引用
 

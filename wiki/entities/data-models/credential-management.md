@@ -40,6 +40,8 @@ Web 用例浏览器状态不再关联旧 Session/Profile 配置。`web_case` 绑
 
 需要支持多步认证链（如账号密码 -> TOTP -> Set-Cookie）的环境，还需执行 `server/sql/20260917_credential_login_steps.sql`，为 `auth_credential_auth_config` 新增 `login_steps`、`refresh_steps` 两个 JSON 列。两列为 `NULL` 时继续走原有单步登录/刷新模板逻辑，存量凭证行为不变。步骤结构定义见 `modules/credential/entity/vo/credential_vo.py` 的 `CredentialLoginStepModel`（含语义化步骤 id 与 `when` 条件步骤）。
 
+配置任务沿用同一 `credentialBindingId` 和 `playwright_storage` 投影，不新建任务专属账号密码或浏览器状态模型；任务版本只保存绑定引用和 revision 摘要。
+
 参见：[凭证刷新流程](../../flows/credential-refresh.md)、[凭证接口契约](../../contracts/credential-api.md)。
 
 被引用：凭证刷新流程、凭证接口契约。
