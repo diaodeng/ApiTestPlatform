@@ -178,3 +178,78 @@ def test_expired_transfer_cannot_accept_chunk(db_session):
     assert result.is_success is False
     assert result.result.status == "EXPIRED"
     assert db_session.get(ResourceObject, RESOURCE_ID).status == "FAILED"
+
+
+def test_maintenance_expires_stale_resources_and_transfers():
+    """过期清理任务应把到期资源收敛 EXPIRED、活动传输联动收敛。"""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    from config.database import Base
+    from modules.configuration_task.dao.resource_transfer_dao import ResourceTransferDao
+    from modules.configuration_task.entity.do.resource_transfer_do import ResourceTransfer
+    from modules.configuration_task.service.task_maintenance_service import ConfigurationTaskMaintenanceService
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine, tables=[ResourceObject.__table__, ResourceTransfer.__table__])
+    with Session(engine) as session:
+        past = datetime.now() - timedelta(hours=1)
+        session.add(
+            ResourceObject(
+                resource_id=RESOURCE_ID,
+                provider_type="agent_local",
+                provider_execution_side="agent",
+                agent_code="agent-01",
+                object_key="inputs/demo.txt",
+                original_file_name="demo.txt",
+                mime_type="text/plain",
+                file_size=3,
+                checksum_algorithm="sha256",
+                sha256=SHA256,
+                version=1,
+                status="READY",
+                expires_at=past,
+                create_by="tester",
+                create_time=now_utc(),
+                update_by="tester",
+                update_time=now_utc(),
+            )
+        )
+        session.add(
+            ResourceTransfer(
+                transfer_id="transfer-exp",
+                resource_id=RESOURCE_ID,
+                agent_code="agent-01",
+                session_id="session-1",
+                status="UPLOADING",
+                expected_size=3,
+                expected_sha256=SHA256,
+                version=1,
+                expires_at=past,
+                create_by="tester",
+                create_time=now_utc(),
+                update_by="tester",
+                update_time=now_utc(),
+            )
+        )
+        session.commit()
+        result = ConfigurationTaskMaintenanceService.cleanup_expired_resources(session)
+        assert result["expired"] == 1
+        assert result["transfers"] == 1
+        assert session.get(ResourceObject, RESOURCE_ID).status == "EXPIRED"
+        assert ResourceTransferDao.get_transfer(session, "transfer-exp").status == "EXPIRED"
+    engine.dispose()
+
+
+def now_utc():
+    """返回当前时间，供测试夹具使用。"""
+    from datetime import datetime
+
+    return datetime.now()

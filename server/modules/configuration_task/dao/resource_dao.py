@@ -11,6 +11,20 @@ class ResourceDao:
     """资源对象 DAO。"""
 
     @classmethod
+    def list_expired_resources(cls, db: Session, limit: int = 200) -> list[ResourceObject]:
+        """查询已到期但仍处于活动状态的资源，供过期清理任务收敛。"""
+        return (
+            db.query(ResourceObject)
+            .filter(
+                ResourceObject.expires_at.isnot(None),
+                ResourceObject.expires_at <= datetime.now(),
+                ResourceObject.status.in_(["PENDING", "UPLOADING", "READY"]),
+            )
+            .limit(limit)
+            .all()
+        )
+
+    @classmethod
     def get_resource(cls, db: Session, resource_id: int) -> ResourceObject | None:
         """按资源 ID 查询资源实体。"""
         return db.query(ResourceObject).filter(ResourceObject.resource_id == resource_id).first()

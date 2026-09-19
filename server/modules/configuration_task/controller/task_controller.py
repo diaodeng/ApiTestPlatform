@@ -13,6 +13,7 @@ from modules.configuration_task.entity.vo.task_vo import (
     ConfigurationTaskUpdateModel,
     TaskRunCreateModel,
     TaskRunQueryModel,
+    TaskRunStopModel,
     TaskVersionCreateModel,
     TaskVersionUpdateModel,
 )
@@ -192,6 +193,22 @@ async def list_task_runs(
         task_run_query.limit,
     )
     return ResponseUtil.success(data=data)
+
+
+@taskController.post(
+    "/runs/{task_run_id}/stop",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:run"))],
+)
+async def stop_task_run(
+    request: Request,
+    task_run_id: int,
+    model: TaskRunStopModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """停止或取消运行。"""
+    result = await ConfigurationTaskRunService.stop_run(query_db, task_run_id, model, current_user)
+    return _result_response(result)
 
 
 @taskController.get(

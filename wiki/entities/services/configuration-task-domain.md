@@ -133,7 +133,9 @@ DRAFT
 
 - `modules/configuration_task/controller/task_controller.py`：任务/版本/运行路由、Pydantic 契约、鉴权和线程池包装；
 - `modules/configuration_task/service/task_service.py`：任务 CRUD、版本草稿、发布校验（步骤非空、资源 READY、资源归属执行 Agent）；
-- `modules/configuration_task/service/task_run_service.py`：运行创建、输入快照冻结、`run_case` 下发和终态落库；
+- `modules/configuration_task/service/task_run_service.py`：运行创建、输入快照冻结、`run_case` 下发和终态落库，以及取消（`stop_run_case`）、手动登录两阶段执行、同 Agent 并发租约、`web_run_*` 事件接入和孤儿运行恢复；
+- `modules/configuration_task/service/task_maintenance_service.py`：资源/传输过期清理与孤儿恢复的周期维护入口；
+- `module_task/scheduler_maintenance.py` 的 `cleanup_configuration_task_resources` / `recover_configuration_task_runs` 定时任务；
 - `modules/configuration_task/dao/task_dao.py`：任务、版本、运行的纯数据访问；
 - 运行执行复用 `WebCaseService._extract_webui_run_response` 和 `module_qtr` 的 `send_message`，不复制浏览器执行逻辑。
 

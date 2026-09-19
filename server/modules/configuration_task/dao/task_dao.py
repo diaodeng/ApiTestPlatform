@@ -105,6 +105,19 @@ class ConfigurationTaskRunDao:
     """配置任务运行数据访问。"""
 
     @classmethod
+    def get_active_by_agent(cls, db: Session, agent_code: str) -> ConfigurationTaskRun | None:
+        """查询 Agent 当前未完成的运行，用于同 Agent 并发租约限制。"""
+        return (
+            db.query(ConfigurationTaskRun)
+            .filter(
+                ConfigurationTaskRun.agent_code == agent_code,
+                ConfigurationTaskRun.status == "RUNNING",
+            )
+            .order_by(ConfigurationTaskRun.create_time.desc())
+            .first()
+        )
+
+    @classmethod
     def get_run(cls, db: Session, task_run_id: int) -> ConfigurationTaskRun | None:
         """按运行 ID 查询运行实体。"""
         return db.query(ConfigurationTaskRun).filter(ConfigurationTaskRun.task_run_id == task_run_id).first()

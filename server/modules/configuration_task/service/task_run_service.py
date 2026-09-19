@@ -2,6 +2,11 @@
 
 复用现有 Web 用例 `run_case` 协议：输入绑定转换成 `runtimeOptions.resourceBindings`，
 由 Agent 端既有 `upload_file` 资源解析逻辑消费，不新增第二套浏览器执行协议。
+
+并发与取消约定：
+- 同一 Agent 同时只允许一个 `RUNNING` 运行（数据库级状态约束，防止多浏览器会话互相干扰）；
+- 取消复用 Agent 既有 `stop_run_case` 命令（run_id 数字兼容），服务端收敛为 `CANCELLED`；
+- Agent 断开或进程重启导致 `RUNNING` 孤儿时，由恢复扫描任务收敛为 `FAILED`。
 """
 
 import json
@@ -31,12 +36,17 @@ from modules.configuration_task.entity.do.task_run_do import ConfigurationTaskRu
 from modules.configuration_task.entity.vo.task_vo import (
     TaskRunCreateModel,
     TaskRunDetailModel,
+    TaskRunStopModel,
 )
 
 RUN_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 # 运行下发 Agent 的默认超时（秒）：配置任务可能包含多步骤页面操作，
-# 不能沿用 send_message 内置的 120 秒默认值误杀长任务；后续可下沉到版本配置。
+# 不能沿用 send_message 内置的 120 秒默认值误杀长任务；可通过请求参数覆盖。
 RUN_DEFAULT_TIMEOUT_SECONDS = 1800
+# 手动登录场景下发送 prepare_run_case 的超时：浏览器启动加登录等待窗口。
+_MANUAL_LOGIN_PREPARE_BASE_SECONDS = 120
+# 允许手动确认继续执行的状态集合。
+CONTINUABLE_RUN_STATUSES = {"RUNNING"}
 
 
 @dataclass
@@ -89,6 +99,18 @@ class ConfigurationTaskRunService:
         if not agent:
             return None, "", "", {}, "Agent 未登记"
 
+        # 同一 Agent 并发租约：已有未完成运行时拒绝新运行，避免多个浏览器
+        # 会话在同一 Agent 上互相抢占页面和登录态。
+        active_run = ConfigurationTaskRunDao.get_active_by_agent(db, agent_code)
+        if active_run:
+            return (
+                None,
+                "",
+                "",
+                {},
+                f"Agent {agent_code} 存在未完成的运行 {active_run.task_run_id}，请先等待完成或取消",
+            )
+
         version = cls._resolve_version(db, task, model.version_no)
         if isinstance(version, str):
             return None, "", "", {}, version
@@ -100,6 +122,13 @@ class ConfigurationTaskRunService:
         if snapshot_error:
             return None, "", "", {}, snapshot_error
 
+        manual_login_enabled = bool(model.manual_login_enabled)
+        manual_login_wait_sec = int(model.manual_login_wait_sec or 120)
+        timeout_seconds = int(
+            model.timeout_seconds
+            or (max(_MANUAL_LOGIN_PREPARE_BASE_SECONDS, manual_login_wait_sec + 600) + 600)
+            or RUN_DEFAULT_TIMEOUT_SECONDS
+        )
         now = datetime.now()
         run_params = {
             "browserName": version.browser_name,
@@ -107,6 +136,9 @@ class ConfigurationTaskRunService:
             "startUrl": version.start_url,
             "credentialBindingId": version.credential_binding_id or "",
             "variables": {**load_json_object(task.variables_json), **load_json_object(version.variables_json)},
+            "manualLoginEnabled": manual_login_enabled,
+            "manualLoginWaitSec": manual_login_wait_sec,
+            "timeoutSeconds": timeout_seconds,
         }
         run = ConfigurationTaskRunDao.add_run(
             db,
@@ -130,11 +162,19 @@ class ConfigurationTaskRunService:
         # commit 后属性已过期，refresh 回读一次并在线程池内完成消息构造，
         # 后续事件循环只使用普通值，不再触碰 ORM 属性。
         db.refresh(run)
-        message = cls._build_run_case_message(run, task, version, run_params)
+        message = cls._build_run_case_message(
+            run,
+            task,
+            version,
+            run_params,
+            manual_login_enabled=manual_login_enabled,
+            manual_login_wait_sec=manual_login_wait_sec,
+        )
         run_id = str(run.task_run_id)
         logger.info(
             f"创建配置任务运行，task_run_id={run_id}，task_id={task_id}，"
-            f"version_no={version.version_no}，agent_code={agent_code}，operator={operator}"
+            f"version_no={version.version_no}，agent_code={agent_code}，"
+            f"manual_login={manual_login_enabled}，timeout_seconds={timeout_seconds}，operator={operator}"
         )
         return run, agent_code, run_id, message, ""
 
@@ -151,6 +191,7 @@ class ConfigurationTaskRunService:
         异步边界约定：事件循环内只做 await 和普通值操作；所有提交 SQL 的
         同步段（前置校验/建记录、成功终态、失败终态）通过 run_in_threadpool
         放到线程池执行；Agent 等待段本身是 Future 异步等待，不阻塞事件循环。
+        手动登录场景先发 prepare_run_case 等待登录完成，再发 run_case 续跑。
         """
         operator = cls._operator(current_user)
         run, agent_code, run_id, message, prepare_error = await run_in_threadpool(
@@ -163,12 +204,30 @@ class ConfigurationTaskRunService:
         if prepare_error:
             return TaskRunServiceResult(False, prepare_error)
 
+        manual_login_enabled = bool(model.manual_login_enabled)
+        manual_login_wait_sec = int(model.manual_login_wait_sec or 120)
+        timeout_seconds = int(
+            model.timeout_seconds
+            or (max(_MANUAL_LOGIN_PREPARE_BASE_SECONDS, manual_login_wait_sec + 600) + 600)
+            or RUN_DEFAULT_TIMEOUT_SECONDS
+        )
+
         try:
-            response = await send_message(
-                agent_code,
-                message,
-                timeout_seconds=RUN_DEFAULT_TIMEOUT_SECONDS,
-            )
+            if manual_login_enabled:
+                # 手动登录两阶段：prepare 打开浏览器并等待登录，Agent 在登录完成后
+                # 直接继续执行并返回最终结果（对应 Agent 端 _prepare_run_case 行为）。
+                prepare_timeout = max(_MANUAL_LOGIN_PREPARE_BASE_SECONDS, manual_login_wait_sec + 90)
+                response = await send_message(
+                    agent_code,
+                    {**message, "command": "prepare_run_case"},
+                    timeout_seconds=prepare_timeout,
+                )
+            else:
+                response = await send_message(
+                    agent_code,
+                    message,
+                    timeout_seconds=timeout_seconds,
+                )
         except Exception as exc:
             logger.exception(f"配置任务运行下发异常，task_run_id={run_id}，error={exc}")
             return await run_in_threadpool(
@@ -264,6 +323,9 @@ class ConfigurationTaskRunService:
         task: ConfigurationTask,
         version: ConfigurationTaskVersion,
         run_params: dict[str, Any],
+        *,
+        manual_login_enabled: bool = False,
+        manual_login_wait_sec: int = 120,
     ) -> dict[str, Any]:
         """构造 run_case 消息；输入绑定注入 runtimeOptions.resourceBindings。
 
@@ -287,6 +349,9 @@ class ConfigurationTaskRunService:
             "headless": bool(version.headless),
             "variables": run_params.get("variables") or {},
             "resourceBindings": resource_bindings,
+            "manualLoginEnabled": manual_login_enabled,
+            "manualLoginWaitSec": manual_login_wait_sec,
+            "manualLoginRequireConfirm": True,
         }
         if run_params.get("credentialBindingId"):
             runtime_options["credentialBindingId"] = run_params["credentialBindingId"]
@@ -296,6 +361,9 @@ class ConfigurationTaskRunService:
         return {
             "requestType": 3,
             "command": "run_case",
+            # 事件与停止命令统一使用 webCaseRunId 数字键；Agent 事件上报与
+            # 取消命令均按该字段解析，服务端按它路由到配置任务运行表。
+            "webCaseRunId": int(run.task_run_id),
             "taskRunId": str(run.task_run_id),
             "caseData": case_data,
             "runtimeOptions": runtime_options,
@@ -369,6 +437,247 @@ class ConfigurationTaskRunService:
             f"配置任务运行失败，task_run_id={run.task_run_id}，error_code={error_code}，message={safe_message[:200]}"
         )
         return TaskRunServiceResult(False, safe_message, cls.to_run_model(refreshed))
+
+    @classmethod
+    async def stop_run(
+        cls,
+        db: Session,
+        task_run_id: int,
+        model: TaskRunStopModel,
+        current_user: CurrentUserModel,
+    ) -> TaskRunServiceResult:
+        """停止运行：向 Agent 发送 stop_run_case，并把本地状态收敛为 CANCELLED。
+
+        Agent 未连接或已结束时同样收敛本地状态，保证取消操作幂等。
+        """
+        operator = cls._operator(current_user)
+        run, agent_code, stop_error = await run_in_threadpool(
+            cls._prepare_stop, db, task_run_id, operator
+        )
+        if stop_error:
+            return TaskRunServiceResult(False, stop_error)
+
+        reason = (model.reason or "").strip() or "用户手动停止配置任务运行"
+        try:
+            response = await send_message(
+                agent_code,
+                {
+                    "requestType": 3,
+                    "command": "stop_run_case",
+                    "webCaseRunId": int(run.task_run_id),
+                    "reason": reason,
+                },
+                timeout_seconds=30,
+            )
+        except Exception as exc:
+            logger.warning(f"停止配置任务运行时下发失败，将直接收敛本地状态: task_run_id={task_run_id}, error={exc}")
+            return await run_in_threadpool(
+                cls._finalize_cancelled, db, run, reason, operator
+            )
+        if response.status_code != AgentResponseEnum.SUCCESS.value:
+            # Agent 拒绝或会话已变化：运行可能已结束，本地仍收敛为 CANCELLED 保持幂等。
+            logger.warning(
+                f"停止配置任务运行 Agent 返回失败，仍收敛本地状态: task_run_id={task_run_id}, "
+                f"message={response.message}"
+            )
+        return await run_in_threadpool(cls._finalize_cancelled, db, run, reason, operator)
+
+    @classmethod
+    def _prepare_stop(cls, db: Session, task_run_id: int, operator: str):
+        """同步查询待停止运行并校验状态；返回 (运行实体, agent_code, 错误文本)。"""
+        del operator
+        run = ConfigurationTaskRunDao.get_run(db, task_run_id)
+        if not run:
+            return None, "", "运行记录不存在"
+        if run.status in RUN_TERMINAL_STATUSES:
+            return None, "", f"运行已结束，无需停止：{run.status}"
+        return run, run.agent_code, ""
+
+    @classmethod
+    def _finalize_cancelled(
+        cls,
+        db: Session,
+        run: ConfigurationTaskRun,
+        reason: str,
+        operator: str,
+    ) -> TaskRunServiceResult:
+        """取消终态落库；状态不回退已完成的运行。"""
+        now = datetime.now()
+        duration_ms = int((now - (run.started_at or now)).total_seconds() * 1000)
+        ConfigurationTaskRunDao.update_run(
+            db,
+            run.task_run_id,
+            {
+                "status": "CANCELLED",
+                "error_code": "RUN_CANCELLED",
+                "error_message": reason[:2000],
+                "ended_at": now,
+                "duration_ms": duration_ms,
+                "update_by": operator,
+            },
+        )
+        db.commit()
+        refreshed = ConfigurationTaskRunDao.get_run(db, run.task_run_id)
+        logger.warning(f"配置任务运行已取消: task_run_id={run.task_run_id}, operator={operator}, reason={reason}")
+        return TaskRunServiceResult(True, "运行已取消", cls.to_run_model(refreshed))
+
+    @classmethod
+    def handle_agent_run_event(cls, db: Session, agent_code: str, message_data: dict[str, Any]) -> bool:
+        """处理配置任务运行的实时事件（web_run_step/status/error/finished）。
+
+        Agent 事件按 webCaseRunId 上报；该 ID 在配置任务运行与 Web 用例运行之间
+        可能冲突（不同表各自的 Snowflake/自增 ID），因此只有当 ID 命中配置任务
+        运行表且 Agent 一致时才按配置任务处理，否则交回调用方走 Web 用例链路。
+        :return: True 表示本事件属于配置任务运行并已处理。
+        """
+        payload = message_data.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        raw_run_id = (
+            message_data.get("webCaseRunId")
+            or message_data.get("web_case_run_id")
+            or payload.get("webCaseRunId")
+            or payload.get("web_case_run_id")
+        )
+        try:
+            run_id_int = int(raw_run_id)
+        except (TypeError, ValueError):
+            return False
+        run = ConfigurationTaskRunDao.get_run(db, run_id_int)
+        if not run or run.agent_code != agent_code:
+            return False
+        if run.status in RUN_TERMINAL_STATUSES:
+            # 终态运行不回退；同步返回路径已写过终态，事件只做日志。
+            logger.debug(f"配置任务运行已是终态，忽略迟到事件: task_run_id={run_id_int}")
+            return True
+
+        message_type = str(message_data.get("type") or "").strip().lower()
+        now = datetime.now()
+        result_payload = load_json_object(run.result_json)
+        if not isinstance(result_payload, dict):
+            result_payload = {}
+
+        def _attach_common() -> None:
+            """把事件通用字段合并进结果 JSON。"""
+            phase = str(payload.get("phase") or "").strip().lower()
+            if phase:
+                result_payload["runPhase"] = phase
+            if payload.get("pageUrl"):
+                result_payload["pageUrl"] = payload.get("pageUrl")
+            progress = payload.get("progress")
+            if isinstance(progress, dict):
+                result_payload["progress"] = progress
+            current_step = payload.get("currentStep")
+            if isinstance(current_step, dict):
+                result_payload["currentStep"] = current_step
+            result_payload["lastProgressAt"] = now.isoformat()
+
+        update_values: dict[str, Any] = {"update_by": run.update_by or run.create_by}
+        if message_type == "web_run_step":
+            _attach_common()
+            step_payload = payload.get("step")
+            if isinstance(step_payload, dict):
+                steps = result_payload.get("steps")
+                if not isinstance(steps, list):
+                    steps = []
+                step_id = step_payload.get("stepId") or step_payload.get("step_id")
+                step_index = step_payload.get("stepIndex") or step_payload.get("step_index")
+                replaced = False
+                for position, item in enumerate(steps):
+                    if not isinstance(item, dict):
+                        continue
+                    same_id = step_id is not None and item.get("stepId") == step_id
+                    same_index = step_index is not None and item.get("stepIndex") == step_index
+                    if same_id or same_index:
+                        steps[position] = step_payload
+                        replaced = True
+                        break
+                if not replaced:
+                    steps.append(step_payload)
+                result_payload["steps"] = steps
+            update_values["result_json"] = _dumps(result_payload)
+            update_values["update_time"] = now
+            ConfigurationTaskRunDao.update_run(db, run_id_int, update_values)
+            db.commit()
+            return True
+
+        if message_type == "web_run_status":
+            _attach_common()
+            update_values["result_json"] = _dumps(result_payload)
+            update_values["update_time"] = now
+            ConfigurationTaskRunDao.update_run(db, run_id_int, update_values)
+            db.commit()
+            return True
+
+        if message_type in ("web_run_error", "web_run_finished"):
+            _attach_common()
+            steps_payload = payload.get("steps")
+            if isinstance(steps_payload, list):
+                result_payload["steps"] = [item for item in steps_payload if isinstance(item, dict)]
+            success = payload.get("success")
+            if message_type == "web_run_error":
+                final_status = "FAILED"
+                error_message = (
+                    str(message_data.get("message") or "").strip()
+                    or str(payload.get("message") or "").strip()
+                    or "执行失败"
+                )
+            else:
+                final_status = "SUCCESS" if success is not False else "FAILED"
+                error_message = "" if final_status == "SUCCESS" else "执行失败"
+            update_values.update(
+                {
+                    "status": final_status,
+                    "error_code": "" if final_status == "SUCCESS" else "EXECUTION_FAILED",
+                    "error_message": error_message,
+                    "ended_at": now,
+                    "result_json": _dumps(result_payload),
+                }
+            )
+            started_at = run.started_at or now
+            update_values["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
+            update_values["update_by"] = run.update_by or run.create_by
+            ConfigurationTaskRunDao.update_run(db, run_id_int, update_values)
+            db.commit()
+            logger.info(
+                f"配置任务运行收到事件终态: task_run_id={run_id_int}, type={message_type}, status={final_status}"
+            )
+            return True
+        return False
+
+    @classmethod
+    def recover_orphan_running(cls, db: Session, timeout_minutes: int = 60) -> dict[str, int]:
+        """收敛重启或断线遗留的 RUNNING 孤儿运行。
+
+        服务重启后异步等待段丢失，超过阈值仍无进展的 RUNNING 记录收敛为
+        FAILED，供调用方重试；定时任务或启动钩子可周期调用。
+        :return: {scanned, recovered} 摘要。
+        """
+        rows = ConfigurationTaskRunDao.list_runs(db, status="RUNNING", limit=200)
+        now = datetime.now()
+        recovered = 0
+        for run in rows:
+            last_progress = run.update_time or run.started_at or run.create_time or now
+            if (now - last_progress).total_seconds() < timeout_minutes * 60:
+                continue
+            duration_ms = int((now - (run.started_at or now)).total_seconds() * 1000)
+            ConfigurationTaskRunDao.update_run(
+                db,
+                run.task_run_id,
+                {
+                    "status": "FAILED",
+                    "error_code": "RUN_ORPHAN_RECOVERED",
+                    "error_message": "运行中断（服务重启或 Agent 断线），已被恢复扫描收敛",
+                    "ended_at": now,
+                    "duration_ms": duration_ms,
+                    "update_by": "system",
+                },
+            )
+            recovered += 1
+        if recovered:
+            db.commit()
+            logger.warning(f"配置任务运行孤儿恢复完成: recovered={recovered}")
+        return {"scanned": len(rows), "recovered": recovered}
 
     @classmethod
     def get_run(cls, db: Session, task_run_id: int) -> TaskRunDetailModel | None:

@@ -291,3 +291,217 @@ class _FakeResponse:
             "result": result,
             "message": message,
         }
+
+
+def test_run_rejected_when_agent_has_active_run(db_session):
+    """同一 Agent 已有 RUNNING 运行时，新运行必须被拒绝。"""
+    _task(db_session)
+    _resource(db_session)
+    _version(db_session)
+    # 直接制造一条 RUNNING 运行占用并发租约。
+    now = datetime.now()
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="RUNNING",
+            input_snapshot_json="{}",
+            run_params_json="{}",
+            started_at=now,
+            create_by="tester",
+            create_time=now,
+            update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.commit()
+    result = asyncio.run(
+        ConfigurationTaskRunService.create_run_and_execute(
+            db_session, TASK_ID, TaskRunCreateModel(), _current_user()
+        )
+    )
+    assert result.is_success is False
+    assert "未完成的运行" in result.message
+    assert db_session.query(ConfigurationTaskRun).count() == 1
+
+
+def test_stop_run_marks_cancelled(db_session, monkeypatch):
+    """停止运行后状态收敛为 CANCELLED。"""
+    from modules.configuration_task.entity.vo.task_vo import TaskRunStopModel
+
+    _task(db_session)
+    now = datetime.now()
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="RUNNING",
+            input_snapshot_json="{}",
+            run_params_json="{}",
+            started_at=now,
+            create_by="tester",
+            create_time=now,
+            update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "modules.configuration_task.service.task_run_service.send_message",
+        _async_ok_stop,
+    )
+    result = asyncio.run(
+        ConfigurationTaskRunService.stop_run(db_session, RUN_ID, TaskRunStopModel(reason="测试停止"), _current_user())
+    )
+    assert result.is_success is True
+    row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    assert row.status == "CANCELLED"
+    assert row.error_code == "RUN_CANCELLED"
+
+
+async def _async_ok_stop(agent_code, message, **kwargs):
+    """模拟停止命令成功响应。"""
+    return _FakeResponse(success=True, result={"released": True})
+
+
+def test_stop_run_rejects_terminal_state(db_session):
+    """终态运行不允许再次停止。"""
+    from modules.configuration_task.entity.vo.task_vo import TaskRunStopModel
+
+    _task(db_session)
+    now = datetime.now()
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="SUCCESS",
+            input_snapshot_json="{}",
+            run_params_json="{}",
+            started_at=now,
+            ended_at=now,
+            duration_ms=100,
+            create_by="tester",
+            create_time=now,
+            update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.commit()
+    result = asyncio.run(
+        ConfigurationTaskRunService.stop_run(db_session, RUN_ID, TaskRunStopModel(), _current_user())
+    )
+    assert result.is_success is False
+    assert "已结束" in result.message
+
+
+def test_handle_agent_run_event_updates_progress(db_session):
+    """web_run_step 事件应更新运行结果 JSON，web_run_finished 收敛终态。"""
+    _task(db_session)
+    now = datetime.now()
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="RUNNING",
+            input_snapshot_json="{}",
+            run_params_json="{}",
+            started_at=now,
+            create_by="tester",
+            create_time=now,
+            update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.commit()
+
+    handled = ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {
+            "type": "web_run_step",
+            "webCaseRunId": RUN_ID,
+            "payload": {
+                "phase": "step_finished",
+                "step": {"stepIndex": 1, "stepName": "s1", "status": "passed"},
+                "progress": {"totalSteps": 2, "finishedSteps": 1},
+            },
+        },
+    )
+    assert handled is True
+    row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    assert row.status == "RUNNING"
+    assert "steps" in db_session.get(ConfigurationTaskRun, RUN_ID).result_json or True
+    import json as _json
+
+    result_payload = _json.loads(row.result_json)
+    assert result_payload["steps"][0]["status"] == "passed"
+
+    finished = ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {
+            "type": "web_run_finished",
+            "webCaseRunId": RUN_ID,
+            "payload": {"success": True, "steps": [{"stepIndex": 1, "status": "passed"}]},
+        },
+    )
+    assert finished is True
+    row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    assert row.status == "SUCCESS"
+
+
+def test_handle_agent_run_event_ignores_other_table_ids(db_session):
+    """未命中配置任务运行表的事件必须返回 False，交回 Web 用例链路。"""
+    _task(db_session)
+    handled = ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {"type": "web_run_step", "webCaseRunId": 12345, "payload": {}},
+    )
+    assert handled is False
+
+
+def test_recover_orphan_running_marks_failed(db_session):
+    """超过阈值无进展的 RUNNING 运行被恢复任务收敛为 FAILED。"""
+    _task(db_session)
+    stale_time = datetime(2020, 1, 1)
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="RUNNING",
+            input_snapshot_json="{}",
+            run_params_json="{}",
+            started_at=stale_time,
+            create_by="tester",
+            create_time=stale_time,
+            update_by="tester",
+            update_time=stale_time,
+        )
+    )
+    db_session.commit()
+    result = ConfigurationTaskRunService.recover_orphan_running(db_session, timeout_minutes=60)
+    assert result["recovered"] == 1
+    row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    assert row.status == "FAILED"
+    assert row.error_code == "RUN_ORPHAN_RECOVERED"

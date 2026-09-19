@@ -15,6 +15,8 @@ title: 更新历史
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 
 ## 2026-09-19
+- 配置任务运行控制与维护能力补齐：运行接口新增停止/取消（复用 Agent `stop_run_case`，终态收敛 `CANCELLED`）、手动登录两阶段执行（先开浏览器等人工登录再继续步骤）、可配置超时（默认 1800 秒）；同一 Agent 同时只允许一个运行（并发租约拒绝新运行）；Agent `web_run_*` 实时事件按 ID+Agent 归属接入配置任务运行，步骤进度实时落库且不影响 Web 用例链路；新增两个定时任务——资源/传输过期清理（收敛 `EXPIRED`）与孤儿运行恢复（超时无进展的 `RUNNING` 收敛 `FAILED`）。详见：[配置任务管理](../configuration-task.md)。
+
 - 配置任务运行域最小闭环上线：新增任务定义、版本快照（含 fileKey→资源 ID 输入绑定）和运行实例三张表与接口；版本发布校验绑定资源就绪且归属执行 Agent，运行时冻结输入快照并复用既有 Web `run_case` 协议下发 Agent（输入绑定注入 `resourceBindings`），同步返回终态。阶段审批、截图产物和报告归档仍未提供。详见：[配置任务运行域](2026-09-19-configuration-task-run-domain.md)，用户说明：[配置任务管理](../configuration-task.md)。
 
 - 配置任务资源与 Agent 传输切片上线：在资源元数据表基础上新增资源传输表和服务端 `begin/chunk/commit` 编排，绑定 Agent WebSocket `session_id`，只有 Agent commit 返回的实际大小和 SHA-256 与资源元数据匹配时才进入 `READY`；旧 `ready` 入口不能绕过 Agent commit。资源创建者范围、已登记 Agent 和在线 session 校验已接入，资源 ID 继续按字符串返回。详见：[配置任务资源与 Agent 传输切片](2026-09-19-configuration-task-resource.md)。

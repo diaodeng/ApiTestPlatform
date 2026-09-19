@@ -297,6 +297,19 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
             WebCaseService.handle_agent_recording_event(event_db, agent_code, message_data)
             return True
         if message_type in ("web_run_step", "web_run_status", "web_run_finished", "web_run_error"):
+            # 配置任务运行与 Web 用例运行共用 web_run_* 事件；先按 ID+Agent 归属
+            # 尝试配置任务运行表，未命中再走 Web 用例链路，保持既有语义不变。
+            try:
+                from modules.configuration_task.service.task_run_service import ConfigurationTaskRunService
+
+                if ConfigurationTaskRunService.handle_agent_run_event(event_db, agent_code, message_data):
+                    return True
+            except Exception as config_exc:
+                event_db.rollback()
+                logger.warning(
+                    f"配置任务运行事件处理未命中或异常，回退 Web 用例链路: agent={agent_code}, "
+                    f"type={message_type}, error={config_exc}"
+                )
             WebCaseService.handle_agent_run_event(event_db, agent_code, message_data)
             return True
         if message_type in ("ai_analysis_step", "ai_analysis_status", "ai_analysis_finished", "ai_analysis_error"):

@@ -172,6 +172,9 @@ class TaskRunCreateModel(TaskBaseModel):
     agent_code: str | None = Field(default=None, min_length=1, max_length=128)
     version_no: int | None = Field(default=None, ge=1)
     trigger_type: str = Field(default="manual", max_length=32)
+    manual_login_enabled: bool = False
+    manual_login_wait_sec: int = Field(default=120, ge=1, le=3600)
+    timeout_seconds: int | None = Field(default=None, ge=30, le=21600)
 
     @field_validator("agent_code", "trigger_type", mode="before")
     @classmethod
@@ -180,6 +183,12 @@ class TaskRunCreateModel(TaskBaseModel):
         if value is None:
             return None
         return str(value).strip() or None
+
+
+class TaskRunStopModel(TaskBaseModel):
+    """停止或取消运行请求。"""
+
+    reason: str = Field(default="", max_length=200)
 
 
 class TaskRunDetailModel(TaskBaseModel):

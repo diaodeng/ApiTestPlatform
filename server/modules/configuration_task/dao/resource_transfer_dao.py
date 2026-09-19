@@ -16,6 +16,20 @@ class ResourceTransferDao:
         return db.query(ResourceTransfer).filter(ResourceTransfer.transfer_id == transfer_id).first()
 
     @classmethod
+    def list_expired_active_transfers(cls, db: Session, limit: int = 200) -> list[ResourceTransfer]:
+        """查询已超过 TTL 的活动传输，供过期清理任务收敛。"""
+        return (
+            db.query(ResourceTransfer)
+            .filter(
+                ResourceTransfer.status.in_(["PENDING", "UPLOADING"]),
+                ResourceTransfer.expires_at.isnot(None),
+                ResourceTransfer.expires_at <= datetime.now(),
+            )
+            .limit(limit)
+            .all()
+        )
+
+    @classmethod
     def get_active_by_resource(cls, db: Session, resource_id: int) -> ResourceTransfer | None:
         """查询资源当前仍在进行中的传输。"""
         return (
