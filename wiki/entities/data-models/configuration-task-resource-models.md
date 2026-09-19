@@ -18,7 +18,7 @@ related_files:
 
 # 配置任务资源与运行数据模型
 
-本页定义门店配置任务的任务版本、运行阶段、输入文件和截图产物模型。它是后续实现的设计契约，当前不代表数据库表已经创建。
+本页定义门店配置任务的任务版本、运行阶段、输入文件和截图产物模型。其中资源对象与资源传输表已在当前切片实现，任务版本、运行阶段、输入绑定和报告产物仍是后续设计契约；未实现部分不能按已上线接口使用。
 
 ```mermaid
 erDiagram
@@ -98,14 +98,74 @@ erDiagram
 
 服务端保存的是资源身份、元数据和 Provider locator 快照，不保存 Agent 本地绝对路径作为业务契约。Agent 侧可以维护 `resource_id -> 受控相对路径` 的 manifest。
 
-### `resource_reference`
+### `resource_transfer`
+
+当前切片新增 `configuration_task_resource_transfer`，记录服务端向 Agent 发布资源的一次传输，不保存文件正文。关键字段包括：
+
+| 字段 | 说明 |
+|---|---|
+| `transfer_id` | 受控字符串传输 ID，同时作为幂等键和主键 |
+| `resource_id` | 资源对象 BIGINT ID；对外响应序列化为字符串 |
+| `agent_code` / `session_id` | 目标 Agent 及开始传输时绑定的 WebSocket 会话 |
+| `status` | `PENDING`、`UPLOADING`、`COMPLETED`、`FAILED` 或 `EXPIRED` |
+| `expected_size` / `expected_sha256` / `version` | 从资源登记复制的不可变校验快照 |
+| `received_bytes` / `received_chunks` | Agent 已确认的接收统计 |
+| `expires_at` / `completed_at` | 传输 TTL 和完成时间 |
+| `error_code` / `error_message` | 最近一次脱敏错误摘要 |
+| `create_by` / `last_audit_at` / `audit_message` | 创建者和关键状态变更审计 |
+
+传输 ID、资源 ID、Agent 编码和 WebSocket session 必须在每一步同时匹配；不同 session 的迟到响应不能覆盖当前传输。资源对象和传输表分别由 `20260919_configuration_task_resource_object.sql`、`20260919_configuration_task_resource_transfer.sql` 创建，生产环境应执行正式迁移，不以应用启动时 `create_all()` 代替迁移。
+
+资源对象的 `(agent_code, object_key, version)` 具有唯一约束，重复登记返回同一资源身份，不以文件名模糊匹配替代资源身份。
+
+## 当前资源 API 与状态联动
+
+服务端当前提供三段式传输接口：
+
+```text
+POST /configuration-tasks/resources/{resourceId}/transfers
+POST /configuration-tasks/resources/{resourceId}/transfers/{transferId}/chunks
+POST /configuration-tasks/resources/{resourceId}/transfers/{transferId}/commit
+```
+
+请求体由 Pydantic 模型校验。`chunk` 仅接受受限 Base64，服务端核对解码字节数和分片 SHA-256 后再转发 Agent；响应只返回状态、统计和错误摘要，不返回文件正文。Agent commit 返回的实际大小和 SHA-256 必须再次匹配资源元数据，资源才允许进入 `READY`。
+
+资源状态的当前有效路径为：
+
+```text
+PENDING -> UPLOADING -> READY
+PENDING/UPLOADING -> FAILED
+PENDING/UPLOADING -> EXPIRED（传输记录）
+```
+
+旧 `POST /configuration-tasks/resources/{resourceId}/ready` 仅作为兼容入口保留，不能凭调用方提交的大小和 SHA-256 绕过 Agent commit；调用该入口不会直接把资源置为 `READY`。
+### `configuration_task` / `configuration_task_version`
+
+当前切片已实现任务定义和版本快照两张表：
+
+- `configuration_task`：任务名称、描述、默认执行 Agent、业务变量 JSON、状态（`ACTIVE/DISABLED`）和当前发布版本指针（`current_version_id/current_version_no`）；
+- `configuration_task_version`：`(task_id, version_no)` 唯一，状态为 `DRAFT/PUBLISHED/DEPRECATED`，冻结 `start_url`、浏览器、凭证绑定 ID、变量、Web 步骤 JSON 和 `input_bindings_json`（fileKey -> 资源 ID 列表）；发布后不可原地修改。
+
+发布版本时服务端校验：至少一个启用步骤；每个绑定资源存在、状态为 `READY`、且资源 `agent_code` 与任务执行 Agent 一致。发布成功后版本指针指向新版本。
+
+### `configuration_task_run`
+
+运行实例在创建时冻结执行版本和输入快照，运行后只追加状态和结果：
+
+- `task_run_id`（Snowflake BIGINT，对外字符串化）、`task_id`、`task_version_id`、`version_no`；
+- `agent_code`、`trigger_type`、状态 `PENDING/RUNNING/SUCCESS/FAILED/CANCELLED`；
+- `input_snapshot_json`：每个 fileKey 下资源的版本、大小、SHA-256、原始文件名、Agent 和状态摘要；
+- `run_params_json`：运行时变量、浏览器和凭证绑定快照；
+- `result_json`、`error_code`、`error_message`、开始/结束时间和时长。
+
+执行时服务端把 `input_snapshot` 转换为 `runtimeOptions.resourceBindings` 下发既有 `run_case` 协议，由 Agent 端 `upload_file` 资源解析逻辑消费；文件正文和 Agent 绝对路径不出现在运行记录中。运行同步等待 Agent 返回后进入 `SUCCESS/FAILED` 终态；取消、恢复和阶段重试属于后续能力。
+
 
 资源引用表将资源与任务、运行、阶段或其他业务对象关联，至少包括：
 
 - `resource_id`；
 - `business_type`、`business_id`；
 - `relation_type`（输入、截图、日志、报告等）；
-- 所属项目、部门或租户范围；
 - 创建人和创建时间。
 
 有引用的资源不能直接物理删除；删除应先进入 `DELETING`，确认没有有效引用后再由 Provider 执行。
@@ -113,8 +173,6 @@ erDiagram
 ### `task_input_binding`
 
 任务版本绑定逻辑文件 Key 和资源版本，例如 `price_tag`、`promotion`、`goods`。运行创建时把绑定复制为输入快照，记录实际使用的 `resource_id`、版本、大小和 SHA-256。
-
-任务模板只引用 `fileKey` 或资源 ID，不引用 Agent 本地绝对路径。替换新文件会创建新版本，不改变历史运行的输入快照。
 
 ### `task_artifact`
 

@@ -18,7 +18,7 @@ related_files:
 
 # 门店配置文件存储流程
 
-本流程说明文件首期只保存在执行 Agent、服务端记录资源 ID，以及后续接入 SFTP Provider 时的统一处理方式。
+本流程区分当前已实现的资源传输切片与后续配置任务运行域。当前输入文件仍以 Agent 受控目录为最终存储位置，服务端保存资源元数据和传输状态，并通过 `begin/chunk/commit` 将受限分片发送到已登记且在线的 Agent；任务版本绑定、SFTP、下载回传和报告归档仍未实现。
 
 ```mermaid
 sequenceDiagram
@@ -86,29 +86,28 @@ sequenceDiagram
 
 ## 3. Agent 本地文件流程
 
-### 3.1 注册或发布
+### 3.1 服务端三段式传输
 
-文件可以由操作人在 Agent 本地准备，也可以由 Agent 运行前生成。服务端先创建资源 ID和 `PENDING` 记录，再授权 Agent 通过 manifest 注册或发布：
+当前服务端资源传输按以下接口编排，不直接接收 multipart 文件：
 
 ```text
-PENDING
-  -> file_publish_begin
-  -> .part 写入/校验
-  -> file_publish_commit
-  -> READY
+POST /configuration-tasks/resources/{resourceId}/transfers
+  -> PENDING -> UPLOADING
+POST /configuration-tasks/resources/{resourceId}/transfers/{transferId}/chunks
+  -> 校验 Base64、chunkBytes、chunkSha256 后转发 Agent
+POST /configuration-tasks/resources/{resourceId}/transfers/{transferId}/commit
+  -> Agent 重新计算完整大小/SHA-256
+  -> transfer COMPLETED，resource READY
 ```
 
-如果服务端只记录一条元数据而不把内容复制到服务端，必须同时记录：
+`begin` 只允许资源创建者或管理员操作，并要求资源所属 Agent 已登记且当前在线；传输记录绑定开始时的 `session_id`。每个 `chunk` 和 `commit` 都重新校验资源、传输、Agent 和 session，不同连接的迟到响应不能推进状态。Agent commit 返回的实际元数据不匹配时，传输和资源进入 `FAILED`。
 
-- 所属 Agent；
-- Agent 资源相对 locator；
-- 文件大小和 SHA-256；
-- 可用时间和过期时间；
-- 任务或商家引用。
+旧 `ready` 入口仅为兼容保留，不能绕过 Agent commit 将资源置为 `READY`。当前权限边界是登录用户权限、资源创建者范围、已登记 Agent 和当前 WebSocket 会话；现有 Agent 表尚无项目/商家/租户行级授权字段，因此本切片不伪造更细的范围控制。
 
-Agent 断线、文件被删除、校验失败时资源不得伪装为 READY。
+### 3.2 Agent 本地落盘
 
-### 3.2 执行时使用
+Agent 收到 `file_publish_begin` 后在 `storage/resources/.tmp/` 创建 `.part`，接收分片后在 commit 阶段重新计算完整大小和 SHA-256，校验通过才原子 rename 并更新 manifest。服务端不会保存 Agent 绝对路径，也不会把文件正文写入普通响应。
+
 
 运行阶段通过 `fileKey` 获取输入资源。Agent 先确认：
 

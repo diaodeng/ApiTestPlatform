@@ -16,6 +16,29 @@ class ResourceDao:
         return db.query(ResourceObject).filter(ResourceObject.resource_id == resource_id).first()
 
     @classmethod
+    def get_by_identity(cls, db: Session, agent_code: str, object_key: str, version: int) -> ResourceObject | None:
+        """按 Agent、受控 key 和版本精确查询资源身份。"""
+        return (
+            db.query(ResourceObject)
+            .filter(
+                ResourceObject.agent_code == agent_code,
+                ResourceObject.object_key == object_key,
+                ResourceObject.version == version,
+            )
+            .first()
+        )
+
+    @classmethod
+    def get_visible_resource(
+        cls, db: Session, resource_id: int, operator: str | None, is_admin: bool
+    ) -> ResourceObject | None:
+        """按当前用户范围查询资源；管理员可查看全部资源。"""
+        query = db.query(ResourceObject).filter(ResourceObject.resource_id == resource_id)
+        if not is_admin:
+            query = query.filter(ResourceObject.create_by == (operator or ""))
+        return query.first()
+
+    @classmethod
     def list_resources(
         cls,
         db: Session,
@@ -24,8 +47,10 @@ class ResourceDao:
         status: str | None = None,
         keyword: str | None = None,
         limit: int = 50,
+        operator: str | None = None,
+        is_admin: bool = False,
     ) -> list[ResourceObject]:
-        """按查询条件返回资源实体，业务过滤规则由服务层决定。"""
+        """按查询条件和用户范围返回资源实体。"""
         query = db.query(ResourceObject)
         if resource_id is not None:
             query = query.filter(ResourceObject.resource_id == resource_id)
@@ -35,6 +60,8 @@ class ResourceDao:
             query = query.filter(ResourceObject.status == status)
         if keyword:
             query = query.filter(ResourceObject.original_file_name.like(f"%{keyword}%"))
+        if not is_admin:
+            query = query.filter(ResourceObject.create_by == (operator or ""))
         return query.order_by(ResourceObject.resource_id.desc()).limit(limit).all()
 
     @classmethod

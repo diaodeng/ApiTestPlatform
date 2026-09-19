@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,6 +25,7 @@ from module_qtr.service.agent_service import (
     AgentResponseEnum,
     HandleResponse,
     agent_loops,
+    agent_sessions,
     agents,
     handle_response,
     response_futures,
@@ -59,9 +61,12 @@ agent_status = defaultdict(dict)
 event_chunks = defaultdict(lambda: {"chunks": {}, "total": 0, "first_seen_at": 0.0})
 _event_chunks_last_sweep_log_at = {"ts": 0.0}
 
-# 孤儿响应分片注册表：服务重启/等待方超时后，Agent 补交的响应没有等待者，
-# 这里先在内存攒齐完整响应，再写入 Redis 结果缓存，供任务恢复逻辑补写回。
-# 结构：request_id -> {"chunks": [...], "first_seen_at": monotonic, "redis": redis实例}
+# Agent连接会话注册表：值保存当前连接对象和会话ID，旧连接不能清理新连接。
+agent_connection_sessions: dict[str, dict[str, Any]] = {}
+# response_chunk 单请求保护上限，避免异常 Agent 无限占用内存。
+RESPONSE_CHUNK_MAX_PIECES = 4096
+RESPONSE_CHUNK_MAX_CHARS = 20 * 1024 * 1024
+# 孤儿响应分片注册表：等待方不存在时暂存，完整后写入 Redis 结果缓存。
 orphan_response_chunks: dict[str, dict[str, Any]] = {}
 
 
@@ -118,6 +123,28 @@ def _prune_response_future_chunks(now_ts: float) -> int:
     return removed
 
 
+def _discard_response_future(request_id: str, reason: str) -> None:
+    """取消并移除异常响应请求，避免调用方继续等待已失效的 Future。"""
+    request_state = response_futures.pop(request_id, None)
+    if request_state:
+        _cancel_future_threadsafe(request_state)
+        logger.warning(f"响应请求已丢弃: request_id={request_id}, reason={reason}")
+
+
+def _prune_orphan_response_chunks(now_ts: float) -> int:
+    """清理超时未完成的孤儿响应分片，避免迟到响应缓存无限增长。"""
+    expired_ids = [
+        request_id
+        for request_id, entry in orphan_response_chunks.items()
+        if now_ts - entry.get("first_seen_at", 0.0) > CHUNK_REGISTRY_EXPIRE_SECONDS
+    ]
+    for request_id in expired_ids:
+        orphan_response_chunks.pop(request_id, None)
+    if expired_ids:
+        logger.warning(f"已清理过期的孤儿响应分片 {len(expired_ids)} 个")
+    return len(expired_ids)
+
+
 async def _stash_orphan_response_chunk(
     agent_code: str,
     request_id: str,
@@ -137,6 +164,7 @@ async def _stash_orphan_response_chunk(
     :param websocket: 当前 WebSocket 连接（仅用于 app 引用获取 Redis）
     :return: 无
     """
+    _prune_orphan_response_chunks(time.monotonic())
     # 服务重启后尚无 Redis 可用时无法缓存，只能丢弃并告警。
     app_state = getattr(websocket, "app", None)
     redis = getattr(getattr(app_state, "state", None), "redis", None)
@@ -145,18 +173,51 @@ async def _stash_orphan_response_chunk(
         return
 
     entry = orphan_response_chunks.get(request_id)
+    try:
+        index = int(message_data.get("index"))
+        total = int(message_data.get("total"))
+    except (TypeError, ValueError):
+        logger.warning(f"孤儿响应分片位置不合法: agent={agent_code}, request_id={request_id}")
+        return
+    if total <= 0 or total > RESPONSE_CHUNK_MAX_PIECES or index < 0 or index >= total:
+        logger.warning(
+            f"孤儿响应分片范围不合法: agent={agent_code}, request_id={request_id}, index={index}, total={total}"
+        )
+        return
     if entry is None:
-        entry = {"chunks": [], "first_seen_at": time.monotonic()}
+        entry = {
+            "chunks": {},
+            "total": total,
+            "chunks_chars": 0,
+            "first_seen_at": time.monotonic(),
+        }
         orphan_response_chunks[request_id] = entry
-    entry["chunks"].append(message_data.get("data") or "")
+    if entry.get("total") != total:
+        orphan_response_chunks.pop(request_id, None)
+        logger.warning(f"孤儿响应分片总数变更，已丢弃: agent={agent_code}, request_id={request_id}")
+        return
+    data_chunk = message_data.get("data") or ""
+    old_chunk = entry["chunks"].get(index)
+    if old_chunk is not None:
+        if old_chunk != data_chunk:
+            orphan_response_chunks.pop(request_id, None)
+            logger.warning(f"孤儿响应重复分片内容不一致，已丢弃: agent={agent_code}, request_id={request_id}")
+        return
+    next_chars = entry.get("chunks_chars", 0) + len(data_chunk)
+    if next_chars > RESPONSE_CHUNK_MAX_CHARS:
+        orphan_response_chunks.pop(request_id, None)
+        logger.warning(f"孤儿响应分片累计大小超限，已丢弃: agent={agent_code}, request_id={request_id}")
+        return
+    entry["chunks"][index] = data_chunk
+    entry["chunks_chars"] = next_chars
 
-    if not message_data.get("finished"):
+    if not message_data.get("finished") or len(entry["chunks"]) < total:
         return
 
     # 已凑齐：解压并写入 Redis 结果缓存，随后清理内存条目。
     orphan_response_chunks.pop(request_id, None)
     try:
-        complete_payload = "".join(entry["chunks"])
+        complete_payload = "".join(entry["chunks"].get(i, "") for i in range(total))
         response_data = decompress_str_to_dict(complete_payload)
         validated = HandleResponse.validate_transport_payload(response_data)
         # 与调度侧 _store_result 保持相同序列化方式，确保缓存格式一致。
@@ -167,13 +228,9 @@ async def _stash_orphan_response_chunk(
             # 与调度侧正常结果缓存使用同一 TTL，保证恢复窗口内均可读取。
             ex=AGENT_AI_ANALYSIS_RESULT_TTL_SECONDS,
         )
-        logger.info(
-            f"迟到响应已写入结果缓存，等待任务恢复读取: agent={agent_code}, request_id={request_id}"
-        )
+        logger.info(f"迟到响应已写入结果缓存，等待任务恢复读取: agent={agent_code}, request_id={request_id}")
     except Exception as exc:
-        logger.warning(
-            f"迟到响应写入结果缓存失败，已丢弃: agent={agent_code}, request_id={request_id}, error={exc}"
-        )
+        logger.warning(f"迟到响应写入结果缓存失败，已丢弃: agent={agent_code}, request_id={request_id}, error={exc}")
 
 
 def _sanitize_log_value(value, *, key: str | None = None):
@@ -244,8 +301,7 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
             return True
         if message_type in ("ai_analysis_step", "ai_analysis_status", "ai_analysis_finished", "ai_analysis_error"):
             logger.info(
-                f"AI分析Agent事件，agent={agent_code}, type={message_type}, "
-                f"data={_summarize_message(message_data)}"
+                f"AI分析Agent事件，agent={agent_code}, type={message_type}, data={_summarize_message(message_data)}"
             )
             return True
         if message_type in (
@@ -273,7 +329,6 @@ def change_agent_status(current_db, agent):
             AgentService.edit_agent_services_controller(current_db, agent_info)
     except Exception as e:
         logger.error(f"改变agent状态失败:{e}")
-
 
 
 def _resolve_future_loop(request_state: dict[str, Any] | None):
@@ -320,28 +375,72 @@ def _cancel_future_threadsafe(request_state: dict[str, Any]) -> None:
     response_future.cancel()
 
 
+def _response_future_matches_connection(
+    request_state: dict[str, Any],
+    agent_code: str,
+    session_id: str,
+) -> bool:
+    """判断响应 Future 是否属于当前 Agent 和 WebSocket 会话。"""
+    expected_agent = request_state.get("agent_code")
+    expected_session = request_state.get("session_id")
+    return expected_agent == agent_code and (
+        not expected_session or expected_session == session_id
+    )
+
+
 class ConnectionManager:
     def __init__(self):
         self.agents = agents
 
-    async def connect(self, agent_code: str, websocket: WebSocket):
+    async def connect(self, agent_code: str, websocket: WebSocket) -> str:
+        """注册 Agent 当前连接并返回连接会话 ID。"""
         await websocket.accept()
+        session_id = uuid.uuid4().hex
+        previous = agent_connection_sessions.get(agent_code)
+        agent_connection_sessions[agent_code] = {
+            "websocket": websocket,
+            "session_id": session_id,
+        }
         self.agents[agent_code] = websocket
         agents[agent_code] = websocket
         agent_loops[agent_code] = asyncio.get_running_loop()
+        agent_sessions[agent_code] = session_id
         agent_status.setdefault(agent_code, {})
-        # 连接建立即初始化最后收信时间：若客户端连接后完全静默（异常场景），
-        # 心跳超时判定也能在阈值后将其识别为离线，而不是永远跳过。
         agent_status[agent_code]["heart_time"] = datetime.now()
-        logger.info(f"Client connected: {self.agents[agent_code].client_state}")
+        if previous and previous.get("websocket") is not websocket:
+            try:
+                await previous["websocket"].close(code=4001, reason="Agent新连接已接管")
+            except Exception:
+                pass
+        logger.info(f"Client connected: agent_code={agent_code}, session_id={session_id}")
+        return session_id
 
-    async def disconnect(self, agent_code: str, close_code):
-        websocket = self.agents.pop(agent_code, None)
+    async def disconnect(
+        self,
+        agent_code: str,
+        close_code: int,
+        session_id: str | None = None,
+        websocket: WebSocket | None = None,
+    ):
+        """仅断开当前会话，避免旧连接清理新连接。"""
+        current = agent_connection_sessions.get(agent_code)
+        if session_id and (not current or current.get("session_id") != session_id):
+            return
+        if current and websocket is not None and current.get("websocket") is not websocket:
+            return
+        if current:
+            websocket = current.get("websocket")
+            agent_connection_sessions.pop(agent_code, None)
+        else:
+            websocket = self.agents.get(agent_code)
+        self.agents.pop(agent_code, None)
+        agents.pop(agent_code, None)
         agent_loops.pop(agent_code, None)
+        agent_sessions.pop(agent_code, None)
         if websocket is None:
             return
         try:
-            logger.info(f"Client disconnected: {getattr(websocket, 'client_state', None)}, close code: {close_code}")
+            logger.info(f"Client disconnected: agent_code={agent_code}, close_code={close_code}")
             await websocket.close(code=close_code)
         except Exception:
             pass
@@ -357,8 +456,10 @@ class ConnectionManager:
         :return: 无
         """
         agent_status.pop(agent_code, None)
-        websocket = self.agents.pop(agent_code, None)
-        agent_loops.pop(agent_code, None)
+        current = agent_connection_sessions.get(agent_code)
+        websocket = current.get("websocket") if current else self.agents.get(agent_code)
+        session_id = current.get("session_id") if current else None
+        await self.disconnect(agent_code, close_code=1011, session_id=session_id, websocket=websocket)
         change_agent_status(db, agent_code)
         if websocket is None:
             return
@@ -377,6 +478,7 @@ class ConnectionManager:
                 now_mono = time.monotonic()
                 _sweep_stale_event_chunks(now_mono)
                 _prune_response_future_chunks(now_mono)
+                _prune_orphan_response_chunks(now_mono)
                 # 离线判定只依赖"最后一次收到该 Agent 消息的时间"（含 pong，由端点
                 # receive 循环刷新），心跳发送侧不再无条件刷新该时间，保证判定真实。
                 # 此前"存在未完成请求则跳过判定"的逻辑已移除：AI Worker 在客户端
@@ -505,7 +607,7 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
     :return: 无
     """
     # await websocket.accept()
-    await manager.connect(agent_code, websocket)
+    session_id = await manager.connect(agent_code, websocket)
     # agents[agent_code] = websocket
     agent_obj = AgentModel()
     agent_obj.agent_code = snowIdWorker.get_id()
@@ -527,10 +629,15 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
 
     try:
         while True:
-            current_websocket = manager.agents.get(agent_code)
-            if current_websocket is None:
-                logger.info(f"agent {agent_code} 已从连接表移除，结束 WebSocket 循环")
+            current_connection = agent_connection_sessions.get(agent_code)
+            if (
+                not current_connection
+                or current_connection.get("session_id") != session_id
+                or current_connection.get("websocket") is not websocket
+            ):
+                logger.info(f"agent {agent_code} 会话已被新连接接管，结束旧 WebSocket 循环")
                 break
+            current_websocket = websocket
             data = await current_websocket.receive_text()
             agent_status[agent_code]["heart_status"] = True
             agent_status[agent_code]["heart_time"] = datetime.now()
@@ -545,7 +652,7 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
             elif message_data.get("type") == "response_chunk":
                 # 获取分片信息
                 request_id = message_data["request_id"]
-                data_chunk = message_data["data"]
+                data_chunk = message_data.get("data") or ""
                 request_state = response_futures.get(request_id)
                 if not request_state:
                     # 等待方已不存在（服务重启/超时/取消/断连清理）：不再直接丢弃，
@@ -554,30 +661,69 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                     await _stash_orphan_response_chunk(agent_code, request_id, message_data, current_websocket)
                     continue
 
-                # 将分片存储在字典中
+                if not _response_future_matches_connection(
+                    request_state,
+                    agent_code,
+                    session_id,
+                ):
+                    expected_agent = request_state.get("agent_code")
+                    expected_session = request_state.get("session_id")
+                    logger.warning(
+                        f"丢弃错误 Agent 响应分片: request_id={request_id}, current_agent={agent_code}, "
+                        f"expected_agent={expected_agent}, current_session={session_id}, "
+                        f"expected_session={expected_session}"
+                    )
+                    continue
+                try:
+                    index = int(message_data.get("index"))
+                    total = int(message_data.get("total"))
+                except (TypeError, ValueError):
+                    logger.warning(f"响应分片位置不合法: agent={agent_code}, request_id={request_id}")
+                    continue
+                if total <= 0 or total > RESPONSE_CHUNK_MAX_PIECES or index < 0 or index >= total:
+                    logger.warning(
+                        f"响应分片范围不合法: agent={agent_code}, request_id={request_id}, index={index}, total={total}"
+                    )
+                    continue
+                # 将分片按 index 存储，允许乱序但拒绝同 index 不同内容。
                 if "chunks" not in request_state:
-                    request_state["chunks"] = []
+                    request_state["chunks"] = {}
+                    request_state["chunks_total"] = total
+                    request_state["chunks_chars"] = 0
                     request_state["chunks_first_seen_at"] = time.monotonic()
+                if request_state.get("chunks_total") != total:
+                    _discard_response_future(request_id, "响应分片总数变更")
+                    continue
+                old_chunk = request_state["chunks"].get(index)
+                if old_chunk is not None:
+                    if old_chunk != data_chunk:
+                        logger.warning(
+                            f"响应重复分片内容不一致: agent={agent_code}, request_id={request_id}, index={index}"
+                        )
+                        _discard_response_future(request_id, "重复响应分片内容冲突")
+                    continue
+                next_chars = request_state.get("chunks_chars", 0) + len(data_chunk)
+                if next_chars > RESPONSE_CHUNK_MAX_CHARS:
+                    _discard_response_future(request_id, "响应分片累计大小超限")
+                    continue
+                request_state["chunks"][index] = data_chunk
+                request_state["chunks_chars"] = next_chars
 
-                # 存储分片数据
-                request_state["chunks"].append(data_chunk)
-
-                # 检查是否收到了所有的分片
-                if message_data["finished"]:
-                    # 重新组装消息
+                # 只有收齐所有分片且末片标记 finished 才组装响应。
+                if message_data.get("finished") and len(request_state["chunks"]) >= total:
                     current_finished_request = response_futures.pop(request_id, None)
                     if not current_finished_request:
                         continue
                     try:
-                        chunks = current_finished_request.pop("chunks", [])
+                        chunks = current_finished_request.pop("chunks", {})
+                        current_finished_request.pop("chunks_total", None)
+                        current_finished_request.pop("chunks_chars", None)
                         current_finished_request.pop("chunks_first_seen_at", None)
-                        complete_message = "".join(chunks)
+                        complete_message = "".join(chunks.get(i, "") for i in range(total))
                         response_data = decompress_str_to_dict(complete_message)
                         response_keys = (
                             list(response_data.keys()) if isinstance(response_data, dict) else type(response_data)
                         )
-
-                        # 检查是否有等待这个响应的Future对象
                         response_future = current_finished_request["future"]
                         logger.info(
                             f"收到完整响应，准备回写 Future | agent={agent_code}, request_id={request_id}, "
@@ -585,12 +731,14 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
                             f"response_keys={response_keys}"
                         )
                         if response_future and not response_future.done():
-                            # Future 由发送方线程创建，这里必须按所属事件循环线程安全回写。
                             _complete_future_threadsafe(current_finished_request, response_data)
-                        del complete_message
-                        del response_data
+                    except Exception as exc:
+                        _cancel_future_threadsafe(current_finished_request)
+                        logger.warning(f"响应分片组装失败: agent={agent_code}, request_id={request_id}, error={exc}")
                     finally:
                         current_finished_request.pop("chunks", None)
+                        current_finished_request.pop("chunks_total", None)
+                        current_finished_request.pop("chunks_chars", None)
                         current_finished_request.pop("chunks_first_seen_at", None)
             elif message_data.get("type") == "event_chunk":
                 chunk_id = f"{agent_code}:{message_data.get('chunk_id')}"
@@ -636,24 +784,39 @@ async def websocket_endpoint(agent_code: str, websocket: WebSocket, db: Session 
         logger.exception(e)
         logger.error(f"Error with {agent_code}: connection closed, {e}")
     finally:
+        current_session = agent_connection_sessions.get(agent_code)
+        owns_connection = bool(
+            current_session
+            and current_session.get("session_id") == session_id
+            and current_session.get("websocket") is websocket
+        )
         try:
             for request_id, request_state in list(response_futures.items()):
                 if request_state.get("agent_code") != agent_code:
                     continue
+                if request_state.get("session_id") not in {"", session_id}:
+                    continue
                 _cancel_future_threadsafe(request_state)
                 response_futures.pop(request_id, None)
-            for chunk_key in [key for key in event_chunks.keys() if str(key).startswith(f"{agent_code}:")]:
+            for chunk_key in [
+                key for key in event_chunks.keys() if str(key).startswith(f"{agent_code}:") and owns_connection
+            ]:
                 event_chunks.pop(chunk_key, None)
         except Exception:
             pass
-        finally:
-            await manager.disconnect(agent_code, close_code=1000)
+        if owns_connection:
+            await manager.disconnect(
+                agent_code,
+                close_code=1000,
+                session_id=session_id,
+                websocket=websocket,
+            )
             agent_info = AgentService.get_agent_detail_services(db, agent_code)
             if agent_info:
                 agent_info.status = 1
                 agent_info.offline_time = datetime.now()
                 AgentService.edit_agent_services(db, agent_info)
-            logger.info(f"Connection closed for agent: {agent_code}")
+            logger.info(f"Connection closed for agent: {agent_code}, session_id={session_id}")
 
 
 @agentController.post("/send/{agent_code}")
@@ -686,9 +849,3 @@ async def send_ai_analysis_message(
     except Exception as exc:
         logger.exception(exc)
         return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(exc)))
-
-
-
-
-
-

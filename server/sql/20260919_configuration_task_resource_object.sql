@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS configuration_task_resource_object (
   audit_message VARCHAR(500) NOT NULL DEFAULT '' COMMENT '审计摘要',
   remark TEXT NULL COMMENT '备注',
   PRIMARY KEY (resource_id),
+  UNIQUE KEY uk_ct_resource_agent_object_version (agent_code, object_key, version),
   KEY idx_ct_resource_agent_status (agent_code, status, resource_id),
   KEY idx_ct_resource_expire (status, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='配置任务资源对象元数据';

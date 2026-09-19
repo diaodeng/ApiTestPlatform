@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
@@ -16,6 +16,7 @@ class ResourceObject(Base):
     __table_args__ = (
         Index("idx_ct_resource_agent_status", "agent_code", "status", "resource_id"),
         Index("idx_ct_resource_expire", "status", "expires_at"),
+        UniqueConstraint("agent_code", "object_key", "version", name="uk_ct_resource_agent_object_version"),
     )
 
     resource_id: Mapped[int] = mapped_column(

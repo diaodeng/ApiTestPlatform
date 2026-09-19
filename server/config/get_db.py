@@ -65,6 +65,15 @@ async def init_create_table():
     from modules.configuration_task.entity.do import (
         resource_object_do as _configuration_task_resource_object_do,  # noqa: F401
     )
+    from modules.configuration_task.entity.do import (
+        resource_transfer_do as _configuration_task_resource_transfer_do,  # noqa: F401
+    )
+    from modules.configuration_task.entity.do import (
+        task_do as _configuration_task_task_do,  # noqa: F401
+    )
+    from modules.configuration_task.entity.do import (
+        task_run_do as _configuration_task_task_run_do,  # noqa: F401
+    )
 
     Base.metadata.create_all(bind=engine)
     _ensure_large_sys_config_value_column()
@@ -555,9 +564,7 @@ def _ensure_ai_provider_preferred_executor_column():
             if any(str(item.get("name") or "") == "preferred_executor" for item in rows):
                 return
             logger.info("检测到 sqlite sys_ai_provider 缺少 preferred_executor，自动补齐")
-            connection.execute(
-                text("ALTER TABLE sys_ai_provider ADD COLUMN preferred_executor VARCHAR(64)")
-            )
+            connection.execute(text("ALTER TABLE sys_ai_provider ADD COLUMN preferred_executor VARCHAR(64)"))
     except Exception as exc:
         logger.warning(f"检查或升级 sys_ai_provider.preferred_executor 字段失败: {exc}")
 
@@ -631,6 +638,7 @@ def _ensure_ai_provider_observability_columns():
                 connection.execute(text(f"ALTER TABLE sys_ai_provider ADD COLUMN {column_name} {column_type}"))
     except Exception as exc:
         logger.warning(f"检查或升级 sys_ai_provider 可观测字段失败: {exc}")
+
 
 def _ensure_ticket_ai_analysis_token_columns():
     """
@@ -760,7 +768,9 @@ def _ensure_ticket_ai_analysis_fingerprint_columns():
                               AND TABLE_NAME = 'ticket_ai_analysis_task'
                             """
                         )
-                    ).mappings().all()
+                    )
+                    .mappings()
+                    .all()
                 }
                 if "request_fingerprint" not in existing_columns:
                     logger.info("检测到 ticket_ai_analysis_task 缺少 request_fingerprint，自动补齐")
@@ -778,16 +788,20 @@ def _ensure_ticket_ai_analysis_fingerprint_columns():
                             "COMMENT '成功结果唯一指纹' AFTER request_fingerprint"
                         )
                     )
-                index_rows = connection.execute(
-                    text(
-                        """
+                index_rows = (
+                    connection.execute(
+                        text(
+                            """
                         SELECT INDEX_NAME
                         FROM information_schema.STATISTICS
                         WHERE TABLE_SCHEMA = DATABASE()
                           AND TABLE_NAME = 'ticket_ai_analysis_task'
                         """
+                        )
                     )
-                ).mappings().all()
+                    .mappings()
+                    .all()
+                )
                 index_names = {str(row.get("INDEX_NAME") or "") for row in index_rows}
                 if "idx_ticket_ai_task_request_fingerprint" not in index_names:
                     connection.execute(
@@ -867,7 +881,9 @@ def _ensure_ticket_ai_analysis_active_lock():
                               AND TABLE_NAME = 'ticket_ai_analysis_task'
                             """
                         )
-                    ).mappings().all()
+                    )
+                    .mappings()
+                    .all()
                 }
                 if "active_lock" not in existing_columns:
                     logger.info("检测到 ticket_ai_analysis_task 缺少 active_lock，自动补齐")
@@ -891,13 +907,14 @@ def _ensure_ticket_ai_analysis_active_lock():
                               AND TABLE_NAME = 'ticket_ai_analysis_task'
                             """
                         )
-                    ).mappings().all()
+                    )
+                    .mappings()
+                    .all()
                 }
                 if "uk_ticket_ai_task_active_lock" not in index_names:
                     connection.execute(
                         text(
-                            "CREATE UNIQUE INDEX uk_ticket_ai_task_active_lock "
-                            "ON ticket_ai_analysis_task (active_lock)"
+                            "CREATE UNIQUE INDEX uk_ticket_ai_task_active_lock ON ticket_ai_analysis_task (active_lock)"
                         )
                     )
                 return
@@ -916,10 +933,7 @@ def _ensure_ticket_ai_analysis_active_lock():
             }
             if "uk_ticket_ai_task_active_lock" not in index_names:
                 connection.execute(
-                    text(
-                        "CREATE UNIQUE INDEX uk_ticket_ai_task_active_lock "
-                        "ON ticket_ai_analysis_task (active_lock)"
-                    )
+                    text("CREATE UNIQUE INDEX uk_ticket_ai_task_active_lock ON ticket_ai_analysis_task (active_lock)")
                 )
     except Exception as exc:
         logger.warning(f"检查或升级 ticket_ai_analysis_task 活跃锁字段失败: {exc}")

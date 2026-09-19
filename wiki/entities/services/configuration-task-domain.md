@@ -24,7 +24,7 @@ related_files:
 
 门店配置任务用于把“按商家、门店和环境执行一组配置 SOP，并留下截图、日志和输入文件版本”的实施工作结构化。它不是普通 Web 测试用例的别名，也不是一段可以无限扩大的录制脚本。
 
-本页是后续实现的领域设计，当前仅记录方案，尚未创建数据库表、接口或 Agent 命令。
+本页是配置任务运行域的领域设计。当前最小闭环已实现：任务定义、任务版本快照（含输入资源绑定）、运行实例创建与 Agent 执行；阶段编排、审批流、截图产物和报告归档仍是后续设计，未实现部分不能按已上线接口使用。
 
 ```mermaid
 graph TD
@@ -127,20 +127,17 @@ DRAFT
 
 首期采用人工参数化，不要求系统自动识别所有变量。录制数据、操作模板、配置任务版本和运行实例分别保存，避免一次临时录制污染已发布任务。
 
-## 服务边界（设计目标）
+## 服务边界（当前实现）
 
-后续实现建议按职责拆分，不继续膨胀 `web_case_service.py`：
+当前已按职责拆分到独立文件：
 
-- `ConfigurationTaskController`：Pydantic 契约、鉴权、异步包装和响应转换；
-- `ConfigurationTaskService`：任务定义和版本发布；
-- `ConfigurationTaskExecutionService`：创建运行快照、阶段编排、审批、取消、恢复和终态；
-- `ConfigurationTaskInputService`：资源注册、文件版本和任务绑定；
-- `ConfigurationTaskArtifactService`：截图、日志、报告产物登记和访问；
-- `WebActionTemplateService`：录制结果整理为可复用模板；
-- `ResourceStorageService`：Agent 本地和 SFTP Provider 的统一资源接口；
-- Agent 侧 `ConfigurationTaskRuntime`：调用共享 Web Runtime，不复制一套浏览器执行器。
+- `modules/configuration_task/controller/task_controller.py`：任务/版本/运行路由、Pydantic 契约、鉴权和线程池包装；
+- `modules/configuration_task/service/task_service.py`：任务 CRUD、版本草稿、发布校验（步骤非空、资源 READY、资源归属执行 Agent）；
+- `modules/configuration_task/service/task_run_service.py`：运行创建、输入快照冻结、`run_case` 下发和终态落库；
+- `modules/configuration_task/dao/task_dao.py`：任务、版本、运行的纯数据访问；
+- 运行执行复用 `WebCaseService._extract_webui_run_response` 和 `module_qtr` 的 `send_message`，不复制浏览器执行逻辑。
 
-Controller 不处理文件路径、SFTP 连接、Playwright 动作或业务状态机；定时任务只负责触发执行服务和检查停止标记。
+阶段编排、审批闸门、截图产物和报告归档仍按下方设计目标推进，属于后续切片。
 
 ## 文件和凭证原则
 

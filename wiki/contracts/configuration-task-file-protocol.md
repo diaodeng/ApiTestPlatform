@@ -19,7 +19,7 @@ related_files:
 
 # 配置任务文件协议
 
-本页定义门店配置任务所需的文件资源协议。当前 Agent 已提供独立的本地资源 manifest 与分片发布控制面；服务端业务资源授权、跨 Agent 调度、下载回传和 SFTP Provider 仍未在本切片实现。
+本页定义门店配置任务所需的文件资源协议。当前 Agent 已提供独立的本地资源 manifest 与分片发布控制面；服务端已补齐资源 begin/chunk/commit 编排和资源状态联动，但下载回传、SFTP Provider、任务级输入绑定和生产级 Token 认证仍未在本切片实现。
 
 ```mermaid
 sequenceDiagram
@@ -57,7 +57,7 @@ sequenceDiagram
 - locator 只允许 `resources/<resource_id>`，拒绝绝对路径、`..`、反斜杠、符号链接、目录和资源根外路径；对外错误不包含绝对路径。
 - 默认限制为单块 512 KiB、单文件 100 MiB、并发传输 4 个、未完成传输 TTL 30 分钟、资源 TTL 24 小时；服务构造器可注入测试限制。
 
-当前切片明确不实现服务端传输编排、任意文件读取、删除、目录浏览、下载授权、SFTP、服务端资源状态联动和 AI workspace 改造；Agent 本地协议与 Web `upload_file` 仅作为同一 Agent 进程内的可验证最小子集。
+当前切片已实现服务端资源传输编排、Agent 本地协议与 Web `upload_file` 最小子集；不实现任意文件读取、删除、目录浏览、下载授权、SFTP、服务端资源下载回传和 AI workspace 改造。完整配置任务运行域、任务级输入绑定、截图/报告归档仍属于后续阶段。
 
 
 服务端资源记录至少包括：

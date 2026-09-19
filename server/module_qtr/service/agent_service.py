@@ -19,8 +19,10 @@ from utils.log_util import logger
 # 存储agent的WebSocket连接和Future对象（用于HTTP请求等待WebSocket响应）
 agents: dict = {}
 agent_loops: dict[str, asyncio.AbstractEventLoop] = {}
+agent_sessions: dict[str, str] = {}
 response_futures = defaultdict(dict)
 CHUNK_SIZE = 5 * 1024
+FILE_RESOURCE_REQUEST_TYPE = 7
 
 
 def _sanitize_log_value(value, *, key: str | None = None):
@@ -50,7 +52,7 @@ async def send_message(
 ):
     request_message = dict(message or {})
     logger.info(f"agent_code: {agent_code}")
-    request_type = request_message.get('requestType')
+    request_type = request_message.get("requestType")
     logger.info(f"转发类型: {request_type}")
     # 如果没有提供request_id，则生成一个唯一的标识符
     if not request_id:
@@ -58,16 +60,24 @@ async def send_message(
     request_message["request_id"] = request_id
 
     if agent_code not in agents:
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
-                                    None,
-                                    f"【{agent_code}】Agent not connected，request_id：{request_id}"))
+        response = handle_response(
+            (
+                AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                None,
+                f"【{agent_code}】Agent not connected，request_id：{request_id}",
+            )
+        )
         return response
 
     agent_loop = agent_loops.get(agent_code)
     if not agent_loop or agent_loop.is_closed():
-        response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
-                                    None,
-                                    f"【{agent_code}】Agent loop not available，request_id：{request_id}"))
+        response = handle_response(
+            (
+                AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+                None,
+                f"【{agent_code}】Agent loop not available，request_id：{request_id}",
+            )
+        )
         return response
 
     current_loop = asyncio.get_running_loop()
@@ -86,7 +96,7 @@ async def _send_message_on_agent_loop(
     request_id: str,
     timeout_seconds: int | float | None = None,
 ):
-    request_type = message.get('requestType')
+    request_type = message.get("requestType")
     if agent_code in agents:
         # 创建一个Future对象来代表异步操作的结果
         loop = asyncio.get_running_loop()
@@ -97,29 +107,42 @@ async def _send_message_on_agent_loop(
         response_futures[request_id]["future"] = future
         response_futures[request_id]["loop"] = loop
         response_futures[request_id]["agent_code"] = agent_code
+        response_futures[request_id]["session_id"] = agent_sessions.get(agent_code, "")
 
         # 发送消息到WebSocket，并包含request_id以便客户端能够识别是哪个请求的响应
         compress_data = compress_dict_to_str(message)
-        request_chunks = [compress_data[i:i+CHUNK_SIZE] for i in range(0, len(compress_data), CHUNK_SIZE)]
+        request_chunks = [compress_data[i : i + CHUNK_SIZE] for i in range(0, len(compress_data), CHUNK_SIZE)]
         total = len(request_chunks) or 1
         logger.info(
             f"发送 AI 分析请求到 Agent | agent_code={agent_code}, request_id={request_id}, "
             f"request_type={request_type}, payload_size={len(compress_data)}, chunk_count={total}, "
             f"timeout_seconds={timeout_seconds}"
         )
-        for idx, chunk in enumerate(request_chunks):
-            message_data = {
-                "type": "request_chunk",
-                "index": idx,
-                "total": total,
-                "request_id": request_id,
-                "data": chunk,
-                "finished": (idx == total - 1),
-                "binary": False,
-                "meta": {}
-
-            }
-            await agents[agent_code].send_text(json.dumps(message_data))
+        try:
+            for idx, chunk in enumerate(request_chunks):
+                message_data = {
+                    "type": "request_chunk",
+                    "index": idx,
+                    "total": total,
+                    "request_id": request_id,
+                    "data": chunk,
+                    "finished": (idx == total - 1),
+                    "binary": False,
+                    "meta": {},
+                }
+                await agents[agent_code].send_text(json.dumps(message_data))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(
+                f"Agent 请求发送失败，request_id={request_id}, agent_code={agent_code}, "
+                f"request_type={request_type}, error={exc}"
+            )
+            if future and not future.done():
+                future.cancel()
+            if response_futures.get(request_id, {}).get("future") is future:
+                response_futures.pop(request_id, None)
+            return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, "Agent 请求发送失败"))
 
         # 等待Future对象的结果（即WebSocket客户端的响应）
         try:
@@ -138,9 +161,13 @@ async def _send_message_on_agent_loop(
             )
             response = {}
             if response_data.get("Error", None):
-                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
-                                        response_data,
-                                        f"客户端中发生异常：{response_data.get('Error')}"))
+                return handle_response(
+                    (
+                        AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                        response_data,
+                        f"客户端中发生异常：{response_data.get('Error')}",
+                    )
+                )
 
             if response_data.get("request_type") == TstepTypeEnum.http.value:
                 response = AgentResponse(response_data)
@@ -151,12 +178,17 @@ async def _send_message_on_agent_loop(
                 TstepTypeEnum.webui.value,
                 TstepTypeEnum.desktopui.value,
                 TstepTypeEnum.ai_analysis.value,
+                FILE_RESOURCE_REQUEST_TYPE,
             ):
                 response = AgentResponseWebUI(**response_data)
             else:
-                return handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value,
-                                        response_data,
-                                        f"响应数据类型【{response_data.get('request_type')}】不支持"))
+                return handle_response(
+                    (
+                        AgentResponseEnum.UNKNOWN_EXCEPTION.value,
+                        response_data,
+                        f"响应数据类型【{response_data.get('request_type')}】不支持",
+                    )
+                )
 
             # 200 仅表示 Agent 网关已完成传输；业务执行失败时透传内层错误，
             # 避免统一的“操作成功”覆盖 Worker 的真实失败原因。
@@ -168,28 +200,29 @@ async def _send_message_on_agent_loop(
         except TimeoutError as e:
             elapsed_sec = round(time.monotonic() - request_started_at, 3)
             logger.error(
-                f'websocket请求超时{e}，request_id：{request_id}, agent_code={agent_code}, '
-                f'request_type={request_type}, elapsed_sec={elapsed_sec}, timeout_sec={request_timeout}, '
-                f'payload_size={len(compress_data)}, chunk_count={total}'
+                f"websocket请求超时{e}，request_id：{request_id}, agent_code={agent_code}, "
+                f"request_type={request_type}, elapsed_sec={elapsed_sec}, timeout_sec={request_timeout}, "
+                f"payload_size={len(compress_data)}, chunk_count={total}"
             )
             if request_type == TstepTypeEnum.http.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
-                                            None,
-                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response(
+                    (AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}，request_id：{request_id}")
+                )
                 return response
             elif request_type == TstepTypeEnum.websocket.value:
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
-                                            None,
-                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response(
+                    (AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}，request_id：{request_id}")
+                )
                 return response
             elif request_type in (
                 TstepTypeEnum.webui.value,
                 TstepTypeEnum.desktopui.value,
                 TstepTypeEnum.ai_analysis.value,
+                FILE_RESOURCE_REQUEST_TYPE,
             ):
-                response = handle_response((AgentResponseEnum.OPERATION_TIMEOUT.value,
-                                            None,
-                                            f'wobsocket请求超时{e}，request_id：{request_id}'))
+                response = handle_response(
+                    (AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}，request_id：{request_id}")
+                )
                 return response
         except asyncio.CancelledError as e:
             logger.error(e)
@@ -208,9 +241,13 @@ async def _send_message_on_agent_loop(
                 future.cancel()
             if response_futures.get(request_id, {}).get("future") is future:
                 response_futures.pop(request_id, None)
-    response = handle_response((AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
-                                None,
-                                f"【{agent_code}】Agent not connected，request_id：{request_id}"))
+    response = handle_response(
+        (
+            AgentResponseEnum.WEBSOCKET_NOT_CONNECTED.value,
+            None,
+            f"【{agent_code}】Agent not connected，request_id：{request_id}",
+        )
+    )
     return response
 
 
@@ -221,7 +258,7 @@ class Request:
 
     @property
     def url(self):
-        return self.message.get('url').get('url')
+        return self.message.get("url").get("url")
 
 
 class URL:
@@ -231,19 +268,18 @@ class URL:
 
 
 class AgentResponse(httpx.Response):
-
-    def __init__(self, message: dict,  request_id: str = None):
+    def __init__(self, message: dict, request_id: str = None):
         self.message = message
         self.request_id = request_id
 
     @property
     def status_code(self):
-        return self.message.get('status_code')
+        return self.message.get("status_code")
 
     @property
-    def elapsed(self) -> datetime.timedelta|None:
+    def elapsed(self) -> datetime.timedelta | None:
         # 正则表达式匹配字符串，提取天数、小时、分钟、秒和微秒（可选）
-        s = self.message.get('elapsed', None)
+        s = self.message.get("elapsed", None)
         if s is None:
             return None
         pattern = re.compile(r"(?:(\d+) days, )?(\d+):(\d+):(\d+)(?:\.(\d+))?")
@@ -262,8 +298,9 @@ class AgentResponse(httpx.Response):
         microseconds = int(microseconds) if microseconds else 0
 
         # 根据提取到的信息创建timedelta对象
-        return datetime.timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds,
-                                  microseconds=microseconds * 1000)  # 注意：将毫秒转换回微秒
+        return datetime.timedelta(
+            days=days, hours=hours, minutes=minutes, seconds=seconds, microseconds=microseconds * 1000
+        )  # 注意：将毫秒转换回微秒
 
     @property
     def request(self) -> Request:
@@ -271,75 +308,75 @@ class AgentResponse(httpx.Response):
 
     @property
     def headers(self) -> dict:
-        return self.message.get('headers')
+        return self.message.get("headers")
 
     @property
     def http_version(self) -> str:
-        return self.message.get('http_version')
+        return self.message.get("http_version")
 
     @property
     def reason_phrase(self) -> str:
-        return self.message.get('reason_phrase')
+        return self.message.get("reason_phrase")
 
     @property
     def url(self):
-        return self.message.get('url')
+        return self.message.get("url")
 
     @property
     def content(self) -> bytes:
-        return self.message.get('content').encode('utf-8')
+        return self.message.get("content").encode("utf-8")
 
     @property
     def text(self) -> str:
-        return self.message.get('text')
+        return self.message.get("text")
 
     @property
     def encoding(self) -> str | None:
-        return self.message.get('encoding')
+        return self.message.get("encoding")
 
     @property
     def charset_encoding(self) -> str | None:
-        return self.message.get('charset_encoding')
+        return self.message.get("charset_encoding")
 
     @property
     def is_informational(self) -> bool:
-        return self.message.get('is_informational')
+        return self.message.get("is_informational")
 
     @property
     def is_success(self) -> bool:
-        return self.message.get('is_success')
+        return self.message.get("is_success")
 
     @property
     def is_redirect(self) -> bool:
-        return self.message.get('is_redirect')
+        return self.message.get("is_redirect")
 
     @property
     def is_client_error(self) -> bool:
-        return self.message.get('is_client_error')
+        return self.message.get("is_client_error")
 
     @property
     def is_server_error(self) -> bool:
-        return self.message.get('is_server_error')
+        return self.message.get("is_server_error")
 
     @property
     def is_error(self) -> bool:
-        return self.message.get('is_error')
+        return self.message.get("is_error")
 
     @property
     def has_redirect_location(self) -> bool:
-        return self.message.get('has_redirect_location')
+        return self.message.get("has_redirect_location")
 
     @property
     def cookies(self):
-        return self.message.get('cookies')
+        return self.message.get("cookies")
 
     @property
     def links(self) -> dict[str | None, dict[str, str]]:
-        return self.message.get('links')
+        return self.message.get("links")
 
     @property
     def num_bytes_downloaded(self) -> int:
-        return self.message.get('num_bytes_downloaded')
+        return self.message.get("num_bytes_downloaded")
 
     def json(self):
         return json.loads(self.text)
@@ -353,11 +390,11 @@ class AgentResponseWebSocket(WebSocketClientProtocol):
 
     @property
     def websocket_data(self):
-        return self.message.get('ws_res_data')
+        return self.message.get("ws_res_data")
 
     @property
     def response_headers(self):
-        return json.loads(self.message.get('response_headers'))
+        return json.loads(self.message.get("response_headers"))
 
 
 class AgentResponseWebUI(BaseModel):

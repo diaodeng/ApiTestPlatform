@@ -19,7 +19,7 @@ related_files:
 
 # 配置任务复用 Web 录制与执行
 
-本页定义门店配置任务如何复用现有 Web 录制、定位和 Agent 执行能力，同时与普通 Web 用例数据隔离。当前是设计文档，尚未新增模板转换器或配置任务执行命令。
+本页定义门店配置任务如何复用现有 Web 录制、定位和 Agent 执行能力，同时与普通 Web 用例数据隔离。当前已实现 Web `upload_file` 动作、资源引用参数标准化和 Agent 本地资源协议；配置任务模板转换、任务运行域和阶段编排仍属于后续实现。
 
 ```mermaid
 sequenceDiagram
@@ -151,14 +151,12 @@ HrmWebRecordingSession
 
 ## 5. 文件上传动作
 
-共享动作执行器增加 `upload_file` 语义，内部调用 Playwright `set_input_files`。任务模板只传 `fileKey`，配置任务运行上下文负责：
+共享动作执行器已增加 `upload_file` 语义，内部调用 Playwright `set_input_files`。当前步骤只声明 `fileKey`、`resourceIds` 或 `resourceBindings`，由 Agent 受控资源解析实际文件；完整任务运行上下文尚未上线。
 
 ```text
-fileKey
-  -> task_run 输入快照
-  -> resource_id
-  -> Agent manifest 或传输缓存
-  -> task_run 临时目录
+fileKey / resourceIds / resourceBindings
+  -> Web 执行步骤输入标准化
+  -> Agent manifest 或受控资源定位
   -> upload_file
 ```
 

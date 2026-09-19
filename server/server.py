@@ -61,6 +61,7 @@ from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
 from modules.configuration_task.controller.resource_controller import resourceController
+from modules.configuration_task.controller.task_controller import taskController
 from modules.configuration_task.perms import register as register_configuration_task_permission_defs
 from modules.credential.controller.credential_controller import credentialController
 from modules.metrics.controller.metrics_collector_controller import metricsCollectorController
@@ -174,6 +175,7 @@ controller_list = [
     {"router": serverController, "tags": ["系统监控-服务监控"]},
     {"router": metricsCollectorController, "tags": ["系统监控-资源采集服务"]},
     {"router": resourceController, "tags": ["配置任务-资源管理"]},
+    {"router": taskController, "tags": ["配置任务-任务管理"]},
     {"router": cacheController, "tags": ["系统监控-缓存监控"]},
     {"router": commonController, "tags": ["通用模块"]},
     {"router": projectController, "tags": ["HRM-项目管理"]},

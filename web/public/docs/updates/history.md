@@ -15,9 +15,11 @@ title: 更新历史
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 
 ## 2026-09-19
-- 配置任务资源元数据服务端切片上线：新增 Agent 本地资源登记、查询、详情与 `ready` 元数据确认接口，资源状态从 `PENDING` 按大小和 SHA-256 校验后进入 `READY`，响应中的 Snowflake `resourceId` 统一为字符串；首期不提供文件内容传输、分片或 SFTP。详见：[配置任务资源元数据](configuration-task-resource.md)。
+- 配置任务运行域最小闭环上线：新增任务定义、版本快照（含 fileKey→资源 ID 输入绑定）和运行实例三张表与接口；版本发布校验绑定资源就绪且归属执行 Agent，运行时冻结输入快照并复用既有 Web `run_case` 协议下发 Agent（输入绑定注入 `resourceBindings`），同步返回终态。阶段审批、截图产物和报告归档仍未提供。详见：[配置任务运行域](2026-09-19-configuration-task-run-domain.md)，用户说明：[配置任务管理](../configuration-task.md)。
 
-- Agent 本地资源 manifest 与分片发布协议首期上线：新增受控 `storage/resources` 文件存储与原子 manifest，支持 `requestType=7` 的 `file_publish_begin/file_chunk/file_publish_commit/file_stat/file_cleanup` 小 JSON 控制命令，校验分片/文件大小与 SHA-256，支持乱序与同 hash 重复分片幂等；拒绝路径穿越、符号链接逃逸、目录和超限输入，不实现任意文件读取、目录浏览、SFTP 或 AI workspace 改造。详见：[Agent 本地资源分片发布](../client/agent-resource-protocol.md)。
+- 配置任务资源与 Agent 传输切片上线：在资源元数据表基础上新增资源传输表和服务端 `begin/chunk/commit` 编排，绑定 Agent WebSocket `session_id`，只有 Agent commit 返回的实际大小和 SHA-256 与资源元数据匹配时才进入 `READY`；旧 `ready` 入口不能绕过 Agent commit。资源创建者范围、已登记 Agent 和在线 session 校验已接入，资源 ID 继续按字符串返回。详见：[配置任务资源与 Agent 传输切片](2026-09-19-configuration-task-resource.md)。
+
+- Agent 本地资源 manifest 与分片发布协议上线：新增受控 `storage/resources` 文件存储与原子 manifest，支持 `requestType=7` 的 `file_publish_begin/file_chunk/file_publish_commit/file_stat/file_cleanup` 小 JSON 控制命令，校验分片/文件大小与 SHA-256，支持乱序与同 hash 重复分片幂等；拒绝路径穿越、符号链接逃逸、目录和超限输入，不实现任意文件读取、目录浏览、SFTP 或 AI workspace 改造。详见：[Agent 本地资源分片发布](../client/agent-resource-protocol.md)。
 
 - 门店配置任务文件存储设计规划：明确复用 Web 录制与 Agent 执行能力，首期允许输入文件保存在执行 Agent 的受控目录，服务端通过资源 ID、版本、大小和 SHA-256 追踪；后续以独立 Provider 接入 SFTP。该记录仅说明设计边界，文件上传、截图归档和 SFTP 功能尚未上线。详见：[门店配置任务文件存储设计](2026-09-19-configuration-task-file-storage-design.md)。
 

@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_hrm.dao.agent_dao import AgentDao
 from modules.configuration_task.dao.resource_dao import ResourceDao
 from modules.configuration_task.entity.do.resource_object_do import ResourceObject
 from modules.configuration_task.entity.vo.resource_vo import (
@@ -29,9 +31,18 @@ class ResourceServiceResult:
 class ResourceService:
     """资源对象元数据服务；首期不执行文件读写和 Agent 传输。"""
 
+    @staticmethod
+    def _operator_scope(current_user: CurrentUserModel) -> tuple[str, bool]:
+        """提取当前用户名称和管理员范围标识。"""
+        user = current_user.user
+        return (user.user_name if user else "system", bool(user and getattr(user, "admin", False)))
+
     @classmethod
-    def list_resources(cls, db: Session, query: ResourceQueryModel) -> list[ResourceDetailModel]:
-        """按条件查询资源，并将 BIGINT resource_id 序列化为字符串。"""
+    def list_resources(
+        cls, db: Session, query: ResourceQueryModel, current_user: CurrentUserModel
+    ) -> list[ResourceDetailModel]:
+        """按用户范围查询资源，并将 BIGINT resource_id 序列化为字符串。"""
+        operator, is_admin = cls._operator_scope(current_user)
         rows = ResourceDao.list_resources(
             db,
             resource_id=query.resource_id,
@@ -39,13 +50,16 @@ class ResourceService:
             status=query.status,
             keyword=query.keyword,
             limit=query.limit,
+            operator=operator,
+            is_admin=is_admin,
         )
         return [cls.to_detail_model(row) for row in rows]
 
     @classmethod
-    def get_resource(cls, db: Session, resource_id: int) -> ResourceDetailModel | None:
-        """查询资源详情，不返回 Agent 绝对路径或传输内容。"""
-        row = ResourceDao.get_resource(db, resource_id)
+    def get_resource(cls, db: Session, resource_id: int, current_user: CurrentUserModel) -> ResourceDetailModel | None:
+        """按用户范围查询资源详情，不返回 Agent 绝对路径或传输内容。"""
+        operator, is_admin = cls._operator_scope(current_user)
+        row = ResourceDao.get_visible_resource(db, resource_id, operator, is_admin)
         return cls.to_detail_model(row) if row else None
 
     @classmethod
@@ -56,44 +70,49 @@ class ResourceService:
         current_user: CurrentUserModel,
     ) -> ResourceServiceResult:
         """登记 Agent 本地资源元数据，初始状态固定为 PENDING。"""
-        operator = current_user.user.user_name if current_user.user else "system"
-        existing = ResourceDao.list_resources(
-            db,
-            agent_code=model.agent_code,
-            keyword=model.original_file_name,
-            limit=200,
-        )
-        for row in existing:
-            if row.object_key == model.object_key and row.version == model.version and row.status != "DELETED":
-                logger.info(f"资源登记幂等命中，resource_id={row.resource_id}，agent_code={model.agent_code}")
-                return ResourceServiceResult(True, "资源已存在", cls.to_detail_model(row))
+        operator, _ = cls._operator_scope(current_user)
+        agent = AgentDao.get_agent_by_code(db, model.agent_code)
+        if not agent:
+            return ResourceServiceResult(False, "Agent 未登记")
+        existing = ResourceDao.get_by_identity(db, model.agent_code, model.object_key, model.version)
+        if existing and existing.status != "DELETED":
+            logger.info(f"资源登记幂等命中，resource_id={existing.resource_id}，agent_code={model.agent_code}")
+            return ResourceServiceResult(True, "资源已存在", cls.to_detail_model(existing))
 
         now = datetime.now()
-        row = ResourceDao.add_resource(
-            db,
-            {
-                "provider_type": model.provider_type,
-                "provider_execution_side": model.provider_execution_side,
-                "agent_code": model.agent_code,
-                "object_key": model.object_key,
-                "original_file_name": model.original_file_name,
-                "mime_type": model.mime_type,
-                "file_size": model.file_size,
-                "checksum_algorithm": "sha256",
-                "sha256": model.sha256,
-                "version": model.version,
-                "status": "PENDING",
-                "expires_at": model.expires_at,
-                "create_by": operator,
-                "create_time": now,
-                "update_by": operator,
-                "update_time": now,
-                "last_audit_at": now,
-                "audit_message": "资源元数据已登记，等待 Agent 确认 ready",
-                "remark": model.remark,
-            },
-        )
-        db.commit()
+        try:
+            row = ResourceDao.add_resource(
+                db,
+                {
+                    "provider_type": model.provider_type,
+                    "provider_execution_side": model.provider_execution_side,
+                    "agent_code": model.agent_code,
+                    "object_key": model.object_key,
+                    "original_file_name": model.original_file_name,
+                    "mime_type": model.mime_type,
+                    "file_size": model.file_size,
+                    "checksum_algorithm": "sha256",
+                    "sha256": model.sha256,
+                    "version": model.version,
+                    "status": "PENDING",
+                    "expires_at": model.expires_at,
+                    "create_by": operator,
+                    "create_time": now,
+                    "update_by": operator,
+                    "update_time": now,
+                    "last_audit_at": now,
+                    "audit_message": "资源元数据已登记，等待 Agent 传输确认",
+                    "remark": model.remark,
+                },
+            )
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existing = ResourceDao.get_by_identity(db, model.agent_code, model.object_key, model.version)
+            if existing and existing.status != "DELETED":
+                logger.info(f"资源并发登记命中唯一身份，resource_id={existing.resource_id}")
+                return ResourceServiceResult(True, "资源已存在", cls.to_detail_model(existing))
+            raise
         logger.info(
             f"登记配置任务资源，resource_id={row.resource_id}，agent_code={row.agent_code}，"
             f"file_size={row.file_size}，status={row.status}，operator={operator}"
@@ -109,7 +128,8 @@ class ResourceService:
         current_user: CurrentUserModel,
     ) -> ResourceServiceResult:
         """确认 Agent 侧资源大小和 SHA-256，匹配后才转为 READY。"""
-        row = ResourceDao.get_resource(db, resource_id)
+        operator, is_admin = cls._operator_scope(current_user)
+        row = ResourceDao.get_visible_resource(db, resource_id, operator, is_admin)
         if not row:
             return ResourceServiceResult(False, "资源不存在")
         if row.status in {"DELETED", "DELETING", "EXPIRED"}:
@@ -136,33 +156,16 @@ class ResourceService:
                     "error_code": "RESOURCE_METADATA_MISMATCH",
                     "error_message": "Agent 确认的文件大小或 SHA-256 与登记值不一致",
                     "last_audit_at": datetime.now(),
-                    "audit_message": "ready 校验失败",
-                    "update_by": current_user.user.user_name if current_user.user else "system",
+                    "audit_message": "旧 ready 校验失败",
+                    "update_by": operator,
                 },
             )
             db.commit()
             logger.warning(f"资源 ready 校验失败，resource_id={resource_id}，status=FAILED")
             return ResourceServiceResult(False, "资源大小或 SHA-256 校验失败")
 
-        if model.version is not None and model.version != row.version:
-            return ResourceServiceResult(False, "资源版本不匹配")
-        operator = current_user.user.user_name if current_user.user else "system"
-        ResourceDao.update_resource(
-            db,
-            resource_id,
-            {
-                "status": "READY",
-                "error_code": "",
-                "error_message": "",
-                "update_by": operator,
-                "last_audit_at": datetime.now(),
-                "audit_message": "Agent 已确认资源可用",
-            },
-        )
-        db.commit()
-        refreshed = ResourceDao.get_resource(db, resource_id)
-        logger.info(f"资源已 ready，resource_id={resource_id}，status=READY，operator={operator}")
-        return ResourceServiceResult(True, "资源已就绪", cls.to_detail_model(refreshed))
+        logger.warning(f"拒绝绕过传输的 ready 请求，resource_id={resource_id}，operator={operator}")
+        return ResourceServiceResult(False, "资源必须通过 Agent 传输 commit 确认就绪")
 
     @staticmethod
     def to_detail_model(row: ResourceObject | None) -> ResourceDetailModel | None:
