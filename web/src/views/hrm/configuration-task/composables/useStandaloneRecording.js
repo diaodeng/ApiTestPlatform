@@ -84,7 +84,9 @@ export function useStandaloneRecording() {
     }
 
     // 轮询录制会话状态：录制中每 3 秒刷新一次，收敛到终态后停止轮询；
-    // 失败终态同时复位按钮状态（failed 标记），允许直接重新填写并再次开始录制。
+    // 失败终态同时复位按钮状态（startFailed 标记），允许直接重新填写并再次开始录制。
+    // 步骤数取详情接口实时重建的 steps 数组（录制中事件实时落库并重建），
+    // resultSummary 只在录制结束时写入且不含步骤数，不能作为录制中的计数来源。
     function startPoll() {
         stopPoll();
         pollTimer = window.setInterval(async () => {
@@ -94,13 +96,16 @@ export function useStandaloneRecording() {
                 const detail = res.data || {};
                 const status = detail.status;
                 if (status === 2) {
-                    liveStatusText.value = `录制中，已捕获 ${detail.resultSummary?.stepCount ?? recordedSteps.value.length ?? 0} 个步骤`;
+                    const steps = Array.isArray(detail.steps) ? detail.steps : [];
+                    recordedSteps.value = steps;
+                    liveStatusText.value = `录制中，已捕获 ${steps.length} 个步骤`;
                     liveStatusType.value = "warning";
                 } else {
                     stopPoll();
                     if (status === 3) {
-                        liveStatusText.value =
-                            "录制已完成，可关闭弹窗后使用「录制转模板」生成版本草稿";
+                        const steps = Array.isArray(detail.steps) ? detail.steps : [];
+                        recordedSteps.value = steps;
+                        liveStatusText.value = `录制已完成，共 ${steps.length} 个步骤；可关闭弹窗后使用「录制转模板」生成版本草稿`;
                         liveStatusType.value = "success";
                     } else if (status === 5) {
                         liveStatusText.value = "录制已停止（未正常完成），仍可尝试转模板";
