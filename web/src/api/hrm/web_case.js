@@ -174,6 +174,14 @@ export function createCredentialFromWebRecording(recordingId, data) {
   return request({ url: `/hrm/web-case/recording/${recordingId}/credential`, method: 'post', data })
 }
 
+// 把录制会话上报的最终浏览器状态回写到指定 Web 凭证绑定（要求绑定开启允许回写）。
+export function writebackRecordingCredential(recordingId, bindingId) {
+  return request({
+    url: `/hrm/web-case/recording/${recordingId}/credential/${bindingId}/writeback`,
+    method: 'post'
+  })
+}
+
 export function delWebRecording(recordingIds) {
   return webCaseRequest({
     url: '/hrm/web-case/recording/' + recordingIds,

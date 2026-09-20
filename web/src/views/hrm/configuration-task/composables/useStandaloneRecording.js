@@ -12,7 +12,9 @@ import { ElMessage } from "element-plus";
 import {
     startWebRecording,
     stopWebRecording,
-    getWebRecording
+    getWebRecording,
+    createCredentialFromWebRecording,
+    writebackRecordingCredential
 } from "@/api/hrm/web_case.js";
 
 // 录制状态枚举，与 Web 用例录制页保持一致。
@@ -24,9 +26,8 @@ export const RECORDING_STATUS = {
     5: "已停止"
 };
 
-export function useStandaloneRecording() {
-    // 弹窗与表单状态
-    const showRecordingDialog = ref(false);
+export function useStandaloneRecording({ credentialBindingOptions } = {}) {
+    // 弹窗与表单状态（弹窗显隐由父组件 v-model 控制，这里只管内容状态）
     const submitting = ref(false);
     const recordingId = ref(undefined);
     const liveStatusText = ref("");
@@ -47,6 +48,9 @@ export function useStandaloneRecording() {
         manualLoginWaitSec: 120,
         closeBrowserOnStop: true,
         captureAssertions: true,
+        // 停止后把最终浏览器状态保存为新统一凭证（与 Web 录制页"停止后保存凭证"同语义）。
+        saveCredentialAfterRecording: false,
+        credentialName: "",
         recordingId: undefined
     });
 
@@ -59,8 +63,10 @@ export function useStandaloneRecording() {
         }
     }
 
-    // 重置弹窗到新建状态。
-    function openRecordingDialog() {
+    // 复位到全新状态：清空表单、录制 ID、步骤、实时状态与失败标记。
+    // 由弹窗组件在"弹窗打开"时调用（弹窗内容由父组件 v-model 控制，
+    // 状态不随 el-dialog 关闭销毁，必须显式复位，避免残留上一次的数据）。
+    function resetRecordingState() {
         recordingForm.value = {
             sessionName: "",
             agentId: undefined,
@@ -72,6 +78,8 @@ export function useStandaloneRecording() {
             manualLoginWaitSec: 120,
             closeBrowserOnStop: true,
             captureAssertions: true,
+            saveCredentialAfterRecording: false,
+            credentialName: "",
             recordingId: undefined
         };
         recordingId.value = undefined;
@@ -80,7 +88,6 @@ export function useStandaloneRecording() {
         liveStatusType.value = "info";
         startFailed.value = false;
         startFailedReason.value = "";
-        showRecordingDialog.value = true;
     }
 
     // 轮询录制会话状态：录制中每 3 秒刷新一次，收敛到终态后停止轮询；
@@ -175,16 +182,62 @@ export function useStandaloneRecording() {
     }
 
     // 停止录制：与 Web 测试管理相同的停止接口，状态由轮询收敛。
+    // "停止后保存凭证"开关按是否选择了登录凭证分派：
+    // - 未选凭证 → 保存为新统一凭证（显式创建接口）；
+    // - 已选凭证 → 回写到该凭证（要求绑定开启"允许回写"，revision 由服务端读取）。
+    // 两种动作都延迟 3 秒等待 Agent 上报最终状态（record_finished）。
     async function stopRecording() {
         if (!recordingId.value) return;
         submitting.value = true;
+        const form = recordingForm.value;
+        // 选中的凭证绑定对象（含 writebackEnabled），由弹窗组件通过 options 传入。
+        const selectedBinding = (credentialBindingOptions?.value || []).find(
+            (item) => String(item.bindingId) === String(form.credentialBindingId || "")
+        );
         try {
             await stopWebRecording({
                 recordingId: recordingId.value,
-                agentId: recordingForm.value.agentId,
-                closeBrowserOnStop: recordingForm.value.closeBrowserOnStop
+                agentId: form.agentId,
+                closeBrowserOnStop: form.closeBrowserOnStop
             });
             ElMessage.success("停止指令已发送");
+            if (!form.saveCredentialAfterRecording) return;
+            const delay = 3000;
+            if (selectedBinding) {
+                // 回写原凭证：新路由内部取录制最终状态并按凭证当前 revision 回写。
+                window.setTimeout(() => {
+                    writebackRecordingCredential(recordingId.value, selectedBinding.bindingId)
+                        .then((res) =>
+                            ElMessage.success(res?.msg || "浏览器状态已回写到所选凭证")
+                        )
+                        .catch((error) =>
+                            ElMessage.warning(
+                                error?.message ||
+                                    "回写失败：绑定未开启允许回写、录制未上报最终状态或版本冲突，请稍后重试"
+                            )
+                        );
+                }, delay);
+            } else {
+                // 保存为新凭证。
+                const credentialName = form.credentialName?.trim() || `录制凭证-${recordingId.value}`;
+                window.setTimeout(() => {
+                    createCredentialFromWebRecording(recordingId.value, {
+                        credentialName,
+                        bindingName: credentialName,
+                        targetUrl: form.startUrl
+                    })
+                        .then(() =>
+                            ElMessage.success(
+                                `已把本次登录后的浏览器状态保存为新凭证「${credentialName}」，可在版本/运行配置中选用`
+                            )
+                        )
+                        .catch((error) =>
+                            ElMessage.warning(
+                                error?.message || "保存凭证失败：录制尚未上报最终状态，请稍后在录制记录中重试"
+                            )
+                        );
+                }, delay);
+            }
         } catch (e) {
             ElMessage.error(e.message || "停止录制失败");
         } finally {
@@ -198,7 +251,6 @@ export function useStandaloneRecording() {
     }
 
     return {
-        showRecordingDialog,
         submitting,
         recordingId,
         recordingForm,
@@ -207,7 +259,7 @@ export function useStandaloneRecording() {
         recordedSteps,
         startFailed,
         startFailedReason,
-        openRecordingDialog,
+        resetRecordingState,
         startRecording,
         stopRecording,
         handleDialogClose

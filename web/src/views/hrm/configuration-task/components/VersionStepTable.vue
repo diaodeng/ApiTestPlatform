@@ -67,6 +67,7 @@
 
         <!-- 步骤详情编辑弹窗：复用 Web 用例的自包含组件，数据结构同为 WebStepModel -->
         <StepDetail
+            v-if="showStepDetail"
             v-model:show-step-detail-dialog="showStepDetail"
             :current-step="currentStep"
             :step-index="currentStepIndex"

@@ -25,7 +25,22 @@
                     </el-option>
                 </el-select>
             </el-form-item>
-            <el-form-item label="变量标记">
+            <el-form-item>
+                <template #label>
+                    <span class="form-label-with-help">
+                        变量标记
+                        <PromptButton
+                            title="变量标记怎么填写"
+                            width="460"
+                            placement="top-start"
+                            class="field-help"
+                        >
+                            <div>格式为“转换后步骤数组索引 → 变量名”，步骤索引从 0 开始：第 1 步写 <code>0</code>，不是页面显示的步骤序号或录制事件序号。</div>
+                            <div>例如 <code>{"0": "store.id"}</code> 会把第 1 步已有的 <code>fill</code> 或 <code>select_option</code> 输入值替换为 <code>${store.id}</code> 占位符。</div>
+                            <div>转换后请在版本编辑器中确认步骤和占位符，并在任务变量或版本变量中提供对应值；版本变量与任务变量同名时优先使用版本变量。</div>
+                        </PromptButton>
+                    </span>
+                </template>
                 <el-input
                     v-model="variablesText"
                     type="textarea"
@@ -33,7 +48,22 @@
                     placeholder='步骤索引到变量名，如 {"0": "store.id", "2": "store.name"}；将替换 fill/select 的输入值为 ${变量} 占位符'
                 />
             </el-form-item>
-            <el-form-item label="上传fileKey标记">
+            <el-form-item>
+                <template #label>
+                    <span class="form-label-with-help">
+                        上传fileKey标记
+                        <PromptButton
+                            title="上传 fileKey 标记怎么填写"
+                            width="460"
+                            placement="top-start"
+                            class="field-help"
+                        >
+                            <div>格式为“转换后步骤数组索引 → fileKey”，步骤索引从 0 开始。例如 <code>{"3": "price_tag"}</code> 表示给第 4 步设置逻辑资源键 <code>price_tag</code>。</div>
+                            <div>该标记只对已有的 <code>upload_file</code> 步骤生效，不会把普通输入或点击步骤自动转换成上传步骤。</div>
+                            <div><code>fileKey</code> 不是 Agent 本地文件路径。转换后还要在版本编辑器的“输入绑定”中使用同名键绑定已上传且状态为 READY 的资源 ID。</div>
+                        </PromptButton>
+                    </span>
+                </template>
                 <el-input
                     v-model="fileKeysText"
                     type="textarea"
@@ -59,6 +89,7 @@ import { ref, reactive, computed, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { convertRecordingToTemplate } from "@/api/hrm/configuration_task";
 import { listWebRecording } from "@/api/hrm/web_case.js";
+import PromptButton from "@/components/PromptButton/index.vue";
 
 const props = defineProps({ modelValue: Boolean, task: Object });
 const emit = defineEmits(["update:modelValue", "converted"]);
@@ -160,9 +191,15 @@ async function convert() {
 </script>
 
 <style lang="scss" scoped>
-.recording-status {
-    float: right;
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
+.form-label-with-help {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
+
+.field-help {
+    vertical-align: middle;
+}
+
+
 </style>

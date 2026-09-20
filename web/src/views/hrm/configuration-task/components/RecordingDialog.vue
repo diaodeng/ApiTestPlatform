@@ -96,6 +96,27 @@
                         <el-input-number v-model="recordingForm.manualLoginWaitSec" :min="1" :max="3600" />
                     </el-form-item>
                 </el-col>
+                <el-col :span="12">
+                    <el-form-item :label="saveSwitchLabel">
+                        <el-switch
+                            v-model="recordingForm.saveCredentialAfterRecording"
+                            :disabled="saveSwitchDisabled"
+                        />
+                        <span class="hint">{{ saveSwitchHint }}</span>
+                    </el-form-item>
+                </el-col>
+                <el-col
+                    :span="12"
+                    v-if="recordingForm.saveCredentialAfterRecording && !isWritebackMode"
+                >
+                    <el-form-item label="新凭证名称">
+                        <el-input
+                            v-model="recordingForm.credentialName"
+                            placeholder="为空则自动生成：录制凭证-{录制ID}"
+                            maxlength="128"
+                        />
+                    </el-form-item>
+                </el-col>
             </el-row>
         </el-form>
 
@@ -119,6 +140,13 @@
                 type="warning"
                 :closable="false"
                 class="mb12"
+            />
+            <el-alert
+                title="录制技巧：按住 Alt 键点击目标元素可增加断言；有文本时生成“文本包含”断言，没有文本时生成“元素可见”断言。Alt+点击不会触发实际点击，当前默认把断言追加到上一条步骤；普通点击不会自动生成断言。"
+                type="info"
+                :closable="false"
+                class="mb12"
+                show-icon
             />
         </template>
         <el-alert
@@ -145,7 +173,7 @@
 </template>
 
 <script setup name="ConfigRecordingDialog">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { browserOptions } from "@/components/hrm/case/webcase/utils/shared.js";
 import {
     useStandaloneRecording
@@ -163,6 +191,10 @@ const visible = computed({
     set: (value) => emit("update:modelValue", value)
 });
 
+// 登录凭证选项：与 Web 用例录制共用统一凭证的 Web 投影绑定（playwright_storage 类型）。
+// 注意：必须先于 useStandaloneRecording 声明——组合函数的停止逻辑要按选中绑定分派保存/回写。
+const credentialOptions = computed(() => props.credentialOptions || []);
+
 const {
     submitting,
     recordingForm,
@@ -170,13 +202,37 @@ const {
     liveStatusType,
     startFailed,
     startFailedReason,
+    resetRecordingState,
     startRecording,
     stopRecording,
     handleDialogClose
-} = useStandaloneRecording();
+} = useStandaloneRecording({ credentialBindingOptions: credentialOptions });
 
-// 登录凭证选项：与 Web 用例录制共用统一凭证的 Web 投影绑定（playwright_storage 类型）。
-const credentialOptions = computed(() => props.credentialOptions || []);
+// 开关语义随凭证选择切换：
+// - 未选凭证 → 保存为新凭证；
+// - 已选凭证 → 回写到该凭证（仅当绑定开启"允许回写"时可用）。
+const selectedBinding = computed(() =>
+    credentialOptions.value.find(
+        (item) => String(item.bindingId) === String(recordingForm.value.credentialBindingId || "")
+    )
+);
+const isWritebackMode = computed(() => Boolean(selectedBinding.value));
+const writebackAllowed = computed(() => Boolean(selectedBinding.value?.writebackEnabled));
+const saveSwitchLabel = computed(() =>
+    isWritebackMode.value ? "停止后回写所选凭证" : "停止后保存为新凭证"
+);
+const saveSwitchDisabled = computed(() => isWritebackMode.value && !writebackAllowed.value);
+const saveSwitchHint = computed(() => {
+    if (!isWritebackMode.value) return "把本次登录后的浏览器状态保存为新凭证";
+    if (writebackAllowed.value) return `登录态将覆盖写回「${selectedBinding.value.bindingName}」`;
+    return "该绑定未开启「允许回写」，请到统一凭证管理开启，或清除凭证选择改为保存新凭证";
+});
+
+// 每次打开弹窗都复位到全新状态：el-dialog 关闭不会销毁组合函数里的表单状态，
+// 不复位会残留上一次的录制数据（表单值、录制 ID、失败提示等）。
+watch(visible, (opened) => {
+    if (opened) resetRecordingState();
+});
 </script>
 
 <style lang="scss" scoped>

@@ -6,9 +6,24 @@
     keyboardKeyOptions,
     safeJsonStringify,
     locatorTypeOptions,
+    assertionTypeOptions,
   } from '../utils/shared.js';
   import { stepNeedsTarget, normalizeStepParams } from '../domain/stepDomain';
   import { createDefaultTargetSnapshot } from '../domain/snapshotDomain';
+  import {
+    addAssertion,
+    removeAssertion,
+    assertionNeedsTarget,
+    handleAssertionTypeChange,
+    getAssertionLocatorList,
+    getAssertionPrimaryLocator,
+    updateAssertionPrimaryLocatorType,
+    updateAssertionPrimaryLocatorValue,
+    addAssertionLocator,
+    moveAssertionLocator,
+    setAssertionPrimaryLocator,
+    removeAssertionLocator,
+  } from '../domain/assertDomain.js';
   import {
     addLocator,
     setPrimaryLocator,
@@ -530,7 +545,7 @@
                       v-for="(locator, locatorIndex) in getAssertionLocatorList(scope.row)"
                       :key="
                         locator.locatorSnapshotId ||
-                        `${selectedStepIndex}-${scope.$index}-${locatorIndex}`
+                        `${props.stepIndex}-${scope.$index}-${locatorIndex}`
                       "
                       class="locator-item"
                     >

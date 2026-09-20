@@ -1,5 +1,11 @@
 import { normalizeAssertion } from '../domain/assertDomain.js';
-import { normalizeThinkTimeMs } from '../utils/shared.js';
+import { cloneData, isPlainObject, normalizeThinkTimeMs } from '../utils/shared.js';
+import { actionOptions } from '../utils/shared.js';
+import { createDefaultTargetSnapshot, normalizeTargetSnapshot } from './snapshotDomain.js';
+
+function getActionLabel(actionType) {
+  return actionOptions.find((item) => item.value === actionType)?.label || actionType || '未设置';
+}
 
 export function createDefaultStep(actionType = 'click') {
   return normalizeStep({

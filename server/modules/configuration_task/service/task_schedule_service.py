@@ -210,7 +210,12 @@ class ConfigurationTaskTemplateService:
             variable = model.mark_variables.get(str(index)) or model.mark_variables.get(index)
             if variable and step_dict.get("actionType") in {"fill", "select_option"}:
                 params = step_dict.get("params") or {}
-                params["value"] = "${" + variable + "}"
+                placeholder = "${" + variable + "}"
+                if step_dict.get("actionType") == "select_option":
+                    # 下拉动作的执行器读取 values 数组，不能写入 fill 专用的 value 字段。
+                    params["values"] = [placeholder]
+                else:
+                    params["value"] = placeholder
                 step_dict["params"] = params
             file_key = model.upload_file_keys.get(index) or model.upload_file_keys.get(str(index))
             if file_key and step_dict.get("actionType") == "upload_file":

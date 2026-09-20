@@ -1,3 +1,37 @@
+import { isPlainObject, cloneData } from '../utils/shared.js';
+import { createDefaultTargetSnapshot } from './snapshotDomain.js';
+
+// 从定位器值中提取序号/匹配元信息；模块内私有辅助，被 resolveLocatorIndex 与
+// normalizeLocatorValue 共用。此前模块拆分时该函数只留在了 useCaseEditor 副本里，
+// 本文件引用它却未定义，任何真实渲染（StepDetail 定位序号输入框）都会抛
+// ReferenceError——共享库 StepDetail 首个真实使用方（配置任务版本步骤编辑）暴露了它。
+function extractLocatorMeta(locatorValue) {
+  const value = isPlainObject(locatorValue) ? locatorValue : {};
+  const result = {};
+  for (const key of ['nth', 'index', 'targetIndex', 'target_index']) {
+    const raw = value[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 0) {
+      if (key === 'target_index') result.targetIndex = parsed;
+      else result[key] = parsed;
+      break;
+    }
+  }
+  const rawMatchCount = value.matchCount ?? value.match_count;
+  if (rawMatchCount !== undefined && rawMatchCount !== null && rawMatchCount !== '') {
+    const parsedMatchCount = Number(rawMatchCount);
+    if (Number.isInteger(parsedMatchCount) && parsedMatchCount >= 0) {
+      result.matchCount = parsedMatchCount;
+    }
+  }
+  const uniqueness = `${value.uniqueness ?? ''}`.trim();
+  if (uniqueness) {
+    result.uniqueness = uniqueness;
+  }
+  return result;
+}
+
 export function normalizeLocator(locator = {}, index = 0) {
   const locatorType = locator.locatorType || locator.locator_type || 'css';
   return {

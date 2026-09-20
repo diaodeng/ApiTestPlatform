@@ -45,7 +45,13 @@
             </el-table>
 
             <!-- 版本编辑器 -->
-            <el-dialog v-model="editorVisible" :title="`编辑版本 v${editing?.versionNo || ''}`" width="72%" top="5vh">
+            <el-dialog
+                v-model="editorVisible"
+                :title="`编辑版本 v${editing?.versionNo || ''}`"
+                width="72%"
+                top="5vh"
+                destroy-on-close
+            >
                 <el-form label-width="110px">
                     <el-row :gutter="16">
                         <el-col :span="12">
@@ -103,7 +109,22 @@
                             </el-tab-pane>
                         </el-tabs>
                     </el-form-item>
-                    <el-form-item label="输入绑定">
+                    <el-form-item>
+                        <template #label>
+                            <span class="form-label-with-help">
+                                输入绑定
+                                <PromptButton
+                                    title="输入绑定怎么填写"
+                                    width="470"
+                                    placement="top-start"
+                                    class="field-help"
+                                >
+                                    <div>用于给步骤中的 <code>upload_file</code> 动作提供文件资源。JSON 键必须与步骤参数中的 <code>fileKey</code> 完全一致。</div>
+                                    <div>值是资源 ID 字符串数组，例如 <code>{"price_tag": ["900000000000001"]}</code>。每个 fileKey 最多绑定 20 个资源，不能填写 Agent 本地绝对路径。</div>
+                                    <div>资源必须已上传、状态为 READY，且属于任务执行 Agent；保存后发布版本时服务端会再次校验。</div>
+                                </PromptButton>
+                            </span>
+                        </template>
                         <el-input
                             v-model="bindingsText"
                             type="textarea"
@@ -111,8 +132,23 @@
                             placeholder='fileKey 到资源ID数组，如 {"price_tag": ["900000000000001"]}'
                         />
                     </el-form-item>
-                    <el-form-item label="版本变量">
-                        <el-input v-model="versionVariablesText" type="textarea" :rows="3" placeholder="JSON 对象（可选）" />
+                    <el-form-item>
+                        <template #label>
+                            <span class="form-label-with-help">
+                                版本变量
+                                <PromptButton
+                                    title="版本变量怎么使用"
+                                    width="470"
+                                    placement="top-start"
+                                    class="field-help"
+                                >
+                                    <div>用于本版本运行时的变量值。步骤中的 <code>${store.id}</code> 或 <code>&#123;&#123;store.id&#125;&#125;</code> 会从运行变量中查找对应名称。</div>
+                                    <div>任务变量先作为基础值，版本变量后合并；同名顶层变量以版本变量为准，适合保存本版本专用值或覆盖任务默认值。</div>
+                                    <div>当前建议使用扁平键名，例如 <code>{"store.id": "2625868"}</code>，以确保与占位符名称直接匹配。已发布版本不可直接修改，修改变量请创建新草稿并重新发布。</div>
+                                </PromptButton>
+                            </span>
+                        </template>
+                        <el-input v-model="versionVariablesText" type="textarea" :rows="3" placeholder='JSON 对象，例如 {"store.id": "2625868"}' />
                     </el-form-item>
                 </el-form>
                 <template #footer>
@@ -133,6 +169,7 @@ import { ref, reactive, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import StageEditor from "./StageEditor.vue";
 import VersionStepTable from "./VersionStepTable.vue";
+import PromptButton from "@/components/PromptButton/index.vue";
 import { browserOptions } from "@/components/hrm/case/webcase/utils/shared.js";
 import { listWebCredentialOptions } from "../composables/recordingOptions.js";
 import {
@@ -332,9 +369,17 @@ function openStages(row) {
 </script>
 
 <style lang="scss" scoped>
-.text-muted {
-    color: var(--el-text-color-secondary);
+.form-label-with-help {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
+
+.field-help {
+    vertical-align: middle;
+}
+
+
 .toolbar {
     display: flex;
     gap: 8px;
