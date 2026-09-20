@@ -20,6 +20,8 @@ export function agentPage(mount) {
   const btnServers = el("button", { class: "btn", text: "服务器管理" });
   const btnConn = el("button", { class: "btn", text: "连接设置" });
   const btnBrowser = el("button", { class: "btn", text: "浏览器设置" });
+  // AI 设置：工单 AI 分析使用的本地目录配置（迁移自旧版 PySide 页面的 AI 配置区）
+  const btnAI = el("button", { class: "btn", text: "AI 设置" });
   const btnSync = el("button", { class: "btn", text: "同步配置" });
   const btnClearLogs = el("button", { class: "btn ghost", text: "清空日志" });
 
@@ -38,7 +40,7 @@ export function agentPage(mount) {
       el("label", { text: "服务" }), serverSelect,
       showLogCheck,
       el("div", { style: "flex:1" }),
-      btnServers, btnConn, btnBrowser, btnSync
+      btnServers, btnConn, btnBrowser, btnAI, btnSync
     ),
     el("div", { class: "split-v flex-fill" },
       el("div", { class: "col", style: "flex:1" }, el("span", { class: "sub-label", text: "请求" }), requestPre),
@@ -235,10 +237,96 @@ export function agentPage(mount) {
     });
   });
 
+  // ===== 弹窗：AI 设置（工单 AI 分析的本地目录，迁移自旧版页面的 AI 配置区） =====
+  btnAI.addEventListener("click", () => {
+    const inputs = {
+      // AI 工作区根目录：AI 分析克隆/派生仓库的存放位置，留空使用客户端默认目录
+      workspace_root: textInput(config.ticket_ai_workspace_root || "", {
+        style: "flex:1",
+        placeholder: "留空则使用客户端默认目录 storage/ticket_ai_analysis",
+      }),
+      // AI 本地仓库路径：优先使用的本地已有仓库，留空则按映射配置在工作区生成 worktree
+      local_repo: textInput(config.ticket_ai_local_repo_path || "", {
+        style: "flex:1",
+        placeholder: "留空则回退到工单映射配置",
+      }),
+      // Codex CLI 路径：AI 分析执行 codex 命令的可执行文件，留空按 PATH 自动查找
+      codex_cli: textInput(config.ticket_ai_codex_cli_path || "", {
+        style: "flex:1",
+        placeholder: "留空则按 PATH 自动查找 codex",
+      }),
+    };
+    const body = el(
+      "div", { class: "form-grid" },
+      el("label", { class: "sub", text: "AI 工作区根目录" }), el("div", { class: "form-row", style: "margin:0" },
+        inputs.workspace_root,
+        el("button", {
+          class: "btn small", text: "浏览",
+          onclick: async () => {
+            const res = await call("choose_dir", "选择 AI 工作区根目录");
+            if (res.ok) inputs.workspace_root.value = res.path;
+          },
+        })),
+      el("label", { class: "sub", text: "AI 本地仓库路径" }), el("div", { class: "form-row", style: "margin:0" },
+        inputs.local_repo,
+        el("button", {
+          class: "btn small", text: "浏览",
+          onclick: async () => {
+            const res = await call("choose_dir", "选择 AI 本地仓库目录");
+            if (res.ok) inputs.local_repo.value = res.path;
+          },
+        })),
+      el("label", { class: "sub", text: "Codex CLI 路径" }), el("div", { class: "form-row", style: "margin:0" },
+        inputs.codex_cli,
+        el("button", {
+          class: "btn small", text: "浏览",
+          onclick: async () => {
+            const res = await call("choose_file", "选择 Codex CLI 可执行文件", "可执行文件 (*.exe;*.cmd;*.bat)|所有文件 (*)");
+            if (res.ok) inputs.codex_cli.value = res.path;
+          },
+        }))
+    );
+    openModal({
+      title: "AI 设置",
+      body,
+      footer: el("button", {
+        class: "btn primary", text: "保存",
+        onclick: async () => {
+          const data = {
+            ...config,
+            ticket_ai_workspace_root: inputs.workspace_root.value.trim(),
+            ticket_ai_local_repo_path: inputs.local_repo.value.trim(),
+            ticket_ai_codex_cli_path: inputs.codex_cli.value.trim(),
+          };
+          const res = await call("agent", "save_config", data);
+          if (res.ok) {
+            config = res.config;
+            toast("已保存", "success", 1200);
+          } else toast(res.message, "error");
+        },
+      }),
+    });
+  });
+
   // ===== 弹窗：浏览器设置 =====
   btnBrowser.addEventListener("click", () => {
     const b = config.browser || {};
     const bindInput = (key) => (e) => { config.browser[key] = e.target.value.trim(); };
+    // 带输入框 + 选择按钮的路径行：type 为 dir 时选目录，否则选可执行文件
+    const pathRow = (labelText, input, type = "file") =>
+      el("div", { class: "form-row" },
+        el("label", { text: labelText }), input,
+        el("button", {
+          class: "btn small", text: "浏览",
+          onclick: async () => {
+            const res = type === "dir"
+              ? await call("choose_dir", `选择${labelText}`)
+              : await call("choose_file", `选择${labelText}`, "可执行文件 (*.exe)|所有文件 (*)");
+            if (res.ok) input.value = res.path;
+            // 选择结果同步回配置，保存/手动下载时随 collectData 一并提交
+            input.dispatchEvent(new Event("change"));
+          },
+        }));
     const inputs = {
       install_dir: textInput(b.install_dir || "", { style: "flex:1", onchange: bindInput("install_dir") }),
       host: textInput(b.playwright_download_host || "", { style: "flex:1", placeholder: "例如: https://npmmirror.com/mirrors/playwright", onchange: bindInput("playwright_download_host") }),
@@ -250,24 +338,20 @@ export function agentPage(mount) {
     const body = el(
       "div", {},
       el("div", { class: "form-row" }, checkbox("浏览器缺失时自动安装", b.auto_install, (e) => (config.browser.auto_install = e.target.checked))),
-      el("div", { class: "form-row" }, el("label", { text: "安装目录" }), inputs.install_dir,
-        el("button", {
-          class: "btn small", text: "浏览",
-          onclick: async () => {
-            const res = await call("choose_dir", "选择浏览器安装目录");
-            if (res.ok) inputs.install_dir.value = res.path;
-          },
-        })),
+      pathRow("安装目录", inputs.install_dir, "dir"),
       el("div", { class: "form-row" }, el("label", { text: "下载源" }), inputs.host),
       el("div", { class: "form-row" }, el("label", { text: "下载代理" }), inputs.proxy),
-      el("div", { class: "form-row" }, el("label", { text: "chromium 路径" }), inputs.chromium),
-      el("div", { class: "form-row" }, el("label", { text: "firefox 路径" }), inputs.firefox),
-      el("div", { class: "form-row" }, el("label", { text: "webkit 路径" }), inputs.webkit),
+      pathRow("chromium 路径", inputs.chromium),
+      pathRow("firefox 路径", inputs.firefox),
+      pathRow("webkit 路径", inputs.webkit),
       el("div", { class: "form-row" },
         el("label", { text: "手动下载" }),
+        // 与后端 playwright_browser_runtime 支持的五种内核保持一致
         el("button", { class: "btn small", text: "chromium", onclick: () => downloadBrowser("chromium") }),
         el("button", { class: "btn small", text: "firefox", onclick: () => downloadBrowser("firefox") }),
         el("button", { class: "btn small", text: "webkit", onclick: () => downloadBrowser("webkit") }),
+        el("button", { class: "btn small", text: "chrome", onclick: () => downloadBrowser("chrome") }),
+        el("button", { class: "btn small", text: "msedge", onclick: () => downloadBrowser("msedge") }),
         el("span", { class: "hint", text: "按当前配置下载对应浏览器内核" }))
     );
     openModal({ title: "浏览器设置", body });

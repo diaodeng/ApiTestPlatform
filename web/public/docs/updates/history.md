@@ -5,6 +5,9 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 
+## 2026-09-20
+- 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
+
 ## 2026-09-18
 - 自动拉日志 AI 门店编码映射修复（生产 INC00001988278 排查产物）：AI 统一提取的门店是外部门店编码（如 8555），而运行参数合并优先级 AI 高于字段识别，会把已映射好的内部 org_no（如 558464）覆盖回外部编码，提交前按 org_no 校验门店配置失败，自动拉日志被记为"参数不完整"跳过、只能人工补拉；修复为合并前先将 AI 门店按门店配置（`sap_org_no → org_no`，仅唯一候选）映射为内部 org_no 再参与合并，映射失败保留原值由提交前校验拦截，自动化审计新增 `aiStoreMappedFrom` 保留 AI 原始编码。详见：[自动拉日志门店映射修复](2026-09-18-ticket-auto-log-pull-ai-store-mapping.md)，用户说明：[工单同步自动化](../ticket-sync-automation.md)、[日志拉取使用说明](../ticket_log_pull.md)。
 
