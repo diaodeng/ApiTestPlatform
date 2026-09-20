@@ -615,7 +615,11 @@ async def list_recording(
 ):
     try:
         result = WebCaseService.list_recording_services(query_db, page_query)
-        return ResponseUtil.success(model_content=result)
+        # is_page=true 返回分页对象；is_page=false 时 DAO 直接返回模型列表，
+        # 与 Agent 列表接口的分支模式一致，不能把 list 传给 model_content。
+        if page_query.is_page:
+            return ResponseUtil.success(model_content=result)
+        return ResponseUtil.success(data=result)
     except Exception as exc:
         logger.exception(exc)
         return ResponseUtil.error(msg=str(exc))

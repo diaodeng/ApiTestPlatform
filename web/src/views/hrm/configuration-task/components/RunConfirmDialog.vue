@@ -5,7 +5,21 @@
                 <span>{{ task?.taskName }}</span>
             </el-form-item>
             <el-form-item label="执行Agent">
-                <el-input v-model="form.agentCode" :placeholder="task?.agentCode || '默认任务 Agent'" />
+                <el-select
+                    v-model="form.agentCode"
+                    :placeholder="task?.agentCode ? `默认任务 Agent：${task.agentCode}` : '默认任务 Agent'"
+                    clearable
+                    filterable
+                    :loading="agentsLoading"
+                    style="width: 100%"
+                >
+                    <el-option
+                        v-for="item in agentOptions"
+                        :key="item.agentCode"
+                        :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                        :value="item.agentCode"
+                    />
+                </el-select>
             </el-form-item>
             <el-form-item label="版本号">
                 <el-input-number v-model="form.versionNo" :min="1" placeholder="默认当前发布版本" />
@@ -34,12 +48,23 @@
 </template>
 
 <script setup name="ConfigRunConfirmDialog">
-import { ref, reactive, computed } from "vue";
+import { ref, reactive, computed, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { createRun } from "@/api/hrm/configuration_task";
+import { useAgentOptions } from "../composables/useAgentOptions";
 
 const props = defineProps({ modelValue: Boolean, task: Object });
 const emit = defineEmits(["update:modelValue", "started"]);
+
+const { agentOptions, ensureAgentOptions, agentsLoading } = useAgentOptions();
+
+watch(
+    () => props.modelValue,
+    (opened) => {
+        if (opened) ensureAgentOptions().catch(() => {});
+    },
+    { immediate: true }
+);
 
 const visible = computed({
     get: () => props.modelValue,

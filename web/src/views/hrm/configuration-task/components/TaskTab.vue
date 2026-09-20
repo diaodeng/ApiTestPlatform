@@ -13,6 +13,7 @@
             <el-form-item>
                 <el-button type="primary" icon="Search" @click="getList">查询</el-button>
                 <el-button type="primary" icon="Plus" @click="openCreateDialog">新增任务</el-button>
+                <el-button type="warning" icon="VideoCamera" @click="$emit('open-recording')">新建录制</el-button>
             </el-form-item>
         </el-form>
 
@@ -55,7 +56,25 @@
                     <el-input v-model="editForm.description" type="textarea" :rows="2" maxlength="500" />
                 </el-form-item>
                 <el-form-item label="执行Agent" required>
-                    <el-input v-model="editForm.agentCode" placeholder="Agent 编码" maxlength="128" />
+                    <el-select
+                        v-model="editForm.agentCode"
+                        placeholder="请选择执行 Agent"
+                        filterable
+                        :loading="agentsLoading"
+                        style="width: 100%"
+                    >
+                        <el-option
+                            v-for="item in agentOptions"
+                            :key="item.agentCode"
+                            :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                            :value="item.agentCode"
+                        >
+                            <span>{{ item.agentName || item.agentCode }} [{{ item.agentCode }}]</span>
+                            <span class="agent-status" :class="item.status === 2 ? 'is-online' : 'is-offline'">
+                                {{ item.status === 2 ? "在线" : "离线" }}
+                            </span>
+                        </el-option>
+                    </el-select>
                 </el-form-item>
                 <el-form-item label="业务变量">
                     <el-input
@@ -87,8 +106,9 @@
 import { ref, reactive, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { listTasks, addTask, updateTask } from "@/api/hrm/configuration_task";
+import { useAgentOptions } from "../composables/useAgentOptions";
 
-defineEmits(["open-versions", "open-run", "open-schedule", "open-convert"]);
+defineEmits(["open-versions", "open-run", "open-schedule", "open-convert", "open-recording"]);
 
 const loading = ref(false);
 const keyword = ref("");
@@ -97,8 +117,12 @@ const editVisible = ref(false);
 const saving = ref(false);
 const variablesText = ref("{}");
 const editForm = reactive({ taskId: "", taskName: "", description: "", agentCode: "", status: "ACTIVE", remark: "" });
+const { agentOptions, ensureAgentOptions, agentsLoading } = useAgentOptions();
 
-onMounted(() => getList());
+onMounted(() => {
+    getList();
+    ensureAgentOptions().catch((e) => ElMessage.error(e.message || "Agent 列表查询失败"));
+});
 
 async function getList() {
     loading.value = true;
@@ -163,3 +187,18 @@ async function saveTask() {
 
 defineExpose({ getList });
 </script>
+
+<style lang="scss" scoped>
+.agent-status {
+    float: right;
+    font-size: 12px;
+
+    &.is-online {
+        color: var(--el-color-success);
+    }
+
+    &.is-offline {
+        color: var(--el-color-danger);
+    }
+}
+</style>

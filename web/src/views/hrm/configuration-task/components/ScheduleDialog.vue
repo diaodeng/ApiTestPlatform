@@ -16,7 +16,21 @@
                     <el-input-number v-model="form.versionNo" :min="1" placeholder="默认当前发布版本" />
                 </el-form-item>
                 <el-form-item label="执行Agent">
-                    <el-input v-model="form.agentCode" :placeholder="task?.agentCode || '默认任务 Agent'" />
+                    <el-select
+                        v-model="form.agentCode"
+                        :placeholder="task?.agentCode ? `默认任务 Agent：${task.agentCode}` : '默认任务 Agent'"
+                        clearable
+                        filterable
+                        :loading="agentsLoading"
+                        style="width: 100%"
+                    >
+                        <el-option
+                            v-for="item in agentOptions"
+                            :key="item.agentCode"
+                            :label="`${item.agentName || item.agentCode} [${item.agentCode}]`"
+                            :value="item.agentCode"
+                        />
+                    </el-select>
                 </el-form-item>
                 <el-alert
                     :title="scheduleHint"
@@ -36,9 +50,12 @@
 import { ref, reactive, computed, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { getTaskSchedule, saveTaskSchedule } from "@/api/hrm/configuration_task";
+import { useAgentOptions } from "../composables/useAgentOptions";
 
 const props = defineProps({ modelValue: Boolean, task: Object });
 const emit = defineEmits(["update:modelValue", "saved"]);
+
+const { agentOptions, ensureAgentOptions, agentsLoading } = useAgentOptions();
 
 const visible = computed({
     get: () => props.modelValue,
@@ -46,13 +63,15 @@ const visible = computed({
 });
 const saving = ref(false);
 const form = reactive({ enabled: false, cron: "", versionNo: undefined, agentCode: "" });
+// 提示用户：这里的保存只是记录偏好，不会自动创建调度任务，必须去定时任务页手工创建。
 const scheduleHint =
-    '保存后需在「系统监控 → 定时任务」创建调用目标 module_task.scheduler_configuration.trigger_configuration_task_run，参数 {"task_id": 任务ID}，cron 与此处一致。';
+    '注意：保存本配置只是记录定时偏好，系统不会自动创建调度任务。还需到「系统监控 → 定时任务」手工创建一条定时任务：调用目标填 module_task.scheduler_configuration.trigger_configuration_task_run，参数填 {"task_id": 任务ID}，cron 与此处保持一致；两处都没配置时不会定时执行。';
 
 watch(
     () => [props.modelValue, props.task?.taskId],
     async ([opened]) => {
         if (!opened || !props.task) return;
+        ensureAgentOptions().catch(() => {});
         try {
             const res = await getTaskSchedule(props.task.taskId);
             const data = res.data || {};
