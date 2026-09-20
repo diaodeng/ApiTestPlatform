@@ -40,6 +40,19 @@ class ConfigurationTaskRun(Base):
     input_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", comment="输入资源快照JSON")
     run_params_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", comment="运行参数快照JSON")
     result_json: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="Agent执行结果JSON")
+    business_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="PENDING",
+        comment="业务执行状态",
+    )
+    evidence_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="NOT_REQUIRED",
+        comment="证据完整状态",
+    )
+    evidence_missing_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", comment="缺失证据项JSON")
     error_code: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="错误码")
     error_message: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="错误消息")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="开始时间")

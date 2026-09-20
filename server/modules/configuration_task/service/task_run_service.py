@@ -24,6 +24,7 @@ from module_hrm.enums.enums import AgentResponseEnum
 from module_hrm.service.web_case_service import WebCaseService
 from module_qtr.service.agent_service import send_message
 from modules.configuration_task.dao.resource_dao import ResourceDao
+from modules.configuration_task.dao.stage_artifact_dao import ConfigurationTaskStageDao
 from modules.configuration_task.dao.task_dao import (
     ConfigurationTaskDao,
     ConfigurationTaskRunDao,
@@ -38,6 +39,10 @@ from modules.configuration_task.entity.vo.task_vo import (
     TaskRunDetailModel,
     TaskRunStopModel,
 )
+from modules.configuration_task.service.evidence_status_service import (
+    ConfigurationTaskEvidenceStatusService,
+)
+from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
 
 RUN_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 # 运行下发 Agent 的默认超时（秒）：配置任务可能包含多步骤页面操作，
@@ -61,6 +66,51 @@ class TaskRunServiceResult:
 def _dumps(value) -> str:
     """序列化为紧凑 JSON，供 ORM 文本列保存。"""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _build_evidence_plan(steps: list[dict[str, Any]], stage_rows: list[Any]) -> dict[str, Any]:
+    """从冻结步骤和运行阶段快照构造 Agent 侧证据计划。"""
+    stage_by_step_id: dict[str, str] = {}
+    stages_payload: dict[str, Any] = {}
+    for stage in stage_rows:
+        step_ids = load_json_list(getattr(stage, "step_ids_json", "[]"))
+        step_indexes = load_json_list(getattr(stage, "step_range_json", "[]"))
+        stage_key = str(getattr(stage, "stage_key", "") or "")
+        for step_id in step_ids:
+            stage_by_step_id[str(step_id)] = stage_key
+        for index in step_indexes:
+            if 0 <= int(index) < len(steps):
+                step_id = str(steps[int(index)].get("stepId") or "")
+                if step_id:
+                    stage_by_step_id[step_id] = stage_key
+        stages_payload[stage_key] = {
+            "stageKey": stage_key,
+            "stepIds": [str(item) for item in step_ids],
+            "evidencePolicy": json.loads(getattr(stage, "evidence_policy_json", "{}") or "{}"),
+        }
+    if not stages_payload:
+        stages_payload["all"] = {
+            "stageKey": "all",
+            "stepIds": [str(step.get("stepId") or "") for step in steps],
+            "evidencePolicy": {"mode": "NONE"},
+        }
+
+    plan_steps: dict[str, Any] = {}
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict) or step.get("actionType") != "capture_screenshot":
+            continue
+        step_id = str(step.get("stepId") or f"step-{index}").strip()
+        params = step.get("params") if isinstance(step.get("params"), dict) else {}
+        evidence_type = str(params.get("evidenceType") or "checkpoint_screenshot").strip()
+        evidence_key = str(params.get("evidenceKey") or step_id).strip()
+        plan_steps[step_id] = {
+            "stageKey": stage_by_step_id.get(step_id, "all"),
+            "evidenceType": evidence_type,
+            "evidenceKey": evidence_key,
+            "sequenceNo": max(int(params.get("sequenceNo") or 1), 1),
+            "required": bool(params.get("required", False)),
+        }
+    return {"version": 1, "steps": plan_steps, "stages": stages_payload}
 
 
 class ConfigurationTaskRunService:
@@ -149,6 +199,9 @@ class ConfigurationTaskRunService:
                 "agent_code": agent_code,
                 "trigger_type": model.trigger_type or "manual",
                 "status": "RUNNING",
+                "business_status": "RUNNING",
+                "evidence_status": "NOT_REQUIRED",
+                "evidence_missing_json": "[]",
                 "input_snapshot_json": _dumps(input_snapshot),
                 "run_params_json": _dumps(run_params),
                 "started_at": now,
@@ -164,9 +217,12 @@ class ConfigurationTaskRunService:
         db.refresh(run)
         # 阶段快照：运行创建时从版本阶段复制；WRITE 阶段创建即挂起审批。
         # 放在 run_case 消息构造之前，保证事件处理时阶段已存在。
-        from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
-
         ConfigurationTaskStageService.snapshot_run_stages(db, run, version)
+        run_params["evidencePlan"] = _build_evidence_plan(
+            load_json_list(version.steps_json),
+            ConfigurationTaskStageService.list_run_stage_entities(db, run.task_run_id),
+        )
+        ConfigurationTaskRunDao.update_run(db, run.task_run_id, {"run_params_json": _dumps(run_params)})
         db.commit()
         message = cls._build_run_case_message(
             run,
@@ -372,6 +428,8 @@ class ConfigurationTaskRunService:
             "headless": bool(version.headless),
             "variables": run_params.get("variables") or {},
             "resourceBindings": resource_bindings,
+            "evidencePlan": run_params.get("evidencePlan") or {"version": 1, "steps": {}, "stages": {}},
+            "agentCode": run.agent_code,
             "manualLoginEnabled": manual_login_enabled,
             "manualLoginWaitSec": manual_login_wait_sec,
             "manualLoginRequireConfirm": True,
@@ -412,6 +470,7 @@ class ConfigurationTaskRunService:
             run.task_run_id,
             {
                 "status": "SUCCESS",
+                "business_status": "SUCCESS",
                 "result_json": _dumps(response_result),
                 "error_code": "",
                 "error_message": "",
@@ -419,6 +478,11 @@ class ConfigurationTaskRunService:
                 "duration_ms": duration_ms,
                 "update_by": operator,
             },
+        )
+        ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(
+            db,
+            run.task_run_id,
+            commit=False,
         )
         db.commit()
         refreshed = ConfigurationTaskRunDao.get_run(db, run.task_run_id)
@@ -445,6 +509,7 @@ class ConfigurationTaskRunService:
         safe_message = (error_message or "运行失败")[:2000]
         update_values: dict[str, Any] = {
             "status": "FAILED",
+            "business_status": "FAILED",
             "error_code": error_code,
             "error_message": safe_message,
             "ended_at": now,
@@ -454,6 +519,11 @@ class ConfigurationTaskRunService:
         if response_result:
             update_values["result_json"] = _dumps(response_result)
         ConfigurationTaskRunDao.update_run(db, run.task_run_id, update_values)
+        ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(
+            db,
+            run.task_run_id,
+            commit=False,
+        )
         db.commit()
         refreshed = ConfigurationTaskRunDao.get_run(db, run.task_run_id)
         logger.warning(
@@ -532,12 +602,18 @@ class ConfigurationTaskRunService:
             run.task_run_id,
             {
                 "status": "CANCELLED",
+                "business_status": "CANCELLED",
                 "error_code": "RUN_CANCELLED",
                 "error_message": reason[:2000],
                 "ended_at": now,
                 "duration_ms": duration_ms,
                 "update_by": operator,
             },
+        )
+        ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(
+            db,
+            run.task_run_id,
+            commit=False,
         )
         db.commit()
         refreshed = ConfigurationTaskRunDao.get_run(db, run.task_run_id)
@@ -546,33 +622,59 @@ class ConfigurationTaskRunService:
 
     @classmethod
     def _advance_stage_by_step(cls, db: Session, task_run_id: int, step_payload: dict[str, Any]) -> None:
-        """把步骤完成事件映射到运行阶段：阶段内全部步骤完成则阶段置 SUCCESS。
+        """按稳定步骤身份推进阶段，并依据阶段内全部步骤结果判定终态。
 
-        任一步骤失败即把阶段置 FAILED 并跳过后续阶段（由 mark_stage_finished 统一处理）。
-        映射失败只记日志，不阻塞事件主流程。
+        新事件优先使用 stepId；旧 Agent 只提供展示用 stepIndex 时，先按当前
+        Agent 的 1-based 索引转换为 0-based，再兼容旧的 0-based 事件。阶段只在
+        所有步骤都已成功/跳过时成功，单个步骤的重复或乱序事件不能提前结束阶段。
         """
         try:
-            from modules.configuration_task.dao.stage_artifact_dao import ConfigurationTaskStageDao, load_json_list
-            from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
-
-            stage_index = step_payload.get("stepIndex")
+            stage_rows = ConfigurationTaskStageDao.list_run_stages(db, task_run_id)
+            if not stage_rows:
+                return
+            step_id = str(step_payload.get("stepId") or step_payload.get("step_id") or "").strip()
+            raw_index = step_payload.get("stepIndex")
+            if raw_index is None:
+                raw_index = step_payload.get("step_index")
+            try:
+                display_index = int(raw_index) if raw_index is not None else None
+            except (TypeError, ValueError):
+                display_index = None
             status = str(step_payload.get("status") or "").strip().lower()
-            if stage_index is None:
-                return
-            stages = ConfigurationTaskStageDao.list_run_stages(db, task_run_id)
+
             target = None
-            for stage in stages:
-                indexes = load_json_list(stage.step_range_json)
-                if not indexes:
-                    # 未声明阶段的单阶段模式：任意步骤都归属该阶段。
+            for stage in stage_rows:
+                stage_step_ids = [str(item) for item in load_json_list(stage.step_ids_json) if item]
+                stage_indexes = [int(item) for item in load_json_list(stage.step_range_json)]
+                if step_id and stage_step_ids:
+                    if step_id in stage_step_ids:
+                        target = stage
+                        break
+                    continue
+                if display_index is None:
+                    continue
+                # 当前 Agent 上报的是 1-based 展示索引；只有无法转换时才
+                # 回退到历史 0-based 事件，避免阶段映射静默错位。
+                candidates = [display_index - 1, display_index]
+                matched_index = next((item for item in candidates if item in stage_indexes), None)
+                if matched_index is not None:
                     target = stage
                     break
-                if int(stage_index) in indexes:
+                if not stage_indexes and len(stage_rows) == 1:
                     target = stage
                     break
-            if not target or target.status in {"SUCCESS", "FAILED", "SKIPPED", "CANCELLED"}:
+
+            if target is None:
+                if step_id or display_index is not None:
+                    logger.warning(
+                        f"步骤事件无法映射运行阶段: task_run_id={task_run_id}, "
+                        f"step_id={step_id}, step_index={display_index}"
+                    )
                 return
-            if status == "failed":
+            if target.status in {"SUCCESS", "FAILED", "SKIPPED", "CANCELLED"}:
+                return
+
+            if status in {"failed", "failure", "error"}:
                 ConfigurationTaskStageService.mark_stage_finished(
                     db,
                     target.run_stage_id,
@@ -582,18 +684,74 @@ class ConfigurationTaskRunService:
                     error_message=str(step_payload.get("errorMessage") or "步骤执行失败"),
                 )
                 return
-            indexes = load_json_list(target.step_range_json)
-            if not indexes:
-                # 单阶段模式无法判断完成度，保持 RUNNING 由 run_finished 收敛。
+            if status not in {"passed", "success", "succeeded", "skipped"}:
                 if target.status != "RUNNING":
                     ConfigurationTaskStageService.mark_stage_running(db, target.run_stage_id)
                 return
-            if all(int(i) <= int(stage_index) for i in indexes if i > int(stage_index)) or int(stage_index) >= max(
-                indexes
-            ):
+
+            stage_step_ids = [str(item) for item in load_json_list(target.step_ids_json) if item]
+            stage_indexes = [int(item) for item in load_json_list(target.step_range_json)]
+            run = ConfigurationTaskRunDao.get_run(db, task_run_id)
+            result_payload = load_json_object(run.result_json if run else "")
+            recorded_steps = result_payload.get("steps") if isinstance(result_payload, dict) else []
+            if not isinstance(recorded_steps, list):
+                recorded_steps = []
+            recorded_steps = [item for item in recorded_steps if isinstance(item, dict)] + [step_payload]
+
+            def _step_matches(item: dict[str, Any], expected_id: str, expected_index: int | None) -> bool:
+                item_id = str(item.get("stepId") or item.get("step_id") or "").strip()
+                if expected_id and item_id:
+                    return item_id == expected_id
+                item_index = item.get("stepIndex")
+                if item_index is None:
+                    item_index = item.get("step_index")
+                try:
+                    item_index_int = int(item_index) if item_index is not None else None
+                except (TypeError, ValueError):
+                    item_index_int = None
+                if expected_index is None or item_index_int is None:
+                    return False
+                return item_index_int in {expected_index, expected_index + 1}
+
+            expected_steps: list[tuple[str, int | None]] = []
+            if stage_step_ids:
+                expected_steps = [(item, None) for item in stage_step_ids]
+            else:
+                expected_steps = [("", item) for item in stage_indexes]
+            if not expected_steps:
+                if target.status != "RUNNING":
+                    ConfigurationTaskStageService.mark_stage_running(db, target.run_stage_id)
+                return
+
+            all_finished = True
+            for expected_id, expected_index in expected_steps:
+                matches = [
+                    item for item in recorded_steps if _step_matches(item, expected_id, expected_index)
+                ]
+                latest = matches[-1] if matches else None
+                latest_status = str((latest or {}).get("status") or "").strip().lower()
+                if latest_status in {"failed", "failure", "error"}:
+                    ConfigurationTaskStageService.mark_stage_finished(
+                        db,
+                        target.run_stage_id,
+                        False,
+                        {"lastStep": latest},
+                        error_code="STEP_FAILED",
+                        error_message=str((latest or {}).get("errorMessage") or "步骤执行失败"),
+                    )
+                    return
+                if latest_status not in {"passed", "success", "succeeded", "skipped"}:
+                    all_finished = False
+                    break
+            if all_finished:
                 ConfigurationTaskStageService.mark_stage_finished(
-                    db, target.run_stage_id, True, {"lastStep": step_payload}
+                    db,
+                    target.run_stage_id,
+                    True,
+                    {"lastStep": step_payload},
                 )
+            elif target.status != "RUNNING":
+                ConfigurationTaskStageService.mark_stage_running(db, target.run_stage_id)
         except Exception as exc:
             logger.warning(f"步骤阶段映射失败（不影响事件处理）: task_run_id={task_run_id}, error={exc}")
 
@@ -656,8 +814,12 @@ class ConfigurationTaskRunService:
                 steps = result_payload.get("steps")
                 if not isinstance(steps, list):
                     steps = []
-                step_id = step_payload.get("stepId") or step_payload.get("step_id")
-                step_index = step_payload.get("stepIndex") or step_payload.get("step_index")
+                step_id = step_payload.get("stepId")
+                if step_id is None:
+                    step_id = step_payload.get("step_id")
+                step_index = step_payload.get("stepIndex")
+                if step_index is None:
+                    step_index = step_payload.get("step_index")
                 replaced = False
                 for position, item in enumerate(steps):
                     if not isinstance(item, dict):
@@ -706,6 +868,7 @@ class ConfigurationTaskRunService:
             update_values.update(
                 {
                     "status": final_status,
+                    "business_status": final_status,
                     "error_code": "" if final_status == "SUCCESS" else "EXECUTION_FAILED",
                     "error_message": error_message,
                     "ended_at": now,
@@ -716,6 +879,11 @@ class ConfigurationTaskRunService:
             update_values["duration_ms"] = max(0, int((now - started_at).total_seconds() * 1000))
             update_values["update_by"] = run.update_by or run.create_by
             ConfigurationTaskRunDao.update_run(db, run_id_int, update_values)
+            ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(
+                db,
+                run_id_int,
+                commit=False,
+            )
             db.commit()
             logger.info(
                 f"配置任务运行收到事件终态: task_run_id={run_id_int}, type={message_type}, status={final_status}"
@@ -728,9 +896,10 @@ class ConfigurationTaskRunService:
         """收敛重启或断线遗留的 RUNNING 孤儿运行。
 
         服务重启后异步等待段丢失，超过阈值仍无进展的 RUNNING 记录收敛为
-        FAILED，供调用方重试；定时任务或启动钩子可周期调用。
+        FAILED，同时收敛运行阶段，避免运行与阶段状态长期分叉。
         :return: {scanned, recovered} 摘要。
         """
+        timeout_minutes = max(int(timeout_minutes or 0), 1)
         rows = ConfigurationTaskRunDao.list_runs(db, status="RUNNING", limit=200)
         now = datetime.now()
         recovered = 0
@@ -744,6 +913,7 @@ class ConfigurationTaskRunService:
                 run.task_run_id,
                 {
                     "status": "FAILED",
+                    "business_status": "FAILED",
                     "error_code": "RUN_ORPHAN_RECOVERED",
                     "error_message": "运行中断（服务重启或 Agent 断线），已被恢复扫描收敛",
                     "ended_at": now,
@@ -751,10 +921,39 @@ class ConfigurationTaskRunService:
                     "update_by": "system",
                 },
             )
+            for stage in ConfigurationTaskStageDao.list_run_stages(db, run.task_run_id):
+                if stage.status == "RUNNING":
+                    ConfigurationTaskStageDao.update_run_stage(
+                        db,
+                        stage.run_stage_id,
+                        {
+                            "status": "FAILED",
+                            "error_code": "RUN_ORPHAN_RECOVERED",
+                            "error_message": "运行中断，阶段已由恢复扫描收敛",
+                            "ended_at": now,
+                        },
+                    )
+                elif stage.status in {"PENDING", "WAITING_APPROVAL"}:
+                    ConfigurationTaskStageDao.update_run_stage(
+                        db,
+                        stage.run_stage_id,
+                        {
+                            "status": "SKIPPED",
+                            "error_code": "RUN_ORPHAN_RECOVERED",
+                            "error_message": "运行中断，阶段未执行",
+                        },
+                    )
+            ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(
+                db,
+                run.task_run_id,
+                commit=False,
+            )
             recovered += 1
         if recovered:
             db.commit()
-            logger.warning(f"配置任务运行孤儿恢复完成: recovered={recovered}")
+            logger.warning(
+                f"配置任务运行孤儿恢复完成: recovered={recovered}, timeout_minutes={timeout_minutes}"
+            )
         return {"scanned": len(rows), "recovered": recovered}
 
     @classmethod
@@ -796,6 +995,9 @@ class ConfigurationTaskRunService:
             agentCode=row.agent_code,
             triggerType=row.trigger_type,
             status=row.status,
+            businessStatus=getattr(row, "business_status", None) or row.status,
+            evidenceStatus=getattr(row, "evidence_status", None) or "NOT_REQUIRED",
+            evidenceMissing=load_json_list(getattr(row, "evidence_missing_json", "[]")),
             inputSnapshot=load_json_object(row.input_snapshot_json),
             result=load_json_object(row.result_json),
             errorCode=row.error_code or "",

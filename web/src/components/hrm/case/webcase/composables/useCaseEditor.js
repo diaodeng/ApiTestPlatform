@@ -129,6 +129,29 @@ export function useCaseEditorManager(options) {
   function stripStepIdentity(step) {
     const cloned = normalizeStep(cloneData(step));
     cloned.stepId = undefined;
+    if (cloned.actionType === 'capture_screenshot') {
+      const sourceKey = `${cloned.params?.evidenceKey || ''}`.trim();
+      let evidenceKey = '';
+      if (sourceKey) {
+        const usedKeys = new Set(
+          form.value.steps
+            .filter((item) => item !== step && item.actionType === 'capture_screenshot')
+            .map((item) => `${item.params?.evidenceKey || ''}`.trim())
+            .filter(Boolean),
+        );
+        const baseKey = `${sourceKey}-copy`;
+        evidenceKey = baseKey;
+        let suffix = 2;
+        while (usedKeys.has(evidenceKey)) {
+          evidenceKey = `${baseKey}-${suffix}`;
+          suffix += 1;
+        }
+      }
+      cloned.params = {
+        ...cloned.params,
+        evidenceKey,
+      };
+    }
     if (cloned.targetSnapshot) {
       cloned.targetSnapshot.targetSnapshotId = undefined;
       cloned.targetSnapshot.locators = cloned.targetSnapshot.locators.map((locator, index) => ({

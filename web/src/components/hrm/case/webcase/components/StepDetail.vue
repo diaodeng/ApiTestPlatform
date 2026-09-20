@@ -8,7 +8,7 @@
     locatorTypeOptions,
     assertionTypeOptions,
   } from '../utils/shared.js';
-  import { stepNeedsTarget, normalizeStepParams } from '../domain/stepDomain';
+  import { getScreenshotEvidenceTypes, stepNeedsTarget, normalizeStepParams } from '../domain/stepDomain';
   import { createDefaultTargetSnapshot } from '../domain/snapshotDomain';
   import {
     addAssertion,
@@ -145,6 +145,62 @@
                 placeholder="https://example.com/path"
               />
             </el-form-item>
+          </el-col>
+          <el-col v-else-if="props.currentStep.actionType === 'capture_screenshot'" :span="24">
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="证据类型">
+                  <el-select v-model="props.currentStep.params.evidenceType" style="width: 100%">
+                    <el-option
+                      v-for="item in getScreenshotEvidenceTypes()"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="证据键">
+                  <el-input v-model="props.currentStep.params.evidenceKey" placeholder="阶段策略匹配用，可选" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="展示名称">
+                  <el-input v-model="props.currentStep.params.label" placeholder="截图在证据列表中的名称" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="必需证据">
+                  <el-switch v-model="props.currentStep.params.required" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="整页截图">
+                  <el-switch v-model="props.currentStep.params.fullPage" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="等待(ms)">
+                  <el-input-number v-model="props.currentStep.params.waitMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="遮罩选择器">
+                  <el-input
+                    :model-value="(props.currentStep.params.maskSelectors || []).join(', ')"
+                    placeholder="多个 CSS 选择器用逗号分隔"
+                    @update:model-value="(value) => (props.currentStep.params.maskSelectors = value.split(',').map((item) => item.trim()).filter(Boolean))"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="备注">
+                  <el-input v-model="props.currentStep.params.note" type="textarea" :rows="2" placeholder="说明该截图用于什么检查点" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <div class="locator-tip">截图正文只保存在 Agent 受控目录，服务端仅登记资源元数据和证据引用。</div>
           </el-col>
           <el-col v-else-if="props.currentStep.actionType === 'set_window_size'" :span="24">
             <el-row :gutter="12">

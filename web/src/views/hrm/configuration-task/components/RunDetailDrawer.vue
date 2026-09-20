@@ -3,10 +3,13 @@
         <div v-loading="loading">
             <template v-if="run">
                 <el-descriptions :column="2" border size="small" class="mb8">
-                    <el-descriptions-item label="运行ID">{{ run.taskRunId }}</el-descriptions-item>
-                    <el-descriptions-item label="状态">
-                        <el-tag :type="statusType(run.status)">{{ run.status }}</el-tag>
+                    <el-descriptions-item label="业务状态">
+                        <el-tag :type="statusType(run.businessStatus || run.status)">{{ run.businessStatus || run.status }}</el-tag>
                     </el-descriptions-item>
+                    <el-descriptions-item label="证据状态">
+                        <el-tag :type="evidenceStatusType(run.evidenceStatus)">{{ run.evidenceStatus || "NOT_REQUIRED" }}</el-tag>
+                    </el-descriptions-item>
+                    <el-descriptions-item label="运行ID">{{ run.taskRunId }}</el-descriptions-item>
                     <el-descriptions-item label="版本">v{{ run.versionNo }}</el-descriptions-item>
                     <el-descriptions-item label="Agent">{{ run.agentCode }}</el-descriptions-item>
                     <el-descriptions-item label="触发方式">{{ run.triggerType }}</el-descriptions-item>
@@ -14,6 +17,19 @@
                     <el-descriptions-item label="开始时间">{{ run.startedAt || "-" }}</el-descriptions-item>
                     <el-descriptions-item label="结束时间">{{ run.endedAt || "-" }}</el-descriptions-item>
                 </el-descriptions>
+                <el-alert
+                    v-if="run.evidenceMissing?.length"
+                    title="业务执行状态与证据完整状态独立计算，以下证据尚未满足策略要求。"
+                    type="warning"
+                    :closable="false"
+                    class="mb8"
+                >
+                    <ul class="missing-list">
+                        <li v-for="(item, index) in run.evidenceMissing" :key="`${item.evidenceKey || item.evidenceType}-${index}`">
+                            {{ item.evidenceType || "证据" }}{{ item.evidenceKey ? ` / ${item.evidenceKey}` : "" }}：{{ item.reason || "未满足" }}
+                        </li>
+                    </ul>
+                </el-alert>
                 <el-alert
                     v-if="run.errorMessage"
                     :title="run.errorMessage"
@@ -28,9 +44,10 @@
                             <el-table-column label="顺序" prop="stageOrder" width="60" />
                             <el-table-column label="阶段" prop="stageName" min-width="120" />
                             <el-table-column label="模式" prop="mode" width="140" />
-                            <el-table-column label="状态" width="150">
+                                    <el-table-column label="状态" width="150">
                                 <template #default="{ row }">
                                     <el-tag :type="stageStatusType(row.status)" size="small">{{ row.status }}</el-tag>
+                                    <el-tag :type="evidenceStatusType(row.evidenceStatus)" size="small" class="ml4">证据 {{ row.evidenceStatus || "NOT_REQUIRED" }}</el-tag>
                                 </template>
                             </el-table-column>
                             <el-table-column label="审批人" prop="approvedBy" width="90" />
@@ -71,6 +88,9 @@
                     <el-tab-pane label="产物">
                         <el-table :data="artifacts" border size="small">
                             <el-table-column label="类型" prop="artifactType" width="150" />
+                            <el-table-column label="证据键" prop="evidenceKey" min-width="140" show-overflow-tooltip />
+                            <el-table-column label="步骤ID" prop="stepId" min-width="150" show-overflow-tooltip />
+                            <el-table-column label="可取回状态" prop="availabilityStatus" width="130" />
                             <el-table-column label="文件名" prop="originalFileName" min-width="160" />
                             <el-table-column label="资源ID" prop="resourceId" width="180" />
                             <el-table-column label="大小" prop="fileSize" width="90" />
@@ -207,6 +227,16 @@ async function generateReport(notifyFeishu) {
     }
 }
 
+function evidenceStatusType(status) {
+    return {
+        NOT_REQUIRED: "info",
+        PENDING: "warning",
+        COMPLETE: "success",
+        INCOMPLETE: "warning",
+        FAILED: "danger"
+    }[status] || "info";
+}
+
 function statusType(status) {
     return {
         SUCCESS: "success",
@@ -229,3 +259,13 @@ function stageStatusType(status) {
     }[status] || "info";
 }
 </script>
+
+<style scoped>
+.missing-list {
+    margin: 0;
+    padding-left: 18px;
+}
+.ml4 {
+    margin-left: 4px;
+}
+</style>

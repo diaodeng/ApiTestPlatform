@@ -9,20 +9,38 @@ begin/chunk/commit 或单接口直传），本服务负责：
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from modules.configuration_task.dao.resource_dao import ResourceDao
-from modules.configuration_task.dao.stage_artifact_dao import TaskArtifactDao
-from modules.configuration_task.dao.task_dao import ConfigurationTaskRunDao
+from modules.configuration_task.dao.stage_artifact_dao import (
+    ConfigurationTaskStageDao,
+    TaskArtifactDao,
+)
+from modules.configuration_task.dao.task_dao import ConfigurationTaskRunDao, load_json_list
 from modules.configuration_task.entity.do.resource_object_do import ResourceObject
 from modules.configuration_task.entity.vo.task_vo import AgentStepScreenshotModel, ArtifactModel
+from modules.configuration_task.service.evidence_status_service import (
+    ConfigurationTaskEvidenceStatusService,
+)
 
 ARTIFACT_TYPES = {"step_screenshot", "failure_screenshot", "execution_log", "report"}
+_EVIDENCE_TYPES = {
+    "checkpoint_screenshot",
+    "before_screenshot",
+    "after_screenshot",
+    "failure_screenshot",
+    "execution_log",
+    "report",
+}
+_SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+_ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "text/plain", "application/json"}
 
 
 @dataclass
@@ -49,11 +67,7 @@ class ConfigurationTaskArtifactService:
         model: AgentStepScreenshotModel,
         current_user,
     ) -> ArtifactServiceResult:
-        """登记 Agent 上报的截图/日志产物：资源表 + 产物引用一次写入。
-
-        资源状态直接置 READY：Agent 上报即代表本地 manifest 已写入该文件
-        （Agent 端在截图后通过本地文件服务落盘），服务端仅追踪元数据。
-        """
+        """登记 Agent 截图产物，兼容旧 Base64 并优先支持 metadata-only。"""
         user = getattr(current_user, "user", None)
         operator = user.user_name if user else "system"
         try:
@@ -63,33 +77,88 @@ class ConfigurationTaskArtifactService:
         run = ConfigurationTaskRunDao.get_run(db, task_run_id)
         if not run:
             return ArtifactServiceResult(False, "运行记录不存在")
+        if model.agent_code and model.agent_code != run.agent_code:
+            return ArtifactServiceResult(False, "产物不属于当前运行 Agent")
+        if model.artifact_type not in ARTIFACT_TYPES:
+            return ArtifactServiceResult(False, "产物类型不支持")
+
+        artifact_type = model.artifact_type
+        evidence_type = model.evidence_type or (
+            "checkpoint_screenshot" if artifact_type == "step_screenshot" else
+            "failure_screenshot" if artifact_type == "failure_screenshot" else None
+        )
+        if evidence_type and evidence_type not in _EVIDENCE_TYPES:
+            return ArtifactServiceResult(False, "证据类型不支持")
+        if model.mime_type not in _ALLOWED_MIME_TYPES:
+            return ArtifactServiceResult(False, "MIME 类型不支持")
+
+        run_stage_id = None
+        if model.stage_key:
+            stage = ConfigurationTaskStageDao.get_run_stage_by_run_and_key(
+                db, task_run_id, model.stage_key
+            )
+            if not stage:
+                return ArtifactServiceResult(False, "阶段不存在或不属于当前运行")
+            run_stage_id = stage.run_stage_id
+            stage_step_ids = load_json_list(stage.step_ids_json)
+            if model.step_id and stage_step_ids and model.step_id not in stage_step_ids:
+                return ArtifactServiceResult(False, "步骤不属于上报阶段")
 
         data_text = model.data
-        try:
-            import base64
+        if data_text:
+            # 旧版事件只在兼容分支解码，正文不写入运行 JSON、日志或资源索引。
+            try:
+                import base64
 
-            content = base64.b64decode(data_text.encode("ascii"), validate=True)
-        except Exception:
-            return ArtifactServiceResult(False, "data 必须是合法 Base64")
-        if not content:
-            return ArtifactServiceResult(False, "截图内容不能为空")
-        sha256 = hashlib.sha256(content).hexdigest()
-        size = len(content)
+                content = base64.b64decode(data_text.encode("ascii"), validate=True)
+            except Exception:
+                return ArtifactServiceResult(False, "data 必须是合法 Base64")
+            if not content:
+                return ArtifactServiceResult(False, "截图内容不能为空")
+            sha256 = hashlib.sha256(content).hexdigest()
+            size = len(content)
+            object_key = (
+                f"artifacts/{task_run_id}/{artifact_type}/"
+                f"{model.step_index}_{sha256[:16]}"
+            )
+            agent_code = run.agent_code
+        else:
+            if model.provider_type != "agent_local":
+                return ArtifactServiceResult(False, "metadata-only 只支持 agent_local Provider")
+            object_key = str(model.object_key or "").strip()
+            parts = object_key.split("/")
+            if (
+                not object_key
+                or object_key.startswith("/")
+                or "\\" in object_key
+                or ".." in parts
+                or len(parts) != 2
+                or parts[0] != "resources"
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", parts[1])
+            ):
+                return ArtifactServiceResult(False, "objectKey 不是受控相对定位键")
+            if model.file_size is None or model.file_size <= 0:
+                return ArtifactServiceResult(False, "metadata-only 必须提供 fileSize")
+            if not _SHA256_PATTERN.fullmatch(model.sha256 or ""):
+                return ArtifactServiceResult(False, "metadata-only 必须提供合法 SHA-256")
+            sha256 = model.sha256.lower()
+            size = model.file_size
+            agent_code = model.agent_code or run.agent_code
 
-        # 资源身份：agent_code + object_key + version；同一运行同一步骤重复上报幂等返回。
-        object_key = f"artifacts/{task_run_id}/{model.artifact_type}/{model.step_index}_{sha256[:16]}"
-        existing = ResourceDao.get_by_identity(db, run.agent_code, object_key, 1)
-        if existing:
-            resource = existing
+        existing_resource = ResourceDao.get_by_identity(db, agent_code, object_key, 1)
+        if existing_resource:
+            if existing_resource.sha256 != sha256 or existing_resource.file_size != size:
+                return ArtifactServiceResult(False, "资源元数据与已有资源不一致")
+            resource = existing_resource
         else:
             now = datetime.now()
             try:
                 resource = ResourceDao.add_resource(
                     db,
                     {
-                        "provider_type": "agent_local",
+                        "provider_type": model.provider_type or "agent_local",
                         "provider_execution_side": "agent",
-                        "agent_code": run.agent_code,
+                        "agent_code": agent_code,
                         "object_key": object_key,
                         "original_file_name": model.file_name or "screenshot.png",
                         "mime_type": model.mime_type or "image/png",
@@ -104,37 +173,91 @@ class ConfigurationTaskArtifactService:
                         "update_time": now,
                         "last_audit_at": now,
                         "audit_message": "Agent 步骤产物上报登记",
-                        "remark": f"task_run_id={task_run_id} step_index={model.step_index}",
+                        "remark": f"task_run_id={task_run_id} step_id={model.step_id or model.step_index}",
                     },
                 )
-                db.commit()
             except Exception as exc:
                 db.rollback()
-                logger.warning(f"产物资源登记冲突，回查已有记录: task_run_id={task_run_id}, error={exc}")
-                resource = ResourceDao.get_by_identity(db, run.agent_code, object_key, 1)
+                logger.warning(
+                    f"产物资源登记冲突，回查已有记录: task_run_id={task_run_id}, error={exc}"
+                )
+                resource = ResourceDao.get_by_identity(db, agent_code, object_key, 1)
                 if not resource:
                     return ArtifactServiceResult(False, "产物资源登记失败")
 
-        artifact = TaskArtifactDao.add_artifact(
+        step_id = model.step_id or f"step-{model.step_index}"
+        evidence_key = model.evidence_key or (step_id if data_text is None else "")
+        existing_artifact = TaskArtifactDao.get_artifact_by_evidence_identity(
             db,
-            {
-                "task_run_id": task_run_id,
-                "run_stage_id": None,
-                "artifact_type": model.artifact_type,
-                "step_key": f"step-{model.step_index}",
-                "resource_id": resource.resource_id,
-                "original_file_name": model.file_name or "screenshot.png",
-                "file_size": size,
-                "sha256": sha256,
-                "note": model.step_name or "",
-                "create_by": operator,
-                "create_time": datetime.now(),
-            },
+            task_run_id,
+            run_stage_id,
+            step_id,
+            evidence_key,
+            model.sequence_no,
+            sha256,
         )
-        db.commit()
+        if existing_artifact:
+            db.rollback()
+            ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(db, task_run_id)
+            return ArtifactServiceResult(True, "产物已登记", cls.to_artifact_model(existing_artifact))
+
+        try:
+            artifact = TaskArtifactDao.add_artifact(
+                db,
+                {
+                    "task_run_id": task_run_id,
+                    "run_stage_id": run_stage_id,
+                    "artifact_type": artifact_type,
+                    "step_key": step_id,
+                    "step_id": step_id,
+                    "evidence_type": evidence_type or "",
+                    "evidence_key": evidence_key,
+                    "sequence_no": model.sequence_no,
+                    "captured_at": model.captured_at,
+                    "mask_applied": model.mask_applied,
+                    "availability_status": "ONLINE",
+                    "provider_type": model.provider_type or "agent_local",
+                    "agent_code": agent_code,
+                    "object_key": object_key,
+                    "mime_type": model.mime_type or "image/png",
+                    "resource_id": resource.resource_id,
+                    "original_file_name": model.file_name or "screenshot.png",
+                    "file_size": size,
+                    "sha256": sha256,
+                    "note": model.step_name or "",
+                    "create_by": operator,
+                    "create_time": datetime.now(),
+                },
+            )
+            db.commit()
+        except IntegrityError as exc:
+            # 并发请求可能同时通过插入前查询，唯一键由数据库完成最终裁决；
+            # 回滚后按同一引用身份回查，向调用方返回已提交的记录而不重复创建。
+            db.rollback()
+            existing_artifact = TaskArtifactDao.get_artifact_by_evidence_identity(
+                db,
+                task_run_id,
+                run_stage_id,
+                step_id,
+                evidence_key,
+                model.sequence_no,
+                sha256,
+            )
+            if not existing_artifact:
+                logger.warning(
+                    f"产物引用登记唯一约束冲突且无法回查: task_run_id={task_run_id}, "
+                    f"run_stage_id={run_stage_id}, step_id={step_id}, error={exc}"
+                )
+                return ArtifactServiceResult(False, "产物引用登记冲突")
+            ConfigurationTaskEvidenceStatusService.refresh_run_and_stages(db, task_run_id)
+            return ArtifactServiceResult(
+                True,
+                "产物已登记",
+                cls.to_artifact_model(existing_artifact),
+            )
         logger.info(
             f"登记运行产物: artifact_id={artifact.artifact_id}, task_run_id={task_run_id}, "
-            f"type={model.artifact_type}, size={size}, operator={operator}"
+            f"type={artifact_type}, evidence_type={evidence_type}, size={size}, operator={operator}"
         )
         return ArtifactServiceResult(True, "产物登记成功", cls.to_artifact_model(artifact))
 
@@ -181,6 +304,17 @@ class ConfigurationTaskArtifactService:
             runStageId=str(row.run_stage_id) if row.run_stage_id else None,
             artifactType=row.artifact_type,
             stepKey=row.step_key or "",
+            stepId=row.step_id or "",
+            evidenceType=row.evidence_type or None,
+            evidenceKey=row.evidence_key or "",
+            sequenceNo=row.sequence_no or 1,
+            capturedAt=row.captured_at,
+            maskApplied=bool(row.mask_applied),
+            availabilityStatus=row.availability_status or "ONLINE",
+            providerType=row.provider_type or "agent_local",
+            agentCode=row.agent_code or "",
+            objectKey=row.object_key or "",
+            mimeType=row.mime_type or "",
             resourceId=str(row.resource_id),
             originalFileName=row.original_file_name or "",
             fileSize=row.file_size,

@@ -3,7 +3,7 @@ title: 内容目录
 type: index
 source_type: code
 created: 2026-05-20
-updated: 2026-09-19
+updated: 2026-09-21
 ---
 
 # 内容目录
@@ -52,6 +52,7 @@ updated: 2026-09-19
 - [新版客户端运行时](entities/components/new-client-runtime.md)
 - [新版客户端服务模块](entities/services/new-client-services.md)
 - [门店配置任务域设计](entities/services/configuration-task-domain.md)
+- [门店配置运行取证与证据包实施方案](features/configuration-task-evidence-collection-plan.md)
 
 ## 流程
 

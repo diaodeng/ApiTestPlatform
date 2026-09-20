@@ -1,6 +1,7 @@
 """配置任务运行域最小闭环测试：任务、版本发布与运行执行。"""
 
 import asyncio
+import json
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -472,21 +473,10 @@ def test_handle_agent_run_event_updates_progress(db_session):
     assert row.status == "SUCCESS"
 
 
-def test_handle_agent_run_event_ignores_other_table_ids(db_session):
-    """未命中配置任务运行表的事件必须返回 False，交回 Web 用例链路。"""
+def test_handle_agent_run_event_uses_stable_step_id_for_replacement(db_session):
+    """同一稳定 stepId 再次上报时应更新原步骤，而不是追加重复步骤。"""
     _task(db_session)
-    handled = ConfigurationTaskRunService.handle_agent_run_event(
-        db_session,
-        "agent-01",
-        {"type": "web_run_step", "webCaseRunId": 12345, "payload": {}},
-    )
-    assert handled is False
-
-
-def test_recover_orphan_running_marks_failed(db_session):
-    """超过阈值无进展的 RUNNING 运行被恢复任务收敛为 FAILED。"""
-    _task(db_session)
-    stale_time = datetime(2020, 1, 1)
+    now = datetime.now()
     db_session.add(
         ConfigurationTaskRun(
             task_run_id=RUN_ID,
@@ -498,16 +488,229 @@ def test_recover_orphan_running_marks_failed(db_session):
             status="RUNNING",
             input_snapshot_json="{}",
             run_params_json="{}",
-            started_at=stale_time,
+            result_json='{"steps":[{"stepId":"capture-before-save","stepIndex":2,"status":"passed"}]}',
+            started_at=now,
             create_by="tester",
-            create_time=stale_time,
+            create_time=now,
             update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.commit()
+
+    handled = ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {
+            "type": "web_run_step",
+            "webCaseRunId": RUN_ID,
+            "payload": {
+                "phase": "step_finished",
+                "step": {
+                    "stepId": "capture-before-save",
+                    "stepIndex": 7,
+                    "stepName": "保存前截图",
+                    "actionType": "capture_screenshot",
+                    "status": "passed",
+                },
+            },
+        },
+    )
+
+    assert handled is True
+    row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    result_payload = json.loads(row.result_json)
+    assert len(result_payload["steps"]) == 1
+    assert result_payload["steps"][0]["stepIndex"] == 7
+    assert result_payload["steps"][0]["actionType"] == "capture_screenshot"
+
+
+def test_handle_agent_run_event_ignores_other_table_ids(db_session):
+    """未命中配置任务运行表的事件必须返回 False，交回 Web 用例链路。"""
+    _task(db_session)
+    handled = ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {"type": "web_run_step", "webCaseRunId": 12345, "payload": {}},
+    )
+    assert handled is False
+
+
+def test_recover_orphan_running_refreshes_evidence_status(db_session):
+    """孤儿运行收敛失败时，同时刷新阶段和运行证据状态。"""
+    _task(db_session)
+    stale_time = datetime(2020, 1, 1)
+    run = ConfigurationTaskRun(
+        task_run_id=RUN_ID,
+        task_id=TASK_ID,
+        task_version_id=VERSION_ID,
+        version_no=1,
+        agent_code="agent-01",
+        trigger_type="manual",
+        status="RUNNING",
+        input_snapshot_json="{}",
+        run_params_json=(
+            '{"evidencePlan":{"steps":{"step-before":'
+            '{"evidenceType":"before_screenshot","evidenceKey":"before"}}}}'
+        ),
+        started_at=stale_time,
+        create_by="tester",
+        update_by="tester",
+        create_time=stale_time,
+        update_time=stale_time,
+    )
+    db_session.add(run)
+    db_session.add(
+        TaskRunStage(
+            task_run_id=RUN_ID,
+            stage_id=1,
+            stage_key="query",
+            stage_name="查询",
+            mode="READ",
+            stage_order=1,
+            step_range_json="[0]",
+            step_ids_json='["step-before"]',
+            evidence_policy_json=(
+                '{"mode":"REQUIRED","requiredTypes":["before_screenshot"]}'
+            ),
+            status="RUNNING",
+            create_time=stale_time,
             update_time=stale_time,
         )
     )
     db_session.commit()
+
     result = ConfigurationTaskRunService.recover_orphan_running(db_session, timeout_minutes=60)
+
     assert result["recovered"] == 1
     row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    stage = db_session.query(TaskRunStage).filter(TaskRunStage.task_run_id == RUN_ID).one()
     assert row.status == "FAILED"
-    assert row.error_code == "RUN_ORPHAN_RECOVERED"
+    assert row.evidence_status == "INCOMPLETE"
+    assert stage.evidence_status == "INCOMPLETE"
+    assert "before_screenshot" in row.evidence_missing_json
+
+
+def test_stage_event_prefers_step_id_and_waits_for_all_steps(db_session):
+    """阶段事件应优先按 stepId 映射，乱序上报不能提前结束阶段。"""
+    _task(db_session)
+    now = datetime.now()
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="RUNNING",
+            input_snapshot_json="{}",
+            run_params_json="{}",
+            result_json="{}",
+            started_at=now,
+            create_by="tester",
+            create_time=now,
+            update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.add(
+        TaskRunStage(
+            task_run_id=RUN_ID,
+            stage_id=1,
+            stage_key="query",
+            stage_name="查询",
+            mode="READ",
+            stage_order=1,
+            step_range_json="[0,1]",
+            step_ids_json='["step-a","step-b"]',
+            status="PENDING",
+            create_time=now,
+            update_time=now,
+        )
+    )
+    db_session.commit()
+
+    # step-b 乱序先到，且展示索引故意指向另一个位置；稳定 stepId 应优先。
+    assert ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {
+            "type": "web_run_step",
+            "webCaseRunId": RUN_ID,
+            "payload": {
+                "step": {"stepId": "step-b", "stepIndex": 1, "status": "passed"}
+            },
+        },
+    )
+    stage = db_session.query(TaskRunStage).filter(TaskRunStage.task_run_id == RUN_ID).one()
+    assert stage.status == "RUNNING"
+
+    assert ConfigurationTaskRunService.handle_agent_run_event(
+        db_session,
+        "agent-01",
+        {
+            "type": "web_run_step",
+            "webCaseRunId": RUN_ID,
+            "payload": {
+                "step": {"stepId": "step-a", "stepIndex": 2, "status": "passed"}
+            },
+        },
+    )
+    db_session.refresh(stage)
+    assert stage.status == "SUCCESS"
+
+
+def test_terminal_run_ignores_late_agent_events(db_session):
+    """运行进入终态后，迟到步骤、状态和终态事件不能覆盖结果。"""
+    _task(db_session)
+    now = datetime.now()
+    db_session.add(
+        ConfigurationTaskRun(
+            task_run_id=RUN_ID,
+            task_id=TASK_ID,
+            task_version_id=VERSION_ID,
+            version_no=1,
+            agent_code="agent-01",
+            trigger_type="manual",
+            status="SUCCESS",
+            business_status="SUCCESS",
+            evidence_status="COMPLETE",
+            evidence_missing_json="[]",
+            result_json='{"winner":"finished"}',
+            error_code="",
+            error_message="",
+            started_at=now,
+            ended_at=now,
+            duration_ms=12,
+            create_by="tester",
+            create_time=now,
+            update_by="tester",
+            update_time=now,
+        )
+    )
+    db_session.commit()
+
+    for message_type, payload in (
+        ("web_run_step", {"step": {"stepId": "late", "status": "failed"}}),
+        ("web_run_status", {"phase": "running"}),
+        ("web_run_finished", {"success": False, "steps": []}),
+        ("web_run_error", {"message": "late error"}),
+    ):
+        assert ConfigurationTaskRunService.handle_agent_run_event(
+            db_session,
+            "agent-01",
+            {
+                "type": message_type,
+                "webCaseRunId": RUN_ID,
+                "payload": payload,
+            },
+        ) is True
+
+    row = db_session.get(ConfigurationTaskRun, RUN_ID)
+    assert row.status == "SUCCESS"
+    assert row.business_status == "SUCCESS"
+    assert row.result_json == '{"winner":"finished"}'
+    assert row.error_code == ""
+    assert row.error_message == ""
+    assert row.duration_ms == 12

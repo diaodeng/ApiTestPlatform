@@ -1,6 +1,6 @@
 # 配置任务管理
 
-> 配置任务用于把“按商家、门店执行一组网页操作 SOP 并绑定输入文件”的实施工作结构化。当前提供任务定义、版本快照、输入资源绑定、运行执行、阶段审批闸门、截图产物登记和报告归档（Word 兼容文件 + 飞书通知）。
+> 配置任务用于把“按商家、门店执行一组网页操作 SOP 并绑定输入文件”的实施工作结构化。当前提供任务定义、版本快照、输入资源绑定、运行执行、阶段审批闸门、显式截图步骤、阶段证据策略字段、Agent-local 产物元数据登记和报告归档（Word 兼容文件 + 飞书通知）。截图正文仍由 Agent 受控目录持有；当前尚未提供产物 preview、单张 download 或 evidence package 接口。
 
 ## 功能与入口
 
@@ -103,7 +103,7 @@
 - **手动登录**：`manualLoginEnabled` 为 `true` 时先打开浏览器等待人工登录（等待 `manualLoginWaitSec` 秒），登录完成后自动继续执行步骤；适合需要扫码或验证码的页面。
 - **超时**：`timeoutSeconds` 默认 1800 秒，可按任务时长调整（30–21600 秒）。
 - **停止**：`POST /configuration-tasks/runs/{taskRunId}/stop` 向 Agent 发送停止命令并把运行收敛为 `CANCELLED`；Agent 离线时本地状态仍会收敛，保证取消幂等。
-- **孤儿恢复**：服务重启或 Agent 断线导致运行长期无进展时，恢复任务（建议 10 分钟周期，阈值 60 分钟）会把它收敛为 `FAILED`（错误码 `RUN_ORPHAN_RECOVERED`），可重新发起运行。
+- **孤儿恢复**：服务重启或 Agent 断线导致运行长期无进展时，恢复任务（建议 10 分钟周期，阈值 60 分钟）会把运行收敛为 `FAILED`（错误码 `RUN_ORPHAN_RECOVERED`），同时把当前 `RUNNING` 阶段收敛为 `FAILED`、尚未执行的 `PENDING/WAITING_APPROVAL` 阶段标记为 `SKIPPED`，并刷新证据完整状态；可重新发起运行。
 - **资源过期清理**：清理任务（建议每小时周期）把超过保留期的资源收敛为 `EXPIRED`、超时未完成的传输收敛为 `EXPIRED`；资源过期后不能被新版本引用，历史运行按快照不受影响。
 
 两个维护任务需要在「系统监控 → 定时任务」中创建：`module_task.scheduler_maintenance.cleanup_configuration_task_resources` 和 `module_task.scheduler_maintenance.recover_configuration_task_runs`。
@@ -137,7 +137,17 @@
 
 ## 产物登记
 
-Agent 执行失败步骤时自动截图，并通过事件上报到服务端；服务端把截图登记为 Agent 本地受控资源（状态 `READY`）并建立产物引用（`task_artifact`）。产物类型包括 `step_screenshot`、`failure_screenshot`、`execution_log`、`report`。产物只保存资源引用和元数据，不把图片 Base64 写入运行记录或报告正文。同一截图重复上报幂等返回同一资源。
+Agent 执行失败步骤时自动截图，并通过事件上报到服务端；服务端把截图登记为 Agent 本地受控资源（状态 `READY`）并建立产物引用（`task_artifact`）。当前首期支持以下证据相关约定：
+
+- 步骤可显式声明 `actionType=capture_screenshot`，用于在明确的页面状态采集业务截图；该步骤不执行点击、填写或定位器操作；
+- 截图参数可携带 `evidenceType`（`checkpoint_screenshot`、`before_screenshot`、`after_screenshot`）、`evidenceKey`、`label`、`required`、`fullPage`、`maskSelectors`、`note` 和 `waitMs`；
+- 阶段定义可携带证据策略字段 `evidencePolicy`，用于表达 `NONE`、`OPTIONAL`、`REQUIRED` 或 `BEFORE_AFTER`，以及所需证据类型/证据键和缺失处理策略；`requiredTypes` 表示每种类型至少一项，阶段内同类型存在多张截图时任意一张即可满足，若要精确指定某张截图应使用 `requiredEvidenceKeys`；字段随阶段快照保存，当前只作为契约和元数据登记，不提供证据包生成；
+- Agent 上报的 `web_run_artifact` 事件以 `stepId` 作为稳定步骤身份，服务端保存 `stepKey`/步骤元数据；旧版仅有 `stepIndex` 或 Base64 `data` 的事件继续兼容；metadata-only 事件可登记 Agent-local 资源元数据，不要求把截图正文写入运行 JSON；
+- 产物类型包括 `step_screenshot`、`failure_screenshot`、`execution_log`、`report`。产物只保存资源引用和元数据，不把图片 Base64 写入运行记录或报告正文；重复事件按资源身份/引用语义幂等处理。
+
+业务执行状态和证据完整性不是同一个状态：运行可能是 `SUCCESS`，但因必需截图缺失而需要提示证据不完整；失败诊断截图也不能自动充当业务成功证据。
+
+当前不提供产物 preview、单张 download 或 evidence package 生成/下载接口，运行详情只展示已经登记的元数据；这些能力属于后续切片，不应按已上线能力使用。
 
 ## 录制与录制转模板
 
@@ -199,4 +209,4 @@ Agent 执行失败步骤时自动截图，并通过事件上报到服务端；�
 - 响应中的 `taskId`、`versionId`、`currentVersionId`、`taskRunId` 均为字符串（数据库 BIGINT）；前端不能对其调用 `Number()`。
 - 版本发布后不可变；修改任务变量不影响已发布版本，新变量在下一个版本中生效。
 - 资源必须通过资源传输接口完成 `begin/chunk/commit` 进入 `READY` 后才能被版本引用。
-- 当前不提供：定时触发运行、批量门店编排、运行中 Web 界面实时进度推送（可通过运行详情轮询查看）。生产环境 `WRITE` 阶段已默认强制审批闸门，请勿为审批账号开通无人值守的自动审批。
+- 当前不提供：批量门店编排、运行中 Web 界面实时进度推送（可通过运行详情轮询查看）、产物 preview/download、证据包生成与下载。定时配置接口已上线，但保存任务上的定时配置不会自动创建调度任务，必须另行配置调度器；生产环境 `WRITE` 阶段已默认强制审批闸门，请勿为审批账号开通无人值守的自动审批。

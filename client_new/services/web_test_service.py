@@ -8,6 +8,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
@@ -21,6 +22,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 from services.playwright_browser_runtime import start_playwright_browser
 from services.agent_resource_storage import ManifestValidationError, ResourceManifestStore
+from services.evidence_file_service import AgentEvidenceFileService
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -1593,6 +1595,7 @@ _ACTIONS_WITHOUT_TARGET = {
     "set_window_size",
     "sleep",
     "wait",
+    "capture_screenshot",
     "assert_page_contains",
     "assert_page_not_contains",
     "assert_title_contains",
@@ -3281,6 +3284,8 @@ class WebTestService:
                     case_data=case_data,
                     cookie_rules=cookie_rules,
                     cookie_variables=cookie_variables,
+                    run_id=run_id,
+                    event_sender=event_sender,
                 )
                 step_result["stepIndex"] = step_display_index
                 if active_session.cancel_event.is_set():
@@ -3835,6 +3840,8 @@ class WebTestService:
                     case_data=case_data,
                     cookie_rules=cookie_rules,
                     cookie_variables=cookie_variables,
+                    run_id=run_id,
+                    event_sender=event_sender,
                 )
                 step_result["stepIndex"] = step_display_index
                 if active_session is not None and active_session.cancel_event.is_set():
@@ -4046,6 +4053,8 @@ class WebTestService:
         case_data: dict[str, Any],
         cookie_rules: list[dict[str, Any]],
         cookie_variables: dict[str, Any],
+        run_id: int = 0,
+        event_sender: EventSender | None = None,
     ) -> dict[str, Any]:
         action_type = (
             str(step.get("actionType") or step.get("action_type") or "").strip().lower()
@@ -4094,14 +4103,27 @@ class WebTestService:
                     timeout_ms,
                     runtime_options=runtime_options,
                 )
-            await asyncio.wait_for(
-                cls._execute_action(
+            action_result = await asyncio.wait_for(
+                cls._capture_explicit_screenshot(
+                    page,
+                    step,
+                    params,
+                    runtime_options=runtime_options,
+                    run_id=run_id,
+                    event_sender=event_sender,
+                    timeout_ms=timeout_ms,
+                )
+                if action_type == "capture_screenshot"
+                else cls._execute_action(
                     page,
                     locator,
                     action_type,
                     params,
                     timeout_ms=timeout_ms,
                     runtime_options=runtime_options,
+                    step=step,
+                    run_id=run_id,
+                    event_sender=event_sender,
                 ),
                 timeout=timeout_ms / 1000.0,
             )
@@ -4113,7 +4135,7 @@ class WebTestService:
                 step_deadline=step_deadline,
                 runtime_options=runtime_options,
             )
-            return {
+            result_payload = {
                 "stepId": step_id,
                 "stepName": step_name,
                 "status": "passed",
@@ -4122,6 +4144,29 @@ class WebTestService:
                 "cookieApply": cookie_apply,
                 "pageUrl": page.url,
             }
+            if isinstance(action_result, dict) and action_type == "capture_screenshot":
+                # 步骤结果只保留索引元数据，不携带截图正文。
+                result_payload["evidence"] = {
+                    key: action_result.get(key)
+                    for key in (
+                        "resourceId",
+                        "objectKey",
+                        "fileName",
+                        "mimeType",
+                        "fileSize",
+                        "sha256",
+                        "taskRunId",
+                        "stageKey",
+                        "stepId",
+                        "evidenceType",
+                        "evidenceKey",
+                        "sequenceNo",
+                        "capturedAt",
+                        "maskApplied",
+                    )
+                    if action_result.get(key) is not None
+                }
+            return result_payload
         except Exception as exc:
             logger.exception(exc)
             error_message = str(exc or "").strip()
@@ -4752,6 +4797,114 @@ class WebTestService:
         return "auto"
 
     @classmethod
+    async def _capture_explicit_screenshot(
+        cls,
+        page: Any,
+        step: dict[str, Any],
+        params: dict[str, Any],
+        *,
+        runtime_options: dict[str, Any],
+        run_id: int,
+        event_sender: EventSender | None,
+        timeout_ms: int,
+    ) -> dict[str, Any]:
+        """执行显式截图步骤，正文只落 Agent 受控目录并上报元数据。"""
+        wait_ms = max(
+            _as_int(
+                params.get("waitMs")
+                or params.get("wait_ms")
+                or params.get("durationMs")
+                or params.get("duration_ms"),
+                0,
+            ),
+            0,
+        )
+        if wait_ms:
+            await asyncio.sleep(wait_ms / 1000.0)
+
+        full_page = _as_bool(params.get("fullPage") or params.get("full_page"), False)
+        raw_masks = params.get("maskSelectors") or params.get("mask_selectors") or []
+        if isinstance(raw_masks, str):
+            raw_masks = [raw_masks]
+        mask_selectors = [str(item or "").strip() for item in raw_masks if str(item or "").strip()]
+        mask_locators = [page.locator(selector) for selector in mask_selectors]
+        screenshot_kwargs: dict[str, Any] = {
+            "type": "png",
+            "full_page": full_page,
+            "timeout": timeout_ms,
+        }
+        if mask_locators:
+            screenshot_kwargs["mask"] = mask_locators
+        content = await page.screenshot(**screenshot_kwargs)
+
+        step_id = str(step.get("stepId") or step.get("step_id") or "").strip()
+        evidence_plan = _as_dict(runtime_options.get("evidencePlan"))
+        plan_steps = _as_dict(evidence_plan.get("steps"))
+        plan_item = _as_dict(plan_steps.get(step_id))
+        evidence_type = str(
+            params.get("evidenceType")
+            or params.get("evidence_type")
+            or plan_item.get("evidenceType")
+            or "checkpoint_screenshot"
+        ).strip()
+        evidence_key = str(
+            params.get("evidenceKey")
+            or params.get("evidence_key")
+            or plan_item.get("evidenceKey")
+            or step_id
+        ).strip()
+        stage_key = str(
+            plan_item.get("stageKey")
+            or step.get("stageKey")
+            or step.get("stage_key")
+            or ""
+        ).strip()
+        sequence_no = max(_as_int(params.get("sequenceNo") or plan_item.get("sequenceNo"), 1), 1)
+        captured_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        file_name = str(params.get("fileName") or f"{evidence_key or step_id or 'screenshot'}.png")
+        root_value = (
+            runtime_options.get("resourceApplicationRoot")
+            or runtime_options.get("resource_application_root")
+        )
+        store = ResourceManifestStore(str(root_value).strip()) if str(root_value or "").strip() else ResourceManifestStore()
+        metadata = AgentEvidenceFileService(store).save_screenshot(
+            content,
+            original_file_name=file_name,
+            mime_type="image/png",
+        )
+        metadata.update(
+            {
+                "taskRunId": str(run_id),
+                "stageKey": stage_key,
+                "stepId": step_id,
+                "evidenceType": evidence_type,
+                "evidenceKey": evidence_key,
+                "sequenceNo": sequence_no,
+                "capturedAt": captured_at,
+                "maskApplied": bool(mask_locators),
+                "pageUrl": str(page.url or ""),
+            }
+        )
+        if event_sender is not None and run_id > 0:
+            event_payload = {
+                "type": "web_run_artifact",
+                "web_case_run_id": run_id,
+                "taskRunId": str(run_id),
+                "payload": {
+                    "artifactType": "step_screenshot",
+                    "providerType": "agent_local",
+                    "agentCode": str(runtime_options.get("agentCode") or ""),
+                    **metadata,
+                },
+            }
+            try:
+                await event_sender(event_payload)
+            except Exception as exc:
+                # 事件上报失败只导致服务端暂时缺少索引，不覆盖截图步骤本身的成功结果。
+                logger.warning(f"显式截图元数据上报失败（不影响步骤）: run_id={run_id}, error={exc}")
+        return metadata
+
+    @classmethod
     async def _execute_action(
         cls,
         page: Any,
@@ -4761,6 +4914,9 @@ class WebTestService:
         *,
         timeout_ms: int,
         runtime_options: dict[str, Any] | None = None,
+        step: dict[str, Any] | None = None,
+        run_id: int = 0,
+        event_sender: EventSender | None = None,
     ) -> None:
         if action_type == "goto":
             await page.goto(str(params.get("url") or ""), timeout=timeout_ms)

@@ -3,11 +3,11 @@ title: 门店配置文件存储流程
 type: flow
 source_type: design
 canonical: true
-knowledge_state: proposed
+knowledge_state: current
 confidence: medium
-freshness: 2026-09-19
+freshness: 2026-09-21
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-21
 related_files:
   - server/module_hrm/utils/desktop_asset_storage.py
   - server/module_admin/controller/common_controller.py
@@ -18,7 +18,7 @@ related_files:
 
 # 门店配置文件存储流程
 
-本流程区分当前已实现的资源传输切片与后续配置任务运行域。当前输入文件仍以 Agent 受控目录为最终存储位置，服务端保存资源元数据和传输状态，并通过 `begin/chunk/commit` 将受限分片发送到已登记且在线的 Agent；任务版本绑定、SFTP、下载回传和报告归档仍未实现。
+本流程区分当前已实现的资源传输、配置任务运行域和运行证据登记。当前输入文件和截图/日志等运行产物均以 Agent 受控目录为最终文件持有位置，服务端保存资源元数据、传输/产物引用状态，并通过 `begin/chunk/commit` 将受限分片发送到已登记且在线的 Agent；任务版本绑定、SFTP 输入资源、报告归档和运行证据元数据登记已上线。运行产物 preview/download、evidence package 和服务端保存截图正文仍未实现。
 
 ```mermaid
 sequenceDiagram
@@ -164,6 +164,8 @@ fileKey = price_tag
 
 共享 Web Runtime 根据运行快照解析本地临时路径，再执行 `set_input_files`。模板不保存 Agent 绝对路径。
 
+第一期运行取证增加独立的 `capture_screenshot` 步骤和阶段证据策略字段。Agent 产物事件优先携带稳定 `stepId`、`stageKey`、`evidenceType`、`evidenceKey`、`objectKey`、文件大小和 SHA-256；服务端登记 `resource_object + task_artifact` 元数据引用。旧版只有 `stepIndex` 或 Base64 `data` 的事件继续兼容，metadata-only 事件不要求服务端保存正文。
+
 截图和日志是输出产物，不应伪装成输入文件。Agent 生成产物后走独立资源发布流程：
 
 ```text
@@ -172,7 +174,7 @@ fileKey = price_tag
   -> 创建或接收 artifact resource_id
   -> 发布/上传
   -> task_artifact 关联 task_run/stage
-  -> 前端预览或报告消费
+  -> 当前仅展示/消费已登记元数据；专用预览、下载和证据包仍未上线
 ```
 
 截图上传失败不能覆盖主阶段成功状态，应记录产物失败并按任务证据策略决定是否重试或把阶段标记为证据不完整。
@@ -192,16 +194,16 @@ fileKey = price_tag
 
 ## 7. 报告归档边界
 
-本地 Word 或飞书文档的生成放在后续阶段，统一消费：
+当前已提供运行报告归档登记：报告由现有服务端报告服务生成 Word 兼容文件并登记为资源/产物，报告内容只消费运行、阶段和产物元数据。该实现不提供运行产物 preview/download 或 evidence package；后续若迁移到 Agent 侧生成，仍须保持服务端只登记元数据的边界。
 
 ```text
-task_run
-  -> task_run_stage
-  -> task_artifact
-  -> resource_object
+ task_run
+   -> task_run_stage
+   -> task_artifact
+   -> resource_object
 ```
 
-报告不从 Agent 目录扫描文件，也不从运行 JSON 中拼接路径。这样即使执行 Agent 更换、文件迁移到 SFTP 或旧资源被清理，历史报告仍然可以通过资源 ID和保留策略追溯。
+报告不从 Agent 目录扫描文件，也不从运行 JSON 中拼接路径。这样即使执行 Agent 更换、文件迁移到 SFTP 或旧资源被清理，历史报告仍然可以通过资源 ID 和保留策略追溯。
 
 ## 参见
 

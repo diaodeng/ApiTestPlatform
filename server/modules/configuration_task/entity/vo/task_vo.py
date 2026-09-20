@@ -3,12 +3,25 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 TaskStatus = Literal["ACTIVE", "DISABLED"]
 VersionStatus = Literal["DRAFT", "PUBLISHED", "DEPRECATED"]
 RunStatus = Literal["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED"]
+BusinessStatus = Literal["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED"]
+EvidenceType = Literal[
+    "checkpoint_screenshot",
+    "before_screenshot",
+    "after_screenshot",
+    "failure_screenshot",
+    "execution_log",
+    "report",
+]
+EvidenceMode = Literal["NONE", "OPTIONAL", "REQUIRED", "BEFORE_AFTER"]
+EvidenceCompletenessPolicy = Literal["WARN", "BLOCK_ACCEPTANCE", "BLOCK_RUN"]
+EvidenceStatus = Literal["NOT_REQUIRED", "PENDING", "COMPLETE", "INCOMPLETE", "FAILED"]
+AvailabilityStatus = Literal["ONLINE", "AGENT_OFFLINE", "NOT_FOUND", "CHECKSUM_MISMATCH", "ACCESS_DENIED"]
 TASK_VARIABLES_MAX_BYTES = 64 * 1024
 TASK_STEPS_MAX_BYTES = 512 * 1024
 TASK_BINDINGS_MAX_BYTES = 64 * 1024
@@ -18,6 +31,36 @@ class TaskBaseModel(BaseModel):
     """任务接口模型基础类，兼容 ORM 属性并对外使用驼峰字段。"""
 
     model_config = ConfigDict(alias_generator=to_camel, from_attributes=True, populate_by_name=True)
+
+
+class EvidencePolicyModel(TaskBaseModel):
+    """阶段取证策略；只声明约束，不隐式创建截图步骤。"""
+
+    mode: EvidenceMode = "NONE"
+    required_types: list[EvidenceType] = Field(default_factory=list)
+    required_evidence_keys: list[str] = Field(default_factory=list, max_length=100)
+    completeness_policy: EvidenceCompletenessPolicy = "WARN"
+    retention_days: int = Field(default=90, ge=1, le=3650)
+    mask_profile_id: str = Field(default="", max_length=128)
+
+    @field_validator("required_evidence_keys")
+    @classmethod
+    def normalize_evidence_keys(cls, value: list[str]) -> list[str]:
+        """清理证据键并去重，避免同一缺失项重复展示。"""
+        result: list[str] = []
+        for item in value or []:
+            key = str(item or "").strip()
+            if key and key not in result:
+                result.append(key)
+        return result
+
+
+class EvidenceMissingModel(TaskBaseModel):
+    """阶段或运行缺失的证据项。"""
+
+    evidence_type: EvidenceType | None = None
+    evidence_key: str = ""
+    reason: str = ""
 
 
 class ConfigurationTaskCreateModel(TaskBaseModel):
@@ -201,6 +244,9 @@ class TaskRunDetailModel(TaskBaseModel):
     agent_code: str
     trigger_type: str
     status: RunStatus
+    business_status: BusinessStatus = "PENDING"
+    evidence_status: EvidenceStatus = "NOT_REQUIRED"
+    evidence_missing: list[EvidenceMissingModel] = Field(default_factory=list)
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any] = Field(default_factory=dict)
     error_code: str = ""
@@ -222,12 +268,14 @@ class TaskRunQueryModel(TaskBaseModel):
 
 
 class StageSplitRuleModel(TaskBaseModel):
-    """版本阶段切分规则：按步骤索引区间声明阶段与模式。"""
+    """版本阶段切分规则：优先按稳定步骤 ID 关联，索引仅作兼容字段。"""
 
     stage_key: str = Field(min_length=1, max_length=128)
     stage_name: str = Field(default="", max_length=255)
     mode: Literal["READ", "PREPARE_WRITE", "WRITE", "VERIFY"] = "READ"
     step_indexes: list[int] = Field(default_factory=list)
+    step_ids: list[str] = Field(default_factory=list)
+    evidence_policy: EvidencePolicyModel = Field(default_factory=EvidencePolicyModel)
 
     @field_validator("stage_key", mode="before")
     @classmethod
@@ -249,6 +297,24 @@ class StageSplitRuleModel(TaskBaseModel):
             raise ValueError("stepIndexes 不能为负数")
         return indexes
 
+    @field_validator("step_ids")
+    @classmethod
+    def validate_step_ids(cls, value: list[str]) -> list[str]:
+        """稳定步骤 ID 去空、去重，兼容旧请求不传。"""
+        result: list[str] = []
+        for item in value or []:
+            step_id = str(item or "").strip()
+            if step_id and step_id not in result:
+                result.append(step_id)
+        return result
+
+    @model_validator(mode="after")
+    def validate_stage_steps(self):
+        """阶段至少声明一种步骤关联方式。"""
+        if not self.step_indexes and not self.step_ids:
+            raise ValueError("阶段至少包含一个 stepId 或步骤索引")
+        return self
+
 
 class TaskRunStageModel(TaskBaseModel):
     """运行阶段响应；ID 按字符串返回。"""
@@ -261,6 +327,10 @@ class TaskRunStageModel(TaskBaseModel):
     mode: Literal["READ", "PREPARE_WRITE", "WRITE", "VERIFY"]
     stage_order: int
     step_indexes: list[int] = Field(default_factory=list)
+    step_ids: list[str] = Field(default_factory=list)
+    evidence_policy: EvidencePolicyModel = Field(default_factory=EvidencePolicyModel)
+    evidence_status: EvidenceStatus = "NOT_REQUIRED"
+    evidence_missing: list[EvidenceMissingModel] = Field(default_factory=list)
     status: Literal[
         "PENDING",
         "WAITING_APPROVAL",
@@ -295,6 +365,17 @@ class ArtifactModel(TaskBaseModel):
     run_stage_id: str | None = None
     artifact_type: Literal["step_screenshot", "failure_screenshot", "execution_log", "report"]
     step_key: str = ""
+    step_id: str = ""
+    evidence_type: EvidenceType | None = None
+    evidence_key: str = ""
+    sequence_no: int = 1
+    captured_at: datetime | None = None
+    mask_applied: bool = False
+    availability_status: AvailabilityStatus = "ONLINE"
+    provider_type: str = "agent_local"
+    agent_code: str = ""
+    object_key: str = ""
+    mime_type: str = ""
     resource_id: str
     original_file_name: str = ""
     file_size: int = 0
@@ -304,16 +385,38 @@ class ArtifactModel(TaskBaseModel):
 
 
 class AgentStepScreenshotModel(TaskBaseModel):
-    """Agent 步骤截图上报契约；截图正文为受限 Base64。"""
+    """Agent 产物上报契约；兼容旧 Base64，metadata-only 事件不携带正文。"""
 
     task_run_id: str = Field(min_length=1, max_length=64)
     stage_key: str = Field(default="", max_length=128)
+    step_id: str = Field(default="", max_length=128)
     step_index: int = Field(default=0, ge=0)
     step_name: str = Field(default="", max_length=255)
     artifact_type: Literal["step_screenshot", "failure_screenshot", "execution_log"] = "step_screenshot"
+    evidence_type: EvidenceType | None = None
+    evidence_key: str = Field(default="", max_length=255)
+    sequence_no: int = Field(default=1, ge=1)
     file_name: str = Field(default="screenshot.png", max_length=255)
     mime_type: str = Field(default="image/png", max_length=128)
-    data: str = Field(min_length=4, max_length=8 * 1024 * 1024)
+    object_key: str = Field(default="", max_length=512)
+    provider_type: str = Field(default="agent_local", max_length=32)
+    agent_code: str = Field(default="", max_length=128)
+    file_size: int | None = Field(default=None, ge=1, le=1024 * 1024 * 1024)
+    sha256: str = Field(default="", min_length=0, max_length=64)
+    captured_at: datetime | None = None
+    mask_applied: bool = False
+    data: str | None = Field(default=None, min_length=4, max_length=8 * 1024 * 1024)
+
+    @model_validator(mode="after")
+    def normalize_legacy_evidence(self):
+        """旧 step_screenshot 映射为 checkpoint_screenshot，并区分元数据与正文事件。"""
+        if self.evidence_type is None:
+            self.evidence_type = "checkpoint_screenshot" if self.artifact_type == "step_screenshot" else (
+                "failure_screenshot" if self.artifact_type == "failure_screenshot" else None
+            )
+        if self.provider_type != "agent_local" and not self.data:
+            raise ValueError("metadata-only 产物只支持 agent_local Provider")
+        return self
 
 
 class RecordingToTemplateModel(TaskBaseModel):

@@ -50,6 +50,16 @@
                     {{ paramsSummary(row) }}
                 </template>
             </el-table-column>
+            <el-table-column v-if="hasEvidenceStep" label="证据" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">
+                    <template v-if="row.actionType === 'capture_screenshot'">
+                        <el-tag size="small" type="info">{{ row.params?.evidenceType || 'checkpoint_screenshot' }}</el-tag>
+                        <el-tag v-if="row.params?.required" size="small" type="warning" class="ml4">必需</el-tag>
+                        <span v-if="row.params?.evidenceKey" class="evidence-key">{{ row.params.evidenceKey }}</span>
+                    </template>
+                    <span v-else>-</span>
+                </template>
+            </el-table-column>
             <el-table-column label="操作" width="190" fixed="right">
                 <template #default="{ $index }">
                     <el-button link type="primary" icon="Edit" @click.stop="openDetail($index)">详情</el-button>
@@ -92,6 +102,7 @@ const currentStepIndex = ref(-1);
 // StepDetail 通过 props 直接改写 currentStep 对象内部字段，这里给它一个稳定引用；
 // 弹窗关闭时 emit('update')，表格整体通知父组件"已变化"。
 const currentStep = computed(() => props.steps[currentStepIndex.value] || {});
+const hasEvidenceStep = computed(() => props.steps.some((step) => step.actionType === "capture_screenshot"));
 
 function actionLabel(actionType) {
     return actionOptions.find((item) => item.value === actionType)?.label || actionType || "-";
@@ -143,6 +154,7 @@ function notifyChange() {
 // 新增一个空白 fill 步骤到末尾，结构与 WebStepModel 一致。
 function addStep() {
     props.steps.push({
+        stepId: `step-fill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         stepName: "",
         actionType: "fill",
         enabled: true,

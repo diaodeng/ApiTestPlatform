@@ -11,7 +11,10 @@ from sqlalchemy.pool import StaticPool
 
 from config.database import Base
 from module_hrm.dao.agent_dao import AgentDao
-from modules.configuration_task.dao.stage_artifact_dao import ConfigurationTaskStageDao
+from modules.configuration_task.dao.stage_artifact_dao import (
+    ConfigurationTaskStageDao,
+    TaskArtifactDao,
+)
 from modules.configuration_task.dao.task_dao import ConfigurationTaskRunDao
 from modules.configuration_task.entity.do.resource_object_do import ResourceObject
 from modules.configuration_task.entity.do.stage_artifact_do import (
@@ -23,6 +26,9 @@ from modules.configuration_task.entity.do.task_do import ConfigurationTask, Conf
 from modules.configuration_task.entity.do.task_run_do import ConfigurationTaskRun
 from modules.configuration_task.entity.vo.task_vo import AgentStepScreenshotModel, StageApproveModel
 from modules.configuration_task.service.artifact_service import ConfigurationTaskArtifactService
+from modules.configuration_task.service.evidence_status_service import (
+    ConfigurationTaskEvidenceStatusService,
+)
 from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
 
 TASK_ID = 700000000000001
@@ -192,18 +198,273 @@ def test_stage_failure_skips_later_stages(db_session):
     assert rows["save"].status == "SKIPPED"
 
 
-def test_retry_write_stage_requires_reapproval(db_session):
-    """WRITE 阶段重试后必须重新进入审批等待。"""
-    stages = _run_with_stages(db_session, write_mode=True)
-    write_stage = stages[1]
+def test_stage_success_refreshes_evidence_status(db_session):
+    """阶段成功终态也要立即重算证据状态，不能继续显示 PENDING。"""
+    stages = _run_with_stages(db_session, write_mode=False)
+    query_stage = stages[0]
     ConfigurationTaskStageDao.update_run_stage(
-        db_session, write_stage.run_stage_id, {"status": "FAILED", "error_code": "STEP_FAILED"}
+        db_session,
+        query_stage.run_stage_id,
+        {
+            "step_ids_json": '["step-before"]',
+            "evidence_policy_json": '{"mode":"REQUIRED","requiredTypes":["before_screenshot"]}',
+        },
+    )
+    run = db_session.get(ConfigurationTaskRun, RUN_ID)
+    run.run_params_json = (
+        '{"evidencePlan":{"steps":{"step-before":'
+        '{"evidenceType":"before_screenshot","evidenceKey":"before"}}}}'
     )
     db_session.commit()
-    result = ConfigurationTaskStageService.retry_stage(db_session, write_stage.run_stage_id, _current_user())
+
+    ConfigurationTaskStageService.mark_stage_finished(
+        db_session,
+        query_stage.run_stage_id,
+        True,
+        {"lastStep": {"stepId": "step-before", "status": "success"}},
+    )
+
+    refreshed = db_session.get(TaskRunStage, query_stage.run_stage_id)
+    assert refreshed.status == "SUCCESS"
+    assert refreshed.evidence_status == "INCOMPLETE"
+    assert "before_screenshot" in refreshed.evidence_missing_json
+
+
+def test_retry_stage_resets_evidence_status(db_session):
+    """阶段重试必须清空上一次尝试的证据状态和缺失摘要。"""
+    stages = _run_with_stages(db_session, write_mode=False)
+    failed_stage = stages[0]
+    ConfigurationTaskStageDao.update_run_stage(
+        db_session,
+        failed_stage.run_stage_id,
+        {
+            "status": "FAILED",
+            "evidence_status": "INCOMPLETE",
+            "evidence_missing_json": '[{"evidenceKey":"before"}]',
+        },
+    )
+    db_session.commit()
+
+    result = ConfigurationTaskStageService.retry_stage(
+        db_session,
+        failed_stage.run_stage_id,
+        _current_user(),
+    )
+
+    assert result.is_success is True
+    assert result.result.evidence_status == "PENDING"
+    assert result.result.evidence_missing == []
+
+
+def test_retry_stage_clears_previous_execution_fields(db_session):
+    """阶段重试必须清空上一轮结果、时间和错误字段。"""
+    stages = _run_with_stages(db_session, write_mode=False)
+    failed_stage = stages[0]
+    started_at = datetime(2025, 1, 1)
+    ended_at = datetime(2025, 1, 2)
+    ConfigurationTaskStageDao.update_run_stage(
+        db_session,
+        failed_stage.run_stage_id,
+        {
+            "status": "FAILED",
+            "result_json": '{"old":true}',
+            "error_code": "OLD_ERROR",
+            "error_message": "旧错误",
+            "started_at": started_at,
+            "ended_at": ended_at,
+        },
+    )
+    db_session.commit()
+
+    result = ConfigurationTaskStageService.retry_stage(
+        db_session,
+        failed_stage.run_stage_id,
+        _current_user(),
+    )
+
+    assert result.is_success is True
+    row = db_session.get(TaskRunStage, failed_stage.run_stage_id)
+    assert row.status == "PENDING"
+    assert row.result_json == "{}"
+    assert row.error_code == ""
+    assert row.error_message == ""
+    assert row.started_at is None
+    assert row.ended_at is None
+
+
+def test_retry_stage_rejects_terminal_run(db_session):
+    """所属运行已经终态时，不能重新打开失败阶段。"""
+    stages = _run_with_stages(db_session, write_mode=False)
+    failed_stage = stages[0]
+    run = db_session.get(ConfigurationTaskRun, RUN_ID)
+    run.status = "CANCELLED"
+    run.business_status = "CANCELLED"
+    ConfigurationTaskStageDao.update_run_stage(
+        db_session,
+        failed_stage.run_stage_id,
+        {"status": "FAILED"},
+    )
+    db_session.commit()
+
+    result = ConfigurationTaskStageService.retry_stage(
+        db_session,
+        failed_stage.run_stage_id,
+        _current_user(),
+    )
+
+    assert result.is_success is False
+    assert "不允许重试" in result.message
+    db_session.refresh(failed_stage)
+    assert failed_stage.status == "FAILED"
+
+
+def test_mark_stage_finished_is_terminal_idempotent(db_session):
+    """阶段已终态时，迟到成功/失败事件均不能覆盖原结果。"""
+    stages = _run_with_stages(db_session, write_mode=False)
+    stage = stages[0]
+    ConfigurationTaskStageDao.update_run_stage(
+        db_session,
+        stage.run_stage_id,
+        {
+            "status": "SUCCESS",
+            "result_json": '{"winner":"success"}',
+            "error_code": "",
+            "error_message": "",
+        },
+    )
+    db_session.commit()
+
+    ConfigurationTaskStageService.mark_stage_finished(
+        db_session,
+        stage.run_stage_id,
+        False,
+        {"winner": "late-failure"},
+        error_code="LATE_FAILURE",
+        error_message="迟到失败",
+    )
+
+    row = db_session.get(TaskRunStage, stage.run_stage_id)
+    assert row.status == "SUCCESS"
+    assert row.result_json == '{"winner":"success"}'
+    assert row.error_code == ""
+    assert row.error_message == ""
+
+
+def test_write_stage_retry_returns_to_approval(db_session):
+    """WRITE 阶段重试必须清理审批信息并重新等待审批。"""
+    stages = _run_with_stages(db_session, write_mode=True)
+    stage = stages[1]
+    ConfigurationTaskStageDao.update_run_stage(
+        db_session,
+        stage.run_stage_id,
+        {
+            "status": "FAILED",
+            "approved_by": "approver",
+            "approved_at": datetime.now(),
+            "result_json": '{"old":true}',
+        },
+    )
+    db_session.commit()
+
+    result = ConfigurationTaskStageService.retry_stage(db_session, stage.run_stage_id, _current_user())
+
     assert result.is_success is True
     assert result.result.status == "WAITING_APPROVAL"
-    assert result.result.model_dump(by_alias=True)["retryCount"] == 1
+    row = db_session.get(TaskRunStage, stage.run_stage_id)
+    assert row.approved_by == ""
+    assert row.approved_at is None
+    assert row.result_json == "{}"
+
+
+def test_required_type_accepts_any_matching_artifact(db_session):
+    """requiredTypes 只要求该类型至少一项，多个同类型步骤不必全部上报。"""
+    candidates = [
+        {
+            "evidenceType": "before_screenshot",
+            "evidenceKey": "before-1",
+            "sequenceNo": 1,
+            "required": True,
+        },
+        {
+            "evidenceType": "before_screenshot",
+            "evidenceKey": "before-2",
+            "sequenceNo": 1,
+            "required": True,
+        },
+    ]
+
+    expected = ConfigurationTaskEvidenceStatusService._build_expected_items(
+        "REQUIRED",
+        {"requiredTypes": ["before_screenshot"]},
+        candidates,
+    )
+
+    assert len(expected) == 1
+    assert expected[0]["evidenceType"] == "before_screenshot"
+    assert expected[0]["evidenceKey"] == ""
+    assert expected[0]["sequenceNo"] is None
+
+    matching_artifact = SimpleNamespace(
+        evidence_type="before_screenshot",
+        artifact_type="step_screenshot",
+        evidence_key="before-2",
+        sequence_no=1,
+        availability_status="ONLINE",
+    )
+    assert ConfigurationTaskEvidenceStatusService._artifact_matches(
+        matching_artifact, expected[0]
+    )
+
+
+def test_register_agent_screenshot_recovers_reference_unique_conflict(db_session, monkeypatch):
+    """插入前查询竞态触发唯一键冲突时，应回查并返回已有引用。"""
+    _run_with_stages(db_session, write_mode=False)
+    payload = base64.b64encode(b"concurrent-screenshot").decode("ascii")
+    model = AgentStepScreenshotModel(
+        taskRunId=str(RUN_ID),
+        stepIndex=2,
+        stepName="并发截图",
+        artifactType="step_screenshot",
+        stageKey="query",
+        data=payload,
+    )
+    first = ConfigurationTaskArtifactService.register_agent_screenshot(
+        db_session, model, _current_user()
+    )
+    assert first.is_success is True
+
+    original_get = TaskArtifactDao.get_artifact_by_evidence_identity
+    query_count = 0
+
+    def hide_existing_once(db, task_run_id, run_stage_id, step_id, evidence_key, sequence_no, sha256):
+        nonlocal query_count
+        query_count += 1
+        if query_count == 1:
+            return None
+        return original_get(
+            db,
+            task_run_id,
+            run_stage_id,
+            step_id,
+            evidence_key,
+            sequence_no,
+            sha256,
+        )
+
+    monkeypatch.setattr(
+        TaskArtifactDao,
+        "get_artifact_by_evidence_identity",
+        staticmethod(hide_existing_once),
+    )
+    second = ConfigurationTaskArtifactService.register_agent_screenshot(
+        db_session, model, _current_user()
+    )
+
+    assert second.is_success is True
+    assert second.result.model_dump(by_alias=True)["artifactId"] == first.result.model_dump(
+        by_alias=True
+    )["artifactId"]
+    assert db_session.query(TaskArtifact).count() == 1
 
 
 def test_register_agent_screenshot_creates_resource_and_artifact(db_session):
@@ -223,8 +484,26 @@ def test_register_agent_screenshot_creates_resource_and_artifact(db_session):
     assert result.result.model_dump(by_alias=True)["artifactType"] == "failure_screenshot"
     assert result.result.model_dump(by_alias=True)["fileSize"] == len(png_bytes)
 
-    # 重复上报同一截图应返回同一资源（幂等）。
-    again = ConfigurationTaskArtifactService.register_agent_screenshot(db_session, model, _current_user())
-    assert again.is_success is True
-    assert again.result.model_dump(by_alias=True)["resourceId"] == result.result.model_dump(by_alias=True)["resourceId"]
-    assert db_session.query(TaskArtifact).count() == 2
+    # 旧版 Agent 未携带证据扩展字段时，仍按 Base64 正文登记资源；引用本身也应幂等。
+    assert db_session.query(TaskArtifact).count() == 1
+
+
+def test_register_agent_screenshot_reference_is_idempotent(db_session):
+    """同一运行、步骤和证据引用重复上报时，不应产生重复 task_artifact。"""
+    _run_with_stages(db_session, write_mode=False)
+    payload = base64.b64encode(b"same-screenshot").decode("ascii")
+    model = AgentStepScreenshotModel(
+        taskRunId=str(RUN_ID),
+        stepIndex=2,
+        stepName="查询结果",
+        artifactType="step_screenshot",
+        data=payload,
+    )
+
+    first = ConfigurationTaskArtifactService.register_agent_screenshot(db_session, model, _current_user())
+    second = ConfigurationTaskArtifactService.register_agent_screenshot(db_session, model, _current_user())
+
+    assert first.is_success is True
+    assert second.is_success is True
+    assert second.result.model_dump(by_alias=True)["resourceId"] == first.result.model_dump(by_alias=True)["resourceId"]
+    assert db_session.query(TaskArtifact).count() == 1

@@ -34,6 +34,10 @@ from module_qtr.service.agent_service import (
     send_message as agent_service_send_message,
 )
 from module_qtr.util.agent_dispatch_config import AGENT_AI_ANALYSIS_RESULT_TTL_SECONDS
+from modules.configuration_task.dao.task_dao import ConfigurationTaskRunDao
+from modules.configuration_task.entity.vo.task_vo import AgentStepScreenshotModel
+from modules.configuration_task.service.artifact_service import ConfigurationTaskArtifactService
+from modules.configuration_task.service.task_run_service import ConfigurationTaskRunService
 from utils.log_util import logger
 from utils.response_util import ResponseUtil
 from utils.snowflake import snowIdWorker
@@ -300,32 +304,39 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
         if message_type == "web_run_artifact":
             # 配置任务产物事件：截图 Base64 转存为 Agent 本地资源 + 产物引用。
             try:
-                from modules.configuration_task.entity.vo.task_vo import AgentStepScreenshotModel
-                from modules.configuration_task.service.artifact_service import ConfigurationTaskArtifactService
-
                 payload = message_data.get("payload") or {}
                 raw_run_id = (
                     message_data.get("webCaseRunId")
                     or message_data.get("web_case_run_id")
                     or payload.get("webCaseRunId")
+                    or payload.get("web_case_run_id")
                 )
                 if not raw_run_id:
                     return True
-                run = None
-                from modules.configuration_task.dao.task_dao import ConfigurationTaskRunDao
-
                 run = ConfigurationTaskRunDao.get_run(event_db, int(raw_run_id))
                 if not run or run.agent_code != agent_code:
                     # 不属于配置任务运行的产物事件，忽略即可（Web 用例无此事件类型）。
                     return True
                 model = AgentStepScreenshotModel(
                     taskRunId=str(raw_run_id),
-                    stepIndex=int(payload.get("stepIndex") or 0),
-                    stepName=str(payload.get("stepName") or ""),
+                    stageKey=str(payload.get("stageKey") or payload.get("stage_key") or ""),
+                    stepId=str(payload.get("stepId") or payload.get("step_id") or ""),
+                    stepIndex=int(payload.get("stepIndex") or payload.get("step_index") or 0),
+                    stepName=str(payload.get("stepName") or payload.get("step_name") or ""),
                     artifactType=payload.get("artifactType") or "step_screenshot",
-                    fileName=payload.get("fileName") or "screenshot.png",
-                    mimeType=payload.get("mimeType") or "image/png",
-                    data=str(payload.get("data") or ""),
+                    evidenceType=payload.get("evidenceType") or payload.get("evidence_type"),
+                    evidenceKey=str(payload.get("evidenceKey") or payload.get("evidence_key") or ""),
+                    sequenceNo=int(payload.get("sequenceNo") or payload.get("sequence_no") or 1),
+                    fileName=payload.get("fileName") or payload.get("file_name") or "screenshot.png",
+                    mimeType=payload.get("mimeType") or payload.get("mime_type") or "image/png",
+                    objectKey=payload.get("objectKey") or payload.get("object_key") or "",
+                    providerType=payload.get("providerType") or payload.get("provider_type") or "agent_local",
+                    agentCode=payload.get("agentCode") or payload.get("agent_code") or agent_code,
+                    fileSize=payload.get("fileSize") or payload.get("file_size"),
+                    sha256=str(payload.get("sha256") or ""),
+                    capturedAt=payload.get("capturedAt") or payload.get("captured_at"),
+                    maskApplied=bool(payload.get("maskApplied") or payload.get("mask_applied")),
+                    data=(str(payload.get("data")) if payload.get("data") else None),
                 )
                 result = ConfigurationTaskArtifactService.register_agent_screenshot(event_db, model, None)
                 if not result.is_success:
@@ -339,8 +350,6 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
             # 配置任务运行与 Web 用例运行共用 web_run_* 事件；先按 ID+Agent 归属
             # 尝试配置任务运行表，未命中再走 Web 用例链路，保持既有语义不变。
             try:
-                from modules.configuration_task.service.task_run_service import ConfigurationTaskRunService
-
                 if ConfigurationTaskRunService.handle_agent_run_event(event_db, agent_code, message_data):
                     return True
             except Exception as config_exc:

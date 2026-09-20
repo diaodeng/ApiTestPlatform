@@ -125,6 +125,31 @@ class TaskArtifactDao:
         )
 
     @classmethod
+    def get_artifact_by_evidence_identity(
+        cls,
+        db: Session,
+        task_run_id: int,
+        run_stage_id: int | None,
+        step_id: str,
+        evidence_key: str,
+        sequence_no: int,
+        sha256: str,
+    ) -> TaskArtifact | None:
+        """按运行阶段、稳定步骤、证据键、序号和摘要查询产物引用。"""
+        query = db.query(TaskArtifact).filter(
+            TaskArtifact.task_run_id == task_run_id,
+            TaskArtifact.step_id == (step_id or ""),
+            TaskArtifact.evidence_key == (evidence_key or ""),
+            TaskArtifact.sequence_no == sequence_no,
+            TaskArtifact.sha256 == (sha256 or ""),
+        )
+        if run_stage_id is None:
+            query = query.filter(TaskArtifact.run_stage_id.is_(None))
+        else:
+            query = query.filter(TaskArtifact.run_stage_id == run_stage_id)
+        return query.first()
+
+    @classmethod
     def get_artifact(cls, db: Session, artifact_id: int) -> TaskArtifact | None:
         """按产物 ID 查询实体。"""
         return db.query(TaskArtifact).filter(TaskArtifact.artifact_id == artifact_id).first()

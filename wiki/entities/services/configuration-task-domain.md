@@ -4,11 +4,11 @@ type: entity
 entity_category: service
 source_type: design
 canonical: true
-knowledge_state: proposed
+knowledge_state: current
 confidence: medium
-freshness: 2026-09-18
+freshness: 2026-09-21
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-21
 related_files:
   - server/module_hrm/controller/web_case_controller.py
   - server/module_hrm/service/web_case_service.py
@@ -24,7 +24,7 @@ related_files:
 
 门店配置任务用于把“按商家、门店和环境执行一组配置 SOP，并留下截图、日志和输入文件版本”的实施工作结构化。它不是普通 Web 测试用例的别名，也不是一段可以无限扩大的录制脚本。
 
-本页是配置任务运行域的领域设计。当前最小闭环已实现：任务定义、任务版本快照（含输入资源绑定）、运行实例创建与 Agent 执行；阶段编排、审批流、截图产物和报告归档仍是后续设计，未实现部分不能按已上线接口使用。
+本页是配置任务运行域的领域设计。当前第一期已上线任务定义、任务版本快照（含输入资源绑定）、运行实例创建与 Agent 执行、阶段编排与审批流、显式 `capture_screenshot` 步骤、证据类型与阶段策略字段、Agent-local 产物元数据登记和稳定 `stepId` 关联；报告归档也已提供 Word 兼容文件登记。产物 preview/download 与 evidence package 仍未上线，不能按已上线接口使用。
 
 ```mermaid
 graph TD
@@ -133,8 +133,8 @@ DRAFT
 
 - `modules/configuration_task/controller/task_controller.py`：任务/版本/运行路由、Pydantic 契约、鉴权和线程池包装；
 - `modules/configuration_task/service/task_service.py`：任务 CRUD、版本草稿、发布校验（步骤非空、资源 READY、资源归属执行 Agent）；
-- `modules/configuration_task/service/task_run_service.py`：运行创建、输入快照冻结、`run_case` 下发和终态落库，以及取消（`stop_run_case`）、手动登录两阶段执行、同 Agent 并发租约、`web_run_*` 事件接入和孤儿运行恢复；
-- `modules/configuration_task/service/stage_service.py`：版本阶段切分、运行阶段快照、WRITE 审批闸门和阶段重试；
+- `modules/configuration_task/service/task_run_service.py`：运行创建、输入快照冻结、`run_case` 下发和终态落库，以及取消（`stop_run_case`）、手动登录两阶段执行、同 Agent 并发租约、`web_run_*` 事件接入和孤儿运行恢复；步骤事件按稳定 `stepId` 优先关联，阶段按全部步骤结果收敛，孤儿恢复同步更新运行阶段；
+- `modules/configuration_task/service/stage_service.py`：版本阶段切分、运行阶段快照、WRITE 审批闸门和阶段重试；阶段终态具备幂等保护，WRITE 重试重新进入审批等待并清理上一轮执行字段；
 - `modules/configuration_task/service/artifact_service.py`：Agent 截图/日志产物登记（资源 + task_artifact 引用）；
 - `modules/configuration_task/service/report_service.py`：运行报告归档（Word 兼容 HTML，零依赖）与飞书通知；
 - `modules/configuration_task/service/task_maintenance_service.py`：资源/传输过期清理与孤儿恢复的周期维护入口；
@@ -142,7 +142,7 @@ DRAFT
 - `modules/configuration_task/dao/task_dao.py`：任务、版本、运行的纯数据访问；
 - 运行执行复用 `WebCaseService._extract_webui_run_response` 和 `module_qtr` 的 `send_message`，不复制浏览器执行逻辑。
 
-阶段审批闸门（WRITE 强制审批）、失败步骤截图产物和 Word 报告归档已实现；阶段级独立下发执行、飞书在线文档产物仍按下方设计目标推进。
+阶段审批闸门（WRITE 强制审批）、失败步骤截图产物、显式取证步骤的契约字段、阶段证据策略元数据和 Word 报告归档已实现；运行事件支持稳定步骤身份 `stepId`，旧 `stepIndex`/Base64 事件保留兼容。阶段级独立下发执行、产物 preview/download、evidence package 和飞书在线文档产物仍未上线。
 
 ## 文件和凭证原则
 

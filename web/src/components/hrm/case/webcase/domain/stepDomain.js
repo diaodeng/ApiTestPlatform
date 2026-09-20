@@ -1,5 +1,5 @@
 import { normalizeAssertion } from '../domain/assertDomain.js';
-import { cloneData, isPlainObject, normalizeThinkTimeMs } from '../utils/shared.js';
+import { cloneData, isPlainObject, normalizeIdValue, normalizeThinkTimeMs } from '../utils/shared.js';
 import { actionOptions } from '../utils/shared.js';
 import { createDefaultTargetSnapshot, normalizeTargetSnapshot } from './snapshotDomain.js';
 
@@ -7,18 +7,105 @@ function getActionLabel(actionType) {
   return actionOptions.find((item) => item.value === actionType)?.label || actionType || '未设置';
 }
 
+/**
+ * 生成前端新增步骤使用的稳定字符串 ID。
+ * 不把后端 BIGINT 主键转换为 Number，缺少后端 ID 时才生成本地身份。
+ * @param {string} actionType 动作类型
+ * @param {number} index 步骤位置
+ * @returns {string} 步骤 ID
+ */
+function createLocalStepId(actionType, index = 0) {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `step-${actionType || 'action'}-${index + 1}-${suffix}`;
+}
+
+const SCREENSHOT_EVIDENCE_TYPES = [
+  'checkpoint_screenshot',
+  'before_screenshot',
+  'after_screenshot',
+];
+
+function normalizeMaskSelectors(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => `${item ?? ''}`.trim()).filter(Boolean);
+}
+
+function createDefaultScreenshotParams(stepName = '') {
+  const fallbackLabel = `${stepName || '截图 / 采集证据'}`.trim();
+  return {
+    evidenceType: 'checkpoint_screenshot',
+    evidenceKey: '',
+    label: fallbackLabel,
+    required: false,
+    fullPage: false,
+    maskSelectors: [],
+    note: '',
+    waitMs: 0,
+    thinkTimeMs: 0,
+  };
+}
+
+/**
+ * 标准化截图证据参数，兼容后端下划线字段和历史 step_screenshot 类型。
+ * @param {Record<string, any>} data 原始参数
+ * @param {string} stepName 步骤名称
+ * @returns {Record<string, any>} 截图参数
+ */
+function normalizeScreenshotParams(data, stepName = '') {
+  const defaults = createDefaultScreenshotParams(stepName);
+  const rawType = `${data.evidenceType ?? data.evidence_type ?? ''}`.trim();
+  const evidenceType = rawType === 'step_screenshot' || !SCREENSHOT_EVIDENCE_TYPES.includes(rawType)
+    ? defaults.evidenceType
+    : rawType;
+  const rawWaitMs = Number(data.waitMs ?? data.wait_ms ?? 0);
+  return {
+    ...defaults,
+    evidenceType,
+    evidenceKey: `${data.evidenceKey ?? data.evidence_key ?? ''}`.trim(),
+    label: `${data.label ?? defaults.label}`.trim() || defaults.label,
+    required: data.required === true || data.required === 'true',
+    fullPage: data.fullPage === true || data.full_page === true || data.fullPage === 'true',
+    maskSelectors: normalizeMaskSelectors(data.maskSelectors ?? data.mask_selectors),
+    note: `${data.note ?? ''}`.trim(),
+    waitMs: Number.isFinite(rawWaitMs) && rawWaitMs >= 0 ? Math.round(rawWaitMs) : 0,
+  };
+}
+
+export function getScreenshotEvidenceTypes() {
+  return SCREENSHOT_EVIDENCE_TYPES.map((value) => ({
+    value,
+    label: {
+      checkpoint_screenshot: '检查点截图',
+      before_screenshot: '修改前截图',
+      after_screenshot: '修改后截图',
+    }[value],
+  }));
+}
+
 export function createDefaultStep(actionType = 'click') {
+  const stepId = createLocalStepId(actionType);
   return normalizeStep({
+    stepId,
     actionType,
     stepName: getActionLabel(actionType),
     targetSnapshot: stepNeedsTarget(actionType) ? createDefaultTargetSnapshot() : null,
   });
 }
 
-export function normalizeStepParams(actionType, params) {
+export function normalizeStepParams(actionType, params, stepName = '') {
   const data = isPlainObject(params) ? cloneData(params) : {};
   const thinkTimeMs = normalizeThinkTimeMs(data.thinkTimeMs ?? data.think_time_ms);
   const waitMs = Number(data.waitMs ?? data.wait_ms ?? 0);
+  if (actionType === 'capture_screenshot') {
+    const evidenceKey = `${data.evidenceKey ?? data.evidence_key ?? ''}`.trim();
+    return {
+      ...normalizeScreenshotParams(data, stepName),
+      evidenceKey,
+      thinkTimeMs,
+    };
+  }
   if (actionType === 'goto') {
     return { url: data.url || '', thinkTimeMs };
   }
@@ -103,6 +190,7 @@ export function stepNeedsTarget(actionType) {
     'goto',
     'window_maximize',
     'set_window_size',
+    'capture_screenshot',
     'sleep',
     'wait',
     'assert_page_contains',
@@ -175,11 +263,13 @@ export function summarizeStepParams(step) {
 
 export function normalizeStep(step = {}, index = 0) {
   const actionType = step.actionType || step.action_type || 'click';
+  const stepName = step.stepName || step.step_name || `${getActionLabel(actionType)} ${index + 1}`;
   const targetSnapshot = normalizeTargetSnapshot(step.targetSnapshot || step.target_snapshot);
   return {
-    stepId: step.stepId || step.step_id,
+    // 后端 BIGINT ID 只转为字符串，不经过 Number，缺少 ID 时生成一次本地稳定身份。
+    stepId: normalizeIdValue(step.stepId ?? step.step_id) || createLocalStepId(actionType, index),
     stepIndex: Number(step.stepIndex ?? step.step_index ?? index + 1),
-    stepName: step.stepName || step.step_name || `${getActionLabel(actionType)} ${index + 1}`,
+    stepName,
     actionType,
     enabled: step.enabled !== false,
     timeoutMs: step.timeoutMs ?? step.timeout_ms,

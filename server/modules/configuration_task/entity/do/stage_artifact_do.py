@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.database import Base
@@ -37,6 +37,8 @@ class ConfigurationTaskStage(Base):
     )
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="阶段顺序，从1递增")
     step_range_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", comment="阶段内步骤索引列表JSON")
+    step_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", comment="阶段内稳定步骤ID列表JSON")
+    evidence_policy_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", comment="阶段取证策略JSON")
     create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
 
 
@@ -65,7 +67,20 @@ class TaskRunStage(Base):
     mode: Mapped[str] = mapped_column(String(32), nullable=False, default="READ", comment="阶段模式")
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="阶段顺序")
     step_range_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", comment="阶段内步骤索引列表JSON")
+    step_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", comment="运行阶段步骤ID快照JSON")
+    evidence_policy_json: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="{}",
+        comment="运行阶段取证策略快照JSON",
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", comment="阶段状态")
+    evidence_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="NOT_REQUIRED", comment="阶段证据完整状态"
+    )
+    evidence_missing_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", comment="阶段缺失证据项JSON"
+    )
     result_json: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="阶段步骤结果JSON")
     error_code: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="错误码")
     error_message: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="错误消息")
@@ -89,6 +104,15 @@ class TaskArtifact(Base):
 
     __tablename__ = "configuration_task_artifact"
     __table_args__ = (
+        UniqueConstraint(
+            "task_run_id",
+            "run_stage_id",
+            "step_id",
+            "evidence_key",
+            "sequence_no",
+            "sha256",
+            name="uk_ct_artifact_evidence_identity",
+        ),
         Index("idx_ct_artifact_run_stage", "task_run_id", "run_stage_id"),
         Index("idx_ct_artifact_type", "artifact_type"),
     )
@@ -109,6 +133,27 @@ class TaskArtifact(Base):
         comment="产物类型：step_screenshot/failure_screenshot/execution_log/report",
     )
     step_key: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="关联步骤标识")
+    step_id: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="稳定步骤ID")
+    evidence_type: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="证据类型")
+    evidence_key: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="证据键")
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="同一步骤产物顺序")
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None, comment="Agent采集时间")
+    mask_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="是否已遮罩")
+    availability_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="ONLINE",
+        comment="资源可用状态",
+    )
+    provider_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="agent_local",
+        comment="资源Provider",
+    )
+    agent_code: Mapped[str] = mapped_column(String(128), nullable=False, default="", comment="持有资源的Agent")
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False, default="", comment="Agent受控相对定位键")
+    mime_type: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="资源MIME类型")
     resource_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="资源对象ID")
     original_file_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="展示文件名")
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="文件字节数")

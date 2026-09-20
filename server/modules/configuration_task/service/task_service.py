@@ -16,7 +16,10 @@ from modules.configuration_task.dao.task_dao import (
     load_json_list,
     load_json_object,
 )
-from modules.configuration_task.entity.do.task_do import ConfigurationTask, ConfigurationTaskVersion
+from modules.configuration_task.entity.do.task_do import (
+    ConfigurationTask,
+    ConfigurationTaskVersion,
+)
 from modules.configuration_task.entity.vo.task_vo import (
     TASK_BINDINGS_MAX_BYTES,
     TASK_STEPS_MAX_BYTES,
@@ -28,6 +31,8 @@ from modules.configuration_task.entity.vo.task_vo import (
     TaskVersionDetailModel,
     TaskVersionUpdateModel,
 )
+from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
+from modules.configuration_task.util.step_identity_util import ensure_step_ids
 
 
 @dataclass
@@ -154,7 +159,7 @@ class ConfigurationTaskService:
         task = ConfigurationTaskDao.get_task(db, task_id)
         if not task:
             return ConfigurationTaskServiceResult(False, "任务不存在")
-        steps_json = _dumps(model.steps or [])
+        steps_json = _dumps(ensure_step_ids(model.steps or []))
         if len(steps_json.encode("utf-8")) > TASK_STEPS_MAX_BYTES:
             return ConfigurationTaskServiceResult(False, "steps 超过大小限制")
         bindings_json = _dumps(model.input_bindings or {})
@@ -218,7 +223,7 @@ class ConfigurationTaskService:
                 return ConfigurationTaskServiceResult(False, "variables 超过大小限制")
             values["variables_json"] = variables_json
         if model.steps is not None:
-            steps_json = _dumps(model.steps)
+            steps_json = _dumps(ensure_step_ids(model.steps))
             if len(steps_json.encode("utf-8")) > TASK_STEPS_MAX_BYTES:
                 return ConfigurationTaskServiceResult(False, "steps 超过大小限制")
             values["steps_json"] = steps_json
@@ -258,10 +263,16 @@ class ConfigurationTaskService:
             return ConfigurationTaskServiceResult(False, "版本不存在")
         if row.status not in {"DRAFT", "PUBLISHED"}:
             return ConfigurationTaskServiceResult(False, f"版本当前状态不允许发布：{row.status}")
-        steps = load_json_list(row.steps_json)
+        steps = ensure_step_ids(load_json_list(row.steps_json))
         enabled_steps = [step for step in steps if isinstance(step, dict) and step.get("enabled", True)]
         if not enabled_steps:
             return ConfigurationTaskServiceResult(False, "发布失败：版本必须包含至少一个启用的步骤")
+        stage_error = ConfigurationTaskStageService.validate_version_stages_for_publish(db, version_id)
+        if stage_error:
+            return ConfigurationTaskServiceResult(False, f"发布失败：{stage_error}")
+        if steps != load_json_list(row.steps_json):
+            ConfigurationTaskVersionDao.update_version(db, version_id, {"steps_json": _dumps(steps)})
+            row = ConfigurationTaskVersionDao.get_version(db, version_id)
         bindings = load_json_object(row.input_bindings_json)
         for file_key, resource_ids in bindings.items():
             for resource_id_text in resource_ids:
@@ -358,7 +369,7 @@ class ConfigurationTaskService:
             headless=bool(row.headless),
             credentialBindingId=row.credential_binding_id or "",
             variables=load_json_object(row.variables_json),
-            steps=load_json_list(row.steps_json),
+            steps=ensure_step_ids(load_json_list(row.steps_json)),
             inputBindings={key: list(value) for key, value in load_json_object(row.input_bindings_json).items()},
             publishBy=row.publish_by or "",
             publishTime=row.publish_time,

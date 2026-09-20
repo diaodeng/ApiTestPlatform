@@ -14,6 +14,9 @@ title: 更新历史
 - AI 分析结果解析失败修复（生产 INC00002000624N 排查产物）：模型在结果字符串值内嵌请求体 JSON 示例且不转义双引号，旧版单遍引号修复启发式无法处理"内层键值对"形态导致整个有效分析被丢弃（`AI_WORKER_RESULT_INVALID`，重试亦复现）；按新结果处理流程修复——`json.loads` 失败后先经**回溯式 json-repair**（键/值字符串上下文判定 + 嵌入花括号剪枝，纯标准库，实测挽救两次生产失败样本），仍失败触发 **Agent 端补救重试**（转存首次现场后 resume 会话发送纠错指令再执行一轮，成功合并 token 走成功链路），两道防线都失败才落库失败；服务端把解析失败的诊断摘要并入任务错误信息，列表页直接可见具体断点。无数据库结构变更。详见：[AI结果JSON修复与补救重试](2026-09-20-ticket-ai-result-json-repair-retry.md)，用户说明：[工单深度AI分析说明](../ticket_ai_analysis.md)。
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 
+## 2026-09-21
+- 配置任务证据策略与产物并发幂等收口：`requiredTypes` 按每种类型至少一项计算，同类型截图任意一项即可满足，精确证据继续使用 `requiredEvidenceKeys`；产物引用唯一键冲突时回滚并回查已存在记录，避免并发重复登记。定向回归测试扩展至 53 项。
+
 ## 2026-09-20
 - 配置任务页面补充录制转模板、版本编辑和新建录制的操作提示：四个 JSON 配置字段新增可点击问号说明，明确步骤索引从 0 开始、变量/fileKey 的适用动作和输入绑定关系，并补充任务变量与版本变量的合并规则、资源 READY 状态和 Agent 归属要求。
 - 配置任务新建录制补充断言操作提示：按住 Alt 点击元素可生成“文本包含”或“元素可见”断言，Alt+点击不会触发真实点击，默认追加到上一条步骤；普通点击不会自动生成断言。
@@ -63,8 +66,6 @@ title: 更新历史
 - Agent 本地资源 manifest 与分片发布协议上线：新增受控 `storage/resources` 文件存储与原子 manifest，支持 `requestType=7` 的 `file_publish_begin/file_chunk/file_publish_commit/file_stat/file_cleanup` 小 JSON 控制命令，校验分片/文件大小与 SHA-256，支持乱序与同 hash 重复分片幂等；拒绝路径穿越、符号链接逃逸、目录和超限输入，不实现任意文件读取、目录浏览、SFTP 或 AI workspace 改造。详见：[Agent 本地资源分片发布](../client/agent-resource-protocol.md)。
 
 - 门店配置任务文件存储设计规划：明确复用 Web 录制与 Agent 执行能力，首期允许输入文件保存在执行 Agent 的受控目录，服务端通过资源 ID、版本、大小和 SHA-256 追踪；后续以独立 Provider 接入 SFTP。该记录仅说明设计边界，文件上传、截图归档和 SFTP 功能尚未上线。详见：[门店配置任务文件存储设计](2026-09-19-configuration-task-file-storage-design.md)。
-
-- 自动拉日志 AI 门店编码映射修复（生产 INC00001988278 排查产物）：AI 统一提取的门店是外部门店编码（如 8555），而运行参数合并优先级 AI 高于字段识别，会把已映射好的内部 org_no（如 558464）覆盖回外部编码，提交前按 org_no 校验门店配置失败，自动拉日志被记为"参数不完整"跳过、只能人工补拉；修复为合并前先将 AI 门店按门店配置（`sap_org_no → org_no`，仅唯一候选）映射为内部 org_no 再参与合并，映射失败保留原值由提交前校验拦截，自动化审计新增 `aiStoreMappedFrom` 保留 AI 原始编码。详见：[自动拉日志门店映射修复](2026-09-18-ticket-auto-log-pull-ai-store-mapping.md)，用户说明：[工单同步自动化](../ticket-sync-automation.md)、[日志拉取使用说明](../ticket_log_pull.md)。
 
 ## 2026-09-18
 - 自动拉日志 AI 门店编码映射修复（生产 INC00001988278 排查产物）：AI 统一提取的门店是外部门店编码（如 8555），而运行参数合并优先级 AI 高于字段识别，会把已映射好的内部 org_no（如 558464）覆盖回外部编码，提交前按 org_no 校验门店配置失败，自动拉日志被记为"参数不完整"跳过、只能人工补拉；修复为合并前先将 AI 门店按门店配置（`sap_org_no → org_no`，仅唯一候选）映射为内部 org_no 再参与合并，映射失败保留原值由提交前校验拦截，自动化审计新增 `aiStoreMappedFrom` 保留 AI 原始编码。详见：[自动拉日志门店映射修复](2026-09-18-ticket-auto-log-pull-ai-store-mapping.md)，用户说明：[工单同步自动化](../ticket-sync-automation.md)、[日志拉取使用说明](../ticket_log_pull.md)。

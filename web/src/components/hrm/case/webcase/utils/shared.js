@@ -43,6 +43,7 @@ export const actionOptions = [
   { label: '等待元素可见', value: 'wait_visible' },
   { label: '等待元素隐藏', value: 'wait_hidden' },
   { label: '固定等待', value: 'sleep' },
+  { label: '截图 / 采集证据', value: 'capture_screenshot' },
   { label: '断言页面包含文本', value: 'assert_page_contains' },
   { label: '断言页面不包含文本', value: 'assert_page_not_contains' },
   { label: '断言元素文本等于', value: 'assert_text_equals' },
