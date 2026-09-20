@@ -44,7 +44,12 @@
 
 ## 版本与输入绑定
 
-版本草稿包含 `startUrl`、`browserName`、`headless`、`credentialBindingId`、`variables`、`steps` 和 `inputBindings`：
+版本草稿支持**可视化步骤编辑**和 JSON 两种模式（编辑弹窗内 Tab 切换，保存时以当前激活视图为准）：
+
+- **可视化编辑**：步骤表格支持新增/删除/上移下移/启停，双击或点「详情」打开步骤详情编辑弹窗（与 Web 测试管理用例编辑共用同一套编辑组件，支持动作类型、定位器、参数、断言、目标快照等完整编辑能力）；「上传文件」动作只填 `fileKey`，配套在输入绑定里把 fileKey 关联到资源 ID；
+- **JSON 模式**：直接编辑步骤数组 JSON，适合批量粘贴或高级调整；两种视图数据实时同步。
+
+版本草稿包含 `startUrl`、`browserName`（Chromium/Chrome/Microsoft Edge/Firefox/WebKit）、`headless`、`credentialBindingId`（统一凭证的浏览器状态绑定，编辑弹窗中下拉选择、可留空）、`variables`、`steps` 和 `inputBindings`：
 
 ```json
 {

@@ -231,7 +231,7 @@ class ConfigurationTaskTemplateService:
             return result
         logger.info(
             f"录制转模板完成: recording_id={recording_id}, task_id={task_id}, "
-            f"version_no={result.result.versionNo if result.result else '?'}, operator={operator}"
+            f"version_no={result.result.version_no if result.result else '?'}, operator={operator}"
         )
         return result
 

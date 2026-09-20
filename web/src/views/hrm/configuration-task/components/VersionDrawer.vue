@@ -56,9 +56,12 @@
                         <el-col :span="6">
                             <el-form-item label="浏览器">
                                 <el-select v-model="editorForm.browserName">
-                                    <el-option label="chromium" value="chromium" />
-                                    <el-option label="firefox" value="firefox" />
-                                    <el-option label="webkit" value="webkit" />
+                                    <el-option
+                                        v-for="item in browserOptions"
+                                        :key="item.value"
+                                        :label="item.label"
+                                        :value="item.value"
+                                    />
                                 </el-select>
                             </el-form-item>
                         </el-col>
@@ -68,11 +71,37 @@
                             </el-form-item>
                         </el-col>
                     </el-row>
-                    <el-form-item label="凭证绑定ID">
-                        <el-input v-model="editorForm.credentialBindingId" placeholder="统一凭证绑定ID（可选）" style="width: 300px" />
+                    <el-form-item label="凭证绑定">
+                        <el-select
+                            v-model="editorForm.credentialBindingId"
+                            placeholder="统一凭证的浏览器状态绑定，可留空"
+                            clearable
+                            filterable
+                            style="width: 100%"
+                        >
+                            <el-option
+                                v-for="item in credentialOptions"
+                                :key="item.bindingId"
+                                :label="`${item.bindingName}（${item.credentialName || '-'}）`"
+                                :value="item.bindingId"
+                            />
+                        </el-select>
                     </el-form-item>
-                    <el-form-item label="步骤JSON">
-                        <el-input v-model="stepsText" type="textarea" :rows="14" placeholder="Web 步骤数组 JSON" />
+                    <el-form-item label="步骤">
+                        <el-tabs v-model="stepsEditorTab" type="card" class="steps-editor-tabs">
+                            <!-- 可视化模式：复用 Web 用例的 StepDetail 编辑能力（自包含组件） -->
+                            <el-tab-pane label="可视化编辑" name="visual">
+                                <VersionStepTable :steps="editorSteps" @change="syncStepsToJson" />
+                            </el-tab-pane>
+                            <el-tab-pane label="JSON" name="json">
+                                <el-input
+                                    v-model="stepsText"
+                                    type="textarea"
+                                    :rows="14"
+                                    placeholder="Web 步骤数组 JSON"
+                                />
+                            </el-tab-pane>
+                        </el-tabs>
                     </el-form-item>
                     <el-form-item label="输入绑定">
                         <el-input
@@ -103,6 +132,9 @@
 import { ref, reactive, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import StageEditor from "./StageEditor.vue";
+import VersionStepTable from "./VersionStepTable.vue";
+import { browserOptions } from "@/components/hrm/case/webcase/utils/shared.js";
+import { listWebCredentialOptions } from "../composables/recordingOptions.js";
 import {
     listVersions,
     createVersion,
@@ -116,6 +148,8 @@ const emit = defineEmits(["update:modelValue", "published"]);
 const loading = ref(false);
 const saving = ref(false);
 const versions = ref([]);
+// 凭证绑定选项：统一凭证的 web_case + playwright_storage 投影，弹窗打开时加载。
+const credentialOptions = ref([]);
 const editorVisible = ref(false);
 const stageVisible = ref(false);
 const stageVersion = ref(null);
@@ -124,12 +158,40 @@ const editorForm = reactive({ startUrl: "", browserName: "chromium", headless: f
 const stepsText = ref("[]");
 const bindingsText = ref("{}");
 const versionVariablesText = ref("{}");
+// 步骤编辑双模式：可视化表格直接操作 editorSteps 数组，JSON 模式编辑文本；
+// 切换/保存时以对方为源同步，保证两种模式不丢数据。
+const stepsEditorTab = ref("visual");
+const editorSteps = ref([]);
+
+// 可视化表格变更后同步回 JSON 文本，保持两视图一致。
+function syncStepsToJson() {
+    stepsText.value = JSON.stringify(editorSteps.value, null, 2);
+}
+
+// 从 JSON 文本刷新可视化表格；解析失败返回 false 并提示。
+function syncStepsFromJson() {
+    try {
+        const parsed = JSON.parse(stepsText.value || "[]");
+        if (!Array.isArray(parsed)) {
+            ElMessage.warning("步骤必须是合法 JSON 数组");
+            return false;
+        }
+        editorSteps.value = parsed;
+        return true;
+    } catch {
+        ElMessage.warning("步骤必须是合法 JSON 数组");
+        return false;
+    }
+}
 
 watch(
     () => [props.modelValue, props.task?.taskId],
     ([visible]) => {
         if (visible && props.task) {
             loadVersions();
+            listWebCredentialOptions()
+                .then((rows) => (credentialOptions.value = rows))
+                .catch(() => (credentialOptions.value = []));
         }
     },
     { immediate: true }
@@ -192,6 +254,9 @@ function openEditor(row) {
         credentialBindingId: row.credentialBindingId
     });
     stepsText.value = JSON.stringify(row.steps || [], null, 2);
+    // 可视化表格用独立数组持有步骤（元素引用与 JSON 文本同步）。
+    editorSteps.value = Array.isArray(row.steps) ? [...row.steps] : [];
+    stepsEditorTab.value = "visual";
     bindingsText.value = JSON.stringify(row.inputBindings || {}, null, 2);
     versionVariablesText.value = JSON.stringify(row.variables || {}, null, 2);
     editorVisible.value = true;
@@ -199,13 +264,13 @@ function openEditor(row) {
 
 async function saveVersion() {
     if (!editing.value) return;
-    let steps, bindings, variables;
-    try {
-        steps = JSON.parse(stepsText.value || "[]");
-    } catch {
-        ElMessage.warning("步骤必须是合法 JSON 数组");
+    // 保存时以当前激活的编辑视图为准：可视化 Tab 先同步到 JSON，JSON Tab 先解析刷新表格。
+    if (stepsEditorTab.value === "visual") {
+        syncStepsToJson();
+    } else if (!syncStepsFromJson()) {
         return;
     }
+    let bindings, variables;
     try {
         bindings = JSON.parse(bindingsText.value || "{}");
     } catch {
@@ -224,8 +289,9 @@ async function saveVersion() {
             startUrl: editorForm.startUrl,
             browserName: editorForm.browserName,
             headless: editorForm.headless,
-            credentialBindingId: editorForm.credentialBindingId,
-            steps,
+            // clearable 清空后为空串，后端 normalize 为空即"未绑定凭证"。
+            credentialBindingId: editorForm.credentialBindingId || "",
+            steps: editorSteps.value,
             inputBindings: bindings,
             variables
         });
@@ -272,5 +338,13 @@ function openStages(row) {
 .toolbar {
     display: flex;
     gap: 8px;
+}
+.steps-editor-tabs {
+    width: 100%;
+
+    :deep(.el-tabs__content) {
+        max-height: 480px;
+        overflow: auto;
+    }
 }
 </style>

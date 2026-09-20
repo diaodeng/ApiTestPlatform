@@ -15,6 +15,12 @@ title: 更新历史
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 
 ## 2026-09-20
+- 配置任务版本编辑弹窗两处体验修复：①浏览器下拉此前手写三项（chromium/firefox/webkit），漏掉 Chrome 和 Microsoft Edge，改为复用共享 `browserOptions` 常量（五项全集）；②「凭证绑定ID」由手工输入改为可选下拉，选项来自统一凭证的 `web_case` + `playwright_storage` 投影绑定（显示绑定名与凭证名，可搜索、可清空），不再要求用户手抄绑定 ID。
+
+- 配置任务版本编辑支持可视化步骤编辑：版本编辑弹窗的「步骤JSON」文本域升级为「可视化编辑 / JSON」双模式 Tab——可视化模式提供步骤表格（新增/删除/上移下移/启停/摘要展示），双击行或点「详情」打开步骤详情编辑弹窗，直接复用 Web 用例编辑的自包含组件 `StepDetail`（动作类型/定位器/参数/断言/目标快照完整编辑能力，配置任务版本 steps 与 Web 用例同为 WebStepModel 结构，零拷贝复用）；JSON 模式保留原文本编辑。两种视图保存时以激活视图为准互相同步。Web 测试管理相关组件与逻辑零改动。
+
+- 录制转模板成功后报 AttributeError 修复：转换本身已成功（版本草稿已创建），但服务端打日志时访问了 `result.result.versionNo`——`TaskVersionDetailModel` 的 Python 属性名是 `version_no`（camelCase 仅是 Pydantic 序列化别名），导致接口 500 但数据已落库；修正为 `version_no`。注意：遇到此报错时转换实际已生效，刷新版本列表即可看到草稿，无需重新转换。
+
 - 配置任务「新建录制」弹窗步骤计数修复：录制中始终显示 0 个步骤——轮询取的是 `resultSummary.stepCount`，但该字段只在录制结束（`record_finished`）时写入且不含步骤数；改为取录制详情接口实时重建的 `steps` 数组（录制中每个操作事件实时落库并重建步骤列表），录制中实时显示已捕获步骤数，完成时显示总步骤数。
 
 - Web 测试插件包补齐 playwright 传递依赖（pyee/greenlet）并修复录制弹窗体验：①插件构建脚本 `build_plugins.py` 此前只打包 playwright 本体，漏掉其声明的传递依赖 pyee 与 greenlet，导致插件安装后运行时 `import playwright` 报 `ModuleNotFoundError: No module named 'pyee'`，而守卫导入统一提示"插件未安装"误导用户反复重装；已补齐两个依赖条目，并在导入失败时区分"插件未安装"与"插件不完整/损坏"（后者附真实异常并提示重装插件）。②「新建录制」弹窗三处体验修复：状态信息由两列 descriptions 改为独立提示条（错误全文展示不再截断溢出）、录制失败后自动复位到表单态并显示"重新开始录制"按钮（不再停留在"停止录制"运行态）、失败原因以错误提示条常驻展示。

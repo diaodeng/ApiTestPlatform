@@ -1,0 +1,214 @@
+<template>
+    <div class="version-step-table">
+        <div class="step-table-toolbar">
+            <span class="panel-title">测试步骤</span>
+            <div class="toolbar-actions">
+                <el-button type="primary" icon="Plus" size="small" @click="addStep">新增步骤</el-button>
+            </div>
+        </div>
+        <el-table
+            :data="steps"
+            border
+            size="small"
+            max-height="420px"
+            empty-text="暂无步骤，可手动新增或通过「录制转模板」生成"
+            :row-class-name="rowClassName"
+            @row-click="handleRowClick"
+        >
+            <el-table-column label="#" width="90" fixed="left">
+                <template #default="{ $index, row }">
+                    <div class="step-order-cell">
+                        <span>{{ $index + 1 }}</span>
+                        <el-switch
+                            v-model="row.enabled"
+                            size="small"
+                            inline-prompt
+                            active-text="启"
+                            inactive-text="停"
+                            @click.stop
+                        />
+                    </div>
+                </template>
+            </el-table-column>
+            <el-table-column label="动作" width="150">
+                <template #default="{ row }">
+                    {{ actionLabel(row.actionType) }}
+                </template>
+            </el-table-column>
+            <el-table-column label="步骤名称" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">
+                    {{ row.stepName || "-" }}
+                </template>
+            </el-table-column>
+            <el-table-column label="定位信息" min-width="220" show-overflow-tooltip>
+                <template #default="{ row }">
+                    {{ targetSummary(row) }}
+                </template>
+            </el-table-column>
+            <el-table-column label="参数摘要" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">
+                    {{ paramsSummary(row) }}
+                </template>
+            </el-table-column>
+            <el-table-column label="操作" width="190" fixed="right">
+                <template #default="{ $index }">
+                    <el-button link type="primary" icon="Edit" @click.stop="openDetail($index)">详情</el-button>
+                    <el-button link icon="Top" :disabled="$index === 0" @click.stop="moveStep($index, -1)" />
+                    <el-button
+                        link
+                        icon="Bottom"
+                        :disabled="$index === steps.length - 1"
+                        @click.stop="moveStep($index, 1)"
+                    />
+                    <el-button link type="danger" icon="Delete" @click.stop="removeStep($index)" />
+                </template>
+            </el-table-column>
+        </el-table>
+
+        <!-- 步骤详情编辑弹窗：复用 Web 用例的自包含组件，数据结构同为 WebStepModel -->
+        <StepDetail
+            v-model:show-step-detail-dialog="showStepDetail"
+            :current-step="currentStep"
+            :step-index="currentStepIndex"
+            @update="handleStepUpdated"
+        />
+    </div>
+</template>
+
+<script setup name="VersionStepTable">
+import { ref, computed } from "vue";
+import StepDetail from "@/components/hrm/case/webcase/components/StepDetail.vue";
+import { actionOptions } from "@/components/hrm/case/webcase/utils/shared.js";
+import { stepNeedsTarget, normalizeStepParams } from "@/components/hrm/case/webcase/domain/stepDomain";
+
+const props = defineProps({
+    steps: { type: Array, required: true }
+});
+const emit = defineEmits(["change"]);
+
+const showStepDetail = ref(false);
+const currentStepIndex = ref(-1);
+// StepDetail 通过 props 直接改写 currentStep 对象内部字段，这里给它一个稳定引用；
+// 弹窗关闭时 emit('update')，表格整体通知父组件"已变化"。
+const currentStep = computed(() => props.steps[currentStepIndex.value] || {});
+
+function actionLabel(actionType) {
+    return actionOptions.find((item) => item.value === actionType)?.label || actionType || "-";
+}
+
+// 定位信息摘要：主定位器类型 + 值，无目标动作显示 -。
+function targetSummary(row) {
+    if (!stepNeedsTarget(row.actionType)) return "-";
+    const target = row.targetSnapshot;
+    const locators = target?.locators;
+    if (Array.isArray(locators) && locators.length) {
+        const primary = locators[0];
+        const value = primary.locatorValue;
+        const text =
+            typeof value === "object" && value !== null
+                ? value.name || value.text || value.role || JSON.stringify(value)
+                : String(value ?? "");
+        return `${primary.locatorType}: ${text}`;
+    }
+    return "(未设置)";
+}
+
+// 参数摘要：剔除空值后展示关键键值，给表格一个可扫读的概览。
+function paramsSummary(row) {
+    const params = row.params || {};
+    const parts = [];
+    for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === null || value === "") continue;
+        if (key === "thinkTimeMs") continue;
+        const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+        parts.push(`${key}=${text.length > 40 ? `${text.slice(0, 40)}…` : text}`);
+    }
+    return parts.join("; ") || "-";
+}
+
+function rowClassName({ rowIndex }) {
+    return rowIndex === currentStepIndex.value ? "current-step-row" : "";
+}
+
+function handleRowClick(row) {
+    const index = props.steps.indexOf(row);
+    if (index >= 0) currentStepIndex.value = index;
+}
+
+function notifyChange() {
+    emit("change", props.steps);
+}
+
+// 新增一个空白 fill 步骤到末尾，结构与 WebStepModel 一致。
+function addStep() {
+    props.steps.push({
+        stepName: "",
+        actionType: "fill",
+        enabled: true,
+        continueOnFailure: false,
+        timeoutMs: null,
+        params: normalizeStepParams("fill", {}),
+        targetSnapshot: null
+    });
+    currentStepIndex.value = props.steps.length - 1;
+    notifyChange();
+    openDetail(props.steps.length - 1);
+}
+
+function openDetail(index) {
+    if (index < 0 || index >= props.steps.length) return;
+    currentStepIndex.value = index;
+    showStepDetail.value = true;
+}
+
+function moveStep(index, offset) {
+    const target = index + offset;
+    if (target < 0 || target >= props.steps.length) return;
+    const [step] = props.steps.splice(index, 1);
+    props.steps.splice(target, 0, step);
+    currentStepIndex.value = target;
+    notifyChange();
+}
+
+function removeStep(index) {
+    props.steps.splice(index, 1);
+    if (currentStepIndex.value >= props.steps.length) {
+        currentStepIndex.value = props.steps.length - 1;
+    }
+    notifyChange();
+}
+
+function handleStepUpdated() {
+    // StepDetail 关闭时已直接改写步骤对象（引用相同），这里触发校验与同步。
+    const step = props.steps[currentStepIndex.value];
+    if (step) {
+        step.params = normalizeStepParams(step.actionType, step.params);
+    }
+    notifyChange();
+}
+</script>
+
+<style lang="scss" scoped>
+.version-step-table {
+    .step-table-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+
+        .panel-title {
+            font-weight: 600;
+        }
+    }
+
+    :deep(.current-step-row) {
+        background: var(--el-fill-color-light);
+    }
+
+    .step-order-cell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+}
+</style>
