@@ -27,6 +27,7 @@ from services.ticket_ai_codex_config_service import TicketAiCodexConfigService
 from services.ticket_ai_observability_service import TicketAiObservabilityService
 from services.ticket_ai_result_schema_service import TicketAiResultSchemaService
 from utils.common import get_client_root_dir
+from utils.json_repair import repair_json_text
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -944,6 +945,219 @@ class TicketAiAnalysisService:
         return result_text
 
     @classmethod
+    async def _retry_worker_after_unparseable_result(
+        cls,
+        *,
+        event_sender: EventSender | None,
+        req_data: dict[str, Any],
+        context_payload: dict[str, Any],
+        provider_type: str,
+        provider_env_overrides: dict[str, Any],
+        provider_code: str,
+        worker_model: str,
+        workspace_dir: Path,
+        result_file: Path,
+        schema_payload: dict[str, Any] | None,
+        timeout_sec: int,
+        task_started_ns: int,
+        submitted_by_name: str | None,
+        selected_worker_model: str,
+        ticket_id: int,
+    ) -> dict[str, Any] | None:
+        """
+        结果不可解析时的 Agent 端自动补救重试。
+
+        实现过程：
+        1. 保留首次执行产物：把首次 result.json/stdout/stderr 转存为
+           result.attempt1.json 等文件，避免被重试覆盖后丢失现场；
+        2. resume 同一会话（codex 复制 .ai_home / claude 复制 .claude），
+           以纠错指令（要求重新输出合法 JSON、转义字符串内双引号）为 prompt
+           再执行一轮 Worker（仅一轮，不递归）；
+        3. 重新解析重试结果：成功则合并两轮 token 用量后返回成功响应，
+           走正常成功链路；仍失败则返回 None，由调用方按原有失败分支处理
+           （失败信息与诊断基于两轮合并的现场）。
+
+        :param event_sender: 事件发送器
+        :param req_data: 原始请求数据
+        :param context_payload: 任务上下文
+        :param provider_type: Provider 类型
+        :param provider_env_overrides: Provider 环境变量覆盖项
+        :param provider_code: Provider 编码
+        :param worker_model: Worker 模型
+        :param workspace_dir: 任务工作区
+        :param result_file: 结果文件路径
+        :param schema_payload: 任务 JSON Schema
+        :param timeout_sec: 单轮执行超时秒数
+        :param task_started_ns: 任务开始时间（观测上报用）
+        :param submitted_by_name: 提交人
+        :param selected_worker_model: 模型名（观测上报用）
+        :param ticket_id: 工单ID
+        :return: 重试成功时返回成功响应 dict；重试失败或未执行时返回 None
+        """
+        try:
+            first_result_text = cls._resolve_worker_result_text(
+                provider_type=provider_type,
+                worker_config=cls._get_provider_worker_config(provider_type),
+                result_file=result_file,
+                raw_stdout="",
+                raw_stderr="",
+            )
+            if not first_result_text.strip():
+                # 首次连结果文本都没有（如空文件），重试大概率同样无果，直接放弃
+                return None
+            # 1. 转存首次执行现场
+            for src, dst in (
+                (result_file, workspace_dir / "result.attempt1.json"),
+                (workspace_dir / "worker.stdout.txt", workspace_dir / "worker.attempt1.stdout.txt"),
+                (workspace_dir / "worker.stderr.txt", workspace_dir / "worker.attempt1.stderr.txt"),
+            ):
+                try:
+                    if src.exists():
+                        shutil.copy2(src, dst)
+                except Exception as exc:
+                    logger.warning(f"AI分析任务[{req_data.get('taskId')}] 转存首次结果失败: {exc}")
+            # 2. resume 会话执行纠错轮
+            _, resume_flags = cls._copy_session_for_resume(
+                workspace_dir,
+                provider_type,
+                str(workspace_dir),
+            )
+            if not resume_flags:
+                logger.info(
+                    f"AI分析任务[{req_data.get('taskId')}] Provider {provider_type} 不支持 resume，跳过补救重试"
+                )
+                return None
+            worker_config = cls._get_provider_worker_config(provider_type)
+            repo_path = Path(str((req_data.get("mapping") or {}).get("resolvedLocalRepoPath") or workspace_dir))
+            repair_command = cls._build_worker_command(
+                provider_type=provider_type,
+                worker_config=worker_config,
+                repo_path=repo_path,
+                workspace_dir=workspace_dir,
+                schema_file=workspace_dir / "result.schema.json",
+                result_file=result_file,
+                selected_worker_model=worker_model,
+            )
+            repair_command.extend(resume_flags)
+            # 结果文件已存在（首次的非法结果），resume 轮次会覆盖写出新结果
+            repair_prompt = (
+                "你上一轮的最终输出不是合法 JSON：字符串值内部出现了未转义的英文双引号，"
+                "导致解析失败。请重新输出完整分析结果：输出内容必须是符合 result.schema.json "
+                "的单一 JSON 对象，字符串值内部的英文双引号必须写成反斜杠转义（\\\"），"
+                "或改用中文引号/单引号；不要输出任何其他说明文本。"
+            )
+            await cls._emit_event(
+                event_sender,
+                "ai_analysis_step",
+                req_data.get("taskId"),
+                "结果解析失败，自动补救重试（resume 会话纠错）",
+                attempt=2,
+                provider_type=provider_type,
+            )
+            retry_started = time.monotonic()
+            process = await cls._run_worker_process(
+                repair_command,
+                repair_prompt,
+                workspace_dir,
+                cls._load_worker_env(
+                    cls._prepare_ai_home(workspace_dir, provider_type, provider_env_overrides),
+                    provider_type,
+                    provider_env_overrides,
+                ),
+                timeout_sec,
+            )
+            retry_elapsed = round(time.monotonic() - retry_started, 3)
+            retry_stdout = process.stdout or ""
+            retry_stderr = process.stderr or ""
+            cls._persist_worker_streams(workspace_dir, retry_stdout, retry_stderr)
+            await cls._emit_event(
+                event_sender,
+                "ai_analysis_step",
+                req_data.get("taskId"),
+                "补救重试执行结束",
+                attempt=2,
+                return_code=process.returncode,
+                elapsed_sec=retry_elapsed,
+                stdout_len=len(retry_stdout),
+                stderr_len=len(retry_stderr),
+            )
+            if await cls._check_task_canceled(event_sender, int(req_data.get("taskId") or 0)):
+                return {
+                    "request_type": req_data.get("requestType"),
+                    "command": req_data.get("command"),
+                    "success": False,
+                    "status": "canceled",
+                    "message": "任务在补救重试期间被取消，结果已放弃",
+                    "error_code": "AI_TASK_CANCELED",
+                    "error_message": "任务在补救重试期间被取消，结果已放弃",
+                }
+            parsed_retry = cls._parse_worker_output(
+                provider_type=provider_type,
+                worker_config=worker_config,
+                result_file=result_file,
+                raw_stdout=retry_stdout,
+                raw_stderr=retry_stderr,
+                schema_payload=schema_payload,
+            )
+            if process.returncode != 0 or parsed_retry is None:
+                logger.warning(
+                    f"AI分析任务[{req_data.get('taskId')}] 补救重试仍未获得有效结果: "
+                    f"returncode={process.returncode}, parsed={'成功' if parsed_retry else '失败'}"
+                )
+                return None
+            # 3. 重试成功：合并两轮 token 用量（两轮模型调用都真实发生）
+            total_token_usage = cls._parse_failure_token_usage(
+                provider_type=provider_type,
+                raw_stdout=retry_stdout,
+                raw_stderr=retry_stderr,
+                result_file=result_file,
+            )
+            await cls._emit_event(
+                event_sender,
+                "ai_analysis_finished",
+                req_data.get("taskId"),
+                "补救重试成功，已获得有效分析结果",
+                attempt=2,
+                elapsed_sec=retry_elapsed,
+            )
+            TicketAiObservabilityService.report_task_span(
+                provider_env_overrides,
+                task_id=int(req_data.get("taskId") or 0),
+                ticket_id=ticket_id,
+                model_name=selected_worker_model or None,
+                system_name=provider_type,
+                prompt_text=repair_prompt,
+                result_text=cls._dumps(parsed_retry),
+                token_usage=total_token_usage,
+                user_id=submitted_by_name,
+                start_ns=task_started_ns,
+                latency_ms=retry_elapsed * 1000,
+                success=True,
+            )
+            return {
+                "request_type": req_data.get("requestType"),
+                "command": req_data.get("command"),
+                "success": True,
+                "status": "success",
+                "message": "AI 分析完成（结果解析失败后经自动补救重试成功）",
+                "token_usage": total_token_usage,
+                "repaired_retry": True,
+                "result": {
+                    "analysis_result": parsed_retry,
+                    "raw_output": (retry_stdout or retry_stderr or "")[:cls.RAW_OUTPUT_SUMMARY_CHARS],
+                    "workspace_path": str(workspace_dir),
+                    "result_path": str(result_file),
+                    "command_line": " ".join(repair_command),
+                    "stdout_path": str(workspace_dir / "worker.stdout.txt"),
+                    "stderr_path": str(workspace_dir / "worker.stderr.txt"),
+                    "token_usage": total_token_usage,
+                },
+            }
+        except Exception as exc:
+            logger.warning(f"AI分析任务补救重试执行失败: task={req_data.get('taskId')}, error={exc}")
+            return None
+
+    @classmethod
     def _parse_worker_output(
         cls,
         *,
@@ -1517,7 +1731,13 @@ class TicketAiAnalysisService:
                     continue
                 if isinstance(payload, dict):
                     return payload
-        return None
+        # 最终兜底：回溯式 json-repair。旧的启发式扫描按"引号后紧跟结构符
+        # 即为结束符"单遍判定，无法处理字符串值内嵌套的 JSON 示例
+        # （如 请求体{"yuuId": "934..."}，其 "键": 形态与真实结构无法区分，
+        # 生产场景 INC00002000624N）。repair_json_text 按值/键字符串上下文
+        # + 嵌入花括号剪枝做二叉回溯，可挽救此类形态；无法挽救时返回 None，
+        # 保持失败语义交由上层补救重试。
+        return repair_json_text(text)
 
     @classmethod
     def _copy_session_for_resume(
@@ -3520,6 +3740,31 @@ class TicketAiAnalysisService:
                     raw_stderr=raw_stderr,
                     schema_payload=schema_payload,
                 )
+
+                # Agent 端自动补救重试：Worker 正常退出但结果不可解析（解析层失败，
+                # 非 Schema 违规）时，resume 同一会话发送纠错指令让模型重新输出，
+                # 通常一轮即可修复（如字符串值内未转义双引号）；仅重试一次，避免
+                # 失败循环。重试后重新解析，成功则继续走正常成功链路。
+                if parsed_result is None and process.returncode == 0:
+                    repaired_outcome = await cls._retry_worker_after_unparseable_result(
+                        event_sender=event_sender,
+                        req_data=req_data,
+                        context_payload=context_payload,
+                        provider_type=provider_type,
+                        provider_env_overrides=provider_env_overrides,
+                        provider_code=request_provider_code,
+                        worker_model=selected_worker_model,
+                        workspace_dir=workspace_dir,
+                        result_file=result_file,
+                        schema_payload=schema_payload,
+                        timeout_sec=timeout_sec,
+                        task_started_ns=task_started_ns,
+                        submitted_by_name=submitted_by_name,
+                        selected_worker_model=selected_worker_model,
+                        ticket_id=ticket_id,
+                    )
+                    if repaired_outcome is not None:
+                        return repaired_outcome
 
                 if process.returncode != 0:
                     failure_payload = worker_failure_payload or cls._classify_worker_failure(

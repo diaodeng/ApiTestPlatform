@@ -1277,6 +1277,37 @@ class TicketAiAnalysisService:
             logger.debug(f"截断Agent响应raw_output失败: error={exc}")
 
     @staticmethod
+    def _summarize_failure_diagnostics(diagnostics: Any) -> str:
+        """
+        汇总 Agent 失败诊断明细为一段可读摘要，用于并入任务失败信息。
+
+        典型输入是客户端 ai_analysis_error 事件携带的 diagnostics 列表，
+        每项含 code / message（如 AI_WORKER_RESULT_UNPARSEABLE + 输出头部预览）。
+        解析层失败时任务表 error_message 只剩通用文案，排查必须翻审计；
+        摘要并入后列表页即可直接看到具体断点（生产 INC00002000624N 排查产物）。
+        :param diagnostics: 诊断明细（列表/字典/None 等）
+        :return: 摘要文本；无有效内容时返回空字符串
+        """
+        if not diagnostics:
+            return ""
+        entries: list[dict[str, Any]] = []
+        if isinstance(diagnostics, dict):
+            entries = [diagnostics]
+        elif isinstance(diagnostics, list):
+            entries = [item for item in diagnostics if isinstance(item, dict)]
+        messages: list[str] = []
+        for item in entries:
+            code = str(item.get("code") or "").strip()
+            message = re.sub(r"\s+", " ", str(item.get("message") or "").strip())
+            if not message:
+                continue
+            # 预览类信息截断，避免长输出撑爆 error_message（Text 字段但通知会引用）
+            if len(message) > 160:
+                message = message[:160] + "…"
+            messages.append(f"{code}: {message}" if code else message)
+        return "；".join(messages[:3])
+
+    @staticmethod
     def _resolve_agent_failure_message(
         response_object: Any,
         agent_response: Any,
@@ -4703,6 +4734,16 @@ class TicketAiAnalysisService:
                 failure_message = "Agent 未返回可解析的分析结果"
                 # 结果不可解析时同样尽力提取已消耗 token（响应中可能内嵌 usage）。
                 token_usage_payload = cls._extract_token_usage_payload(response_payload, response_dump, response_object)
+                # 解析层失败的诊断明细（含输出预览/违规摘要）此前只进审计记录和
+                # 事件流，任务表 error_message 仍是通用文案，排查必须翻审计；
+                # 这里把诊断摘要并入任务失败信息，让列表页直接可见具体原因
+                # （生产 INC00002000624N 排查产物，纯任务表字段写入，无库结构变更）。
+                failure_diagnostics = getattr(response_object, "diagnostics", None) or (
+                    response_payload.get("diagnostics") if isinstance(response_payload, dict) else None
+                )
+                diagnostic_summary = cls._summarize_failure_diagnostics(failure_diagnostics)
+                if diagnostic_summary:
+                    failure_message = f"{failure_message}（{diagnostic_summary}）"
                 cls._log_task_step(
                     task_id,
                     "FAIL",
