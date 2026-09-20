@@ -162,6 +162,12 @@ class ConfigurationTaskRunService:
         # commit 后属性已过期，refresh 回读一次并在线程池内完成消息构造，
         # 后续事件循环只使用普通值，不再触碰 ORM 属性。
         db.refresh(run)
+        # 阶段快照：运行创建时从版本阶段复制；WRITE 阶段创建即挂起审批。
+        # 放在 run_case 消息构造之前，保证事件处理时阶段已存在。
+        from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
+
+        ConfigurationTaskStageService.snapshot_run_stages(db, run, version)
+        db.commit()
         message = cls._build_run_case_message(
             run,
             task,
@@ -177,6 +183,23 @@ class ConfigurationTaskRunService:
             f"manual_login={manual_login_enabled}，timeout_seconds={timeout_seconds}，operator={operator}"
         )
         return run, agent_code, run_id, message, ""
+
+    @classmethod
+    def execute_run_sync(
+        cls,
+        db: Session,
+        task_id: int,
+        model: TaskRunCreateModel,
+        current_user: CurrentUserModel,
+    ) -> TaskRunServiceResult:
+        """同步执行入口：供定时任务线程（无事件循环）调用。
+
+        内部用 asyncio.run 驱动异步编排；如果调用方已在事件循环内，
+        必须直接 await create_run_and_execute，不得使用本方法。
+        """
+        import asyncio
+
+        return asyncio.run(cls.create_run_and_execute(db, task_id, model, current_user))
 
     @classmethod
     async def create_run_and_execute(
@@ -522,6 +545,59 @@ class ConfigurationTaskRunService:
         return TaskRunServiceResult(True, "运行已取消", cls.to_run_model(refreshed))
 
     @classmethod
+    def _advance_stage_by_step(cls, db: Session, task_run_id: int, step_payload: dict[str, Any]) -> None:
+        """把步骤完成事件映射到运行阶段：阶段内全部步骤完成则阶段置 SUCCESS。
+
+        任一步骤失败即把阶段置 FAILED 并跳过后续阶段（由 mark_stage_finished 统一处理）。
+        映射失败只记日志，不阻塞事件主流程。
+        """
+        try:
+            from modules.configuration_task.dao.stage_artifact_dao import ConfigurationTaskStageDao, load_json_list
+            from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
+
+            stage_index = step_payload.get("stepIndex")
+            status = str(step_payload.get("status") or "").strip().lower()
+            if stage_index is None:
+                return
+            stages = ConfigurationTaskStageDao.list_run_stages(db, task_run_id)
+            target = None
+            for stage in stages:
+                indexes = load_json_list(stage.step_range_json)
+                if not indexes:
+                    # 未声明阶段的单阶段模式：任意步骤都归属该阶段。
+                    target = stage
+                    break
+                if int(stage_index) in indexes:
+                    target = stage
+                    break
+            if not target or target.status in {"SUCCESS", "FAILED", "SKIPPED", "CANCELLED"}:
+                return
+            if status == "failed":
+                ConfigurationTaskStageService.mark_stage_finished(
+                    db,
+                    target.run_stage_id,
+                    False,
+                    {"lastStep": step_payload},
+                    error_code="STEP_FAILED",
+                    error_message=str(step_payload.get("errorMessage") or "步骤执行失败"),
+                )
+                return
+            indexes = load_json_list(target.step_range_json)
+            if not indexes:
+                # 单阶段模式无法判断完成度，保持 RUNNING 由 run_finished 收敛。
+                if target.status != "RUNNING":
+                    ConfigurationTaskStageService.mark_stage_running(db, target.run_stage_id)
+                return
+            if all(int(i) <= int(stage_index) for i in indexes if i > int(stage_index)) or int(stage_index) >= max(
+                indexes
+            ):
+                ConfigurationTaskStageService.mark_stage_finished(
+                    db, target.run_stage_id, True, {"lastStep": step_payload}
+                )
+        except Exception as exc:
+            logger.warning(f"步骤阶段映射失败（不影响事件处理）: task_run_id={task_run_id}, error={exc}")
+
+    @classmethod
     def handle_agent_run_event(cls, db: Session, agent_code: str, message_data: dict[str, Any]) -> bool:
         """处理配置任务运行的实时事件（web_run_step/status/error/finished）。
 
@@ -595,6 +671,8 @@ class ConfigurationTaskRunService:
                 if not replaced:
                     steps.append(step_payload)
                 result_payload["steps"] = steps
+                # 步骤进度映射到运行阶段：步骤完成时推进所属阶段状态。
+                cls._advance_stage_by_step(db, run_id_int, step_payload)
             update_values["result_json"] = _dumps(result_payload)
             update_values["update_time"] = now
             ConfigurationTaskRunDao.update_run(db, run_id_int, update_values)

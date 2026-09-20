@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 from config.database import Base
 from module_hrm.dao.agent_dao import AgentDao
 from modules.configuration_task.entity.do.resource_object_do import ResourceObject
+from modules.configuration_task.entity.do.stage_artifact_do import (
+    ConfigurationTaskStage,
+    TaskRunStage,
+)
 from modules.configuration_task.entity.do.task_do import ConfigurationTask, ConfigurationTaskVersion
 from modules.configuration_task.entity.do.task_run_do import ConfigurationTaskRun
 from modules.configuration_task.entity.vo.task_vo import (
@@ -59,6 +63,8 @@ def db_session():
             ConfigurationTaskVersion.__table__,
             ConfigurationTaskRun.__table__,
             ResourceObject.__table__,
+            ConfigurationTaskStage.__table__,
+            TaskRunStage.__table__,
         ],
     )
     with Session(engine) as session:

@@ -73,6 +73,7 @@ async def init_create_table():
     )
     from modules.configuration_task.entity.do import (
         task_run_do as _configuration_task_task_run_do,  # noqa: F401
+        stage_artifact_do as _configuration_task_stage_artifact_do,  # noqa: F401
     )
 
     Base.metadata.create_all(bind=engine)

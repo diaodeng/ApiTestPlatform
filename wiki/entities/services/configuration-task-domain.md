@@ -134,12 +134,15 @@ DRAFT
 - `modules/configuration_task/controller/task_controller.py`：任务/版本/运行路由、Pydantic 契约、鉴权和线程池包装；
 - `modules/configuration_task/service/task_service.py`：任务 CRUD、版本草稿、发布校验（步骤非空、资源 READY、资源归属执行 Agent）；
 - `modules/configuration_task/service/task_run_service.py`：运行创建、输入快照冻结、`run_case` 下发和终态落库，以及取消（`stop_run_case`）、手动登录两阶段执行、同 Agent 并发租约、`web_run_*` 事件接入和孤儿运行恢复；
+- `modules/configuration_task/service/stage_service.py`：版本阶段切分、运行阶段快照、WRITE 审批闸门和阶段重试；
+- `modules/configuration_task/service/artifact_service.py`：Agent 截图/日志产物登记（资源 + task_artifact 引用）；
+- `modules/configuration_task/service/report_service.py`：运行报告归档（Word 兼容 HTML，零依赖）与飞书通知；
 - `modules/configuration_task/service/task_maintenance_service.py`：资源/传输过期清理与孤儿恢复的周期维护入口；
 - `module_task/scheduler_maintenance.py` 的 `cleanup_configuration_task_resources` / `recover_configuration_task_runs` 定时任务；
 - `modules/configuration_task/dao/task_dao.py`：任务、版本、运行的纯数据访问；
 - 运行执行复用 `WebCaseService._extract_webui_run_response` 和 `module_qtr` 的 `send_message`，不复制浏览器执行逻辑。
 
-阶段编排、审批闸门、截图产物和报告归档仍按下方设计目标推进，属于后续切片。
+阶段审批闸门（WRITE 强制审批）、失败步骤截图产物和 Word 报告归档已实现；阶段级独立下发执行、飞书在线文档产物仍按下方设计目标推进。
 
 ## 文件和凭证原则
 

@@ -219,3 +219,148 @@ class TaskRunQueryModel(TaskBaseModel):
     agent_code: str | None = None
     status: RunStatus | None = None
     limit: int = Field(default=50, ge=1, le=200)
+
+
+class StageSplitRuleModel(TaskBaseModel):
+    """版本阶段切分规则：按步骤索引区间声明阶段与模式。"""
+
+    stage_key: str = Field(min_length=1, max_length=128)
+    stage_name: str = Field(default="", max_length=255)
+    mode: Literal["READ", "PREPARE_WRITE", "WRITE", "VERIFY"] = "READ"
+    step_indexes: list[int] = Field(default_factory=list)
+
+    @field_validator("stage_key", mode="before")
+    @classmethod
+    def validate_stage_key(cls, value: str) -> str:
+        """阶段标识去空白且不能为空。"""
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("stageKey 不能为空")
+        return normalized
+
+    @field_validator("step_indexes")
+    @classmethod
+    def validate_step_indexes(cls, value: list[int]) -> list[int]:
+        """步骤索引必须非负且不重复。"""
+        indexes = [int(item) for item in (value or [])]
+        if len(set(indexes)) != len(indexes):
+            raise ValueError("stepIndexes 不能重复")
+        if any(item < 0 for item in indexes):
+            raise ValueError("stepIndexes 不能为负数")
+        return indexes
+
+
+class TaskRunStageModel(TaskBaseModel):
+    """运行阶段响应；ID 按字符串返回。"""
+
+    run_stage_id: str
+    task_run_id: str
+    stage_id: str
+    stage_key: str
+    stage_name: str
+    mode: Literal["READ", "PREPARE_WRITE", "WRITE", "VERIFY"]
+    stage_order: int
+    step_indexes: list[int] = Field(default_factory=list)
+    status: Literal[
+        "PENDING",
+        "WAITING_APPROVAL",
+        "RUNNING",
+        "SUCCESS",
+        "FAILED",
+        "SKIPPED",
+        "CANCELLED",
+    ]
+    result: dict[str, Any] = Field(default_factory=dict)
+    error_code: str = ""
+    error_message: str = ""
+    retry_count: int = 0
+    approved_by: str = ""
+    approved_at: datetime | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+
+
+class StageApproveModel(TaskBaseModel):
+    """WRITE 阶段审批请求；审批意见仅用于审计。"""
+
+    approved: bool
+    comment: str = Field(default="", max_length=500)
+
+
+class ArtifactModel(TaskBaseModel):
+    """运行产物响应；ID 和资源 ID 按字符串返回。"""
+
+    artifact_id: str
+    task_run_id: str
+    run_stage_id: str | None = None
+    artifact_type: Literal["step_screenshot", "failure_screenshot", "execution_log", "report"]
+    step_key: str = ""
+    resource_id: str
+    original_file_name: str = ""
+    file_size: int = 0
+    sha256: str = ""
+    note: str = ""
+    create_time: datetime | None = None
+
+
+class AgentStepScreenshotModel(TaskBaseModel):
+    """Agent 步骤截图上报契约；截图正文为受限 Base64。"""
+
+    task_run_id: str = Field(min_length=1, max_length=64)
+    stage_key: str = Field(default="", max_length=128)
+    step_index: int = Field(default=0, ge=0)
+    step_name: str = Field(default="", max_length=255)
+    artifact_type: Literal["step_screenshot", "failure_screenshot", "execution_log"] = "step_screenshot"
+    file_name: str = Field(default="screenshot.png", max_length=255)
+    mime_type: str = Field(default="image/png", max_length=128)
+    data: str = Field(min_length=4, max_length=8 * 1024 * 1024)
+
+
+class RecordingToTemplateModel(TaskBaseModel):
+    """录制转模板请求：从录制会话生成任务版本草稿。
+
+    步骤占位符由调用方标记；服务端默认把整个录制转成单一草稿版本，
+    fileKey 绑定保持为空，由使用者在版本编辑时补充资源绑定。
+    """
+
+    task_id: str = Field(min_length=1, max_length=32)
+    recording_id: str = Field(min_length=1, max_length=32)
+    version_note: str = Field(default="", max_length=500)
+    mark_variables: dict[str, str] = Field(
+        default_factory=dict,
+        description="步骤索引到变量占位符的映射，如 {\"0\": \"store.id\"}；替换 fill/select 的 value",
+    )
+    upload_file_keys: dict[int, str] = Field(
+        default_factory=dict,
+        description="步骤索引到 fileKey 的映射，用于把上传类输入步骤标记为资源引用",
+    )
+
+    @field_validator("task_id", "recording_id", mode="before")
+    @classmethod
+    def validate_id_text(cls, value: str) -> str:
+        """ID 必须是数字字符串。"""
+        normalized = str(value or "").strip()
+        if not normalized.isdigit():
+            raise ValueError("ID 必须是数字字符串")
+        return normalized
+
+
+class TaskScheduleModel(TaskBaseModel):
+    """定时触发运行配置；cron 使用 5 字段标准表达式（本地时区）。"""
+
+    enabled: bool = False
+    cron: str = Field(default="", max_length=64)
+    version_no: int | None = Field(default=None, ge=1)
+    agent_code: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: str) -> str:
+        """启用时 cron 必填且必须为 5 字段表达式。"""
+        normalized = str(value or "").strip()
+        if not normalized:
+            return ""
+        fields = normalized.split()
+        if len(fields) != 5:
+            raise ValueError("cron 必须是 5 字段表达式：分 时 日 月 周")
+        return normalized

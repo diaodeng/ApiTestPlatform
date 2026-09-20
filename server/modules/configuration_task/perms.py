@@ -15,6 +15,12 @@ PERM_DEFS: tuple[PermDef, ...] = (
     PermDef("configuration_task:task:edit", "配置任务编辑"),
     PermDef("configuration_task:task:publish", "配置任务版本发布"),
     PermDef("configuration_task:task:run", "配置任务运行"),
+    PermDef("configuration_task:task:approve", "配置任务阶段审批"),
+    PermDef("configuration_task:artifact:upload", "配置任务产物上报"),
+    PermDef("configuration_task:report:generate", "配置任务报告归档"),
+    PermDef("configuration_task:resource:sftp", "配置任务SFTP资源上传"),
+    PermDef("configuration_task:resource:download", "配置任务资源下载"),
+    PermDef("configuration_task:resource:delete", "配置任务资源删除"),
 )
 
 

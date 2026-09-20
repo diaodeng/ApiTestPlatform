@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -3300,6 +3301,15 @@ class WebTestService:
                         finished_steps=finished_steps,
                     ),
                 )
+                # 失败步骤自动截图上报（配置任务产物链路；截图失败不影响主流程）。
+                if step_result["status"] == "failed" and page is not None:
+                    shot_b64 = await _capture_step_screenshot_b64(page)
+                    artifact_event = _build_step_screenshot_event(run_id, step_result, shot_b64)
+                    if artifact_event and event_sender is not None:
+                        try:
+                            await event_sender(artifact_event)
+                        except Exception as exc:
+                            logger.debug(f"发送步骤截图事件失败（忽略）: error={exc}")
                 if active_session.cancel_event.is_set():
                     overall_success = False
                     break
@@ -3845,6 +3855,15 @@ class WebTestService:
                         finished_steps=finished_steps,
                     ),
                 )
+                # 失败步骤自动截图上报（配置任务产物链路；截图失败不影响主流程）。
+                if step_result["status"] == "failed" and page is not None:
+                    shot_b64 = await _capture_step_screenshot_b64(page)
+                    artifact_event = _build_step_screenshot_event(run_id, step_result, shot_b64)
+                    if artifact_event and event_sender is not None:
+                        try:
+                            await event_sender(artifact_event)
+                        except Exception as exc:
+                            logger.debug(f"发送步骤截图事件失败（忽略）: error={exc}")
                 if active_session is not None and active_session.cancel_event.is_set():
                     overall_success = False
                     break
@@ -5119,3 +5138,43 @@ class WebTestService:
                     f"{assertion_label}超时（{assertion_wait_ms}ms），最后错误：{last_message}"
                 ) from last_error
             raise AssertionError(f"{assertion_label}超时（{assertion_wait_ms}ms）")
+
+
+# ---------------------------------------------------------------------------
+# 配置任务产物上报：失败步骤自动截图并通过事件推送 Base64，
+# 服务端事件接入点转存为 Agent 本地资源 + task_artifact 引用。
+# ---------------------------------------------------------------------------
+
+
+async def _capture_step_screenshot_b64(page: Any) -> str:
+    """抓取当前页面截图并返回 Base64；失败返回空串，不影响主流程。"""
+    try:
+        raw = await page.screenshot(type="png", timeout=10000)
+        return base64.b64encode(raw).decode("ascii")
+    except Exception as exc:
+        logger.debug(f"步骤截图抓取失败（忽略）: error={exc}")
+        return ""
+
+
+def _build_step_screenshot_event(
+    run_id: int,
+    step_result: dict[str, Any],
+    screenshot_b64: str,
+) -> dict[str, Any]:
+    """构造步骤截图事件载荷；无截图时返回空 dict 表示跳过。"""
+    if not screenshot_b64:
+        return {}
+    return {
+        "type": "web_run_artifact",
+        "web_case_run_id": run_id,
+        "payload": {
+            "artifactType": "failure_screenshot"
+            if step_result.get("status") == "failed"
+            else "step_screenshot",
+            "stepIndex": step_result.get("stepIndex") or 0,
+            "stepName": step_result.get("stepName") or "",
+            "fileName": f"step-{step_result.get('stepIndex') or 0}.png",
+            "mimeType": "image/png",
+            "data": screenshot_b64,
+        },
+    }

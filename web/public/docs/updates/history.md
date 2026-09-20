@@ -15,6 +15,12 @@ title: 更新历史
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 
 ## 2026-09-19
+- 配置任务前端管理页面、录制转模板与定时触发上线：新增「配置任务」页面（任务管理 + 运行记录两个 Tab，版本抽屉含草稿编辑/发布/阶段切分，运行详情含阶段审批/重试/产物/报告入口，定时配置弹窗与录制转换弹窗）；后端新增 `POST /templates/from-recording`（录制步骤重建→变量/fileKey 标记→版本草稿）与任务级定时配置接口（5 字段 cron，存任务 remark 受控段），定时执行入口 `module_task.scheduler_configuration.trigger_configuration_task_run`（同步执行复用运行编排，triggerType=scheduled）。详见：[配置任务管理](../configuration-task.md)。
+
+- 配置任务 SFTP 资源、下载回传与删除保护上线：新增 SFTP Provider（复用统一凭证绑定，远端先写 `.part` 再原子 rename，凭证加密保存不回显明文）；`POST /resources/sftp` 上传文件并登记 READY 资源；`GET /resources/{id}/download` 按 Provider 下载回传（SFTP 服务端直连 / Agent 本地经 `file_read` 命令），回传前重新校验 SHA-256；`POST /resources/{id}/delete` 带引用保护——被产物引用默认拒绝、管理员可 force，删除走 `DELETING → DELETED` 状态机，远端文件清理失败保留 `DELETING` 可重试。Agent 端新增 `file_read/file_delete` 受控命令。详见：[配置任务资源](../configuration-task-resource.md)。
+
+- 配置任务阶段审批闸门、截图产物与报告归档上线：版本支持按步骤切分阶段（READ/PREPARE_WRITE/WRITE/VERIFY 模式），WRITE 阶段执行前强制审批（拒绝即取消运行，重试需重新审批）；Agent 失败步骤自动截图上报，服务端登记为受控资源并建立产物引用（task_artifact）；运行报告归档为 Word 兼容文件（零依赖，Word/WPS 直接打开）并登记产物，可选飞书机器人通知。需执行 `server/sql/20260919_configuration_task_stage_artifact.sql`。详见：[配置任务管理](../configuration-task.md)。
+
 - 配置任务运行控制与维护能力补齐：运行接口新增停止/取消（复用 Agent `stop_run_case`，终态收敛 `CANCELLED`）、手动登录两阶段执行（先开浏览器等人工登录再继续步骤）、可配置超时（默认 1800 秒）；同一 Agent 同时只允许一个运行（并发租约拒绝新运行）；Agent `web_run_*` 实时事件按 ID+Agent 归属接入配置任务运行，步骤进度实时落库且不影响 Web 用例链路；新增两个定时任务——资源/传输过期清理（收敛 `EXPIRED`）与孤儿运行恢复（超时无进展的 `RUNNING` 收敛 `FAILED`）。详见：[配置任务管理](../configuration-task.md)。
 
 - 配置任务运行域最小闭环上线：新增任务定义、版本快照（含 fileKey→资源 ID 输入绑定）和运行实例三张表与接口；版本发布校验绑定资源就绪且归属执行 Agent，运行时冻结输入快照并复用既有 Web `run_case` 协议下发 Agent（输入绑定注入 `resourceBindings`），同步返回终态。阶段审批、截图产物和报告归档仍未提供。详见：[配置任务运行域](2026-09-19-configuration-task-run-domain.md)，用户说明：[配置任务管理](../configuration-task.md)。

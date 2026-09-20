@@ -1,6 +1,6 @@
 # 配置任务资源与 Agent 传输
 
-> 当前版本提供资源登记、查询、创建者范围、Agent 本地 manifest，以及服务端到在线 Agent 的 `begin/chunk/commit` 三段式传输。服务端不保存文件正文；文件最终保存在执行 Agent 的受控目录。SFTP、下载回传、任意路径读写、完整配置任务绑定和生产级 Token 认证尚未提供。
+> 当前版本提供资源登记、查询、创建者范围、Agent 本地 manifest、服务端到在线 Agent 的 `begin/chunk/commit` 三段式传输、SFTP 资源上传与下载回传，以及带引用保护的资源删除。Agent 本地文件保存在执行 Agent 受控目录；SFTP 文件保存在远端服务器。
 
 ## 功能与入口
 
@@ -99,6 +99,29 @@ Agent 本地资源协议使用 `requestType=7` 的小 JSON 控制命令维护受
 
 传输默认有 TTL。Agent 断线、session 变化、超时、Agent 拒绝或元数据不一致都会拒绝后续操作并记录脱敏错误；当前版本不支持跨新 session 接管旧传输的断点续传。
 
+## SFTP 资源与下载回传
+
+### SFTP 上传
+
+`POST /configuration-tasks/resources/sftp`：文件正文（受限 Base64，最大 100 MiB）随请求提交，服务端通过统一凭证绑定的 SFTP 连接把文件写入远端（先写 `.part` 再原子 rename），随后登记资源（`providerType=sftp`、`providerExecutionSide=server`，状态直接 `READY`）。
+
+请求体分两部分：资源元数据（`agentCode`、`credentialBindingId`、`objectKey`、`originalFileName` 等）和文件正文（`data`）。`credentialBindingId` 是统一凭证管理中 SFTP 类型凭证的绑定 ID，凭证内容加密保存，接口和日志不回显明文。
+
+远端 `objectKey` 必须是从凭证 `baseDirectory` 出发的受控相对路径，拒绝绝对路径、`..` 穿越和用户目录展开。
+
+### 下载回传
+
+`GET /configuration-tasks/resources/{resourceId}/download`：按 Provider 下载文件内容并 Base64 回传（`providerType=sftp` 走服务端 SFTP 直连；`agent_local` 通过 Agent `file_read` 命令读取受控文件）。下载时重新计算 SHA-256，与登记值不一致则拒绝回传。响应包含元数据和 `data`，不返回任何主机地址或本地路径。
+
+### 删除与引用保护
+
+`POST /configuration-tasks/resources/{resourceId}/delete`：删除资源需走引用保护流程：
+
+1. 资源被运行产物（`task_artifact`）引用时默认拒绝删除，提示先清理相关运行记录；
+2. 管理员可 `force: true` 强制删除被引用资源；
+3. 删除流程：先置 `DELETING`，再清理远端文件（SFTP 删除远端对象 / Agent `file_delete` 删除受控文件），最后置 `DELETED`；
+4. 远端文件清理失败时资源保留在 `DELETING`，可重试；`DELETING/DELETED` 资源不能开始新传输。
+
 ## 状态与旧 ready 入口
 
 创建资源后状态为 `PENDING`。旧 `ready` 请求即使提交了匹配的 `fileSize` 和 `sha256`，也不能直接把资源改为 `READY`；必须走在线 Agent 的三段式传输并由 Agent commit 确认。大小或 SHA-256 不匹配会进入 `FAILED`。`DELETING`、`DELETED`、`EXPIRED` 资源不能开始新传输。
@@ -109,4 +132,4 @@ Agent 本地资源协议使用 `requestType=7` 的小 JSON 控制命令维护受
 - `resourceId` 只是资源身份，不是下载授权凭证；当前版本没有下载接口。
 - `objectKey` 不是任意本地路径，Agent 应自行在受控根目录中解析。
 - 当前接口不代表文件内容已经上传成功；只有 Agent 侧文件实际存在并完成 commit 元数据核对后才可置为 `READY`。
-- 当前支持服务端三段式分片传输，但不支持跨新 session 接管旧传输的断点续传；SFTP、下载回传、短期 transfer token、截图/报告归档和完整任务级资源绑定属于后续能力。
+- 当前支持服务端三段式分片传输、SFTP 资源上传、下载回传和带引用保护的删除；不支持跨新 session 接管旧传输的断点续传，短期 transfer token 和完整任务级资源绑定属于后续能力。

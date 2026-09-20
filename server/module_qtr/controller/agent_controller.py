@@ -279,6 +279,7 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
         "web_run_status",
         "web_run_finished",
         "web_run_error",
+        "web_run_artifact",
         "ai_analysis_step",
         "ai_analysis_status",
         "ai_analysis_finished",
@@ -296,6 +297,44 @@ def _dispatch_agent_event(agent_code: str, message_data: dict[str, Any]) -> bool
         if message_type in ("record_event", "record_status", "record_finished", "record_error"):
             WebCaseService.handle_agent_recording_event(event_db, agent_code, message_data)
             return True
+        if message_type == "web_run_artifact":
+            # 配置任务产物事件：截图 Base64 转存为 Agent 本地资源 + 产物引用。
+            try:
+                from modules.configuration_task.entity.vo.task_vo import AgentStepScreenshotModel
+                from modules.configuration_task.service.artifact_service import ConfigurationTaskArtifactService
+
+                payload = message_data.get("payload") or {}
+                raw_run_id = (
+                    message_data.get("webCaseRunId")
+                    or message_data.get("web_case_run_id")
+                    or payload.get("webCaseRunId")
+                )
+                if not raw_run_id:
+                    return True
+                run = None
+                from modules.configuration_task.dao.task_dao import ConfigurationTaskRunDao
+
+                run = ConfigurationTaskRunDao.get_run(event_db, int(raw_run_id))
+                if not run or run.agent_code != agent_code:
+                    # 不属于配置任务运行的产物事件，忽略即可（Web 用例无此事件类型）。
+                    return True
+                model = AgentStepScreenshotModel(
+                    taskRunId=str(raw_run_id),
+                    stepIndex=int(payload.get("stepIndex") or 0),
+                    stepName=str(payload.get("stepName") or ""),
+                    artifactType=payload.get("artifactType") or "step_screenshot",
+                    fileName=payload.get("fileName") or "screenshot.png",
+                    mimeType=payload.get("mimeType") or "image/png",
+                    data=str(payload.get("data") or ""),
+                )
+                result = ConfigurationTaskArtifactService.register_agent_screenshot(event_db, model, None)
+                if not result.is_success:
+                    logger.warning(f"产物事件登记失败: task_run_id={raw_run_id}, message={result.message}")
+                return True
+            except Exception as artifact_exc:
+                event_db.rollback()
+                logger.warning(f"处理产物事件异常（已忽略）: agent={agent_code}, error={artifact_exc}")
+                return True
         if message_type in ("web_run_step", "web_run_status", "web_run_finished", "web_run_error"):
             # 配置任务运行与 Web 用例运行共用 web_run_* 事件；先按 ID+Agent 归属
             # 尝试配置任务运行表，未命中再走 Web 用例链路，保持既有语义不变。

@@ -86,7 +86,30 @@ POST /configuration-tasks/resources/{resourceId}/transfers/{transferId}/commit
 
 响应只包含 resource_id、受控 locator、原始文件名、MIME、大小、SHA-256、版本和生命周期时间，不返回文件正文或绝对路径。
 
-### 清理
+### 读取资源内容（下载回传）
+
+```json
+{
+  "requestType": 7,
+  "command": "file_read",
+  "resource_id": "res_demo"
+}
+```
+
+返回 Base64 文件正文和元数据（文件名、MIME、大小、SHA-256）；只允许 manifest 内的受控资源，超过 100 MiB 拒绝。服务端收到后重新校验 SHA-256 与登记值一致才回传调用方。该命令专供服务端"资源下载回传"链路调用。
+
+### 删除资源
+
+```json
+{
+  "requestType": 7,
+  "command": "file_delete",
+  "resource_id": "res_demo"
+}
+```
+
+删除受控文件与 manifest 条目；资源不存在时幂等返回。只接受 manifest 登记过的资源 ID，不支持任意路径删除。
+
 
 ```json
 {

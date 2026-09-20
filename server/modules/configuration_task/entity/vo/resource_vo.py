@@ -12,11 +12,13 @@ from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
 
-RESOURCE_PROVIDER_TYPE = Literal["agent_local"]
-RESOURCE_PROVIDER_EXECUTION_SIDE = Literal["agent"]
+RESOURCE_PROVIDER_TYPE = Literal["agent_local", "sftp"]
+RESOURCE_PROVIDER_EXECUTION_SIDE = Literal["agent", "server"]
 RESOURCE_STATUS = Literal["PENDING", "UPLOADING", "READY", "FAILED", "EXPIRED", "DELETING", "DELETED"]
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 OBJECT_KEY_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# 下载回传单文件上限：与传输协议单文件上限保持一致。
+MAX_DOWNLOAD_FILE_BYTES = 100 * 1024 * 1024
 
 
 class ResourceBaseModel(BaseModel):
@@ -235,3 +237,69 @@ class ResourceDetailModel(ResourceBaseModel):
     last_audit_at: datetime | None = None
     audit_message: str = ""
     remark: str = ""
+
+
+class ResourceSftpCreateModel(ResourceBaseModel):
+    """SFTP 资源上传请求：文件正文直接随请求提交，服务端写入 SFTP 后登记资源。"""
+
+    agent_code: str = Field(min_length=1, max_length=128, description="资源归属Agent编码（仅作归属标记）")
+    credential_binding_id: str = Field(min_length=1, max_length=64, description="SFTP凭证绑定ID")
+    object_key: str = Field(min_length=1, max_length=512, description="远端受控相对 key")
+    original_file_name: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(default="application/octet-stream", min_length=1, max_length=255)
+    version: int = Field(default=1, ge=1, le=2147483647)
+    expires_at: datetime | None = None
+    remark: str = Field(default="", max_length=2000)
+
+    @field_validator("agent_code", "original_file_name", "mime_type", mode="before")
+    @classmethod
+    def strip_text_fields(cls, value: str) -> str:
+        """去掉首尾空白，拒绝空的资源展示或归属字段。"""
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("资源文本字段不能为空")
+        return normalized
+
+    @field_validator("original_file_name")
+    @classmethod
+    def validate_original_file_name(cls, value: str) -> str:
+        """原始文件名仅用于展示，禁止携带路径分隔符。"""
+        if "/" in value or "\\" in value or value in {".", ".."}:
+            raise ValueError("原始文件名不能包含路径")
+        return value
+
+
+class ResourceSftpUploadModel(ResourceBaseModel):
+    """SFTP 上传文件正文：受限 Base64，最大 100 MiB。"""
+
+    data: str = Field(min_length=4, max_length=MAX_RESOURCE_FILE_BYTES * 2)
+
+    @field_validator("data")
+    @classmethod
+    def validate_base64_data(cls, value: str) -> str:
+        """校验文件 Base64 可解码且不超过单文件上限。"""
+        try:
+            decoded = base64.b64decode(value.encode("ascii"), validate=True)
+        except (UnicodeEncodeError, binascii.Error, ValueError) as exc:
+            raise ValueError("data 必须是合法 Base64") from exc
+        if not decoded or len(decoded) > MAX_RESOURCE_FILE_BYTES:
+            raise ValueError("文件不能为空且不能超过 100 MiB")
+        return value
+
+
+class ResourceDownloadModel(ResourceBaseModel):
+    """资源下载回传响应：Base64 正文 + 元数据；不返回 Agent 绝对路径或 SFTP 主机信息。"""
+
+    resource_id: str
+    original_file_name: str
+    mime_type: str
+    file_size: int
+    sha256: str
+    data: str
+
+
+class ResourceDeleteModel(ResourceBaseModel):
+    """资源删除请求；强制删除仅管理员可用。"""
+
+    force: bool = False
+    reason: str = Field(default="", max_length=500)

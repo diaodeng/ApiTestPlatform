@@ -31,7 +31,15 @@ from services.agent_resource_storage import (
 
 FILE_RESOURCE_REQUEST_TYPE = 7
 FILE_RESOURCE_COMMANDS = frozenset(
-    {"file_publish_begin", "file_chunk", "file_publish_commit", "file_stat", "file_cleanup"}
+    {
+        "file_publish_begin",
+        "file_chunk",
+        "file_publish_commit",
+        "file_stat",
+        "file_cleanup",
+        "file_read",
+        "file_delete",
+    }
 )
 DEFAULT_CHUNK_LIMIT = 512 * 1024
 DEFAULT_FILE_LIMIT = 100 * 1024 * 1024
@@ -116,6 +124,10 @@ class AgentFileService:
                 result = self.publish_commit(message)
             elif command == "file_stat":
                 result = self.file_stat(message)
+            elif command == "file_read":
+                result = self.file_read(message)
+            elif command == "file_delete":
+                result = self.file_delete(message)
             else:
                 result = self.file_cleanup(message)
             return {
@@ -311,6 +323,52 @@ class AgentFileService:
                 f"Agent资源发布完成: transfer_id={transfer_id}, resource_id={transfer.resource_id}, size={actual_size}"
             )
             return {"resource_id": manifest.resource_id, "locator": manifest.locator, **manifest.to_dict()}
+
+    def file_read(self, message: dict[str, Any]) -> dict[str, Any]:
+        """读取受控资源内容并返回 Base64；只允许 manifest 内资源，限制单文件大小。"""
+        resource_id = self._resource_id(message.get("resource_id", message.get("resourceId")))
+        with self._lock:
+            manifest = self.store.get(resource_id)
+            if manifest is None:
+                raise AgentFileError("RESOURCE_NOT_FOUND", "资源不存在")
+            path = self.store.resolve_locator(manifest.locator, manifest.resource_id)
+            if path.is_symlink() or not path.is_file():
+                raise AgentFileError("RESOURCE_PATH_INVALID", "资源不可用")
+            if path.stat().st_size > self.max_file_size:
+                raise AgentFileError("FILE_TOO_LARGE", "资源超过可回传大小")
+            try:
+                content = path.read_bytes()
+            except OSError:
+                raise AgentFileError("READ_FAILED", "资源读取失败") from None
+            manifest.last_used = utc_now_iso()
+            self.store.save(manifest)
+            import base64 as _base64
+
+            return {
+                "resource_id": manifest.resource_id,
+                "original_file_name": manifest.original_file_name,
+                "mime_type": manifest.mime_type,
+                "size": len(content),
+                "sha256": manifest.sha256,
+                "data": _base64.b64encode(content).decode("ascii"),
+            }
+
+    def file_delete(self, message: dict[str, Any]) -> dict[str, Any]:
+        """删除受控资源文件与 manifest 条目；资源不存在视为已删除（幂等）。"""
+        resource_id = self._resource_id(message.get("resource_id", message.get("resourceId")))
+        with self._lock:
+            manifest = self.store.get(resource_id)
+            if manifest is None:
+                return {"resource_id": resource_id, "deleted": False, "exists": False}
+            try:
+                path = self.store.resolve_locator(manifest.locator, manifest.resource_id)
+                if path.is_file() and not path.is_symlink():
+                    path.unlink()
+            except OSError:
+                raise AgentFileError("DELETE_FAILED", "资源删除失败") from None
+            self.store.remove(resource_id)
+            logger.info(f"Agent受控资源已删除: resource_id={resource_id}")
+            return {"resource_id": resource_id, "deleted": True, "exists": False}
 
     def file_stat(self, message: dict[str, Any]) -> dict[str, Any]:
         """只返回 manifest 元数据和受控资源存在性，不返回文件内容。"""

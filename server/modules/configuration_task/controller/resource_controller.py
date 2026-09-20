@@ -10,12 +10,16 @@ from module_admin.entity.vo.user_vo import CurrentUserModel
 from module_admin.service.login_service import LoginService
 from modules.configuration_task.entity.vo.resource_vo import (
     ResourceCreateModel,
+    ResourceDeleteModel,
     ResourceQueryModel,
     ResourceReadyModel,
+    ResourceSftpCreateModel,
+    ResourceSftpUploadModel,
     ResourceTransferBeginModel,
     ResourceTransferChunkModel,
     ResourceTransferCommitModel,
 )
+from modules.configuration_task.service.resource_extended_service import ResourceExtendedService
 from modules.configuration_task.service.resource_service import ResourceService
 from modules.configuration_task.service.resource_transfer_service import ResourceTransferService
 from utils.response_util import ResponseUtil
@@ -157,4 +161,55 @@ async def mark_resource_ready(
 ):
     """兼容旧 ready 入口，但不允许绕过 Agent 传输 commit。"""
     result = await run_in_threadpool(ResourceService.mark_ready, query_db, resource_id, model, current_user)
+    return _result_response(result)
+
+
+@resourceController.post(
+    "/sftp",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:resource:sftp"))],
+)
+async def upload_sftp_resource(
+    request: Request,
+    model: ResourceSftpCreateModel,
+    upload: ResourceSftpUploadModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """上传文件到 SFTP 并登记资源；文件正文为受限 Base64。"""
+    result = await run_in_threadpool(
+        ResourceExtendedService.upload_sftp_resource, query_db, model, upload, current_user
+    )
+    return _result_response(result)
+
+
+@resourceController.get(
+    "/{resource_id}/download",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:resource:download"))],
+)
+async def download_resource(
+    request: Request,
+    resource_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """下载回传资源内容：SFTP 资源走服务端直连，agent_local 资源走 Agent file_read。"""
+    result = await run_in_threadpool(ResourceExtendedService.download_resource, query_db, resource_id, current_user)
+    return _result_response(result)
+
+
+@resourceController.post(
+    "/{resource_id}/delete",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:resource:delete"))],
+)
+async def delete_resource(
+    request: Request,
+    resource_id: int,
+    model: ResourceDeleteModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """删除资源（带引用保护）；被产物引用时需管理员 force。"""
+    result = await run_in_threadpool(
+        ResourceExtendedService.delete_resource, query_db, resource_id, model, current_user
+    )
     return _result_response(result)
