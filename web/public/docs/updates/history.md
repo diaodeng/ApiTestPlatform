@@ -15,6 +15,12 @@ title: 更新历史
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
 
 ## 2026-09-20
+- Web 测试插件包补齐 playwright 传递依赖（pyee/greenlet）并修复录制弹窗体验：①插件构建脚本 `build_plugins.py` 此前只打包 playwright 本体，漏掉其声明的传递依赖 pyee 与 greenlet，导致插件安装后运行时 `import playwright` 报 `ModuleNotFoundError: No module named 'pyee'`，而守卫导入统一提示"插件未安装"误导用户反复重装；已补齐两个依赖条目，并在导入失败时区分"插件未安装"与"插件不完整/损坏"（后者附真实异常并提示重装插件）。②「新建录制」弹窗三处体验修复：状态信息由两列 descriptions 改为独立提示条（错误全文展示不再截断溢出）、录制失败后自动复位到表单态并显示"重新开始录制"按钮（不再停留在"停止录制"运行态）、失败原因以错误提示条常驻展示。
+
+- 手动登录链路允许浏览器凭证内容为空：此前录制/执行只要选择了浏览器状态凭证就要求凭证已配置 `storageState`，导致首次录制/首次执行（浏览器状态还不存在）被"浏览器凭证未配置 storageState"拦死；修复为开启手动登录时凭证仅作为目标站点与回写目标的引用、允许空状态启动，登录后的最终状态由 Agent 上报（可显式保存新凭证或按绑定回写）；未开启手动登录时仍要求凭证有内容（无人工补录机会）。覆盖开始录制与 Web 用例运行两条链路，回放链路无手动登录参数维持原行为。详见：[统一凭证管理](../credential_management.md)。
+
+- 配置任务「新建录制」弹窗浏览器选项补齐：弹窗内浏览器下拉此前手写为 Chromium/Firefox/WebKit 三项，漏掉了 Chrome 和 Microsoft Edge；改为复用 Web 用例录制页共享的 `browserOptions` 常量（Chromium/Chrome/Microsoft Edge/Firefox/WebKit 五项），与既有录制页保持一致。客户端 Agent 浏览器规格表本就支持全部五种（chrome/msedge 经 channel 启动本机安装浏览器），后端原样透传，无需后端改动。
+
 - 配置任务页新增「新建录制」入口：任务管理 Tab 顶部新增录制按钮，弹窗内填写起始地址/执行 Agent/浏览器/手动登录/登录凭证投影后直接开始录制，支持实时状态轮询与停止；录制不关联 Web 用例（`webCaseId` 留空，后端本就支持），录制记录与 Web 测试管理共用同一会话表，完成后用「录制转模板」生成版本草稿。前端新建独立录制组合函数与弹窗组件，复用既有录制接口，后端无改动。详见：[配置任务管理](../configuration-task.md)。
 
 - 修复录制记录列表接口 `isPage=false` 报错：`GET /hrm/web-case/recording/list` 在 `isPage=false` 时 DAO 返回模型列表，但控制器固定按分页对象处理导致 `AttributeError: 'list' object has no attribute 'model_dump'`；修复为按 `is_page` 分支返回（与 Agent 列表接口同模式），分页调用方行为不变。

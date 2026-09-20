@@ -31,14 +31,30 @@ class CredentialResolveService:
         return headers
 
     @classmethod
-    def resolve_playwright_storage_state(cls, db: Session, binding_id: int | str, target_url: str | None = None) -> dict[str, Any]:
-        """按绑定读取 Playwright storageState，普通 Web 执行仅读取且不回写。"""
+    def resolve_playwright_storage_state(
+        cls,
+        db: Session,
+        binding_id: int | str,
+        target_url: str | None = None,
+        *,
+        allow_empty_state: bool = False,
+    ) -> dict[str, Any]:
+        """按绑定读取 Playwright storageState，普通 Web 执行仅读取且不回写。
+
+        :param allow_empty_state: 为 True 时凭证未配置 storageState 不再报错，
+            返回空 dict；用于手动登录链路（凭证可能尚未产生浏览器状态）。
+        """
         binding, credential, secret = cls._resolve_binding_secret(db, binding_id, "browser")
         if binding.projection_type != "playwright_storage":
             raise ValueError("凭证绑定未配置为浏览器 storageState 投影")
         cls._assert_target_allowed(db, binding, credential, target_url or binding.target_url)
         storage_state = secret.get("storageState") or secret.get("storage_state")
         if not isinstance(storage_state, dict):
+            if allow_empty_state:
+                logger.info(
+                    f"浏览器凭证暂无 storageState，按空状态继续（手动登录链路）: binding_id={binding.binding_id}"
+                )
+                return {}
             raise ValueError("浏览器凭证未配置 storageState")
         return storage_state
 

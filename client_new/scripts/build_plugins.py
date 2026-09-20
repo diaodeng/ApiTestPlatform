@@ -75,9 +75,16 @@ PLUGIN_PACKAGE_MAP: dict[str, dict] = {
         "version_packages": ("playwright",),
         "entries": [
             "playwright",
+            # playwright 的传递依赖（uv.lock：playwright dependencies = greenlet + pyee），
+            # 缺少时 import playwright 报 ModuleNotFoundError: No module named 'pyee'，
+            # 守卫导入只会提示"插件缺失"误导用户重装插件。
+            "pyee",
+            "greenlet",
         ],
         "distributions": [
             "playwright",
+            "pyee",
+            "greenlet",
         ],
         "modules": ["playwright"],
     },

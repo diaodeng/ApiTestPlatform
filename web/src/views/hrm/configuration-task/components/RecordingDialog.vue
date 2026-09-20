@@ -7,6 +7,16 @@
         :close-on-click-modal="false"
         @close="handleDialogClose"
     >
+        <!-- 失败提示条：独立于表单展示完整错误信息，不会被列宽截断 -->
+        <el-alert
+            v-if="startFailed"
+            :title="`录制失败：${startFailedReason}`"
+            type="error"
+            :closable="false"
+            class="mb12"
+            show-icon
+        />
+
         <el-form :model="recordingForm" label-width="120px">
             <el-row :gutter="16">
                 <el-col :span="12">
@@ -38,9 +48,12 @@
                 <el-col :span="12">
                     <el-form-item label="浏览器">
                         <el-select v-model="recordingForm.browserName" style="width: 100%">
-                            <el-option label="Chromium" value="chromium" />
-                            <el-option label="Firefox" value="firefox" />
-                            <el-option label="WebKit" value="webkit" />
+                            <el-option
+                                v-for="item in browserOptions"
+                                :key="item.value"
+                                :label="item.label"
+                                :value="item.value"
+                            />
                         </el-select>
                     </el-form-item>
                 </el-col>
@@ -86,18 +99,19 @@
             </el-row>
         </el-form>
 
-        <el-alert
-            v-if="!recordingForm.recordingId"
-            title="录制在执行 Agent 的机器上拉起浏览器，操作过程会被记录为步骤；录制完成后回到任务列表用「录制转模板」生成版本草稿。"
-            type="info"
-            :closable="false"
-            class="mb12"
-        />
-        <template v-else>
-            <el-descriptions :column="2" border class="mb12">
-                <el-descriptions-item label="当前录制ID">{{ recordingForm.recordingId }}</el-descriptions-item>
-                <el-descriptions-item label="状态">
-                    <el-tag :type="liveStatusType">{{ liveStatusText || "已启动" }}</el-tag>
+        <!-- 录制中/已结束的运行态视图；失败时不展示（回到表单态允许重新开始） -->
+        <template v-if="recordingForm.recordingId && !startFailed">
+            <el-alert
+                v-if="liveStatusText"
+                :title="liveStatusText"
+                :type="liveStatusType"
+                :closable="false"
+                class="mb12"
+                show-icon
+            />
+            <el-descriptions :column="1" border class="mb12">
+                <el-descriptions-item label="当前录制ID">
+                    <span class="recording-id">{{ recordingForm.recordingId }}</span>
                 </el-descriptions-item>
             </el-descriptions>
             <el-alert
@@ -107,15 +121,24 @@
                 class="mb12"
             />
         </template>
+        <el-alert
+            v-if="!recordingForm.recordingId || startFailed"
+            title="录制在执行 Agent 的机器上拉起浏览器，操作过程会被记录为步骤；录制完成后回到任务列表用「录制转模板」生成版本草稿。"
+            type="info"
+            :closable="false"
+            class="mb12"
+        />
 
         <template #footer>
-            <template v-if="!recordingForm.recordingId">
-                <el-button @click="visible = false">取消</el-button>
-                <el-button type="primary" :loading="submitting" @click="startRecording">开始录制</el-button>
-            </template>
-            <template v-else>
+            <template v-if="recordingForm.recordingId && !startFailed">
                 <el-button @click="visible = false">关闭弹窗（后台继续录制）</el-button>
                 <el-button type="danger" :loading="submitting" @click="stopRecording">停止录制</el-button>
+            </template>
+            <template v-else>
+                <el-button @click="visible = false">{{ startFailed ? "关闭" : "取消" }}</el-button>
+                <el-button type="primary" :loading="submitting" @click="startRecording">
+                    {{ startFailed ? "重新开始录制" : "开始录制" }}
+                </el-button>
             </template>
         </template>
     </el-dialog>
@@ -123,6 +146,7 @@
 
 <script setup name="ConfigRecordingDialog">
 import { computed } from "vue";
+import { browserOptions } from "@/components/hrm/case/webcase/utils/shared.js";
 import {
     useStandaloneRecording
 } from "../composables/useStandaloneRecording.js";
@@ -144,6 +168,8 @@ const {
     recordingForm,
     liveStatusText,
     liveStatusType,
+    startFailed,
+    startFailedReason,
     startRecording,
     stopRecording,
     handleDialogClose
@@ -152,3 +178,19 @@ const {
 // 登录凭证选项：与 Web 用例录制共用统一凭证的 Web 投影绑定（playwright_storage 类型）。
 const credentialOptions = computed(() => props.credentialOptions || []);
 </script>
+
+<style lang="scss" scoped>
+.hint {
+    margin-left: 8px;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+}
+
+.mb12 {
+    margin-bottom: 12px;
+}
+
+.recording-id {
+    word-break: break-all;
+}
+</style>

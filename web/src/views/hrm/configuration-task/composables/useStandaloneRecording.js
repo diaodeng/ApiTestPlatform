@@ -32,6 +32,9 @@ export function useStandaloneRecording() {
     const liveStatusText = ref("");
     const liveStatusType = ref("info");
     const recordedSteps = ref([]);
+    // 启动/录制失败后的复位标记：弹窗回到表单态（可修改参数重新开始），保留失败原因展示。
+    const startFailed = ref(false);
+    const startFailedReason = ref("");
 
     const recordingForm = ref({
         sessionName: "",
@@ -75,10 +78,13 @@ export function useStandaloneRecording() {
         recordedSteps.value = [];
         liveStatusText.value = "";
         liveStatusType.value = "info";
+        startFailed.value = false;
+        startFailedReason.value = "";
         showRecordingDialog.value = true;
     }
 
-    // 轮询录制会话状态：录制中每 3 秒刷新一次，收敛到终态后停止并汇总步骤。
+    // 轮询录制会话状态：录制中每 3 秒刷新一次，收敛到终态后停止轮询；
+    // 失败终态同时复位按钮状态（failed 标记），允许直接重新填写并再次开始录制。
     function startPoll() {
         stopPoll();
         pollTimer = window.setInterval(async () => {
@@ -92,13 +98,20 @@ export function useStandaloneRecording() {
                     liveStatusType.value = "warning";
                 } else {
                     stopPoll();
-                    liveStatusText.value =
-                        status === 3
-                            ? "录制已完成，可关闭弹窗后使用「录制转模板」生成版本草稿"
-                            : status === 5
-                              ? "录制已停止（未正常完成），仍可尝试转模板"
-                              : `录制失败：${detail.errorMessage || "未知错误"}`;
-                    liveStatusType.value = status === 3 ? "success" : "danger";
+                    if (status === 3) {
+                        liveStatusText.value =
+                            "录制已完成，可关闭弹窗后使用「录制转模板」生成版本草稿";
+                        liveStatusType.value = "success";
+                    } else if (status === 5) {
+                        liveStatusText.value = "录制已停止（未正常完成），仍可尝试转模板";
+                        liveStatusType.value = "info";
+                    } else {
+                        // 失败（4）或其他异常终态：给出原因并复位到可重新录制的状态。
+                        liveStatusText.value = "";
+                        liveStatusType.value = "danger";
+                        startFailed.value = true;
+                        startFailedReason.value = detail.errorMessage || `录制异常结束（状态 ${status ?? "未知"}）`;
+                    }
                 }
             } catch {
                 // 轮询失败不中断录制，下一轮重试。
@@ -122,6 +135,8 @@ export function useStandaloneRecording() {
             return;
         }
         submitting.value = true;
+        startFailed.value = false;
+        startFailedReason.value = "";
         try {
             const response = await startWebRecording({
                 // 不关联 Web 用例：门店配置的录制只用于转版本草稿。
@@ -185,6 +200,8 @@ export function useStandaloneRecording() {
         liveStatusText,
         liveStatusType,
         recordedSteps,
+        startFailed,
+        startFailedReason,
         openRecordingDialog,
         startRecording,
         stopRecording,

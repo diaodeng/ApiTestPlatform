@@ -1440,14 +1440,27 @@ class WebCaseService:
         return runtime_overrides
 
     @classmethod
-    def _resolve_credential_runtime_overrides(cls, query_db: Session, binding_id: str | None) -> dict[str, Any]:
-        """将统一凭证的 Playwright storageState 转为本次只读浏览器初始化状态。"""
+    def _resolve_credential_runtime_overrides(
+        cls,
+        query_db: Session,
+        binding_id: str | None,
+        allow_empty_state: bool = False,
+    ) -> dict[str, Any]:
+        """将统一凭证的 Playwright storageState 转为本次只读浏览器初始化状态。
+
+        :param allow_empty_state: 允许凭证内容为空（storageState 未配置）。
+            手动登录场景下浏览器状态可能尚未产生（首次录制/首次执行登录），
+            此时凭证只作为"目标站点 + 回写目标"的引用，登录完成后的最终状态
+            由 Agent 上报并显式保存/回写，因此允许空状态继续执行。
+        """
         binding_id_value = str(binding_id or "").strip()
         if not binding_id_value:
             return {}
         from modules.credential.service.credential_resolve_service import CredentialResolveService
 
-        storage_state = CredentialResolveService.resolve_playwright_storage_state(query_db, binding_id_value)
+        storage_state = CredentialResolveService.resolve_playwright_storage_state(
+            query_db, binding_id_value, allow_empty_state=allow_empty_state
+        )
         return {"persistContextSeedState": cls._normalize_storage_state_payload(storage_state)}
 
     @classmethod
@@ -3004,8 +3017,13 @@ class WebCaseService:
 
         credential_binding_id = str(request_model.credential_binding_id or "").strip()
         state_source_type = "credential" if credential_binding_id else "none"
+        manual_login_enabled = bool(request_model.manual_login_enabled)
         try:
-            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            # 手动登录时凭证内容允许为空：首次录制/执行还没有浏览器状态，
+            # 凭证仅作为目标站点与回写目标的引用，登录后的最终状态由 Agent 上报。
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(
+                query_db, credential_binding_id, allow_empty_state=manual_login_enabled
+            )
             browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
@@ -3016,7 +3034,6 @@ class WebCaseService:
             runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
         runtime_options_payload["stateSourceType"] = state_source_type
         runtime_options_payload["credentialBindingId"] = credential_binding_id
-        manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
         persist_context_enabled = bool(credential_binding_id and request_model.persist_context_enabled)
@@ -3552,7 +3569,10 @@ class WebCaseService:
         state_source_type = "credential" if str(request_model.credential_binding_id or "").strip() else "none"
         credential_binding_id = str(request_model.credential_binding_id or "").strip()
         try:
-            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            # 手动登录时凭证内容允许为空：首次执行还没有浏览器状态，登录后由 Agent 上报。
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(
+                query_db, credential_binding_id, allow_empty_state=bool(request_model.manual_login_enabled)
+            )
             browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
