@@ -100,9 +100,23 @@ class ConfigurationTaskVersionDao:
             == 1
         )
 
+    @classmethod
+    def delete_version(cls, db: Session, version_id: int) -> bool:
+        """按版本 ID 物理删除版本实体；仅服务层确认无运行引用的草稿可调用。"""
+        return (
+            db.query(ConfigurationTaskVersion).filter(ConfigurationTaskVersion.version_id == version_id).delete() == 1
+        )
+
 
 class ConfigurationTaskRunDao:
     """配置任务运行数据访问。"""
+
+    @classmethod
+    def count_runs_by_version(cls, db: Session, version_id: int) -> int:
+        """统计引用指定版本的运行记录数，用于撤销发布/删除前置校验。"""
+        return (
+            db.query(ConfigurationTaskRun).filter(ConfigurationTaskRun.task_version_id == version_id).count()
+        )
 
     @classmethod
     def get_active_by_agent(cls, db: Session, agent_code: str) -> ConfigurationTaskRun | None:

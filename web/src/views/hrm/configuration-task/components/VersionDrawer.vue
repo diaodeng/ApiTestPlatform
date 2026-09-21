@@ -29,16 +29,38 @@
                 </el-table-column>
                 <el-table-column label="发布人" prop="publishBy" width="100" />
                 <el-table-column label="发布时间" prop="publishTime" width="160" />
-                <el-table-column label="操作" width="260" fixed="right">
+                <el-table-column label="操作" width="300" fixed="right">
                     <template #default="{ row }">
                         <el-button link type="primary" icon="View" @click="openEditor(row)">编辑</el-button>
                         <el-button
+                            v-if="row.status === 'DRAFT'"
                             link
                             type="success"
                             icon="Upload"
-                            :disabled="row.status !== 'DRAFT'"
                             @click="publish(row)"
                         >发布</el-button>
+                        <el-button link type="primary" icon="CopyDocument" @click="copyVersionRow(row)">复制</el-button>
+                        <el-button
+                            v-if="row.status === 'PUBLISHED'"
+                            link
+                            type="warning"
+                            icon="RefreshLeft"
+                            @click="unpublish(row)"
+                        >撤销发布</el-button>
+                        <el-button
+                            v-if="row.status === 'PUBLISHED'"
+                            link
+                            type="danger"
+                            icon="CircleClose"
+                            @click="deprecate(row)"
+                        >废弃</el-button>
+                        <el-button
+                            v-if="row.status === 'DRAFT'"
+                            link
+                            type="danger"
+                            icon="Delete"
+                            @click="remove(row)"
+                        >删除</el-button>
                         <el-button link type="warning" icon="SetUp" @click="openStages(row)">阶段</el-button>
                     </template>
                 </el-table-column>
@@ -54,6 +76,13 @@
                 append-to-body
                 class="version-editor-dialog"
             >
+                <el-alert
+                    v-if="editing && editing.status !== 'DRAFT'"
+                    title="当前版本已发布/已废弃，内容仅可查看且不能保存；如需修改请复制为新草稿后编辑"
+                    type="info"
+                    :closable="false"
+                    class="mb8"
+                />
                 <el-form label-width="110px">
                     <el-row :gutter="16">
                         <el-col :span="12">
@@ -149,7 +178,12 @@
                 </el-form>
                 <template #footer>
                     <el-button @click="editorVisible = false">取消</el-button>
-                    <el-button type="primary" :loading="saving" @click="saveVersion">保存草稿</el-button>
+                    <el-button
+                        type="primary"
+                        :loading="saving"
+                        :disabled="!editing || editing.status !== 'DRAFT'"
+                        @click="saveVersion"
+                    >保存草稿</el-button>
                 </template>
             </el-dialog>
 
@@ -172,7 +206,11 @@ import {
     listVersions,
     createVersion,
     updateVersion,
-    publishVersion
+    publishVersion,
+    copyVersion,
+    deleteVersion,
+    deprecateVersion,
+    unpublishVersion
 } from "@/api/hrm/configuration_task";
 
 const props = defineProps({ modelValue: Boolean, task: Object });
@@ -273,6 +311,11 @@ function openEditor(row) {
 
 async function saveVersion() {
     if (!editing.value) return;
+    // 版本快照不可变原则：仅草稿可保存；已发布/已废弃版本弹窗只作查看。
+    if (editing.value.status !== "DRAFT") {
+        ElMessage.warning("仅草稿版本可编辑保存；如需修改请复制为新草稿");
+        return;
+    }
     // 保存前应用 JSON Tab 的编辑（不在 JSON Tab 时直接通过），失败则中止保存。
     if (!stepEditorRef.value?.flush()) {
         return;
@@ -329,6 +372,77 @@ async function publish(row) {
         emit("published");
     } catch (e) {
         ElMessage.error(e.message || "发布失败");
+    }
+}
+
+// 复制任意版本为新草稿：步骤/绑定/变量/阶段切分一并复制，新版本号自动递增。
+async function copyVersionRow(row) {
+    try {
+        const res = await copyVersion(row.versionId);
+        ElMessage.success(res?.msg || `已复制为新草稿 v${row.versionNo}`);
+        loadVersions();
+    } catch (e) {
+        ElMessage.error(e.message || "复制失败");
+    }
+}
+
+// 删除草稿：仅草稿可删，后端校验无运行记录引用。
+async function remove(row) {
+    try {
+        await ElMessageBox.confirm(
+            `确定删除草稿 v${row.versionNo}？删除后不可恢复。`,
+            "删除草稿",
+            { type: "warning" }
+        );
+    } catch {
+        return;
+    }
+    try {
+        await deleteVersion(row.versionId);
+        ElMessage.success("草稿已删除");
+        loadVersions();
+    } catch (e) {
+        ElMessage.error(e.message || "删除失败");
+    }
+}
+
+// 废弃已发布版本：下架不可再运行，历史运行保留追溯；当前版本指针自动回退。
+async function deprecate(row) {
+    try {
+        await ElMessageBox.confirm(
+            `废弃后 v${row.versionNo} 不可再发起运行，历史运行记录保留可追溯。确定废弃？`,
+            "废弃版本",
+            { type: "warning" }
+        );
+    } catch {
+        return;
+    }
+    try {
+        await deprecateVersion(row.versionId);
+        ElMessage.success("版本已废弃");
+        loadVersions();
+    } catch (e) {
+        ElMessage.error(e.message || "废弃失败");
+    }
+}
+
+// 撤销发布：回退为草稿继续编辑；已有运行记录的版本会被后端拒绝（改用废弃+复制）。
+async function unpublish(row) {
+    try {
+        await ElMessageBox.confirm(
+            `撤销发布后 v${row.versionNo} 将回到草稿状态并可以继续编辑。确定撤销发布？`,
+            "撤销发布",
+            { type: "warning" }
+        );
+    } catch {
+        return;
+    }
+    try {
+        await unpublishVersion(row.versionId);
+        ElMessage.success("已撤销发布，可继续编辑");
+        loadVersions();
+    } catch (e) {
+        ElMessage.error(e.message || "撤销发布失败");
     }
 }
 

@@ -39,6 +39,9 @@ from modules.configuration_task.service.task_schedule_service import (
     ConfigurationTaskTemplateService,
 )
 from modules.configuration_task.service.task_service import ConfigurationTaskService
+from modules.configuration_task.service.version_lifecycle_service import (
+    ConfigurationTaskVersionLifecycleService,
+)
 from utils.response_util import ResponseUtil
 
 taskController = APIRouter(prefix="/configuration-tasks", dependencies=[Depends(LoginService.get_current_user)])
@@ -174,6 +177,74 @@ async def publish_task_version(
 ):
     """发布任务版本。"""
     result = await run_in_threadpool(ConfigurationTaskService.publish_version, query_db, version_id, current_user)
+    return _result_response(result)
+
+
+@taskController.post(
+    "/versions/{version_id}/copy",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:edit"))],
+)
+async def copy_task_version(
+    request: Request,
+    version_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """复制任意版本为新草稿（步骤/绑定/变量/阶段切分一并复制）。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskVersionLifecycleService.copy_version, query_db, version_id, current_user
+    )
+    return _result_response(result)
+
+
+@taskController.delete(
+    "/versions/{version_id}",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:edit"))],
+)
+async def delete_task_version(
+    request: Request,
+    version_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """删除版本草稿（仅草稿且无运行记录）。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskVersionLifecycleService.delete_version, query_db, version_id, current_user
+    )
+    return _result_response(result)
+
+
+@taskController.post(
+    "/versions/{version_id}/deprecate",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:publish"))],
+)
+async def deprecate_task_version(
+    request: Request,
+    version_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """废弃已发布版本（下架，不可再运行，保留追溯）。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskVersionLifecycleService.deprecate_version, query_db, version_id, current_user
+    )
+    return _result_response(result)
+
+
+@taskController.post(
+    "/versions/{version_id}/unpublish",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:publish"))],
+)
+async def unpublish_task_version(
+    request: Request,
+    version_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """撤销发布：回退为草稿；仅允许从未运行过的版本。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskVersionLifecycleService.unpublish_version, query_db, version_id, current_user
+    )
     return _result_response(result)
 
 

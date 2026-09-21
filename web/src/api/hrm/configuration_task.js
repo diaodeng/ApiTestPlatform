@@ -50,6 +50,22 @@ export function publishVersion(versionId) {
   return silent({ url: `/configuration-tasks/versions/${versionId}/publish`, method: 'post' })
 }
 
+export function copyVersion(versionId) {
+  return silent({ url: `/configuration-tasks/versions/${versionId}/copy`, method: 'post' })
+}
+
+export function deleteVersion(versionId) {
+  return silent({ url: `/configuration-tasks/versions/${versionId}`, method: 'delete' })
+}
+
+export function deprecateVersion(versionId) {
+  return silent({ url: `/configuration-tasks/versions/${versionId}/deprecate`, method: 'post' })
+}
+
+export function unpublishVersion(versionId) {
+  return silent({ url: `/configuration-tasks/versions/${versionId}/unpublish`, method: 'post' })
+}
+
 // ---------- 阶段 ----------
 
 export function saveVersionStages(versionId, stages) {

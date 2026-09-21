@@ -1,3 +1,11 @@
+## [2026-09-21] FEATURE | 配置任务版本生命周期：复制为新草稿/草稿删除/废弃/撤销发布
+
+- 背景：门店配置版本发布后不可编辑（update_version 锁定 DRAFT），且缺少配套出口——新建版本是空草稿（无复制能力）、无删除/废弃接口，改一个步骤超时时间都要重建整个版本。经分析确认"快照不可变"本身合理（运行消息下发时步骤实时读版本 steps_json，编辑/物理删除已发布版本会破坏运行可追溯），缺口在变更路径而非锁定本身。
+- 实现：新增 version_lifecycle_service.py（ConfigurationTaskVersionLifecycleService）四个方法——copy_version（任意状态可复制；steps/inputBindings/variables/浏览器参数原样保留 stepId，阶段切分经 replace_version_stages 一并复制）、delete_version（仅 DRAFT 且校验 task_run 无引用，阶段定义一并清理）、deprecate_version（PUBLISHED→DEPRECATED）、unpublish_version（PUBLISHED→DRAFT，仅限 count_runs_by_version==0，否则拒绝并提示废弃+复制）；废弃/撤销后任务 current_version_id/no 指针自动回退到最近一个未废弃的已发布版本（无则置空）。DAO 补 delete_version/count_runs_by_version；controller 四路由（copy/delete 用 task:edit 权限，deprecate/unpublish 用 task:publish）。运行入口 create_run 现有 status==PUBLISHED 校验天然拦截 DEPRECATED，无需改动。前端 VersionDrawer 操作列按状态渲染四按钮，非草稿版本编辑弹窗显示只读提示条并禁用保存。
+- 踩坑记录：①复制阶段时 replace_version_stages 构造的 dict 必须显式携带 version_id（Stage DO 无默认值，漏掉 INSERT 报 1048 cannot be null）；②新增 DAO 方法漏写 @classmethod 导致类调用时 cls 吃掉 db 参数（TypeError missing 'version_id'，签名 inspect 正确但行为错误，靠字节码+装饰器检查定位）；③dev 环境曾并存两个 vite/后端进程与 HMR 污染导致页面空白假象，验证一律在干净进程+全新标签页进行。
+- 验证：配置任务回归测试 20 用例通过；ruff 通过；build:prod 通过；浏览器端到端（admin/.env.dev，全程只操作复制出的版本）：复制 v6→v9（阶段一并复制）、v9 发布→撤销发布→回草稿（无运行校验通过）、再发布→废弃→已废弃且任务当前版本指针自动回退 v8、复制 v6→v10→删除成功、已发布版本编辑弹窗只读提示条+保存禁用（截图确认）。
+- 文档：web/public/docs/configuration-task.md 新增"版本生命周期"章节（状态×操作矩阵）；更新记录 2026-09-21-configuration-task-version-lifecycle.md。
+
 ## [2026-09-21] UX | 步骤区域交互优化：单滚动条/移除冗余按钮/表格单行省略
 
 - 诉求：版本编辑弹窗可视化步骤区域出现两个竖向滚动条；"编辑当前步骤"按钮与行内"编辑"重复；表格长文本换行撑高行。
