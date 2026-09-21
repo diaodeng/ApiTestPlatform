@@ -1,3 +1,11 @@
+## [2026-09-21] FIX | 配置任务版本步骤详情弹窗空指针修复 + 阶段证据预校验
+
+- 背景：门店配置版本发布报"阶段 门店信息 要求证据，但未配置 capture_screenshot 步骤"，且版本编辑弹窗新增步骤后点详情无响应（控制台 Uncaught TypeError: Cannot read properties of null (reading elementText)）。分析确认两点：阶段证据模式是对步骤的约束声明而非阶段结束自动截图（设计见 wiki/features/configuration-task-evidence-collection-plan.md 两层模型）；详情弹窗崩溃点在共享组件 StepDetail.vue 定位卡片直接绑定 targetSnapshot.elementText。
+- 根因：VersionStepTable.addStep 手工构造步骤把 targetSnapshot 写死 null，默认动作 fill 属于需要定位动作（stepNeedsTarget=true），弹窗渲染时 null.elementText 抛错中断；正常链路 normalizeStep 会自动补默认快照，但配置任务侧 addStep/openEditor 均未走标准化。崩溃与证据配置连锁——弹窗打不开导致无法把新增步骤改成截图动作，发布校验必然失败。
+- 前端：VersionStepTable.vue addStep 改用 webcase 域层 createDefaultStep 工厂（需要定位的动作自动带默认 targetSnapshot），openDetail 打开前对需要定位但缺快照的步骤补 createDefaultTargetSnapshot 兜底历史数据；StepDetail.vue 定位卡片 v-if 增加 targetSnapshot 存在性守卫，并新增"当前步骤缺少定位快照数据"空态；StageEditor.vue 保存时按后端 stage_service.validate_version_stages_for_publish 同口径预校验证据模式（REQUIRED 无截图步骤 / BEFORE_AFTER 缺 before 或 after / NONE 声明必需类型 / requiredTypes 在阶段截图步骤中缺失），错误提前到保存阶段时提示。
+- 文档：web/public/docs/configuration-task.md 新增"证据模式与截图步骤的关系"章节（含各模式校验规则表和发布报错处理路径）；更新记录 2026-09-21-configuration-task-step-detail-fix.md。
+- 验证：npm run build:prod 通过；修复路径核验——新增步骤自动弹详情可正常渲染，历史缺快照步骤点详情不再抛 elementText 空指针。后端无改动，发布校验语义不变。
+
 
 ## [2026-09-16] PERF | 工单编辑弹窗打开慢治理：新增轻量编辑详情接口，切断编辑链路与相似检索/消息/快照的耦合
 

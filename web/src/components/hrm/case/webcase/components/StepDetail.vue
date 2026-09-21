@@ -368,7 +368,7 @@
       </el-form>
 
       <el-card
-        v-if="stepNeedsTarget(props.currentStep.actionType)"
+        v-if="stepNeedsTarget(props.currentStep.actionType) && props.currentStep.targetSnapshot"
         class="panel-card"
         shadow="never"
       >
@@ -570,6 +570,11 @@
             </el-row>
           </div>
         </div>
+        <el-empty
+          v-else-if="stepNeedsTarget(props.currentStep.actionType) && !props.currentStep.targetSnapshot"
+          description="当前步骤缺少定位快照数据"
+          :image-size="70"
+        />
         <el-empty v-else description="当前步骤暂无定位器" :image-size="70" />
       </el-card>
 

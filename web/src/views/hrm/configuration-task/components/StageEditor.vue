@@ -275,8 +275,49 @@ function parseStrings(text) {
     return normalizeStringArray((text || "").split(","));
 }
 
+// 与后端发布校验（stage_service.validate_version_stages_for_publish）同口径的
+// 证据预校验：阶段声明的证据模式必须能被阶段内显式 capture_screenshot 步骤满足，
+// 提前在保存阶段时提示，避免拖到发布才失败。
+function validateEvidencePolicy() {
+    const screenshotTypesByStage = stages.value.map((stage) => {
+        const types = new Set();
+        normalizeStringArray(stage.stepIds).forEach((id) => {
+            const step = versionSteps.value.find((item) => stepIdOf(item) === id);
+            if (!step || String(step.actionType || step.action_type || "") !== "capture_screenshot") return;
+            const params = step.params && typeof step.params === "object" ? step.params : {};
+            types.add(String(params.evidenceType || params.evidence_type || "checkpoint_screenshot"));
+        });
+        return types;
+    });
+    for (let i = 0; i < stages.value.length; i += 1) {
+        const stage = stages.value[i];
+        const name = stage.stageName || stage.stageKey || `第${i + 1}个阶段`;
+        const mode = stage.evidencePolicy.mode;
+        const types = screenshotTypesByStage[i];
+        if (mode === "NONE" && stage.evidencePolicy.requiredTypes.length) {
+            return `阶段「${name}」证据模式为“不要求”，不能声明必需类型，请清空必需类型或调整模式`;
+        }
+        if (mode === "REQUIRED" && !types.size) {
+            return `阶段「${name}」要求证据，请在该阶段包含的步骤中添加“截图 / 采集证据”步骤`;
+        }
+        if (mode === "BEFORE_AFTER" && !(types.has("before_screenshot") && types.has("after_screenshot"))) {
+            return `阶段「${name}」为前后对照模式，必须同时包含修改前（before_screenshot）和修改后（after_screenshot）两类截图步骤`;
+        }
+        const missingTypes = stage.evidencePolicy.requiredTypes.filter((item) => !types.has(item));
+        if (missingTypes.length) {
+            return `阶段「${name}」缺少证据类型：${missingTypes.join("、")}`;
+        }
+    }
+    return "";
+}
+
 async function save() {
     if (!props.version) return;
+    const evidenceError = validateEvidencePolicy();
+    if (evidenceError) {
+        ElMessage.warning(evidenceError);
+        return;
+    }
     const indexById = new Map(stepOptions.value.map((item) => [item.value, item.stepIndex]));
     const invalidStepIds = new Set();
     const emptyStageIndex = stages.value.findIndex((stage) => {

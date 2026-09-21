@@ -90,7 +90,12 @@
 import { ref, computed } from "vue";
 import StepDetail from "@/components/hrm/case/webcase/components/StepDetail.vue";
 import { actionOptions } from "@/components/hrm/case/webcase/utils/shared.js";
-import { stepNeedsTarget, normalizeStepParams } from "@/components/hrm/case/webcase/domain/stepDomain";
+import {
+    stepNeedsTarget,
+    normalizeStepParams,
+    createDefaultStep
+} from "@/components/hrm/case/webcase/domain/stepDomain";
+import { createDefaultTargetSnapshot } from "@/components/hrm/case/webcase/domain/snapshotDomain";
 
 const props = defineProps({
     steps: { type: Array, required: true }
@@ -151,26 +156,27 @@ function notifyChange() {
     emit("change", props.steps);
 }
 
-// 新增一个空白 fill 步骤到末尾，结构与 WebStepModel 一致。
+// 新增一个步骤到末尾：统一走 createDefaultStep 工厂，保证需要定位的动作
+// 自动带上默认 targetSnapshot（缺它会触发详情弹窗 elementText 空指针）。
 function addStep() {
-    props.steps.push({
-        stepId: `step-fill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        stepName: "",
-        actionType: "fill",
-        enabled: true,
-        continueOnFailure: false,
-        timeoutMs: null,
-        params: normalizeStepParams("fill", {}),
-        targetSnapshot: null
-    });
+    props.steps.push(createDefaultStep("fill"));
     currentStepIndex.value = props.steps.length - 1;
     notifyChange();
     openDetail(props.steps.length - 1);
 }
 
+// 打开详情前兜底：历史草稿或手工 JSON 可能没有 targetSnapshot，
+// 而详情弹窗的定位卡片直接绑定 targetSnapshot 内部字段，必须先补齐。
+function ensureTargetSnapshot(step) {
+    if (step && stepNeedsTarget(step.actionType) && !step.targetSnapshot) {
+        step.targetSnapshot = createDefaultTargetSnapshot();
+    }
+}
+
 function openDetail(index) {
     if (index < 0 || index >= props.steps.length) return;
     currentStepIndex.value = index;
+    ensureTargetSnapshot(props.steps[index]);
     showStepDetail.value = true;
 }
 
