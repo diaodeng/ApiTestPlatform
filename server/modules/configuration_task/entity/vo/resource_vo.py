@@ -12,7 +12,7 @@ from pydantic.alias_generators import to_camel
 
 from module_admin.annotation.pydantic_annotation import as_query
 
-RESOURCE_PROVIDER_TYPE = Literal["agent_local", "sftp"]
+RESOURCE_PROVIDER_TYPE = Literal["agent_local", "sftp", "report"]
 RESOURCE_PROVIDER_EXECUTION_SIDE = Literal["agent", "server"]
 RESOURCE_STATUS = Literal["PENDING", "UPLOADING", "READY", "FAILED", "EXPIRED", "DELETING", "DELETED"]
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")

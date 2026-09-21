@@ -21,6 +21,9 @@ PERM_DEFS: tuple[PermDef, ...] = (
     PermDef("configuration_task:task:run", "配置任务运行"),
     PermDef("configuration_task:task:approve", "配置任务阶段审批"),
     PermDef("configuration_task:artifact:upload", "配置任务产物上报"),
+    PermDef("configuration_task:artifact:query", "配置任务产物查询"),
+    PermDef("configuration_task:artifact:preview", "配置任务产物预览"),
+    PermDef("configuration_task:artifact:download", "配置任务产物下载"),
     PermDef("configuration_task:report:generate", "配置任务报告归档"),
     PermDef("configuration_task:resource:sftp", "配置任务SFTP资源上传"),
     PermDef("configuration_task:resource:download", "配置任务资源下载"),
@@ -114,8 +117,14 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
     # 产物与报告按钮权限
     _menu("configtask.artifact.upload", "产物上报", "F", "configtask.task",
           perm="configuration_task:artifact:upload", order=15),
+    _menu("configtask.artifact.query", "产物查询", "F", "configtask.task",
+          perm="configuration_task:artifact:query", order=16),
+    _menu("configtask.artifact.preview", "产物预览", "F", "configtask.task",
+          perm="configuration_task:artifact:preview", order=17),
+    _menu("configtask.artifact.download", "产物下载", "F", "configtask.task",
+          perm="configuration_task:artifact:download", order=18),
     _menu("configtask.report.generate", "报告归档", "F", "configtask.task",
-          perm="configuration_task:report:generate", order=16),
+          perm="configuration_task:report:generate", order=19),
 )
 
 

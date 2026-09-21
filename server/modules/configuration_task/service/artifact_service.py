@@ -18,6 +18,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from module_qtr.service.agent_file_transfer_service import AgentFileTransferService
 from modules.configuration_task.dao.resource_dao import ResourceDao
 from modules.configuration_task.dao.stage_artifact_dao import (
     ConfigurationTaskStageDao,
@@ -105,6 +106,7 @@ class ConfigurationTaskArtifactService:
                 return ArtifactServiceResult(False, "步骤不属于上报阶段")
 
         data_text = model.data
+        resource_probe = ("ONLINE", "", "")
         if data_text:
             # 旧版事件只在兼容分支解码，正文不写入运行 JSON、日志或资源索引。
             try:
@@ -144,14 +146,34 @@ class ConfigurationTaskArtifactService:
             sha256 = model.sha256.lower()
             size = model.file_size
             agent_code = model.agent_code or run.agent_code
-
+            resource_probe = cls._probe_agent_resource(agent_code, object_key, size, sha256)
         existing_resource = ResourceDao.get_by_identity(db, agent_code, object_key, 1)
         if existing_resource:
             if existing_resource.sha256 != sha256 or existing_resource.file_size != size:
                 return ArtifactServiceResult(False, "资源元数据与已有资源不一致")
             resource = existing_resource
+            if data_text is None:
+                resource_status, resource_error_code, resource_error_message = cls._resource_state_from_probe(
+                    resource_probe
+                )
+                ResourceDao.update_resource(
+                    db,
+                    resource.resource_id,
+                    {
+                        "status": resource_status,
+                        "error_code": resource_error_code,
+                        "error_message": resource_error_message,
+                        "last_audit_at": datetime.now(),
+                        "audit_message": "Agent metadata-only 资源状态复核",
+                        "update_by": operator,
+                    },
+                )
+                db.flush()
         else:
             now = datetime.now()
+            resource_status, resource_error_code, resource_error_message = cls._resource_state_from_probe(
+                resource_probe
+            )
             try:
                 resource = ResourceDao.add_resource(
                     db,
@@ -166,13 +188,15 @@ class ConfigurationTaskArtifactService:
                         "checksum_algorithm": "sha256",
                         "sha256": sha256,
                         "version": 1,
-                        "status": "READY",
+                        "status": resource_status,
+                        "error_code": resource_error_code,
+                        "error_message": resource_error_message,
                         "create_by": operator,
                         "create_time": now,
                         "update_by": operator,
                         "update_time": now,
                         "last_audit_at": now,
-                        "audit_message": "Agent 步骤产物上报登记",
+                        "audit_message": "Agent 步骤产物 metadata-only 登记",
                         "remark": f"task_run_id={task_run_id} step_id={model.step_id or model.step_index}",
                     },
                 )
@@ -184,6 +208,8 @@ class ConfigurationTaskArtifactService:
                 resource = ResourceDao.get_by_identity(db, agent_code, object_key, 1)
                 if not resource:
                     return ArtifactServiceResult(False, "产物资源登记失败")
+
+        artifact_availability = resource_probe[0]
 
         step_id = model.step_id or f"step-{model.step_index}"
         evidence_key = model.evidence_key or (step_id if data_text is None else "")
@@ -215,7 +241,7 @@ class ConfigurationTaskArtifactService:
                     "sequence_no": model.sequence_no,
                     "captured_at": model.captured_at,
                     "mask_applied": model.mask_applied,
-                    "availability_status": "ONLINE",
+                    "availability_status": artifact_availability,
                     "provider_type": model.provider_type or "agent_local",
                     "agent_code": agent_code,
                     "object_key": object_key,
@@ -261,6 +287,51 @@ class ConfigurationTaskArtifactService:
         )
         return ArtifactServiceResult(True, "产物登记成功", cls.to_artifact_model(artifact))
 
+    @staticmethod
+    def _probe_agent_resource(
+        agent_code: str,
+        object_key: str,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> tuple[str, str, str]:
+        """登记 metadata-only 产物前探测 Agent 本地文件，不读取文件正文。"""
+        parts = object_key.split("/")
+        agent_resource_id = parts[1] if len(parts) == 2 else ""
+        command_result = AgentFileTransferService.send_command(
+            agent_code,
+            "file_stat",
+            {
+                "resource_id": agent_resource_id,
+                "expected_size": expected_size,
+                "expected_sha256": expected_sha256,
+            },
+            timeout_seconds=30,
+        )
+        if not command_result.success:
+            error_code = command_result.error_code or "AGENT_STAT_FAILED"
+            availability = {
+                "AGENT_OFFLINE": "AGENT_OFFLINE",
+                "RESOURCE_NOT_FOUND": "NOT_FOUND",
+                "RESOURCE_EXPIRED": "NOT_FOUND",
+                "CHECKSUM_MISMATCH": "CHECKSUM_MISMATCH",
+                "SIZE_MISMATCH": "CHECKSUM_MISMATCH",
+            }.get(error_code, "ACCESS_DENIED")
+            return availability, error_code, command_result.error_message or "Agent 文件状态不可用"
+        actual_size = int(command_result.data.get("size") or 0)
+        actual_sha256 = str(command_result.data.get("sha256") or "").lower()
+        if actual_size != expected_size:
+            return "CHECKSUM_MISMATCH", "SIZE_MISMATCH", "Agent 文件大小与上报元数据不一致"
+        if actual_sha256 != expected_sha256:
+            return "CHECKSUM_MISMATCH", "CHECKSUM_MISMATCH", "Agent 文件摘要与上报元数据不一致"
+        return "ONLINE", "", ""
+
+    @staticmethod
+    def _resource_state_from_probe(probe: tuple[str, str, str]) -> tuple[str, str, str]:
+        """把 Agent 探测结果转换为资源表状态和脱敏错误摘要。"""
+        availability, error_code, error_message = probe
+        status = "READY" if availability == "ONLINE" else "FAILED"
+        return status, error_code, error_message
+
     @classmethod
     def register_report_artifact(
         cls,
@@ -277,6 +348,15 @@ class ConfigurationTaskArtifactService:
                 "run_stage_id": None,
                 "artifact_type": "report",
                 "step_key": "",
+                "step_id": "",
+                "evidence_type": "report",
+                "evidence_key": f"report-{task_run_id}",
+                "sequence_no": 1,
+                "availability_status": "ONLINE" if resource.status == "READY" else "NOT_FOUND",
+                "provider_type": resource.provider_type,
+                "agent_code": resource.agent_code,
+                "object_key": resource.object_key,
+                "mime_type": resource.mime_type,
                 "resource_id": resource.resource_id,
                 "original_file_name": resource.original_file_name,
                 "file_size": resource.file_size,

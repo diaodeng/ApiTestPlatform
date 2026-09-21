@@ -18,7 +18,7 @@ related_files:
 
 # 门店配置文件存储流程
 
-本流程区分当前已实现的资源传输、配置任务运行域和运行证据登记。当前输入文件和截图/日志等运行产物均以 Agent 受控目录为最终文件持有位置，服务端保存资源元数据、传输/产物引用状态，并通过 `begin/chunk/commit` 将受限分片发送到已登记且在线的 Agent；任务版本绑定、SFTP 输入资源、报告归档和运行证据元数据登记已上线。运行产物 preview/download、evidence package 和服务端保存截图正文仍未实现。
+本流程区分当前已实现的资源传输、配置任务运行域和运行证据登记。当前输入文件和截图/日志等运行产物均以 Agent 受控目录为最终文件持有位置，服务端保存资源元数据、传输/产物引用状态，并通过 `begin/chunk/commit` 将受限分片发送到已登记且在线的 Agent；任务版本绑定、SFTP 输入资源、报告归档、运行证据元数据登记和 artifact 级 preview/download 已上线。证据包和服务端保存截图正文仍未实现。
 
 ```mermaid
 sequenceDiagram
@@ -174,7 +174,8 @@ fileKey = price_tag
   -> 创建或接收 artifact resource_id
   -> 发布/上传
   -> task_artifact 关联 task_run/stage
-  -> 当前仅展示/消费已登记元数据；专用预览、下载和证据包仍未上线
+  -> 通过 artifact_id 受控 preview/download；访问校验权限、状态和摘要并记录审计
+  -> 证据包仍未上线
 ```
 
 截图上传失败不能覆盖主阶段成功状态，应记录产物失败并按任务证据策略决定是否重试或把阶段标记为证据不完整。
@@ -194,7 +195,7 @@ fileKey = price_tag
 
 ## 7. 报告归档边界
 
-当前已提供运行报告归档登记：报告由现有服务端报告服务生成 Word 兼容文件并登记为资源/产物，报告内容只消费运行、阶段和产物元数据。该实现不提供运行产物 preview/download 或 evidence package；后续若迁移到 Agent 侧生成，仍须保持服务端只登记元数据的边界。
+当前已提供运行报告归档登记：报告由现有服务端报告服务生成 Word 兼容文件并登记为资源/产物，报告内容只消费运行、阶段和产物元数据。报告和其他运行产物通过 artifact 级 preview/download 受控访问：外部只接受 `artifact_id`，按任务/运行/产物/资源归属和元数据一致性校验后，分别走 Agent-local、SFTP 或 server report Provider，并在读取后再次校验 SHA-256；访问成功/失败都会写入脱敏审计。证据包仍未上线。
 
 ```text
  task_run

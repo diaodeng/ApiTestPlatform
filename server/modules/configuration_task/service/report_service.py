@@ -115,7 +115,7 @@ class ConfigurationTaskReportService:
                     resource = ResourceDao.add_resource(
                         db,
                         {
-                            "provider_type": "agent_local",
+                            "provider_type": "report",
                             "provider_execution_side": "server",
                             "agent_code": "server",
                             "object_key": object_key,

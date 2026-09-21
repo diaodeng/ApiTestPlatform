@@ -325,21 +325,26 @@ class AgentFileService:
             return {"resource_id": manifest.resource_id, "locator": manifest.locator, **manifest.to_dict()}
 
     def file_read(self, message: dict[str, Any]) -> dict[str, Any]:
-        """读取受控资源内容并返回 Base64；只允许 manifest 内资源，限制单文件大小。"""
+        """读取受控资源内容并返回 Base64；返回前重新校验实际文件摘要。"""
         resource_id = self._resource_id(message.get("resource_id", message.get("resourceId")))
         with self._lock:
             manifest = self.store.get(resource_id)
             if manifest is None:
                 raise AgentFileError("RESOURCE_NOT_FOUND", "资源不存在")
+            self._ensure_not_expired(manifest)
             path = self.store.resolve_locator(manifest.locator, manifest.resource_id)
             if path.is_symlink() or not path.is_file():
                 raise AgentFileError("RESOURCE_PATH_INVALID", "资源不可用")
-            if path.stat().st_size > self.max_file_size:
-                raise AgentFileError("FILE_TOO_LARGE", "资源超过可回传大小")
             try:
                 content = path.read_bytes()
             except OSError:
                 raise AgentFileError("READ_FAILED", "资源读取失败") from None
+            actual_size = len(content)
+            if actual_size > self.max_file_size:
+                raise AgentFileError("FILE_TOO_LARGE", "资源超过可回传大小")
+            actual_sha256 = hashlib.sha256(content).hexdigest()
+            self._validate_manifest_content(manifest, actual_size, actual_sha256)
+            self._validate_expected_content(message, actual_size, actual_sha256)
             manifest.last_used = utc_now_iso()
             self.store.save(manifest)
             import base64 as _base64
@@ -348,8 +353,8 @@ class AgentFileService:
                 "resource_id": manifest.resource_id,
                 "original_file_name": manifest.original_file_name,
                 "mime_type": manifest.mime_type,
-                "size": len(content),
-                "sha256": manifest.sha256,
+                "size": actual_size,
+                "sha256": actual_sha256,
                 "data": _base64.b64encode(content).decode("ascii"),
             }
 
@@ -371,17 +376,84 @@ class AgentFileService:
             return {"resource_id": resource_id, "deleted": True, "exists": False}
 
     def file_stat(self, message: dict[str, Any]) -> dict[str, Any]:
-        """只返回 manifest 元数据和受控资源存在性，不返回文件内容。"""
+        """只返回实际文件元数据和受控资源存在性，不返回文件内容。"""
         resource_id = self._resource_id(message.get("resource_id", message.get("resourceId")))
         with self._lock:
             manifest = self.store.get(resource_id)
             if manifest is None:
                 raise AgentFileError("RESOURCE_NOT_FOUND", "资源不存在")
+            self._ensure_not_expired(manifest)
             path = self.store.resolve_locator(manifest.locator, manifest.resource_id)
             if path.is_symlink() or not path.is_file():
                 raise AgentFileError("RESOURCE_PATH_INVALID", "资源不可用")
-            actual_size = path.stat().st_size
-            return {"resource_id": manifest.resource_id, "exists": True, "size": actual_size, "sha256": manifest.sha256, "version": manifest.version, "mime_type": manifest.mime_type, "original_file_name": manifest.original_file_name, "locator": manifest.locator, "expires": manifest.expires, "last_used": manifest.last_used}
+            try:
+                actual_size, actual_sha256 = self._hash_file(path)
+            except OSError:
+                raise AgentFileError("STAT_FAILED", "资源校验失败") from None
+            self._validate_manifest_content(manifest, actual_size, actual_sha256)
+            self._validate_expected_content(message, actual_size, actual_sha256)
+            return {
+                "resource_id": manifest.resource_id,
+                "exists": True,
+                "size": actual_size,
+                "sha256": actual_sha256,
+                "version": manifest.version,
+                "mime_type": manifest.mime_type,
+                "original_file_name": manifest.original_file_name,
+                "locator": manifest.locator,
+                "expires": manifest.expires,
+                "last_used": manifest.last_used,
+            }
+
+    @staticmethod
+    def _ensure_not_expired(manifest: ResourceManifest) -> None:
+        """拒绝读取已超过 manifest expires 的 Agent 本地资源。"""
+        try:
+            expires_epoch = AgentFileService._parse_time(manifest.expires)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise AgentFileError("INVALID_EXPIRY", "资源过期时间不合法") from exc
+        if expires_epoch <= time.time():
+            raise AgentFileError("RESOURCE_EXPIRED", "资源已过期")
+
+    @staticmethod
+    def _validate_manifest_content(
+        manifest: ResourceManifest,
+        actual_size: int,
+        actual_sha256: str,
+    ) -> None:
+        """确认当前文件仍与 Agent manifest 登记的大小和摘要一致。"""
+        if actual_size != manifest.size:
+            raise AgentFileError("SIZE_MISMATCH", "资源实际大小与 manifest 不一致")
+        if actual_sha256 != manifest.sha256:
+            raise AgentFileError("CHECKSUM_MISMATCH", "资源实际摘要与 manifest 不一致")
+
+    @staticmethod
+    def _validate_expected_content(
+        message: dict[str, Any],
+        actual_size: int,
+        actual_sha256: str,
+    ) -> None:
+        """校验服务端传入的期望大小和摘要，失败时不返回文件正文。"""
+        raw_size = message.get("expected_size")
+        if raw_size is None:
+            raw_size = message.get("expectedSize")
+        if raw_size is not None:
+            try:
+                expected_size = int(raw_size)
+            except (TypeError, ValueError) as exc:
+                raise AgentFileError("INVALID_EXPECTED_SIZE", "期望文件大小不合法") from exc
+            if expected_size != actual_size:
+                raise AgentFileError("SIZE_MISMATCH", "资源实际大小与期望值不一致")
+
+        expected_sha256 = message.get("expected_sha256")
+        if expected_sha256 is None:
+            expected_sha256 = message.get("expectedSha256")
+        if expected_sha256 is not None:
+            normalized_sha256 = str(expected_sha256 or "").lower()
+            if not _HEX_SHA256.fullmatch(normalized_sha256):
+                raise AgentFileError("INVALID_EXPECTED_SHA256", "期望文件摘要不合法")
+            if normalized_sha256 != actual_sha256:
+                raise AgentFileError("CHECKSUM_MISMATCH", "资源实际摘要与期望值不一致")
 
     def file_cleanup(self, message: dict[str, Any]) -> dict[str, Any]:
         """清理过期传输和过期 manifest 对应文件；不接受任意路径。"""

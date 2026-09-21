@@ -10,12 +10,14 @@ title: 更新历史
 ## 2026-09-22
 - 日志拉取门店编号空间治理（生产 INC00002013662 排查产物）：来源门店编码（store_code/SAP 编号）与日志接口机构号（org_no）在弹窗回显与 hints 落库两处混用——回显值 333 被前端三字段 OR 跨列匹配改写到 sap_org_no=333 的仓库门店（org 550944）且无告警，未匹配的来源编码会被当 org_no 落入 hints 并可被直接提交；修复为提交字段只承载 org_no（匹配收窄 org_no-only、hints 匹配失败不写并清除旧映射、来源编码仅展示映射关系），提交前对匹配不到 org_no 的值二次确认以保留手输新店 org_no 的合法场景。详见：[门店编号空间治理](2026-09-22-log-pull-store-id-space-fix.md)，用户说明：[日志拉取使用说明](../ticket_log_pull.md)。
 
-## 2026-09-20
+## 2026-09-21
+- 修复配置任务证据迁移在 MySQL/MariaDB 上为 `TEXT` 字段声明默认值导致的 1101 错误：改为先允许 NULL、回填空 JSON，再收紧为 NOT NULL；同时修正基线 SQL 中 `LONG BLOB DEFAULT NULL` 定义。
+- 配置任务阶段步骤选择体验优化：阶段编辑器将稳定 `stepId` 改为“步骤序号 · 动作 · 步骤名称”多选项，用户不再需要从 JSON 手工复制 ID；保存时按稳定 ID 自动生成兼容的 `stepIndexes`，并对历史缺失步骤保留异常提示。非草稿版本的阶段控件统一只读。
+- 配置任务证据策略与产物并发幂等收口：`requiredTypes` 按每种类型至少一项计算，同类型截图任意一项即可满足，精确证据继续使用 `requiredEvidenceKeys`；产物引用唯一键冲突时回滚并回查已存在记录，避免并发重复登记。新增 metadata-only 登记前 `file_stat` 探测、Agent `file_read` 完整性校验和运行产物 artifact 级 preview/download；外部访问统一使用 `artifactId`，并记录脱敏访问审计。测试数量以本轮完整定向验证结果为准。
+- 配置任务第一期取证契约与回归补齐：上线口径明确支持显式 `capture_screenshot` 步骤、`evidenceType`/阶段 `evidencePolicy` 字段、Agent-local 产物元数据登记和稳定 `stepId`；旧 `stepIndex`/Base64 事件保留兼容。运行状态与证据完整性分开理解；当前已提供 artifact 级 preview/download，必须使用 `artifactId`，并经过归属、状态、元数据一致性和正文摘要校验；证据包仍未上线。同步补充截图参数、metadata-only 事件、业务状态/证据字段和幂等语义的回归覆盖。
+- 配置任务证据状态收敛补齐：阶段成功/失败终态、阶段重试和孤儿运行恢复都会在同一事务内刷新证据状态；新增数据库增量迁移，补齐稳定步骤、阶段策略、运行/阶段双状态、产物元数据和引用级唯一约束。详见：[配置任务取证第一期更新](2026-09-21-configuration-task-evidence.md)。
 - AI 分析结果解析失败修复（生产 INC00002000624N 排查产物）：模型在结果字符串值内嵌请求体 JSON 示例且不转义双引号，旧版单遍引号修复启发式无法处理"内层键值对"形态导致整个有效分析被丢弃（`AI_WORKER_RESULT_INVALID`，重试亦复现）；按新结果处理流程修复——`json.loads` 失败后先经**回溯式 json-repair**（键/值字符串上下文判定 + 嵌入花括号剪枝，纯标准库，实测挽救两次生产失败样本），仍失败触发 **Agent 端补救重试**（转存首次现场后 resume 会话发送纠错指令再执行一轮，成功合并 token 走成功链路），两道防线都失败才落库失败；服务端把解析失败的诊断摘要并入任务错误信息，列表页直接可见具体断点。无数据库结构变更。详见：[AI结果JSON修复与补救重试](2026-09-20-ticket-ai-result-json-repair-retry.md)，用户说明：[工单深度AI分析说明](../ticket_ai_analysis.md)。
 - 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
-
-## 2026-09-21
-- 配置任务证据策略与产物并发幂等收口：`requiredTypes` 按每种类型至少一项计算，同类型截图任意一项即可满足，精确证据继续使用 `requiredEvidenceKeys`；产物引用唯一键冲突时回滚并回查已存在记录，避免并发重复登记。定向回归测试扩展至 53 项。
 
 ## 2026-09-20
 - 配置任务页面补充录制转模板、版本编辑和新建录制的操作提示：四个 JSON 配置字段新增可点击问号说明，明确步骤索引从 0 开始、变量/fileKey 的适用动作和输入绑定关系，并补充任务变量与版本变量的合并规则、资源 READY 状态和 Agent 归属要求。

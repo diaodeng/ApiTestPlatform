@@ -61,9 +61,16 @@ Agent 本地资源协议使用 `requestType=7` 的小 JSON 控制命令维护受
 
 配置任务的输入资源和运行证据都使用 Agent-local 元数据登记，但用途不同：输入资源通过版本的 `inputBindings` 参与运行；截图、日志和报告通过 `task_artifact` 关联运行/阶段。服务端只保存 `resourceId`、Agent、受控 `objectKey`、文件名、MIME、大小、版本和 SHA-256 等元数据，不把 Agent 绝对路径作为契约。
 
-运行证据可使用 `capture_screenshot` 步骤和 `evidenceType`、`evidenceKey` 等字段表达业务语义；旧版 `step_screenshot` 和带 Base64 `data` 的上报仍用于兼容迁移。metadata-only 上报只登记 Agent-local 文件元数据，不等同于服务端已保存文件正文。资源登记成功也不代表页面已有证据 preview 或可下载文件。
+运行证据可使用 `capture_screenshot` 步骤和 `evidenceType`、`evidenceKey` 等字段表达业务语义；旧版 `step_screenshot` 和带 Base64 `data` 的上报仍用于兼容迁移。metadata-only 上报登记前会调用 Agent `file_stat`，只有实际文件存在且大小、SHA-256 均与上报元数据一致时，资源才进入 `READY`、产物才标记为 `ONLINE`；Agent 离线、文件不存在、过期、被替换或摘要/大小不一致时保留引用但标记不可用，不伪造可取回状态。
 
-当前资源下载接口仍仅针对输入资源 Provider 的既有能力；配置任务运行产物尚未提供专用 preview、download 或 evidence package 接口。不要把资源 ID 当作下载凭证，也不要根据元数据状态推断服务端保存了截图正文。
+运行产物使用专用 artifact 访问接口，不与输入资源下载接口混用：
+
+- `GET /configuration-tasks/artifacts/{artifactId}/preview`：按 `artifactId` 预览安全 MIME 类型的正文，仅允许 PNG、JPEG、WebP、纯文本和 JSON，并以内联方式返回。
+- `GET /configuration-tasks/artifacts/{artifactId}/download`：按 `artifactId` 以附件方式流式下载，返回安全文件名、正确 MIME、`Content-Length`、`X-Artifact-Id`、`X-Artifact-SHA256` 和 `X-Content-Type-Options: nosniff`。
+- 访问前校验任务、运行、产物、资源和当前用户归属；管理员可跨范围访问。成功和失败都会写入脱敏访问审计。
+- Agent-local 读取携带 expected 大小和 SHA-256，服务端读取后再次校验摘要；report 资源从固定报告目录读取，SFTP 资源走 SFTP Provider。
+
+`resourceId` 只是资源身份，不是下载授权；`objectKey` 只是受控相对定位键，也不能作为下载授权凭证。证据包生成、查询和下载仍未上线，不要把资源元数据状态理解为服务端保存了截图正文。
 
 
 列表支持 `resourceId`、`agentCode`、`status`、`keyword` 和 `limit`。`status` 可选：`PENDING`、`UPLOADING`、`READY`、`FAILED`、`EXPIRED`、`DELETING`、`DELETED`；`limit` 默认 50，最大 200。
@@ -136,7 +143,7 @@ Agent 本地资源协议使用 `requestType=7` 的小 JSON 控制命令维护受
 ## ID 和安全注意事项
 
 - 响应中的 `resourceId` 是字符串，即使数据库使用 BIGINT/Snowflake；前端不能对其调用 `Number()`。
-- `resourceId` 只是资源身份，不是下载授权凭证；输入资源可按既有 Provider 下载回传能力读取，运行证据产物仍没有专用下载接口。
-- `objectKey` 不是任意本地路径，Agent 应自行在受控根目录中解析。
-- 当前接口不代表文件内容已经上传成功；只有 Agent 侧文件实际存在并完成 commit 元数据核对后才可置为 `READY`。
-- 当前支持服务端三段式分片传输、SFTP 资源上传、下载回传和带引用保护的删除；不支持跨新 session 接管旧传输的断点续传，短期 transfer token 和完整任务级资源绑定属于后续能力。
+- `resourceId` 只是资源身份，不是下载授权凭证；输入资源可按既有 Provider 下载回传能力读取，运行产物必须改用 artifact 级 preview/download 接口并按 `artifactId` 授权访问。
+- `objectKey` 只是受控相对定位键，不能作为授权凭证或任意本地路径。
+- 当前接口不代表文件内容已经上传成功；只有 Agent 侧文件实际存在并完成 commit 元数据核对后才可置为 `READY`。metadata-only 运行产物同样只有通过 `file_stat` 的实际大小和 SHA-256 校验后才标记为 `READY/ONLINE`。
+- 当前支持服务端三段式分片传输、SFTP 资源上传、输入资源下载回传、运行产物 artifact 级 preview/download 和带引用保护的删除；不支持跨新 session 接管旧传输的断点续传、短期 transfer token、证据包生成/下载和完整任务级资源绑定。

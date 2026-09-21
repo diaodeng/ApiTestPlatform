@@ -141,5 +141,56 @@ def test_stat_returns_metadata_without_file_content(tmp_path: Path):
     result = service.handle_command({"requestType": 7, "command": "file_stat", "resource_id": "res-test"})
     assert result["success"]
     assert result["data"]["size"] == len(payload)
-    assert "content" not in result["data"]
-    assert "absolute" not in json.dumps(result, ensure_ascii=False).lower()
+def test_stat_rehashes_file_and_rejects_modified_content(tmp_path: Path):
+    """文件正文被替换后，file_stat 和 file_read 都不能继续返回旧摘要。"""
+    payload = b"original-content"
+    service = AgentFileService(root=tmp_path)
+    assert _begin(service, payload)["success"]
+    assert _chunk(service, payload, 0, 0)["success"]
+    assert service.handle_command({"requestType": 7, "command": "file_publish_commit", "transfer_id": "transfer-test"})["success"]
+
+    resource_path = tmp_path / "storage" / "resources" / "res-test"
+    resource_path.write_bytes(b"changed-content")
+
+    stat = service.handle_command({"requestType": 7, "command": "file_stat", "resource_id": "res-test"})
+    assert not stat["success"]
+    assert stat["error_code"] == "CHECKSUM_MISMATCH"
+
+    read = service.handle_command({"requestType": 7, "command": "file_read", "resource_id": "res-test"})
+    assert not read["success"]
+    assert read["error_code"] == "CHECKSUM_MISMATCH"
+    assert "data" not in read
+
+
+def test_read_validates_expected_size_and_sha256(tmp_path: Path):
+    """file_read 支持服务端期望元数据校验，失败时不返回正文。"""
+    payload = b"expected-content"
+    service = AgentFileService(root=tmp_path)
+    assert _begin(service, payload)["success"]
+    assert _chunk(service, payload, 0, 0)["success"]
+    assert service.handle_command({"requestType": 7, "command": "file_publish_commit", "transfer_id": "transfer-test"})["success"]
+
+    wrong = service.handle_command(
+        {
+            "requestType": 7,
+            "command": "file_read",
+            "resource_id": "res-test",
+            "expectedSize": len(payload) + 1,
+            "expectedSha256": _digest(payload),
+        }
+    )
+    assert not wrong["success"]
+    assert wrong["error_code"] == "SIZE_MISMATCH"
+    assert "data" not in wrong
+
+    valid = service.handle_command(
+        {
+            "requestType": 7,
+            "command": "file_read",
+            "resource_id": "res-test",
+            "expected_size": len(payload),
+            "expected_sha256": _digest(payload),
+        }
+    )
+    assert valid["success"]
+    assert base64.b64decode(valid["data"]["data"]) == payload

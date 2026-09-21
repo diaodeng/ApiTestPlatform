@@ -261,6 +261,7 @@ def test_agent_resource_download_via_file_read(db_session, monkeypatch):
     row = _sftp_resource(db_session)
     row.provider_type = "agent_local"
     row.provider_execution_side = "agent"
+    row.object_key = "resources/agent-local-demo"
     row.sha256 = hashlib.sha256(b"agent-content").hexdigest()
     db_session.commit()
 
@@ -287,6 +288,7 @@ def test_agent_resource_download_sha_mismatch_rejected(db_session):
     row = db_session.get(ResourceObject, RESOURCE_ID)
     row.provider_type = "agent_local"
     row.provider_execution_side = "agent"
+    row.object_key = "resources/agent-local-demo"
     db_session.commit()
 
     bad_b64 = base64.b64encode(b"tampered").decode("ascii")

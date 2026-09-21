@@ -63,6 +63,9 @@ async def init_create_table():
     logger.info("初始化数据库连接...")
     # 资源领域模型在 server.py 导入链中加载；这里保留显式导入，兼容直接调用初始化函数的场景。
     from modules.configuration_task.entity.do import (
+        artifact_access_audit_do as _configuration_task_artifact_access_audit_do,  # noqa: F401
+    )
+    from modules.configuration_task.entity.do import (
         resource_object_do as _configuration_task_resource_object_do,  # noqa: F401
     )
     from modules.configuration_task.entity.do import (

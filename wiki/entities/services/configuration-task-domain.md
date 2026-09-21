@@ -24,7 +24,7 @@ related_files:
 
 门店配置任务用于把“按商家、门店和环境执行一组配置 SOP，并留下截图、日志和输入文件版本”的实施工作结构化。它不是普通 Web 测试用例的别名，也不是一段可以无限扩大的录制脚本。
 
-本页是配置任务运行域的领域设计。当前第一期已上线任务定义、任务版本快照（含输入资源绑定）、运行实例创建与 Agent 执行、阶段编排与审批流、显式 `capture_screenshot` 步骤、证据类型与阶段策略字段、Agent-local 产物元数据登记和稳定 `stepId` 关联；报告归档也已提供 Word 兼容文件登记。产物 preview/download 与 evidence package 仍未上线，不能按已上线接口使用。
+本页是配置任务运行域的领域设计。当前第一期已上线任务定义、任务版本快照（含输入资源绑定）、运行实例创建与 Agent 执行、阶段编排与审批流、显式 `capture_screenshot` 步骤、证据类型与阶段策略字段、Agent-local 产物元数据登记和稳定 `stepId` 关联；报告归档和 artifact 级 preview/download 也已提供。证据包生成、查询和下载仍未上线。
 
 ```mermaid
 graph TD
@@ -142,7 +142,7 @@ DRAFT
 - `modules/configuration_task/dao/task_dao.py`：任务、版本、运行的纯数据访问；
 - 运行执行复用 `WebCaseService._extract_webui_run_response` 和 `module_qtr` 的 `send_message`，不复制浏览器执行逻辑。
 
-阶段审批闸门（WRITE 强制审批）、失败步骤截图产物、显式取证步骤的契约字段、阶段证据策略元数据和 Word 报告归档已实现；运行事件支持稳定步骤身份 `stepId`，旧 `stepIndex`/Base64 事件保留兼容。阶段级独立下发执行、产物 preview/download、evidence package 和飞书在线文档产物仍未上线。
+阶段审批闸门（WRITE 强制审批）、失败步骤截图产物、显式取证步骤的契约字段、阶段证据策略元数据、Word 报告归档和 artifact 级 preview/download 已实现；运行事件支持稳定步骤身份 `stepId`，旧 `stepIndex`/Base64 事件保留兼容。阶段级独立下发执行、evidence package 和飞书在线文档产物仍未上线。
 
 ## 文件和凭证原则
 

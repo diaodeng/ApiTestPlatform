@@ -28,7 +28,7 @@ class ResourceObject(Base):
         comment="资源ID，Snowflake BIGINT",
     )
     provider_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="agent_local", comment="资源Provider：首期仅agent_local"
+        String(32), nullable=False, default="agent_local", comment="资源Provider：agent_local/sftp/report"
     )
     provider_execution_side: Mapped[str] = mapped_column(
         String(16), nullable=False, default="agent", comment="Provider执行侧：agent/server"

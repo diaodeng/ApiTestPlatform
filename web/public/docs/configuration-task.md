@@ -1,6 +1,6 @@
 # 配置任务管理
 
-> 配置任务用于把“按商家、门店执行一组网页操作 SOP 并绑定输入文件”的实施工作结构化。当前提供任务定义、版本快照、输入资源绑定、运行执行、阶段审批闸门、显式截图步骤、阶段证据策略字段、Agent-local 产物元数据登记和报告归档（Word 兼容文件 + 飞书通知）。截图正文仍由 Agent 受控目录持有；当前尚未提供产物 preview、单张 download 或 evidence package 接口。
+> 配置任务用于把“按商家、门店执行一组网页操作 SOP 并绑定输入文件”的实施工作结构化。当前提供任务定义、版本快照、输入资源绑定、运行执行、阶段审批闸门、显式截图步骤、阶段证据策略字段、Agent-local 产物元数据登记、产物受控预览/下载和报告归档（Word 兼容文件 + 飞书通知）。截图正文仍由 Agent 受控目录持有；证据包生成、查询和下载尚未上线。
 
 ## 功能与入口
 
@@ -33,14 +33,16 @@
 - `GET /configuration-tasks/runs/{taskRunId}/stages`：查询运行阶段列表。
 - `POST /configuration-tasks/runs/stages/{runStageId}/approve`：审批 WRITE 阶段（通过/拒绝）。
 - `POST /configuration-tasks/runs/stages/{runStageId}/retry`：重试失败阶段。
-- `GET /configuration-tasks/runs/{taskRunId}/artifacts`：查询运行产物列表。
+- `GET /configuration-tasks/runs/{taskRunId}/artifacts`：按任务/运行归属查询运行产物元数据。
+- `GET /configuration-tasks/artifacts/{artifactId}/preview`：按 `artifactId` 预览安全 MIME 类型的产物正文。
+- `GET /configuration-tasks/artifacts/{artifactId}/download`：按 `artifactId` 下载产物正文。
 - `POST /configuration-tasks/runs/artifacts/agent-report`：Agent 上报步骤截图/日志（供客户端集成）。
 - `POST /configuration-tasks/runs/{taskRunId}/report`：生成并归档运行报告，`notifyFeishu=true` 时推送飞书通知。
 - `POST /configuration-tasks/templates/from-recording`：录制会话转任务版本草稿（录制→模板转换器）。
 - `GET /configuration-tasks/{taskId}/schedule`：查询定时触发配置。
 - `PUT /configuration-tasks/{taskId}/schedule`：保存定时触发配置（cron 5 字段表达式）。
 
-权限码包括 `configuration_task:task:list/query/add/edit/publish/run/approve`、`configuration_task:artifact:upload`、`configuration_task:report:generate`、`configuration_task:resource:list/query/add/edit/transfer/sftp/download/delete`。权限按钮已随菜单自动注册，给角色勾选对应权限即可。
+权限码包括 `configuration_task:task:list/query/add/edit/publish/run/approve`、`configuration_task:artifact:upload/query/preview/download`、`configuration_task:report:generate`、`configuration_task:resource:list/query/add/edit/transfer/sftp/download/delete`。权限按钮已随菜单自动注册，给角色勾选对应权限即可。
 
 ## 版本与输入绑定
 
@@ -121,14 +123,29 @@
 | `WRITE` | 保存、导入、状态变更 | 执行前必须审批 |
 | `VERIFY` | 修改后重新查询 | 自动执行 |
 
-阶段切分请求示例：
+阶段切分请求示例（前端阶段编辑器会根据步骤选择自动生成 `stepIds` 和兼容的 `stepIndexes`）：
 
 ```json
 [
-  { "stageKey": "query", "stageName": "查询现状", "mode": "READ", "stepIndexes": [0, 1] },
-  { "stageKey": "save", "stageName": "提交配置", "mode": "WRITE", "stepIndexes": [2] }
+  {
+    "stageKey": "query",
+    "stageName": "查询现状",
+    "mode": "READ",
+    "stepIds": ["step-open-store", "step-check-config"],
+    "stepIndexes": [0, 1]
+  },
+  {
+    "stageKey": "save",
+    "stageName": "提交配置",
+    "mode": "WRITE",
+    "stepIds": ["step-save"],
+    "stepIndexes": [2]
+  }
 ]
 ```
+
+- 在版本管理的“阶段”编辑器中，步骤通过“第几步 · 动作 · 步骤名称”多选项选择，不需要手工复制稳定 ID；保存时系统以选中的稳定 `stepId` 为准，自动计算当前版本对应的 `stepIndexes`。
+- 步骤移动不会改变其稳定 `stepId`；`stepIndexes` 只用于兼容旧版本和展示顺序。历史阶段若引用了当前版本不存在的步骤，会保留异常提示，确认处理后才能保存。
 
 - 运行创建时阶段快照到运行记录；`WRITE` 阶段创建即进入 `WAITING_APPROVAL`，审批通过后才允许执行；
 - 审批拒绝会取消整个运行（错误码 `STAGE_REJECTED`）；
@@ -137,7 +154,7 @@
 
 ## 产物登记
 
-Agent 执行失败步骤时自动截图，并通过事件上报到服务端；服务端把截图登记为 Agent 本地受控资源（状态 `READY`）并建立产物引用（`task_artifact`）。当前首期支持以下证据相关约定：
+Agent 执行失败步骤时自动截图，并通过事件上报到服务端；服务端把截图登记为 Agent 本地受控资源并建立产物引用（`task_artifact`）。metadata-only 事件登记前会调用 Agent `file_stat`，只有实际文件存在且大小、SHA-256 均与上报元数据一致时，资源才进入 `READY`、产物才标记为 `ONLINE`；Agent 离线、文件不存在、过期、被替换或摘要/大小不一致时保留引用但标记不可用，不伪造可取回状态。首期支持以下证据相关约定：
 
 - 步骤可显式声明 `actionType=capture_screenshot`，用于在明确的页面状态采集业务截图；该步骤不执行点击、填写或定位器操作；
 - 截图参数可携带 `evidenceType`（`checkpoint_screenshot`、`before_screenshot`、`after_screenshot`）、`evidenceKey`、`label`、`required`、`fullPage`、`maskSelectors`、`note` 和 `waitMs`；
@@ -145,9 +162,17 @@ Agent 执行失败步骤时自动截图，并通过事件上报到服务端；�
 - Agent 上报的 `web_run_artifact` 事件以 `stepId` 作为稳定步骤身份，服务端保存 `stepKey`/步骤元数据；旧版仅有 `stepIndex` 或 Base64 `data` 的事件继续兼容；metadata-only 事件可登记 Agent-local 资源元数据，不要求把截图正文写入运行 JSON；
 - 产物类型包括 `step_screenshot`、`failure_screenshot`、`execution_log`、`report`。产物只保存资源引用和元数据，不把图片 Base64 写入运行记录或报告正文；重复事件按资源身份/引用语义幂等处理。
 
-业务执行状态和证据完整性不是同一个状态：运行可能是 `SUCCESS`，但因必需截图缺失而需要提示证据不完整；失败诊断截图也不能自动充当业务成功证据。
+### 产物预览、下载与访问审计
 
-当前不提供产物 preview、单张 download 或 evidence package 生成/下载接口，运行详情只展示已经登记的元数据；这些能力属于后续切片，不应按已上线能力使用。
+运行详情中的产物访问必须使用产物自己的 `artifactId`，不能把 `resourceId` 或 `objectKey` 当作授权凭证。运行产物列表先校验任务/运行归属；预览和下载再校验产物、运行、任务、资源和当前用户权限，管理员可跨范围访问。
+
+- `preview` 只允许 `image/png`、`image/jpeg`、`image/webp`、`text/plain`、`application/json`，响应以内联方式返回；其他 MIME 类型请使用下载。
+- `download` 以附件方式流式返回，文件名会去除路径和不安全字符，并返回 `Content-Length`、`X-Artifact-Id`、`X-Artifact-SHA256` 和 `X-Content-Type-Options: nosniff`。
+- Agent-local 产物通过 Agent `file_read` 读取，服务端携带登记的 expected 大小和 SHA-256，并在返回前再次计算摘要；服务端报告只从固定的 `storage/configuration-task-reports/` 目录读取，SFTP 资源走 SFTP Provider，不会误走报告路径。
+- preview/download 成功和失败都会写入脱敏访问审计；审计不保存图片 Base64、Cookie、Token、Agent 绝对路径或文件正文。
+- 资源为 `FAILED`/`EXPIRED`、产物不是 `ONLINE`、文件被替换或读取后摘要不一致时，访问失败并返回稳定错误码，不返回空文件。
+
+业务执行状态和证据完整性不是同一个状态：运行可能是 `SUCCESS`，但因必需截图缺失而需要提示证据不完整；失败诊断截图也不能自动充当业务成功证据。
 
 ## 录制与录制转模板
 
@@ -209,4 +234,4 @@ Agent 执行失败步骤时自动截图，并通过事件上报到服务端；�
 - 响应中的 `taskId`、`versionId`、`currentVersionId`、`taskRunId` 均为字符串（数据库 BIGINT）；前端不能对其调用 `Number()`。
 - 版本发布后不可变；修改任务变量不影响已发布版本，新变量在下一个版本中生效。
 - 资源必须通过资源传输接口完成 `begin/chunk/commit` 进入 `READY` 后才能被版本引用。
-- 当前不提供：批量门店编排、运行中 Web 界面实时进度推送（可通过运行详情轮询查看）、产物 preview/download、证据包生成与下载。定时配置接口已上线，但保存任务上的定时配置不会自动创建调度任务，必须另行配置调度器；生产环境 `WRITE` 阶段已默认强制审批闸门，请勿为审批账号开通无人值守的自动审批。
+- 当前不提供：批量门店编排、运行中 Web 界面实时进度推送（可通过运行详情轮询查看）、证据包生成与下载。产物 preview/download 已上线，必须使用 `artifactId` 访问；定时配置接口已上线，但保存任务上的定时配置不会自动创建调度任务，必须另行配置调度器；生产环境 `WRITE` 阶段已默认强制审批闸门，请勿为审批账号开通无人值守的自动审批。

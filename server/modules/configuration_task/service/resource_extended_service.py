@@ -6,14 +6,17 @@ SFTP 文件正文不进入资源记录或日志；下载回传响应只含 Base6
 
 import base64
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from module_admin.entity.vo.user_vo import CurrentUserModel
+from module_qtr.service.agent_file_transfer_service import AgentFileTransferService
 from modules.configuration_task.dao.resource_dao import ResourceDao
 from modules.configuration_task.dao.stage_artifact_dao import TaskArtifactDao
 from modules.configuration_task.entity.do.resource_object_do import ResourceObject
@@ -34,6 +37,8 @@ from modules.credential.util.credential_secret_util import decrypt_secret
 
 # 引用保护检查上限：超过该数量的引用拒绝删除并提示先清理产物。
 MAX_REFERENCE_CHECK = 200
+RUN_REPORTS_DIR = Path("storage") / "configuration-task-reports"
+_SERVER_REPORT_KEY = re.compile(r"^reports/(\d+)/(\w{16})$")
 
 
 class ResourceDownloadError(RuntimeError):
@@ -164,26 +169,10 @@ class ResourceExtendedService:
             return ResourceExtendedResult(False, f"资源当前状态不允许下载：{row.status}")
         if row.expires_at and row.expires_at <= datetime.now():
             return ResourceExtendedResult(False, "资源已过期")
-        if row.provider_type == "sftp":
-            binding_id = cls._extract_binding_id(row)
-            if not binding_id:
-                return ResourceExtendedResult(False, "资源缺少 SFTP 凭证绑定信息，无法下载")
-            binding, _credential, secret = cls._resolve_sftp_credential(db, binding_id)
-            if isinstance(binding, str):
-                return ResourceExtendedResult(False, binding)
-            try:
-                with SftpProvider(resolve_sftp_config(secret)) as provider:
-                    content = provider.download(row.object_key)
-            except SftpProviderError as exc:
-                logger.warning(
-                    f"SFTP 资源下载失败: resource_id={resource_id}, code={exc.code}, operator={operator}"
-                )
-                return ResourceExtendedResult(False, exc.args[0] if exc.args else "SFTP 下载失败")
-        else:
-            try:
-                content = cls._read_agent_resource(row, operator)
-            except ResourceDownloadError as exc:
-                return ResourceExtendedResult(False, exc.args[0] if exc.args else "Agent 资源读取失败")
+        try:
+            content = cls.read_resource_content(db, row, operator)
+        except ResourceDownloadError as exc:
+            return ResourceExtendedResult(False, exc.args[0] if exc.args else "资源读取失败")
 
         actual_sha256 = hashlib.sha256(content).hexdigest()
         if actual_sha256 != row.sha256:
@@ -323,17 +312,62 @@ class ResourceExtendedService:
         return ""
 
     @classmethod
+    def read_resource_content(cls, db: Session, row: ResourceObject, operator: str) -> bytes:
+        """按资源执行侧读取正文，供资源下载和产物受控访问共同使用。"""
+        if row.provider_type == "sftp":
+            binding_id = cls._extract_binding_id(row)
+            if not binding_id:
+                raise ResourceDownloadError("SFTP_BINDING_MISSING", "资源缺少 SFTP 凭证绑定信息")
+            binding, _credential, secret = cls._resolve_sftp_credential(db, binding_id)
+            if isinstance(binding, str):
+                raise ResourceDownloadError("SFTP_CREDENTIAL_INVALID", binding)
+            try:
+                with SftpProvider(resolve_sftp_config(secret)) as provider:
+                    return provider.download(row.object_key)
+            except SftpProviderError as exc:
+                raise ResourceDownloadError(
+                    exc.code or "SFTP_READ_FAILED",
+                    exc.args[0] if exc.args else "SFTP 资源读取失败",
+                ) from exc
+            except Exception as exc:
+                raise ResourceDownloadError("SFTP_READ_FAILED", "SFTP 资源读取失败") from exc
+        if row.provider_execution_side == "server":
+            return cls._read_server_report(row)
+        return cls._read_agent_resource(row, operator)
+
+    @classmethod
+    def _read_server_report(cls, row: ResourceObject) -> bytes:
+        """从固定报告根目录读取服务端报告，禁止信任任意 remark 路径。"""
+        match = _SERVER_REPORT_KEY.fullmatch(row.object_key or "")
+        if not match:
+            raise ResourceDownloadError("REPORT_KEY_INVALID", "服务端报告定位键不合法")
+        report_path = RUN_REPORTS_DIR / f"{match.group(1)}_{match.group(2)}.doc"
+        try:
+            resolved_root = RUN_REPORTS_DIR.resolve()
+            resolved_path = report_path.resolve()
+        except OSError as exc:
+            raise ResourceDownloadError("REPORT_PATH_INVALID", "服务端报告路径不可用") from exc
+        if resolved_root not in resolved_path.parents or not resolved_path.is_file():
+            raise ResourceDownloadError("REPORT_NOT_FOUND", "服务端报告不存在")
+        try:
+            return resolved_path.read_bytes()
+        except OSError as exc:
+            raise ResourceDownloadError("REPORT_READ_FAILED", "服务端报告读取失败") from exc
+
+    @classmethod
     def _read_agent_resource(cls, row: ResourceObject, operator: str) -> bytes:
-        """通过 Agent file_read 命令读取受控资源内容；失败抛出 ResourceDownloadError。
-
-        同步实现：调用方负责线程池包裹；不记录 Base64 正文。
-        """
-        from module_qtr.service.agent_file_transfer_service import AgentFileTransferService
-
+        """通过 Agent 受控 file_read 读取正文，并携带登记摘要进行二次校验。"""
+        parts = (row.object_key or "").split("/")
+        if len(parts) != 2 or parts[0] != "resources" or not parts[1]:
+            raise ResourceDownloadError("OBJECT_KEY_INVALID", "Agent 资源定位键不合法")
         command_result = AgentFileTransferService.send_command(
             row.agent_code,
             "file_read",
-            {"resource_id": str(row.resource_id)},
+            {
+                "resource_id": parts[1],
+                "expected_size": row.file_size,
+                "expected_sha256": row.sha256,
+            },
             timeout_seconds=60,
         )
         if not command_result.success:
@@ -366,12 +400,13 @@ class ResourceExtendedService:
                 return exc.args[0] if exc.args else "SFTP 删除失败"
             return ""
         # agent_local：通过 Agent file_delete 命令清理受控文件。
-        from module_qtr.service.agent_file_transfer_service import AgentFileTransferService
-
+        parts = (row.object_key or "").split("/")
+        if len(parts) != 2 or parts[0] != "resources" or not parts[1]:
+            return "Agent 资源定位键不合法"
         command_result = AgentFileTransferService.send_command(
             row.agent_code,
             "file_delete",
-            {"resource_id": str(row.resource_id)},
+            {"resource_id": parts[1]},
             timeout_seconds=30,
         )
         if not command_result.success:

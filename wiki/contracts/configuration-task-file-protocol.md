@@ -19,7 +19,7 @@ related_files:
 
 # 配置任务文件协议
 
-本页定义门店配置任务所需的文件资源协议。当前 Agent 已提供独立的本地资源 manifest 与分片发布控制面；服务端已补齐资源 begin/chunk/commit 编排、SFTP 输入资源和资源状态联动。运行证据支持 metadata-only 产物元数据登记，但不代表服务端持有截图正文；运行产物 preview/download、evidence package 和生产级 Token 认证仍未在本切片实现。
+本页定义门店配置任务所需的文件资源协议。当前 Agent 已提供独立的本地资源 manifest 与分片发布控制面；服务端已补齐资源 begin/chunk/commit 编排、SFTP 输入资源和资源状态联动。运行证据支持 metadata-only 产物元数据登记、Agent `file_stat/file_read` 完整性校验和 artifact 级 preview/download；证据包和生产级 Token 认证仍未在本切片实现。
 
 ```mermaid
 sequenceDiagram
@@ -57,7 +57,7 @@ sequenceDiagram
 - locator 只允许 `resources/<resource_id>`，拒绝绝对路径、`..`、反斜杠、符号链接、目录和资源根外路径；对外错误不包含绝对路径。
 - 默认限制为单块 512 KiB、单文件 100 MiB、并发传输 4 个、未完成传输 TTL 30 分钟、资源 TTL 24 小时；服务构造器可注入测试限制。
 
-当前切片已实现服务端资源传输编排、Agent 本地协议、Web `upload_file` 最小子集，以及配置任务运行的截图/日志产物元数据登记。运行证据支持显式 `capture_screenshot` 的契约字段、证据类型/阶段策略元数据、稳定 `stepId` 和 metadata-only 事件；旧 `stepIndex` 与 Base64 正文事件继续兼容。当前不实现任意文件读取、目录浏览、下载授权、运行产物 preview/download、evidence package 或 AI workspace 改造；SFTP 输入资源下载属于资源 Provider 的既有能力，不等同于运行产物下载。
+当前切片已实现服务端资源传输编排、Agent 本地协议、Web `upload_file` 最小子集，以及配置任务运行的截图/日志产物元数据登记和受控访问。运行证据支持显式 `capture_screenshot` 的契约字段、证据类型/阶段策略元数据、稳定 `stepId`、metadata-only 事件和 `file_stat/file_read` 期望大小/摘要校验；旧 `stepIndex` 与 Base64 正文事件继续兼容。artifact 预览/下载只接受 `artifactId`，不把 `resourceId` 或 `objectKey` 当作授权凭证；当前仍不实现任意文件读取、目录浏览、证据包或 AI workspace 改造；SFTP 输入资源下载属于资源 Provider 的既有能力，不等同于运行产物访问。
 
 
 服务端资源记录至少包括：

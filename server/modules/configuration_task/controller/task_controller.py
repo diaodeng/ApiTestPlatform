@@ -1,7 +1,10 @@
 """配置任务运行域接口：只负责路由、鉴权、线程池包装和响应转换。"""
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -23,6 +26,9 @@ from modules.configuration_task.entity.vo.task_vo import (
     TaskScheduleModel,
     TaskVersionCreateModel,
     TaskVersionUpdateModel,
+)
+from modules.configuration_task.service.artifact_access_service import (
+    ConfigurationTaskArtifactAccessService,
 )
 from modules.configuration_task.service.artifact_service import ConfigurationTaskArtifactService
 from modules.configuration_task.service.report_service import ConfigurationTaskReportService
@@ -329,16 +335,95 @@ async def retry_run_stage(
 
 @taskController.get(
     "/runs/{task_run_id}/artifacts",
-    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:query"))],
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:artifact:query"))],
 )
 async def list_run_artifacts(
     request: Request,
     task_run_id: int,
     query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
 ):
-    """查询运行产物列表。"""
-    data = await run_in_threadpool(ConfigurationTaskArtifactService.list_artifacts, query_db, task_run_id)
-    return ResponseUtil.success(data=data)
+    """按任务和运行归属查询运行产物元数据。"""
+    success, message, data = await run_in_threadpool(
+        ConfigurationTaskArtifactAccessService.list_artifacts,
+        query_db,
+        task_run_id,
+        current_user,
+    )
+    return ResponseUtil.success(msg=message, data=data) if success else ResponseUtil.failure(msg=message)
+
+@taskController.get(
+    "/artifacts/{artifact_id}/preview",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:artifact:preview"))],
+)
+async def preview_artifact(
+    request: Request,
+    artifact_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """按 artifact_id 受控预览安全 MIME 产物正文。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskArtifactAccessService.access_artifact,
+        query_db,
+        artifact_id,
+        current_user,
+        "preview",
+    )
+    if not result.is_success or not result.result:
+        return ResponseUtil.failure(
+            msg=result.message,
+            dict_content={"errorCode": result.error_code or "ARTIFACT_ACCESS_FAILED"},
+        )
+    content = result.result
+    return StreamingResponse(
+        iter([content.content]),
+        media_type=content.mime_type,
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(content.file_name)}",
+            "Content-Length": str(content.file_size),
+            "X-Artifact-Id": str(content.artifact_id),
+            "X-Artifact-SHA256": content.sha256,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@taskController.get(
+    "/artifacts/{artifact_id}/download",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:artifact:download"))],
+)
+async def download_artifact(
+    request: Request,
+    artifact_id: int,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """按 artifact_id 受控下载产物正文，不接受 resourceId 或 objectKey 授权。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskArtifactAccessService.access_artifact,
+        query_db,
+        artifact_id,
+        current_user,
+        "download",
+    )
+    if not result.is_success or not result.result:
+        return ResponseUtil.failure(
+            msg=result.message,
+            dict_content={"errorCode": result.error_code or "ARTIFACT_ACCESS_FAILED"},
+        )
+    content = result.result
+    return StreamingResponse(
+        iter([content.content]),
+        media_type=content.mime_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(content.file_name)}",
+            "Content-Length": str(content.file_size),
+            "X-Artifact-Id": str(content.artifact_id),
+            "X-Artifact-SHA256": content.sha256,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @taskController.post(
