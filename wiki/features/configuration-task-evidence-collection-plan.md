@@ -19,8 +19,10 @@ related_files:
   - client_new/services/web_test_service.py
   - web/src/components/hrm/case/webcase/utils/shared.js
   - web/src/components/hrm/case/webcase/domain/stepDomain.js
-  - web/src/components/hrm/case/webcase/components/StepDetail.vue
-  - web/src/views/hrm/configuration-task/components/VersionStepTable.vue
+  - web/src/components/hrm/case/webcase/components/WebStepDetailDialog.vue
+  - web/src/components/hrm/case/webcase/components/WebStepEditor.vue
+  - web/src/components/hrm/case/webcase/composables/useStepEditorTable.js
+  - web/src/views/hrm/configuration-task/components/VersionDrawer.vue
   - web/src/views/hrm/configuration-task/components/VersionDrawer.vue
   - web/src/views/hrm/configuration-task/components/RunDetailDrawer.vue
 ---

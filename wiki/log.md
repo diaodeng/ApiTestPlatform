@@ -1,3 +1,35 @@
+## [2026-09-21] UX | 步骤区域交互优化：单滚动条/移除冗余按钮/表格单行省略
+
+- 诉求：版本编辑弹窗可视化步骤区域出现两个竖向滚动条；"编辑当前步骤"按钮与行内"编辑"重复；表格长文本换行撑高行。
+- 修复：①WebStepEditor 新增 tableMaxHeight 属性（默认 560 保持用例管理行为），门店配置传空值取消表格内部限高；②VersionDrawer 弹窗 body 作为唯一竖向滚动容器（.version-editor-dialog .el-dialog__body max-height calc(100vh-180px) + overflow-y auto，footer 固定在外，内容滚动可达），删除此前加在 tabs content 上的 480px 限高（双滚动条来源）；注意 append-to-body 后 scoped :deep 无法命中 teleport DOM，需用全局 class 选择器；③工具栏移除"编辑当前步骤"按钮（两侧统一，行内"编辑"已覆盖）；④步骤名称/定位信息/输入参数列加 show-overflow-tooltip，step-cell-text 改单行省略（完整内容走编辑态/详情/tooltip）。
+- 验证：浏览器实测弹窗 body 唯一竖向滚动（clientH 529/scrollH 890 可滚动）、表格无内滚、滚动到底输入绑定/版本变量完整可见、省略号与悬浮 tooltip 正常（截图确认）、"编辑当前步骤"两侧均移除；用例管理侧表格保持 560 内滚不变。dev server 在 HMR 大量变更后模块图易污染（页面空白假象），重启实例 + 全新标签页即恢复，与业务代码无关。
+
+## [2026-09-21] FIX | 版本管理抽屉内弹窗全窗口覆盖：编辑版本与阶段切分补 append-to-body
+
+- 背景：版本编辑与阶段切分弹窗嵌在版本管理 el-drawer 的 DOM 内，抽屉滑入动画的 transform 祖先使弹窗 fixed 遮罩的包含块变成抽屉，弹窗与遮罩被限制在抽屉区域而非覆盖整个视口。
+- 修复：VersionDrawer 的编辑版本 el-dialog 与 StageEditor 根 el-dialog 补 append-to-body，挂载到 body；抽屉内的步骤详情弹窗（WebStepDetailDialog）此前已是 append-to-body。任务页直开的定时/录制转模板/运行配置弹窗在页面级无 transform 祖先，不需要调整。
+- 验证：浏览器实测两弹窗均全窗口居中覆盖（遮罩盖住侧边菜单与背景抽屉），getBoundingClientRect 宽度约 71% 视口、closest('body') 为真；截图确认视觉。
+- 文档：updates/2026-09-21-configuration-task-web-step-editor.md 补充"弹窗层级修复"一节。
+
+## [2026-09-21] FIX | WebStepEditor 统一后两处回归修复：domain 层 describeLocator 缺失与 index.vue 三函数引用丢失
+
+- 背景：统一改造后在浏览器实测发现两类问题。①门店配置 v6 版本步骤表格从第 3 步（首个带定位器的步骤）起渲染中断（行内列缺失、后续空行），多次开关详情弹窗出现叠加，控制台报 Uncaught TypeError: Cannot read properties of null (reading 'emitsOptions')；②Web 测试管理页面整页空白（404 或 app-main 空）。
+- 根因一：stepDomain.js 的 describeStepTarget 调用 describeLocator，但该函数既未定义也未导入——与 locatorDomain 头注释记录的历史拆分遗留同款；manager 本地副本掩盖了问题，新组件是 domain 版首个真实使用方，渲染含定位快照的行时 ReferenceError 中断 Vue patch（emitsOptions 报错即渲染中断的表象）。
+- 根因二：index.vue 的 useRecordingManager 依赖注入引用 getActionLabel/describeStepTarget/summarizeStepParams，三者原本来自 caseEditorManager 解构，精简 manager 返回值后漏改该处，setup 抛 ReferenceError 导致页面渲染空。二分验证（stash 后正常、pop 后必现，均在干净 dev server + 全新标签页操作）确认因果，此前一度误判为 HMR/keep-alive 污染。
+- 修复：locatorDomain.js 新增并导出 describeLocator（移植 manager 原实现，含 nth 后缀与 role/text/testId/id/name/css 分支），stepDomain.js 导入使用；stepDomain.js 补导出 getActionLabel；index.vue 从 domain 层导入三函数；同时删除 stepDomain 中引用未定义符号的死导出 addStep/insertStep/copyStep/removeStep/moveStep。
+- 排查副产品：本机曾并存两个 vite dev server（80 与 127.0.0.1:81），HMR 大量文件变更后模块图被污染，页面渲染忽好忽坏；已统一为单实例，回归验证均在干净实例 + 全新标签页进行。
+- 验证（浏览器实测，admin 登录 .env.dev）：门店配置 v6 步骤表格 9 行完整渲染、证据列按需显隐、详情弹窗 #3/#5/#8 连续开关标题正确、指纹字段按 showFingerprint=false 正确隐藏、页面错误收集器零报错；用例管理新增弹窗 3 步新增/前插/名称列内联编辑生效、详情 #3 到 #1 切换正确、指纹字段正确显示、高级 JSON 为提交格式；npm run build:prod 通过。
+- 文档：web/public/docs/updates/2026-09-21-configuration-task-web-step-editor.md 已补充"回归修复（同日补充）"一节。
+
+## [2026-09-21] REFACTOR | 步骤编辑公共组件 WebStepEditor：统一用例管理与门店配置版本编辑
+
+- 背景：对比 7bb5f7d0（门店配置前端产生之前）确认，用例编辑的步骤表格支持内联编辑/前插/选中行高亮/JSON 双向同步，而门店配置 VersionStepTable 是独立简化实现（无内联编辑、纯文本 JSON 框、样式不一致），详情弹窗"指纹"永远为空（录制 buildSnapshot 不生成 fingerprint，用例指纹是保存时服务端 _build_fingerprint 计算入库，版本 steps_json 链路从不计算）。另发现共享层存在死代码：webcase/components/CaseEditor.vue（495 行，模板引用未定义变量、零引用）与 composables/useCaseEditor.js（594 行，零引用），真正逻辑在视图级 useCaseEditorManager（1360 行，内含与 domain 层重复的 normalizeStep 等副本）；stepDomain.js 中 addStep/insertStep/copyStep 等 5 个导出引用未定义变量属死代码。
+- 方案：抽取公共组件 WebStepEditor + WebStepDetailDialog + useStepEditorTable 组合函数（components/hrm/case/webcase/），表格/详情逻辑平移自 useCaseEditorManager 并改为调用既有 domain 层；JSON 序列化经 serializeSteps prop 注入（用例侧保持 prepareStepForSubmit 提交格式预览，配置侧默认原始序列化）；保存前由父组件调用 expose 的 flush() 应用 JSON Tab 编辑；详情弹窗合并截图证据与上传文件区块（取自 StepDetail.vue），指纹字段经 showFingerprint prop 显隐——用例显示（服务端落库），配置隐藏（不落指纹，避免误导）。
+- 改造：CaseEditorDialogs 变薄壳（用例表单 + WebStepEditor），useCaseEditorManager 删除 41 个已平移函数及相关状态/watch，return 缩减为表单/校验/提交链路（1360→787 行）；VersionDrawer 用 WebStepEditor 替换 VersionStepTable + 纯文本 JSON 框，保存前 flush；删除死代码 CaseEditor.vue、useCaseEditor.js、StepDetail.vue、空 index.js、VersionStepTable.vue。
+- 文档：web/public/docs/configuration-task.md 版本编辑章节、web_case_use.md 4.2/4.3 章节更新；更新记录 2026-09-21-configuration-task-web-step-editor.md。
+- 验证：npm run build:prod 通过；被删文件全仓库零引用（grep 校验）；manager node --check 语法通过。建议回归：用例管理编辑/JSON 应用/保存，门店配置版本草稿编辑/阶段切分/发布，录制转模板。
+- 风险：dialogs.scss 与 web-step-editor.scss 存在同名类需同步维护（录制/运行对话框仍引用前者）；版本步骤指纹按设计不显示，若未来需要元素库匹配需在版本保存链路补服务端计算。
+
 ## [2026-09-21] FIX | 配置任务版本步骤详情弹窗空指针修复 + 阶段证据预校验
 
 - 背景：门店配置版本发布报"阶段 门店信息 要求证据，但未配置 capture_screenshot 步骤"，且版本编辑弹窗新增步骤后点详情无响应（控制台 Uncaught TypeError: Cannot read properties of null (reading elementText)）。分析确认两点：阶段证据模式是对步骤的约束声明而非阶段结束自动截图（设计见 wiki/features/configuration-task-evidence-collection-plan.md 两层模型）；详情弹窗崩溃点在共享组件 StepDetail.vue 定位卡片直接绑定 targetSnapshot.elementText。

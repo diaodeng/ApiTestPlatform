@@ -1,5 +1,5 @@
 <template>
-    <el-dialog v-model="visible" :title="`阶段切分 v${version?.versionNo || ''}`" width="980px">
+    <el-dialog v-model="visible" :title="`阶段切分 v${version?.versionNo || ''}`" width="980px" append-to-body>
         <el-alert
             v-if="version && version.status !== 'DRAFT'"
             title="仅草稿版本可修改阶段切分"

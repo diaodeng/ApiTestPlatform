@@ -116,6 +116,33 @@ export function createDefaultLocator(locatorType = 'css') {
   };
 }
 
+/**
+ * 把首选定位器摘要成一行可读文本，用于步骤表格"定位信息"列。
+ * @param {Object} locator 定位器对象
+ * @returns {string} 摘要文本
+ */
+export function describeLocator(locator) {
+  if (!locator) return '未设置定位器';
+  const resolvedIndex = resolveLocatorIndex(locator.locatorValue);
+  const indexSuffix = resolvedIndex === null ? '' : ` / nth=${resolvedIndex}`;
+  if (locator.locatorType === 'role') {
+    return `role=${locator.locatorValue?.role || '-'} / name=${locator.locatorValue?.name || '-'}${indexSuffix}`;
+  }
+  if (['label', 'placeholder', 'text'].includes(locator.locatorType)) {
+    return `${locator.locatorType}=${locator.locatorValue?.text || '-'}${indexSuffix}`;
+  }
+  if (locator.locatorType === 'test_id') {
+    return `testId=${locator.locatorValue?.testId || '-'}${indexSuffix}`;
+  }
+  if (locator.locatorType === 'id') {
+    return `id=${locator.locatorValue?.id || '-'}${indexSuffix}`;
+  }
+  if (locator.locatorType === 'name') {
+    return `name=${locator.locatorValue?.name || '-'}${indexSuffix}`;
+  }
+  return `${locator.locatorType}=${locator.locatorValue?.selector || '-'}${indexSuffix}`;
+}
+
 export function addLocator(step) {
   if (!step.targetSnapshot) {
     step.targetSnapshot = createDefaultTargetSnapshot();

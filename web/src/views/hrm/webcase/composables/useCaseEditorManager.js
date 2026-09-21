@@ -16,7 +16,6 @@ export function useCaseEditorManager(options) {
         isPlainObject,
         isSameId,
         normalizeIdValue,
-        safeJsonStringify,
         syncCaseOptions,
         refreshCaseTab,
         loadAllCaseOptions,
@@ -26,11 +25,6 @@ export function useCaseEditorManager(options) {
     } = options;
 
     const showCaseDialog = ref(false);
-    const showStepDetailDialog = ref(false);
-    const caseEditorTab = ref("visual");
-    const selectedStepIndex = ref(-1);
-    const stepEditingCell = ref({ index: -1, field: "" });
-    const stepsText = ref("[]");
     const form = ref(createEmptyCase());
 
     function createDefaultContext() {
@@ -401,16 +395,6 @@ export function useCaseEditorManager(options) {
         };
     }
 
-    function createDefaultStep(actionType = "click") {
-        return normalizeStep({
-            actionType,
-            stepName: getActionLabel(actionType),
-            targetSnapshot: stepNeedsTarget(actionType)
-                ? createDefaultTargetSnapshot()
-                : null,
-        });
-    }
-
     function createEmptyCase() {
         return {
             webCaseId: undefined,
@@ -465,517 +449,6 @@ export function useCaseEditorManager(options) {
     const caseDialogTitle = computed(
         () => `${form.value.webCaseId ? "编辑" : "新增"} Web 用例`,
     );
-    const currentStep = computed(
-        () => form.value.steps[selectedStepIndex.value] || null,
-    );
-    const stepDetailTitle = computed(() =>
-        selectedStepIndex.value >= 0
-            ? `步骤详情 - #${selectedStepIndex.value + 1}`
-            : "步骤详情",
-    );
-
-    function describeLocator(locator) {
-        if (!locator) return "未设置定位器";
-        const resolvedIndex = resolveLocatorIndex(locator.locatorValue);
-        const indexSuffix = resolvedIndex === null ? "" : ` / nth=${resolvedIndex}`;
-        if (locator.locatorType === "role") {
-            return `role=${locator.locatorValue.role || "-"} / name=${locator.locatorValue.name || "-"}${indexSuffix}`;
-        }
-        if (["label", "placeholder", "text"].includes(locator.locatorType)) {
-            return `${locator.locatorType}=${locator.locatorValue.text || "-"}${indexSuffix}`;
-        }
-        if (locator.locatorType === "test_id") {
-            return `testId=${locator.locatorValue.testId || "-"}${indexSuffix}`;
-        }
-        if (locator.locatorType === "id") {
-            return `id=${locator.locatorValue.id || "-"}${indexSuffix}`;
-        }
-        if (locator.locatorType === "name") {
-            return `name=${locator.locatorValue.name || "-"}${indexSuffix}`;
-        }
-        return `${locator.locatorType}=${locator.locatorValue.selector || "-"}${indexSuffix}`;
-    }
-
-    function describeStepTarget(step) {
-        if (!stepNeedsTarget(step.actionType)) {
-            if (step.actionType === "goto") return step.params?.url || "页面跳转";
-            if (step.actionType === "window_maximize") return "窗口最大化";
-            if (step.actionType === "set_window_size") {
-                const width = Number(step.params?.width ?? 0) || 0;
-                const height = Number(step.params?.height ?? 0) || 0;
-                return width > 0 && height > 0
-                    ? `窗口尺寸 ${width}x${height}`
-                    : "窗口尺寸调整";
-            }
-            if (["sleep", "wait"].includes(step.actionType)) {
-                return `等待 ${Number(step.params?.waitMs ?? 0) || 0}ms`;
-            }
-            if (step.actionType === "assert_page_contains") {
-                return `页面包含 ${step.params?.text || "-"}`;
-            }
-            if (step.actionType === "assert_page_not_contains") {
-                return `页面不包含 ${step.params?.text || "-"}`;
-            }
-            if (step.actionType === "assert_title_contains") {
-                return `标题包含 ${step.params?.title || "-"}`;
-            }
-            if (step.actionType === "assert_url_contains") {
-                return `URL包含 ${step.params?.urlPart || "-"}`;
-            }
-            return "页面级动作";
-        }
-        const firstLocator =
-            step.targetSnapshot?.locators?.find((item) => item.enabled !== false) ||
-            step.targetSnapshot?.locators?.[0];
-        const locatorText = firstLocator
-            ? describeLocator(firstLocator)
-            : "未设置定位器";
-        const elementText = step.targetSnapshot?.elementText
-            ? ` / 文本=${step.targetSnapshot.elementText}`
-            : "";
-        return `${locatorText}${elementText}`;
-    }
-
-    function summarizeStepParams(step) {
-        if (!step) return "-";
-        const thinkTimeMs = normalizeThinkTimeMs(step.params?.thinkTimeMs);
-        const appendThinkTime = (text) =>
-            thinkTimeMs > 0
-                ? `${text || "-"} / 思考${thinkTimeMs}ms`
-                : text || "-";
-        if (step.actionType === "goto") {
-            return appendThinkTime(step.params?.url || "-");
-        }
-        if (step.actionType === "window_maximize") {
-            return appendThinkTime("最大化窗口");
-        }
-        if (step.actionType === "set_window_size") {
-            const width = Number(step.params?.width ?? 0) || 0;
-            const height = Number(step.params?.height ?? 0) || 0;
-            return appendThinkTime(
-                width > 0 && height > 0 ? `${width}x${height}` : "自定义窗口尺寸",
-            );
-        }
-        if (step.actionType === "fill") {
-            return appendThinkTime(step.params?.value || "-");
-        }
-        if (step.actionType === "upload_file") {
-            const fileKey = `${step.params?.fileKey || ""}`.trim();
-            const resourceCount = Array.isArray(step.params?.resourceIds)
-                ? step.params.resourceIds.filter((item) => `${item ?? ""}`.trim()).length
-                : 0;
-            const modeText = step.params?.multiple === true ? "多文件" : "单文件";
-            return appendThinkTime(
-                `${fileKey || "未设置资源键"} / ${modeText} / ${resourceCount}个资源`,
-            );
-        }
-        if (step.actionType === "press") {
-            return appendThinkTime(step.params?.key || "-");
-        }
-        if (step.actionType === "select_option") {
-            const valuesText =
-                Array.isArray(step.params?.values) && step.params.values.length
-                    ? step.params.values.join(", ")
-                    : "-";
-            return appendThinkTime(valuesText);
-        }
-        if (["sleep", "wait"].includes(step.actionType)) {
-            return appendThinkTime(`${Number(step.params?.waitMs ?? 0) || 0}ms`);
-        }
-        if (step.actionType === "assert_page_contains") {
-            return appendThinkTime(`页面包含：${step.params?.text || "-"}`);
-        }
-        if (step.actionType === "assert_page_not_contains") {
-            return appendThinkTime(`页面不含：${step.params?.text || "-"}`);
-        }
-        if (step.actionType === "assert_title_contains") {
-            return appendThinkTime(`标题包含：${step.params?.title || "-"}`);
-        }
-        if (step.actionType === "assert_url_contains") {
-            return appendThinkTime(`URL包含：${step.params?.urlPart || "-"}`);
-        }
-        if (step.actionType === "assert_text_equals") {
-            return appendThinkTime(`文本等于：${step.params?.expected || "-"}`);
-        }
-        if (step.actionType === "assert_text_contains") {
-            return appendThinkTime(`文本包含：${step.params?.expected || "-"}`);
-        }
-        return appendThinkTime("-");
-    }
-
-    function syncStepsTextFromForm() {
-        stepsText.value = safeJsonStringify(
-            form.value.steps.map((step, index) =>
-                prepareStepForSubmit(step, index + 1),
-            ),
-        );
-    }
-
-    function applyStepsTextToForm(showSuccess = false) {
-        let parsedSteps = [];
-        try {
-            parsedSteps = JSON.parse(stepsText.value || "[]");
-        } catch (error) {
-            ElMessage.error(`步骤 JSON 解析失败：${error.message}`);
-            return false;
-        }
-        if (!Array.isArray(parsedSteps)) {
-            ElMessage.error("步骤 JSON 必须是数组");
-            return false;
-        }
-        form.value.steps = parsedSteps.map((step, index) =>
-            normalizeStep(step, index),
-        );
-        selectedStepIndex.value = form.value.steps.length ? 0 : -1;
-        if (showSuccess) {
-            ElMessage.success("JSON 已同步到可视化编辑器");
-        }
-        return true;
-    }
-
-    function stripStepIdentity(step) {
-        const cloned = normalizeStep(cloneData(step));
-        cloned.stepId = undefined;
-        if (cloned.targetSnapshot) {
-            cloned.targetSnapshot.targetSnapshotId = undefined;
-            cloned.targetSnapshot.locators = cloned.targetSnapshot.locators.map(
-                (locator, index) => ({
-                    ...locator,
-                    locatorSnapshotId: undefined,
-                    priority: index,
-                }),
-            );
-        }
-        return cloned;
-    }
-
-    function selectStep(index) {
-        selectedStepIndex.value = index;
-    }
-
-    function startStepCellEditing(index, field) {
-        if (index < 0 || index >= form.value.steps.length) {
-            return;
-        }
-        selectedStepIndex.value = index;
-        stepEditingCell.value = {
-            index,
-            field: `${field || ""}`.trim(),
-        };
-    }
-
-    function finishStepCellEditing() {
-        stepEditingCell.value = { index: -1, field: "" };
-    }
-
-    function isStepCellEditing(index, field) {
-        return (
-            stepEditingCell.value.index === index &&
-            stepEditingCell.value.field === `${field || ""}`.trim()
-        );
-    }
-
-    function openStepDetailByIndex(index) {
-        if (index < 0 || index >= form.value.steps.length) {
-            return;
-        }
-        finishStepCellEditing();
-        form.value.steps[index] = normalizeStep(form.value.steps[index], index);
-        if (stepNeedsTarget(form.value.steps[index]?.actionType)) {
-            getPrimaryLocator(form.value.steps[index]);
-        }
-        selectedStepIndex.value = index;
-        showStepDetailDialog.value = true;
-    }
-
-    function handleStepRowClick(row) {
-        const index = form.value.steps.indexOf(row);
-        if (index === -1) {
-            return;
-        }
-        selectedStepIndex.value = index;
-        if (stepEditingCell.value.index !== index) {
-            finishStepCellEditing();
-        }
-    }
-
-    function getStepRowClassName({ row }) {
-        return form.value.steps.indexOf(row) === selectedStepIndex.value
-            ? "selected-step-row"
-            : "";
-    }
-
-    function addStep(actionType = "click") {
-        form.value.steps.push(createDefaultStep(actionType));
-        selectedStepIndex.value = form.value.steps.length - 1;
-        finishStepCellEditing();
-    }
-
-    function insertStep(index, actionType = "click") {
-        const insertIndex = Math.max(
-            0,
-            Math.min(Number(index), form.value.steps.length),
-        );
-        form.value.steps.splice(insertIndex, 0, createDefaultStep(actionType));
-        selectedStepIndex.value = insertIndex;
-        finishStepCellEditing();
-    }
-
-    function copyStep(index) {
-        const source = form.value.steps[index];
-        if (!source) return;
-        const copied = stripStepIdentity(source);
-        copied.stepName = `${copied.stepName} - 副本`;
-        form.value.steps.splice(index + 1, 0, copied);
-        selectedStepIndex.value = index + 1;
-    }
-
-    function removeStep(index) {
-        form.value.steps.splice(index, 1);
-        if (!form.value.steps.length) {
-            selectedStepIndex.value = -1;
-            finishStepCellEditing();
-            return;
-        }
-        selectedStepIndex.value = Math.min(index, form.value.steps.length - 1);
-        finishStepCellEditing();
-    }
-
-    function moveStep(index, direction) {
-        const targetIndex = index + direction;
-        if (targetIndex < 0 || targetIndex >= form.value.steps.length) return;
-        const steps = [...form.value.steps];
-        [steps[index], steps[targetIndex]] = [steps[targetIndex], steps[index]];
-        form.value.steps = steps;
-        selectedStepIndex.value = targetIndex;
-        finishStepCellEditing();
-    }
-
-    function addLocator(step) {
-        if (!step.targetSnapshot) {
-            step.targetSnapshot = createDefaultTargetSnapshot();
-        }
-        if (!Array.isArray(step.targetSnapshot.locators)) {
-            step.targetSnapshot.locators = [];
-        }
-        step.targetSnapshot.locators.push(createDefaultLocator());
-    }
-
-    function moveLocator(step, index, direction) {
-        if (!step?.targetSnapshot?.locators) return;
-        const targetIndex = index + direction;
-        if (targetIndex < 0 || targetIndex >= step.targetSnapshot.locators.length) {
-            return;
-        }
-        const locators = [...step.targetSnapshot.locators];
-        [locators[index], locators[targetIndex]] = [
-            locators[targetIndex],
-            locators[index],
-        ];
-        step.targetSnapshot.locators = locators;
-    }
-
-    function setPrimaryLocator(step, index) {
-        if (!step?.targetSnapshot?.locators) return;
-        if (index <= 0 || index >= step.targetSnapshot.locators.length) return;
-        const locators = [...step.targetSnapshot.locators];
-        const [preferred] = locators.splice(index, 1);
-        locators.unshift(preferred);
-        step.targetSnapshot.locators = locators;
-    }
-
-    function removeLocator(step, index) {
-        if (!step?.targetSnapshot?.locators) return;
-        step.targetSnapshot.locators.splice(index, 1);
-    }
-
-    function addAssertion(step) {
-        step.assertions.push(createDefaultAssertion());
-    }
-
-    function removeAssertion(step, index) {
-        step.assertions.splice(index, 1);
-    }
-
-    function handleAssertionTypeChange(assertion) {
-        if (!assertionNeedsTarget(assertion?.assertType)) {
-            return;
-        }
-        getAssertionLocatorList(assertion);
-    }
-
-    function ensureAssertionTargetSnapshot(assertion) {
-        if (!assertion?.targetSnapshot) {
-            assertion.targetSnapshot = createDefaultTargetSnapshot();
-        }
-        if (!Array.isArray(assertion.targetSnapshot.locators)) {
-            assertion.targetSnapshot.locators = [];
-        }
-        return assertion.targetSnapshot;
-    }
-
-    function getAssertionLocatorList(assertion) {
-        if (!assertionNeedsTarget(assertion?.assertType)) {
-            return [];
-        }
-        const snapshot = ensureAssertionTargetSnapshot(assertion);
-        if (!snapshot.locators.length) {
-            snapshot.locators = [createDefaultLocator()];
-        }
-        return snapshot.locators;
-    }
-
-    function getAssertionPrimaryLocator(assertion) {
-        const locators = getAssertionLocatorList(assertion);
-        return (
-            locators.find((item) => item.enabled !== false) || locators[0] || null
-        );
-    }
-
-    function updateAssertionPrimaryLocatorType(assertion, locatorType) {
-        const locator = getAssertionPrimaryLocator(assertion);
-        if (!locator) {
-            return;
-        }
-        locator.locatorType = locatorType;
-        locator.locatorValue = normalizeLocatorValue(locatorType, {});
-    }
-
-    function updateAssertionPrimaryLocatorValue(assertion, key, value) {
-        const locator = getAssertionPrimaryLocator(assertion);
-        if (!locator) {
-            return;
-        }
-        locator.locatorValue = normalizeLocatorValue(
-            locator.locatorType,
-            locator.locatorValue,
-        );
-        locator.locatorValue[key] = value;
-    }
-
-    function addAssertionLocator(assertion) {
-        if (!assertionNeedsTarget(assertion?.assertType)) return;
-        const snapshot = ensureAssertionTargetSnapshot(assertion);
-        snapshot.locators.push(createDefaultLocator());
-    }
-
-    function moveAssertionLocator(assertion, index, direction) {
-        const locators = getAssertionLocatorList(assertion);
-        const targetIndex = index + direction;
-        if (targetIndex < 0 || targetIndex >= locators.length) return;
-        [locators[index], locators[targetIndex]] = [
-            locators[targetIndex],
-            locators[index],
-        ];
-    }
-
-    function setAssertionPrimaryLocator(assertion, index) {
-        const locators = getAssertionLocatorList(assertion);
-        if (index <= 0 || index >= locators.length) return;
-        const [preferred] = locators.splice(index, 1);
-        locators.unshift(preferred);
-    }
-
-    function removeAssertionLocator(assertion, index) {
-        const snapshot = ensureAssertionTargetSnapshot(assertion);
-        if (!Array.isArray(snapshot.locators) || !snapshot.locators.length) return;
-        snapshot.locators.splice(index, 1);
-    }
-
-    function handleStepActionTypeChange(step) {
-        step.params = normalizeStepParams(step.actionType, step.params);
-        if (stepNeedsTarget(step.actionType) && !step.targetSnapshot) {
-            step.targetSnapshot = createDefaultTargetSnapshot();
-        }
-    }
-
-    function getPrimaryLocator(step) {
-        if (!stepNeedsTarget(step?.actionType)) {
-            return null;
-        }
-        if (!step.targetSnapshot) {
-            step.targetSnapshot = createDefaultTargetSnapshot();
-        }
-        if (
-            !Array.isArray(step.targetSnapshot.locators) ||
-            !step.targetSnapshot.locators.length
-        ) {
-            step.targetSnapshot.locators = [createDefaultLocator()];
-        }
-        return (
-            step.targetSnapshot.locators.find((item) => item.enabled !== false) ||
-            step.targetSnapshot.locators[0]
-        );
-    }
-
-    function updatePrimaryLocatorType(step, locatorType) {
-        const locator = getPrimaryLocator(step);
-        if (!locator) {
-            return;
-        }
-        locator.locatorType = locatorType;
-        locator.locatorValue = normalizeLocatorValue(locatorType, {});
-    }
-
-    function updatePrimaryLocatorValue(step, key, value) {
-        const locator = getPrimaryLocator(step);
-        if (!locator) {
-            return;
-        }
-        locator.locatorValue = normalizeLocatorValue(
-            locator.locatorType,
-            locator.locatorValue,
-        );
-        locator.locatorValue[key] = value;
-    }
-
-    function handleLocatorTypeChange(locator) {
-        locator.locatorValue = normalizeLocatorValue(
-            locator.locatorType,
-            locator.locatorValue,
-        );
-    }
-
-    function updateLocatorNth(locator, rawValue) {
-        if (!locator) return;
-        locator.locatorValue = normalizeLocatorValue(
-            locator.locatorType,
-            locator.locatorValue,
-        );
-        delete locator.locatorValue.index;
-        delete locator.locatorValue.targetIndex;
-        delete locator.locatorValue.target_index;
-        if (rawValue === undefined || rawValue === null || rawValue === "") {
-            delete locator.locatorValue.nth;
-            return;
-        }
-        const parsed = Number(rawValue);
-        if (Number.isInteger(parsed) && parsed >= 0) {
-            locator.locatorValue.nth = parsed;
-            return;
-        }
-        delete locator.locatorValue.nth;
-    }
-
-    function isLocatorFilled(locator) {
-        if (!locator || locator.enabled === false) return false;
-        if (locator.locatorType === "role") {
-            return Boolean(locator.locatorValue.role);
-        }
-        if (["label", "placeholder", "text"].includes(locator.locatorType)) {
-            return Boolean(locator.locatorValue.text);
-        }
-        if (locator.locatorType === "test_id") {
-            return Boolean(locator.locatorValue.testId);
-        }
-        if (locator.locatorType === "id") {
-            return Boolean(locator.locatorValue.id);
-        }
-        if (locator.locatorType === "name") {
-            return Boolean(locator.locatorValue.name);
-        }
-        return Boolean(locator.locatorValue.selector);
-    }
 
     function getCaseValidationError() {
         if (!form.value.caseName?.trim()) return "用例名称不能为空";
@@ -1200,11 +673,8 @@ export function useCaseEditorManager(options) {
     }
 
     function resetForm() {
+        // 步骤表格内部状态（选中行/JSON 文本/Tab）由 WebStepEditor 自行重置。
         form.value = createEmptyCase();
-        selectedStepIndex.value = -1;
-        finishStepCellEditing();
-        caseEditorTab.value = "visual";
-        syncStepsTextFromForm();
     }
 
     function handleAdd() {
@@ -1216,17 +686,12 @@ export function useCaseEditorManager(options) {
         return getWebCase(row.webCaseId).then((response) => {
             form.value = normalizeCase(response.data || {});
             syncCaseOptions(form.value);
-            selectedStepIndex.value = form.value.steps.length ? 0 : -1;
-            syncStepsTextFromForm();
-            caseEditorTab.value = "visual";
             showCaseDialog.value = true;
         });
     }
 
     function saveCase() {
-        if (caseEditorTab.value === "json" && !applyStepsTextToForm()) {
-            return;
-        }
+        // JSON Tab 的保存前应用由 CaseEditorDialogs 调用 WebStepEditor.flush 完成。
         const errorMessage = getCaseValidationError();
         if (errorMessage) {
             ElMessage.error(errorMessage);
@@ -1260,33 +725,6 @@ export function useCaseEditorManager(options) {
     }
 
     watch(
-        () => form.value.steps,
-        () => {
-            if (caseEditorTab.value !== "json") {
-                syncStepsTextFromForm();
-            }
-        },
-        { deep: true },
-    );
-
-    watch(
-        () => form.value.steps.length,
-        (length) => {
-            if (!length) {
-                selectedStepIndex.value = -1;
-                return;
-            }
-            if (selectedStepIndex.value < 0) {
-                selectedStepIndex.value = 0;
-                return;
-            }
-            if (selectedStepIndex.value >= length) {
-                selectedStepIndex.value = length - 1;
-            }
-        },
-    );
-
-    watch(
         () => form.value.projectId,
         (projectId) => {
             if (!projectId) return;
@@ -1302,59 +740,14 @@ export function useCaseEditorManager(options) {
 
     return {
         showCaseDialog,
-        showStepDetailDialog,
-        caseEditorTab,
-        selectedStepIndex,
-        stepsText,
         form,
         filteredCaseModules,
         caseDialogTitle,
-        currentStep,
-        stepDetailTitle,
-        getActionLabel,
-        stepNeedsTarget,
-        assertionNeedsTarget,
-        describeStepTarget,
-        summarizeStepParams,
-        syncStepsTextFromForm,
-        applyStepsTextToForm,
-        startStepCellEditing,
-        finishStepCellEditing,
-        isStepCellEditing,
-        openStepDetailByIndex,
-        handleStepRowClick,
-        getStepRowClassName,
-        addStep,
-        insertStep,
-        copyStep,
-        removeStep,
-        moveStep,
-        addLocator,
-        moveLocator,
-        setPrimaryLocator,
-        removeLocator,
-        addAssertion,
-        removeAssertion,
-        handleAssertionTypeChange,
-        getAssertionLocatorList,
-        getAssertionPrimaryLocator,
-        updateAssertionPrimaryLocatorType,
-        updateAssertionPrimaryLocatorValue,
-        addAssertionLocator,
-        moveAssertionLocator,
-        setAssertionPrimaryLocator,
-        removeAssertionLocator,
-        handleStepActionTypeChange,
-        getPrimaryLocator,
-        updatePrimaryLocatorType,
-        updatePrimaryLocatorValue,
-        handleLocatorTypeChange,
-        updateLocatorNth,
-        isLocatorFilled,
         resetForm,
         handleAdd,
         handleEdit,
         saveCase,
-        resolveLocatorIndex,
+        // 提交格式序列化：供 WebStepEditor 的 JSON Tab 预览使用。
+        prepareStepForSubmit,
     };
 }

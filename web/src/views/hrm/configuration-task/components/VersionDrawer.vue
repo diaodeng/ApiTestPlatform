@@ -44,13 +44,15 @@
                 </el-table-column>
             </el-table>
 
-            <!-- 版本编辑器 -->
+            <!-- 版本编辑器：append-to-body 挂到 body，弹窗与遮罩覆盖整个窗口而非局限在抽屉内 -->
             <el-dialog
                 v-model="editorVisible"
                 :title="`编辑版本 v${editing?.versionNo || ''}`"
                 width="72%"
                 top="5vh"
                 destroy-on-close
+                append-to-body
+                class="version-editor-dialog"
             >
                 <el-form label-width="110px">
                     <el-row :gutter="16">
@@ -94,20 +96,14 @@
                         </el-select>
                     </el-form-item>
                     <el-form-item label="步骤">
-                        <el-tabs v-model="stepsEditorTab" type="card" class="steps-editor-tabs">
-                            <!-- 可视化模式：复用 Web 用例的 StepDetail 编辑能力（自包含组件） -->
-                            <el-tab-pane label="可视化编辑" name="visual">
-                                <VersionStepTable :steps="editorSteps" @change="syncStepsToJson" />
-                            </el-tab-pane>
-                            <el-tab-pane label="JSON" name="json">
-                                <el-input
-                                    v-model="stepsText"
-                                    type="textarea"
-                                    :rows="14"
-                                    placeholder="Web 步骤数组 JSON"
-                                />
-                            </el-tab-pane>
-                        </el-tabs>
+                        <!-- 步骤编辑复用公共组件 WebStepEditor（可视化表格 + 高级 JSON + 步骤详情弹窗），
+                             与用例管理共用同一交互与样式；版本步骤不落指纹，隐藏指纹字段。 -->
+                        <WebStepEditor
+                            ref="stepEditorRef"
+                            :steps="editorSteps"
+                            :show-fingerprint="false"
+                            :table-max-height="null"
+                        />
                     </el-form-item>
                     <el-form-item>
                         <template #label>
@@ -168,7 +164,7 @@
 import { ref, reactive, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import StageEditor from "./StageEditor.vue";
-import VersionStepTable from "./VersionStepTable.vue";
+import WebStepEditor from "@/components/hrm/case/webcase/components/WebStepEditor.vue";
 import PromptButton from "@/components/PromptButton/index.vue";
 import { browserOptions } from "@/components/hrm/case/webcase/utils/shared.js";
 import { listWebCredentialOptions } from "../composables/recordingOptions.js";
@@ -192,34 +188,12 @@ const stageVisible = ref(false);
 const stageVersion = ref(null);
 const editing = ref(null);
 const editorForm = reactive({ startUrl: "", browserName: "chromium", headless: false, credentialBindingId: "" });
-const stepsText = ref("[]");
 const bindingsText = ref("{}");
 const versionVariablesText = ref("{}");
-// 步骤编辑双模式：可视化表格直接操作 editorSteps 数组，JSON 模式编辑文本；
-// 切换/保存时以对方为源同步，保证两种模式不丢数据。
-const stepsEditorTab = ref("visual");
+// 步骤编辑交给公共组件 WebStepEditor：可视化表格与 JSON 双模式都在组件内部，
+// 保存前调用其 flush() 应用 JSON 编辑，步骤数据始终以 editorSteps 数组为准。
 const editorSteps = ref([]);
-
-// 可视化表格变更后同步回 JSON 文本，保持两视图一致。
-function syncStepsToJson() {
-    stepsText.value = JSON.stringify(editorSteps.value, null, 2);
-}
-
-// 从 JSON 文本刷新可视化表格；解析失败返回 false 并提示。
-function syncStepsFromJson() {
-    try {
-        const parsed = JSON.parse(stepsText.value || "[]");
-        if (!Array.isArray(parsed)) {
-            ElMessage.warning("步骤必须是合法 JSON 数组");
-            return false;
-        }
-        editorSteps.value = parsed;
-        return true;
-    } catch {
-        ElMessage.warning("步骤必须是合法 JSON 数组");
-        return false;
-    }
-}
+const stepEditorRef = ref(null);
 
 watch(
     () => [props.modelValue, props.task?.taskId],
@@ -290,10 +264,8 @@ function openEditor(row) {
         headless: row.headless,
         credentialBindingId: row.credentialBindingId
     });
-    stepsText.value = JSON.stringify(row.steps || [], null, 2);
-    // 可视化表格用独立数组持有步骤（元素引用与 JSON 文本同步）。
+    // 可视化表格用独立数组持有步骤（WebStepEditor 打开时自动初始化 JSON 文本与选中行）。
     editorSteps.value = Array.isArray(row.steps) ? [...row.steps] : [];
-    stepsEditorTab.value = "visual";
     bindingsText.value = JSON.stringify(row.inputBindings || {}, null, 2);
     versionVariablesText.value = JSON.stringify(row.variables || {}, null, 2);
     editorVisible.value = true;
@@ -301,10 +273,8 @@ function openEditor(row) {
 
 async function saveVersion() {
     if (!editing.value) return;
-    // 保存时以当前激活的编辑视图为准：可视化 Tab 先同步到 JSON，JSON Tab 先解析刷新表格。
-    if (stepsEditorTab.value === "visual") {
-        syncStepsToJson();
-    } else if (!syncStepsFromJson()) {
+    // 保存前应用 JSON Tab 的编辑（不在 JSON Tab 时直接通过），失败则中止保存。
+    if (!stepEditorRef.value?.flush()) {
         return;
     }
     let bindings, variables;
@@ -384,12 +354,18 @@ function openStages(row) {
     display: flex;
     gap: 8px;
 }
-.steps-editor-tabs {
+/* 步骤编辑区：公共组件 WebStepEditor 占满表单宽度。 */
+:deep(.web-step-editor) {
     width: 100%;
+}
+</style>
 
-    :deep(.el-tabs__content) {
-        max-height: 480px;
-        overflow: auto;
-    }
+<style lang="scss">
+/* 版本编辑弹窗（append-to-body 后 scoped 样式无法命中）：
+   dialog body 作为唯一的竖向滚动容器（footer 固定在外），滚动可达全部内容，
+   避免与表格内部滚动条叠加出现两个竖向滚动条。 */
+.version-editor-dialog .el-dialog__body {
+    max-height: calc(100vh - 180px);
+    overflow-y: auto;
 }
 </style>

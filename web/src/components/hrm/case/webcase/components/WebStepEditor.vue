@@ -1,94 +1,18 @@
 <template>
-  <el-dialog
-    v-model="showCaseDialog"
-    :title="caseDialogTitle"
-    width="90%"
-    destroy-on-close
-    append-to-body
-    :close-on-click-modal="false"
-    :close-on-press-escape="false"
-  >
-    <el-form :model="form" label-width="90px" class="mb16">
-      <el-row :gutter="16">
-        <el-col :span="10">
-          <el-form-item label="用例名称">
-            <el-input v-model="form.caseName" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="7">
-          <el-form-item label="浏览器">
-            <el-select v-model="form.browserName" style="width: 100%">
-              <el-option
-                v-for="item in browserOptions"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-              />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="7">
-          <el-form-item label="无头模式">
-            <el-switch v-model="form.headless" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="项目">
-            <el-select v-model="form.projectId" clearable filterable style="width: 100%">
-              <el-option
-                v-for="item in props.projectOptions"
-                :key="item.projectId"
-                :label="item.projectName"
-                :value="item.projectId"
-              />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="模块">
-            <el-select v-model="form.moduleId" clearable filterable style="width: 100%">
-              <el-option
-                v-for="item in filteredCaseModules"
-                :key="item.moduleId"
-                :label="item.moduleName"
-                :value="item.moduleId"
-              />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="24">
-          <el-form-item label="起始地址">
-            <el-input v-model="form.startUrl" placeholder="https://example.com" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="24">
-          <el-form-item label="说明">
-            <el-input v-model="form.notes" type="textarea" :rows="2" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-    </el-form>
-
-    <el-tabs v-model="caseEditorTab" class="case-editor-tabs">
+  <div class="web-step-editor">
+    <el-tabs v-model="activeTab" class="case-editor-tabs">
       <el-tab-pane label="可视化步骤" name="visual">
         <div class="step-table-toolbar">
           <div class="panel-title">测试步骤</div>
           <div class="step-table-toolbar-actions">
             <el-button type="primary" icon="Plus" @click="addStep()">新增步骤 </el-button>
-            <el-button
-              plain
-              icon="EditPen"
-              :disabled="selectedStepIndex < 0"
-              @click="openStepDetailByIndex(selectedStepIndex)"
-              >编辑当前步骤
-            </el-button>
           </div>
         </div>
         <el-table
-          :data="form.steps"
+          :data="steps"
           border
           class="step-edit-table"
-          max-height="560px"
+          :max-height="tableMaxHeight || undefined"
           empty-text="暂无步骤，可手动新增或通过录制生成"
           :row-class-name="getStepRowClassName"
           @row-click="handleStepRowClick"
@@ -143,7 +67,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="步骤名称" min-width="220">
+          <el-table-column label="步骤名称" min-width="220" show-overflow-tooltip>
             <template #default="scope">
               <div
                 class="step-edit-cell"
@@ -162,7 +86,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="定位信息" min-width="320">
+          <el-table-column label="定位信息" min-width="320" show-overflow-tooltip>
             <template #default="scope">
               <div
                 class="step-edit-cell"
@@ -233,9 +157,7 @@
                             ? '//*[@id=&quot;login&quot;]'
                             : '.login-button'
                         "
-                        @update:model-value="
-                          updatePrimaryLocatorValue(scope.row, 'selector', $event)
-                        "
+                        @update:model-value="updatePrimaryLocatorValue(scope.row, 'selector', $event)"
                       />
                     </div>
                   </template>
@@ -247,7 +169,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="输入/参数" min-width="260">
+          <el-table-column label="输入/参数" min-width="260" show-overflow-tooltip>
             <template #default="scope">
               <div
                 class="step-edit-cell"
@@ -292,6 +214,14 @@
                       @click.stop
                       @blur="finishStepCellEditing"
                       placeholder="请输入内容"
+                    />
+                  </template>
+                  <template v-else-if="scope.row.actionType === 'upload_file'">
+                    <el-input
+                      v-model="scope.row.params.fileKey"
+                      @click.stop
+                      @blur="finishStepCellEditing"
+                      placeholder="资源键，如 price_tag"
                     />
                   </template>
                   <template v-else-if="scope.row.actionType === 'press'">
@@ -390,6 +320,16 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column v-if="hasEvidenceStep" label="证据" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <template v-if="row.actionType === 'capture_screenshot'">
+                <el-tag size="small" type="info">{{ row.params?.evidenceType || 'checkpoint_screenshot' }}</el-tag>
+                <el-tag v-if="row.params?.required" size="small" type="warning" class="ml4">必需</el-tag>
+                <span v-if="row.params?.evidenceKey" class="step-cell-text">{{ row.params.evidenceKey }}</span>
+              </template>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="230" fixed="right">
             <template #default="scope">
               <div class="step-op-buttons">
@@ -411,7 +351,7 @@
                   link
                   icon="Bottom"
                   title="下移"
-                  :disabled="scope.$index === form.steps.length - 1"
+                  :disabled="scope.$index === steps.length - 1"
                   @click.stop="moveStep(scope.$index, 1)"
                 />
                 <el-button
@@ -436,7 +376,7 @@
 
       <el-tab-pane label="高级 JSON" name="json">
         <div class="json-toolbar">
-          <el-button type="primary" icon="Check" @click="applyStepsTextToForm(true)"
+          <el-button type="primary" icon="Check" @click="handleApplyJson"
             >应用 JSON 到可视化
           </el-button>
           <el-button icon="RefreshRight" @click="syncStepsTextFromForm"
@@ -447,49 +387,122 @@
       </el-tab-pane>
     </el-tabs>
 
-    <template #footer>
-      <el-button @click="showCaseDialog = false">取消</el-button>
-      <el-button type="primary" :loading="loading.save" @click="saveCase">保存 </el-button>
-    </template>
-  </el-dialog>
-  <StepDetail
-    step-index=""
-    current-step=""
-    :show-step-detail-dialog="showStepDetailDialog"
-  ></StepDetail>
+    <WebStepDetailDialog
+      v-model="showStepDetailDialog"
+      :current-step="currentStep || {}"
+      :step-index="selectedStepIndex"
+      :show-fingerprint="showFingerprint"
+      @change="emitChange"
+    />
+  </div>
 </template>
 
 <script setup>
+  import { computed, onMounted } from 'vue';
+  import { ElMessage } from 'element-plus';
   import AceEditor from '@/components/hrm/common/ace-editor.vue';
-  import StepDetail from '@/components/hrm/case/webcase/components/StepDetail.vue';
-  import { browserOptions } from '../utils/shared.js';
-  import { createEmptyCase } from '../domain/caseDomain.js';
-  import { stepNeedsTarget } from '@/components/hrm/case/webcase/domain/stepDomain.js';
+  import WebStepDetailDialog from './WebStepDetailDialog.vue';
+  import { actionOptions, keyboardKeyOptions, locatorTypeOptions } from '../utils/shared.js';
+  import { useStepEditorTable } from '../composables/useStepEditorTable.js';
 
   const props = defineProps({
-    context: {
-      type: Object,
-      required: true,
-    },
-    projectOptions: { type: Object, required: true },
+    // 步骤数组：由调用方持有，组件只做原地变更（push/splice），
+    // 每次变更后 emit('change') 通知调用方。
+    steps: { type: Array, required: true },
+    // JSON Tab 文本序列化钩子；默认直接序列化步骤数组，
+    // 用例管理注入提交格式序列化（prepareStepForSubmit）。
+    serializeSteps: { type: Function, default: null },
+    // 是否在详情弹窗中显示"指纹"字段：用例管理显示（服务端落库），
+    // 门店配置版本步骤不落指纹，传 false 隐藏。
+    showFingerprint: { type: Boolean, default: true },
+    // 表格内部滚动限高；传空值表示不限高，由外层容器（如弹窗 body）统一滚动，
+    // 避免表格内滚动条与外层滚动条叠加出现两个竖向滚动条。
+    tableMaxHeight: { type: [String, Number], default: 560 },
   });
 
-  const form = ref(createEmptyCase());
+  const emit = defineEmits(['change']);
 
-  function openStepDetailByIndex(index) {
-    if (index < 0 || index >= form.value.steps.length) {
+  function emitChange() {
+    emit('change', props.steps);
+  }
+
+  const editor = useStepEditorTable({
+    getSteps: () => props.steps,
+    emitChange,
+    serializeSteps: props.serializeSteps || undefined,
+  });
+
+  // 顶层解构：模板中的 ref 自动解包，函数直接可用。
+  const {
+    activeTab,
+    selectedStepIndex,
+    stepsText,
+    showStepDetailDialog,
+    currentStep,
+    syncStepsTextFromForm,
+    applyStepsTextToForm,
+    getActionLabel,
+    startStepCellEditing,
+    finishStepCellEditing,
+    isStepCellEditing,
+    handleStepRowClick,
+    getStepRowClassName,
+    openStepDetailByIndex,
+    addStep,
+    insertStep,
+    removeStep,
+    moveStep,
+    handleStepActionTypeChange,
+    getPrimaryLocator,
+    updatePrimaryLocatorType,
+    updatePrimaryLocatorValue,
+    summarizeStepParams,
+    describeStepTarget,
+    stepNeedsTarget,
+    resetUi,
+    watchSteps,
+  } = editor;
+
+  // 存在截图步骤时展示证据列，与门店配置版本编辑器保持一致。
+  const hasEvidenceStep = computed(() => props.steps.some((step) => step.actionType === 'capture_screenshot'));
+
+  function handleApplyJson() {
+    const result = applyStepsTextToForm(true);
+    if (!result.ok) {
+      ElMessage.error(result.message);
       return;
     }
-    finishStepCellEditing();
-    form.value.steps[index] = normalizeStep(form.value.steps[index], index);
-    if (stepNeedsTarget(form.value.steps[index]?.actionType)) {
-      getPrimaryLocator(form.value.steps[index]);
+    if (result.success) {
+      ElMessage.success(result.message);
     }
-    selectedStepIndex.value = index;
-    showStepDetailDialog.value = true;
+    emitChange();
   }
+
+  onMounted(() => {
+    watchSteps();
+    syncStepsTextFromForm();
+  });
+
+  /**
+   * 保存前由调用方调用：若当前在 JSON Tab，把 JSON 文本应用回步骤数组。
+   * 应用失败时提示并返回 false，调用方应中止保存。
+   * @returns {boolean}
+   */
+  function flush() {
+    if (editor.flushJsonToSteps()) {
+      return true;
+    }
+    ElMessage.error('步骤 JSON 应用失败，请修正后再保存');
+    return false;
+  }
+
+  defineExpose({
+    flush,
+    resetUi,
+    syncStepsTextFromForm,
+  });
 </script>
 
 <style scoped lang="scss">
-  @import '../styles/dialogs.scss';
+  @import '../styles/web-step-editor.scss';
 </style>

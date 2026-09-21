@@ -2,8 +2,9 @@ import { normalizeAssertion } from '../domain/assertDomain.js';
 import { cloneData, isPlainObject, normalizeIdValue, normalizeThinkTimeMs } from '../utils/shared.js';
 import { actionOptions } from '../utils/shared.js';
 import { createDefaultTargetSnapshot, normalizeTargetSnapshot } from './snapshotDomain.js';
+import { describeLocator } from './locatorDomain.js';
 
-function getActionLabel(actionType) {
+export function getActionLabel(actionType) {
   return actionOptions.find((item) => item.value === actionType)?.label || actionType || '未设置';
 }
 
@@ -321,47 +322,4 @@ export function describeStepTarget(step) {
     ? ` / 文本=${step.targetSnapshot.elementText}`
     : '';
   return `${locatorText}${elementText}`;
-}
-
-export function addStep(actionType = 'click') {
-  form.value.steps.push(createDefaultStep(actionType));
-  selectedStepIndex.value = form.value.steps.length - 1;
-  finishStepCellEditing();
-}
-
-export function insertStep(index, actionType = 'click') {
-  const insertIndex = Math.max(0, Math.min(Number(index), form.value.steps.length));
-  form.value.steps.splice(insertIndex, 0, createDefaultStep(actionType));
-  selectedStepIndex.value = insertIndex;
-  finishStepCellEditing();
-}
-
-export function copyStep(index) {
-  const source = form.value.steps[index];
-  if (!source) return;
-  const copied = stripStepIdentity(source);
-  copied.stepName = `${copied.stepName} - 副本`;
-  form.value.steps.splice(index + 1, 0, copied);
-  selectedStepIndex.value = index + 1;
-}
-
-export function removeStep(index) {
-  form.value.steps.splice(index, 1);
-  if (!form.value.steps.length) {
-    selectedStepIndex.value = -1;
-    finishStepCellEditing();
-    return;
-  }
-  selectedStepIndex.value = Math.min(index, form.value.steps.length - 1);
-  finishStepCellEditing();
-}
-
-export function moveStep(index, direction) {
-  const targetIndex = index + direction;
-  if (targetIndex < 0 || targetIndex >= form.value.steps.length) return;
-  const steps = [...form.value.steps];
-  [steps[index], steps[targetIndex]] = [steps[targetIndex], steps[index]];
-  form.value.steps = steps;
-  selectedStepIndex.value = targetIndex;
-  finishStepCellEditing();
 }
