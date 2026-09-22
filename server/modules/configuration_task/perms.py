@@ -84,6 +84,18 @@ MENU_DEFS: tuple[MenuConfig, ...] = (
         order=1,
         remark="门店配置任务管理：任务/版本/运行/审批/报告",
     ),
+    _menu(
+        "configtask.resource.page",
+        "资源管理",
+        "C",
+        "configtask.root",
+        perm="configuration_task:resource:list",
+        path="configuration-task-resource",
+        component="hrm/configuration-task/resource/index",
+        icon="upload",
+        order=2,
+        remark="手动维护上传到 Agent 的文件资源，按 Agent 区分存储与使用",
+    ),
     # 任务管理按钮权限
     _menu("configtask.task.query", "任务详情", "F", "configtask.task",
           perm="configuration_task:task:query", order=1),

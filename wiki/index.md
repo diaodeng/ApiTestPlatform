@@ -65,6 +65,7 @@ updated: 2026-09-21
 - [Web 录制流程](flows/ticket-recording-flow.md)
 - [门店配置文件存储流程](flows/configuration-task-file-storage.md)
 - [配置任务复用 Web 录制与执行](flows/configuration-task-web-reuse.md)
+- [配置任务文件上传录制与回放流程](flows/configuration-task-upload-recording-flow.md)
 - [内存增长监控流程](flows/memory-growth-monitoring.md)
 - [工单日志拉取记录独立查看流程](flows/ticket-log-record-isolated-view.md)
 

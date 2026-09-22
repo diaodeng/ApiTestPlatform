@@ -132,6 +132,7 @@
                             :steps="editorSteps"
                             :show-fingerprint="false"
                             :table-max-height="null"
+                            :upload-resource-agent-code="task?.agentCode || ''"
                         />
                     </el-form-item>
                     <el-form-item>

@@ -60,6 +60,7 @@ from module_hrm.controller.tools_controller import toolsController
 from module_hrm.controller.web_case_controller import webCaseController
 from module_hrm.perms import register as register_hrm_permission_defs
 from module_qtr.controller.agent_controller import agentController, startup_handler
+from modules.configuration_task.controller.agent_upload_file_controller import agentUploadFileController
 from modules.configuration_task.controller.resource_controller import resourceController
 from modules.configuration_task.controller.task_controller import taskController
 from modules.configuration_task.perms import register as register_configuration_task_permission_defs
@@ -175,6 +176,7 @@ controller_list = [
     {"router": serverController, "tags": ["系统监控-服务监控"]},
     {"router": metricsCollectorController, "tags": ["系统监控-资源采集服务"]},
     {"router": resourceController, "tags": ["配置任务-资源管理"]},
+    {"router": agentUploadFileController, "tags": ["配置任务-Agent上传目录"]},
     {"router": taskController, "tags": ["配置任务-任务管理"]},
     {"router": cacheController, "tags": ["系统监控-缓存监控"]},
     {"router": commonController, "tags": ["通用模块"]},

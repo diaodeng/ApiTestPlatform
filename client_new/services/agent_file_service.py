@@ -39,6 +39,7 @@ FILE_RESOURCE_COMMANDS = frozenset(
         "file_cleanup",
         "file_read",
         "file_delete",
+        "file_list",
     }
 )
 DEFAULT_CHUNK_LIMIT = 512 * 1024
@@ -124,6 +125,8 @@ class AgentFileService:
                 result = self.publish_commit(message)
             elif command == "file_stat":
                 result = self.file_stat(message)
+            elif command == "file_list":
+                result = self.file_list(message)
             elif command == "file_read":
                 result = self.file_read(message)
             elif command == "file_delete":
@@ -374,6 +377,63 @@ class AgentFileService:
             self.store.remove(resource_id)
             logger.info(f"Agent受控资源已删除: resource_id={resource_id}")
             return {"resource_id": resource_id, "deleted": True, "exists": False}
+
+    def _upload_inputs_root(self) -> Path:
+        """受控上传根目录：与资源根平级，独立于资源 manifest 生命周期管理。"""
+        return self.store.storage_root / "upload_inputs"
+
+    def file_list(self, message: dict[str, Any]) -> dict[str, Any]:
+        """列出受控上传目录一层的条目，供编辑器"Agent 目录文件"模式选择。
+
+        只返回相对路径、类型、大小与修改时间戳，不返回绝对路径与文件内容；
+        prefix 允许定位到受控根内的子目录，但拒绝反斜杠、盘符、绝对路径与 .. 逃逸，
+        并跳过符号链接，保证列出的条目都落在受控根目录内。
+        """
+        raw_prefix = str(message.get("prefix") or "").strip()
+        if "\\" in raw_prefix or ":" in raw_prefix or raw_prefix.startswith("/"):
+            raise AgentFileError("PATH_INVALID", "目录前缀不合法")
+        parts = [part for part in raw_prefix.split("/") if part and part != "."]
+        if any(part == ".." for part in parts):
+            raise AgentFileError("PATH_INVALID", "目录前缀不合法")
+        root = self._upload_inputs_root()
+        with self._lock:
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                root_resolved = root.resolve(strict=True)
+                target = root_resolved.joinpath(*parts).resolve(strict=True) if parts else root_resolved
+            except (OSError, RuntimeError):
+                raise AgentFileError("LIST_FAILED", "上传目录不存在或不可用") from None
+            if target != root_resolved and root_resolved not in target.parents:
+                raise AgentFileError("PATH_INVALID", "目录前缀越界")
+            if target.is_symlink() or not target.is_dir():
+                raise AgentFileError("PATH_INVALID", "目录前缀不是有效目录")
+            entries: list[dict[str, Any]] = []
+            try:
+                for child in sorted(target.iterdir(), key=lambda item: item.name):
+                    if child.is_symlink():
+                        # 跳过符号链接，防止通过链接逃逸出受控目录
+                        continue
+                    rel_path = "/".join((*parts, child.name)) if parts else child.name
+                    if child.is_dir():
+                        entries.append(
+                            {"path": rel_path, "type": "directory", "size": 0, "modified_at": 0}
+                        )
+                        continue
+                    if not child.is_file():
+                        continue
+                    stat = child.stat()
+                    entries.append(
+                        {
+                            "path": rel_path,
+                            "type": "file",
+                            "size": stat.st_size,
+                            "modified_at": int(stat.st_mtime),
+                        }
+                    )
+            except OSError:
+                raise AgentFileError("LIST_FAILED", "读取上传目录失败") from None
+        logger.info(f"Agent受控上传目录列表: prefix={raw_prefix or '/'}, entries={len(entries)}")
+        return {"prefix": "/".join(parts), "entries": entries}
 
     def file_stat(self, message: dict[str, Any]) -> dict[str, Any]:
         """只返回实际文件元数据和受控资源存在性，不返回文件内容。"""

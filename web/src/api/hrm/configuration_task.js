@@ -135,3 +135,48 @@ export function saveTaskSchedule(taskId, data) {
 export function convertRecordingToTemplate(data) {
   return silent({ url: '/configuration-tasks/templates/from-recording', method: 'post', data })
 }
+
+// ---------- 资源管理 ----------
+
+export function listResources(query) {
+  return silent({ url: '/configuration-tasks/resources', method: 'get', params: query })
+}
+
+export function getResource(resourceId) {
+  return silent({ url: `/configuration-tasks/resources/${resourceId}`, method: 'get' })
+}
+
+// 登记资源元数据（PENDING），随后走 begin/chunk/commit 把文件分片推送到 Agent。
+export function addResource(data) {
+  return silent({ url: '/configuration-tasks/resources', method: 'post', data })
+}
+
+export function deleteResource(resourceId, data) {
+  return silent({ url: `/configuration-tasks/resources/${resourceId}/delete`, method: 'post', data })
+}
+
+export function beginResourceTransfer(resourceId, data) {
+  return silent({ url: `/configuration-tasks/resources/${resourceId}/transfers`, method: 'post', data })
+}
+
+// 单块上限 512KiB，服务端按 Base64 校验，超出会被拒绝。
+export function sendResourceTransferChunk(resourceId, transferId, data) {
+  return silent({
+    url: `/configuration-tasks/resources/${resourceId}/transfers/${transferId}/chunks`,
+    method: 'post',
+    data
+  })
+}
+
+export function commitResourceTransfer(resourceId, transferId, data) {
+  return silent({
+    url: `/configuration-tasks/resources/${resourceId}/transfers/${transferId}/commit`,
+    method: 'post',
+    data
+  })
+}
+
+// 浏览 Agent 受控上传目录（upload_inputs），编辑器"Agent 目录文件"模式使用。
+export function listAgentUploadFiles(query) {
+  return silent({ url: '/configuration-tasks/agent-upload-files', method: 'get', params: query })
+}

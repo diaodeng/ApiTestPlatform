@@ -20,9 +20,24 @@
 
 ## Agent 本地资源与 Web 上传动作
 
-Agent 本地资源协议使用 `requestType=7` 的小 JSON 控制命令维护受控 manifest，支持开始发布、分片写入、提交校验、元数据查询和过期清理。Web 用例的 `upload_file` 步骤只保存 `fileKey`、资源 ID 和 `multiple`，执行时在 Agent 受控目录内按 manifest 解析文件并调用文件输入框上传。
+Agent 本地资源协议使用 `requestType=7` 的小 JSON 控制命令维护受控 manifest，支持开始发布、分片写入、提交校验、元数据查询、受控上传目录列表和过期清理。配置任务的 `upload_file` 步骤保存 `fileKey`、文件来源（`resourceIds` 或 `agentPath`）和 `multiple`，执行时在 Agent 受控目录内按 manifest 或受控上传根目录解析文件，并调用文件输入框上传（不弹出文件选择框）。注入页面的文件名与登记资源的原始文件名一致：manifest 落盘文件名为资源 ID，回放时执行器会以 `original_file_name` 生成临时命名副本再注入，用后清理；「Agent 目录文件」模式天然使用真实文件名。
 
-当前不支持服务端任意路径上传/下载、文件目录浏览、SFTP 真实连接、自动录制本地上传路径，也不允许把 Agent 绝对路径写入步骤参数。
+当前不支持服务端任意路径上传/下载、SFTP 真实连接，也不允许把 Agent 绝对路径写入步骤参数；除资源清单外，Agent 另提供受控上传根目录（`storage/upload_inputs/`）的**一层目录浏览**（`file_list` 命令 / `GET /configuration-tasks/agent-upload-files`），仅返回相对路径、类型、大小与修改时间，供编辑器「Agent 目录文件」模式选择。
+
+## 资源管理页面
+
+菜单入口：**门店配置 → 资源管理**（需要 `configuration_task:resource:list` 权限）。页面按 Agent 区分展示资源，提供：
+
+- **查询筛选**：按 Agent、状态（`PENDING/UPLOADING/READY/FAILED/EXPIRED/DELETING/DELETED`）、关键字（文件名/备注）过滤；
+- **上传资源**：选择目标在线 Agent 与本地文件（单文件上限 100MiB），前端计算 SHA-256 后自动走「登记元数据 → begin → 分片（512KiB/块）→ commit」流程，Agent 校验完整大小与摘要后原子落盘为 `READY`；上传过程有进度显示；
+- **详情**：查看资源 ID、存储键、SHA-256、MIME、版本、状态与最近错误等元数据；
+- **删除**：提交删除请求后通知 Agent 清理本地文件（带引用保护，被运行引用的资源不允许删除）。
+
+上传的文件实体只保存在所选 Agent 的受控目录，服务端仅登记元数据；跨 Agent 不共享，运行时会校验资源属于执行 Agent。
+
+## 录制时的文件上传行为
+
+录制**不会**自动把人工选择的文件归档为资源：录制页面选的文件只是让页面流程继续的样本，生成的「上传文件」步骤保留样本文件名做占位。正式文件在编辑阶段通过「资源绑定」（本页面上传的资源）或「Agent 目录文件」（受控上传目录）指定，详见配置任务文档的「上传文件步骤的文件来源」。
 
 
 ```json

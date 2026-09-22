@@ -93,14 +93,23 @@ class ResourceQueryModel(ResourceBaseModel):
     keyword: str = Field(default="", max_length=128)
     limit: int = Field(default=50, ge=1, le=200)
 
-    @field_validator("agent_code", "keyword", mode="before")
+    @field_validator("agent_code", mode="before")
     @classmethod
-    def normalize_query_text(cls, value: str | None) -> str | None:
+    def normalize_agent_code(cls, value: str | None) -> str | None:
         """统一查询文本空白，空字符串按未传处理。"""
         if value is None:
             return None
         normalized = str(value).strip()
         return normalized or None
+
+    @field_validator("keyword", mode="before")
+    @classmethod
+    def normalize_keyword(cls, value: str | None) -> str:
+        """keyword 未传时 as_query 会给 None，必须按空串处理，否则 str 校验失败。"""
+        if value is None:
+            return ""
+        normalized = str(value).strip()
+        return normalized
 
 
 class ResourceIdPathModel(ResourceBaseModel):

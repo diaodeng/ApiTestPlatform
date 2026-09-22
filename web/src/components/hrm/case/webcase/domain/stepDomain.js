@@ -143,11 +143,16 @@ export function normalizeStepParams(actionType, params, stepName = '') {
       : data.resourceIds
         ? [data.resourceIds]
         : [];
+    const fileNames = Array.isArray(data.fileNames) ? data.fileNames : data.fileNames ? [data.fileNames] : [];
     return {
       fileKey: `${data.fileKey ?? data.file_key ?? ''}`.trim(),
       resourceIds: resourceIds
         .map((item) => `${item ?? ''}`.trim())
         .filter(Boolean),
+      // Agent 受控上传根目录内的相对路径；与 resourceIds 二选一，运行时资源绑定优先
+      agentPath: `${data.agentPath ?? data.agent_path ?? ''}`.trim(),
+      // 录制样本文件名，仅编辑占位展示，不参与回放
+      fileNames: fileNames.map((item) => `${item ?? ''}`.trim()).filter(Boolean),
       multiple: data.multiple === true || data.multiple === 'true',
       thinkTimeMs,
     };
@@ -225,8 +230,19 @@ export function summarizeStepParams(step) {
     const resourceCount = Array.isArray(step.params?.resourceIds)
       ? step.params.resourceIds.filter((item) => `${item ?? ''}`.trim()).length
       : 0;
+    const agentPath = `${step.params?.agentPath || ''}`.trim();
+    // 展示优先级：资源绑定 > Agent 目录文件 > 录制样本文件名占位
+    let sourceText;
+    if (resourceCount > 0) {
+      sourceText = `${resourceCount}个资源`;
+    } else if (agentPath) {
+      sourceText = `Agent目录：${agentPath}`;
+    } else {
+      const fileNames = Array.isArray(step.params?.fileNames) ? step.params.fileNames : [];
+      sourceText = fileNames.length ? `待绑定（样本：${fileNames.join('、')}）` : '未绑定文件';
+    }
     const modeText = step.params?.multiple === true ? '多文件' : '单文件';
-    return appendThinkTime(`${fileKey || '未设置资源键'} / ${modeText} / ${resourceCount}个资源`);
+    return appendThinkTime(`${fileKey || '未设置资源键'} / ${modeText} / ${sourceText}`);
   }
   if (step.actionType === 'press') {
     return appendThinkTime(step.params?.key || '-');
