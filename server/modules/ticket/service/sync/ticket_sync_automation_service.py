@@ -303,6 +303,10 @@ class TicketSyncAutomationService:
         if store_mapping_ambiguous:
             # 多个 org_no 命中同一外部编码时禁止静默选值，交由自动日志参数校验中断。
             store_id, store_name = "", ""
+        # 标记 storeId 是否来自当前源数据的唯一成功映射（org_no 空间）。
+        # 匹配失败时 resolve_store_by_external_value 会原样返回外部门店编码（store_code 空间），
+        # 该标记供 hints 写入端区分空间，避免把 store_code 当作 org_no 落库回显。
+        store_mapping_matched = bool(store_id) and len(store_candidates) == 1
         if not store_name:
             store_name = str(log_pull_hints.get("storeName") or log_pull_hints.get("store_name") or "").strip()
         if not store_id and not store_mapping_ambiguous:
@@ -435,6 +439,7 @@ class TicketSyncAutomationService:
             "vendorName": vendor_name,
             "storeId": store_id,
             "storeName": store_name,
+            "storeMappingMatched": store_mapping_matched,
             "storeMappingAmbiguous": store_mapping_ambiguous,
             "storeMappingCandidates": store_candidates,
             "status": status_code or str(sync_object.status or "").strip(),

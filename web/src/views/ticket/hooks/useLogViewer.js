@@ -117,15 +117,14 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       extraData.externalFieldMapping || extraData.external_field_mapping || {};
     const externalSyncFieldMapping =
       externalSync.externalFieldMapping || externalSync.external_field_mapping || {};
-    const ticketStore = pickFirstFilledValue([
+    // 来源门店编码（store_code 空间）：仅用于展示映射关系，绝不回填进 storeId 提交字段
+    const sourceStoreCode = pickFirstFilledValue([
+      logPullHints.sourceStoreCode,
+      logPullHints.source_store_code,
       externalFieldMapping.ticketStore,
       externalFieldMapping.ticket_store,
-      externalFieldMapping.storeInfo,
-      externalFieldMapping.store_info,
       externalSyncFieldMapping.ticketStore,
       externalSyncFieldMapping.ticket_store,
-      externalSyncFieldMapping.storeInfo,
-      externalSyncFieldMapping.store_info,
     ]);
     const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {};
     const automationLogPullConfig =
@@ -145,6 +144,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         directLogPullConfig.vendorId,
         directLogPullConfig.vendor_id,
       ]),
+      // storeId 只接受 org_no 空间的回填值；store_code 空间的 ticketStore 已移出候选，
+      // 避免未匹配的来源编码被当作 org_no 提交（提交前校验无法区分二者）
       storeId: pickFirstFilledValue([
         source.storeId,
         source.store_id,
@@ -156,8 +157,8 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         automationLogPullConfig.store_id,
         directLogPullConfig.storeId,
         directLogPullConfig.store_id,
-        ticketStore,
       ]),
+      sourceStoreCode,
       posNo: pickFirstFilledValue([
         source.posNo,
         source.pos_no,
@@ -203,6 +204,9 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     }
     const storeId = String(hints.storeId || '').trim();
     if (storeId) logPullForm.value.storeId = storeId;
+    // 来源门店编码只进展示位（store_code 空间），绝不回填 storeId 提交字段
+    const sourceStoreCode = String(hints.sourceStoreCode || '').trim();
+    if (sourceStoreCode) logPullForm.value.sourceStoreCode = sourceStoreCode;
     const posNo = Number(hints.posNo);
     if (Number.isFinite(posNo) && posNo > 0) logPullForm.value.posNo = posNo;
     const modifyTime = String(hints.modifyTime || '').trim();
@@ -269,6 +273,13 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
       });
   }
 
+  // 门店匹配状态（由 LogPullConfigFields 组件通过 store-match-change 事件回报）
+  const logPullStoreMatchState = ref('empty');
+
+  function setLogPullStoreMatchState(state) {
+    logPullStoreMatchState.value = String(state || 'empty');
+  }
+
   function submitLogPull() {
     proxy.$refs.logPullRef.validate((valid) => {
       if (!valid) return;
@@ -305,6 +316,24 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         proxy.$modal.msgWarning('门店（storeId）不能为空，请输入正确的 org_no')
         return
       }
+      // 门店未匹配到当前商家配置时二次确认：既放行手输新店 org_no 的合法场景，
+      // 也拦住误填/残留的来源门店编码（store_code），避免被当 org_no 提交到外部平台
+      if (logPullStoreMatchState.value === 'unmatched') {
+        proxy.$modal
+          .confirm(`门店 "${storeId}" 未匹配到当前商家的门店配置，确认按 org_no 直接提交？`)
+          .then(() => {
+            doSubmitLogPull();
+          })
+          .catch(() => {});
+        return;
+      }
+      doSubmitLogPull();
+    });
+  }
+
+  function doSubmitLogPull() {
+      const envKey = String(logPullForm.value.environment || '').trim()
+      const resolvedKey = String(logPullForm.value.resolvedItemKey || '').trim()
       const payload = {
         environment: envKey && resolvedKey ? `${envKey}:${resolvedKey}` : (envKey || undefined),
         vendorId: logPullForm.value.vendorId,
@@ -344,7 +373,6 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
         .finally(() => {
           logPullSubmitting.value = false;
         });
-    });
   }
 
   function runLogPullAction(actionPromise, successMessage) {
@@ -1010,6 +1038,7 @@ export function useLogViewer(proxy, currentTicketId, options = {}) {
     scheduleLogPullAutoRefresh,
     loadLogPullList,
     submitLogPull,
+    setLogPullStoreMatchState,
     runLogPullAction,
     deleteLogPull,
     retryLogPull,

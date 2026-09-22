@@ -138,6 +138,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
     stopLogPullAutoRefresh,
     loadLogPullList,
     submitLogPull,
+    setLogPullStoreMatchState,
     deleteLogPull,
     retryLogPull,
     stopLogPull,
@@ -743,6 +744,7 @@ import LogViewerDialog from '@/components/ticket/LogViewerDialog.vue';
         :provider-options="providerOptions"
         :data-type-options="logPullDataTypeOptions"
         :storage-mode-options="logPullStorageModeOptions"
+        @store-match-change="setLogPullStoreMatchState"
       />
       <LogPullNotifyConfigFields v-model="logPullForm.notifyConfig" :push-options="pushOptions" />
       <el-form-item>

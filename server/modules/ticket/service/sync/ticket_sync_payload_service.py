@@ -191,6 +191,12 @@ class TicketSyncPayloadService:
             log_pull_config=sync_object.log_pull_config,
         )
         store_id_hint = str((detected or {}).get("storeId") or "").strip()
+        # storeMappingMatched 由 detect_fields 输出：True 表示 storeId 来自当前源数据的
+        # 唯一成功映射（org_no 空间）；显式 False 且 storeId 非空时，storeId 是匹配失败后
+        # 原样透传的外部门店编码（store_code 空间），绝不能当 org_no 落入 hints。
+        # 键缺失（旧调用方/手工构造的 detected）时按旧口径视为已匹配，保持向后兼容。
+        detected_mapping_matched = (detected or {}).get("storeMappingMatched")
+        store_mapping_matched = True if detected_mapping_matched is None else bool(detected_mapping_matched)
         pos_no_hint = (
             SyncUtil.safe_int((detected or {}).get("posNo"))
             or SyncUtil.safe_int((detected or {}).get("scoNo"))
@@ -208,8 +214,17 @@ class TicketSyncPayloadService:
             log_pull_hints.pop("vendor_id", None)
         if source_store_code_hint:
             log_pull_hints["sourceStoreCode"] = source_store_code_hint
-        if store_id_hint:
+        if store_id_hint and store_mapping_matched:
             log_pull_hints["storeId"] = store_id_hint
+        elif store_id_hint and not store_mapping_matched:
+            # 未匹配成功时 detected.storeId 是 resolve_store_by_external_value 失败后
+            # 原样透传的外部门店编码（store_code 空间），绝不能当 org_no 落 hints。
+            if store_id_hint == source_store_code_hint:
+                # 确认是源编码透传：本次源数据指向的门店在配置中不存在，
+                # 旧 storeId（上次映射结果）已不可信，一并清除避免 web 回显串店。
+                log_pull_hints.pop("storeId", None)
+                log_pull_hints.pop("store_id", None)
+            # 其余情况（如远端同步从旧 hints 回填的 org_no）不写入也不清除，保持现状。
         if pos_no_hint:
             log_pull_hints["posNo"] = pos_no_hint
         if modify_time_hint:
