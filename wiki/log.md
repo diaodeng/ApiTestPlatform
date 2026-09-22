@@ -1,3 +1,30 @@
+## [2026-09-22] FEATURE | 配置任务阶段三：失败策略 + 登录失效检测 + 历史记录重跑
+
+- 背景：失败后只能整体重来的语义过严；凭证失效导致失败时用户不知道原因、也不知道失败后该怎么办。阶段三确认方向：重试用关联凭证（更新靠回写）；失败继续/停止由用户自担依赖判断；"执行中人工介入"因 Agent 为单次平铺执行（run_case）且无阶段级命令消费端而暂不具备条件，当前闭环为失败（带失效提示）→ 手动登录/更新凭证映射 → 重跑（最新登录态生效）。
+- 实现：①TaskRunCreateModel.failureStrategy(stop|continue)→run_params→continue 时注入 runtime_options.continueOnFailure（Agent 既有能力零改动）；②模块常量 _LOGIN_PAGE_URL_FLAGS/_LOGIN_PAGE_MESSAGE_FLAGS + _looks_like_login_failure/_annotate_login_failure_hint 启发式检测（失败页 URL 或错误信息命中 login/sso/登录/401 等特征即在错误信息前缀"疑似登录失效，请手动登录或更新凭证后重跑"），在阶段 STEP_FAILED 与运行 EXECUTION_FAILED 两处收敛点接线；③RunRecordTab SUCCESS/FAILED 行新增"重跑"按钮（双确认+loading），按原 versionNo 调 createRun，凭证/映射/登录态取当前最新配置——重跑定位是"以最新环境重新执行"而非重放快照，正是凭证失效场景所需。
+- 中断恢复：会话中断于 RunRecordTab 重跑函数引用 createRun 未导入，补齐后构建通过。
+- 验证：回归 16 用例通过；ruff 通过；build:prod 通过；后端已重启。浏览器实测：运行弹窗失败策略区渲染确认；运行记录按任务 ID 查询后 4 条 FAILED 运行全部显示重跑按钮；点击后确认框文案正确（"将使用当前最新的凭证映射与登录态，并真实执行外站操作"），取消无副作用。失效检测真实命中场景待下次真实调试运行观察。
+- 文档：configuration-task.md 运行行补失败策略/强制刷新说明；更新记录 2026-09-22-configuration-task-stage3-failure-strategy.md。
+- 备注：阶段三接线后阶段化执行三阶段（运行级参数/多凭证合并/失败策略与重跑）全部落地；"执行中人工介入+阶段级暂停恢复"需 Agent 新增命令消费端，列为后续演进。
+
+## [2026-09-22] FEATURE | 配置任务阶段二：阶段目标系统声明 + 多凭证合并初始化
+
+- 背景：阶段一落了任务级系统凭证映射台账但运行未消费；阶段二补全"阶段声明目标系统 → 运行合并各系统凭证登录态"的主链路。**排查发现配置任务链路此前版本凭证绑定只透传绑定 ID 作调试信息，persistContextSeedState 从未下发**（登录态一直依赖本地状态文件/手动登录）——本阶段补齐该主链路，多系统以"按域合并 seed"方式一次初始化。
+- 实现：①阶段 DO/运行阶段快照 DO/建表加 system_key（ALTER SQL 20260922，dev 库已执行）；阶段保存链（StageSplitRuleModel.systemKey→stage_rows）、定义响应 to_stage_def_model、snapshot_run_stages 快照透传；②task_run_service._prepare_run 收集阶段 system_key→查映射→缺失/未绑定阻断（列出阶段与系统）→resolve_playwright_storage_state 逐绑定取登录态→按 cookie 域/origin 合并（不同绑定同域即冲突阻断，同绑定多阶段去重不冲突；版本默认绑定一并参与）→合并 seed 进 run_params.persistContextSeedState；③_build_run_case_message 下发 runtimeOptions.runtimeOverrides.persistContextSeedState（与 web_case 链路语义对齐，Agent 端 _resolve_runtime_settings 展开合并）+ forceRefreshSeedState；④Agent _seed_context_state_file_if_needed 支持 forceRefreshSeedState 强制覆写本地状态文件；⑤前端 StageEditor 阶段行"目标系统"下拉（选项取任务凭证映射）、RunConfirmDialog"强制刷新登录态"开关。
+- 验证：回归 16 用例通过；ruff 通过；build:prod 通过；dev 库加列完成。浏览器/脚本端到端：阶段 system_key 保存/回读一致（v13 三阶段=erp，阶段弹窗下拉回显 erp）；映射缺失时合并阻断并正确列出"阶段[基础信息1] 的系统[erp] 未配置凭证映射"；erp 绑定真实凭证（生产数据更新专用）后合并产出 22 cookies/6 域/2 origins；测试草稿 v13 已删除清理。
+- 风险：同域多账号（两个绑定同域）被设计性阻断（浏览器同域 cookie 唯一）；forceRefreshSeedState 覆写会清掉本地文件中未包含在 seed 内的其它站点登录态（合并 seed 已含全部所需系统时无影响）；真实运行的多系统登录态行为建议下次真实调试运行确认。
+- 文档：configuration-task.md 阶段章节补"目标系统"与合并规则；更新记录 2026-09-22-configuration-task-stage-credential-seed.md。
+
+## [2026-09-22] FEATURE | 配置任务阶段一：运行级步骤参数覆盖 + 回写凭证开关 + 任务级系统凭证映射
+
+- 背景：发布后改凭证/超时需复制重发布、所有步骤默认 10s 超时要逐个改、单任务多系统无法配多凭证、运行无回写凭证开关。分析确认 Agent 执行器已有运行级覆盖解析链（runtimeOptions.stepTimeoutMs/stepThinkTimeMs 在步骤值之后作为默认值）与结束事件最终 storageState 上报（persistContextFinalState），统一凭证域已有回写服务（writeback_enabled 约束），故第一批全部走"参数通道"，Agent 端仅加 force 覆盖优先级。
+- 实现：①TaskRunCreateModel 新增 defaultStepTimeoutMs/defaultStepWaitMs/stepParamApplyMode(default|force)/writebackCredentialEnabled；task_run_service 写入 run_params 并按模式组装 runtimeOptions（default→stepTimeoutMs/stepThinkTimeMs 走既有默认值链；force→stepTimeoutOverride/stepThinkTimeOverride）；②web_run_finished 终态后 _writeback_credential_after_finish 消费事件 runtimeDebug.persistContextFinalState 调 CredentialWritebackService（约束保留：writeback_enabled/非 shared_read/本地缓存启用，失败仅日志不影响终态）；③新表 configuration_task_credential_mapping（task_id+system_key 唯一）+ credential_mapping_service 批量替换式保存 + GET/PUT credential-mappings 路由 + 前端 CredentialMappingDialog（任务行「凭证映射」入口）；④Agent web_test_service 两个解析函数 candidates 头部加 Override 键（force 模式优先于步骤值）。
+- 设计决策：运行参数定位为"运行级覆盖"不写回版本快照——调试（改凭证/超时）直接改参数运行，长期生效走复制发布；凭证映射独立于版本快照（环境配置不冻结），发布后可改；凭证放任务级映射表而非阶段表（阶段经 system_key 引用，映射表即多系统清单），版本快照零解冻。
+- 验证：回归 16 用例通过；ruff 通过；build:prod 通过；建表 SQL 已在 dev 库执行；浏览器端到端：凭证映射弹窗添加 erp→保存→落库查询一致；运行弹窗四参数区渲染截图确认。运行参数真实执行链路建议下次真实调试运行时确认（避免 dev 环境真实外站执行）。
+- 文档：configuration-task.md 运行/凭证映射操作说明；更新记录 2026-09-22-configuration-task-run-params-credential-mapping.md。
+- 待办（阶段二/三已确认方向）：多凭证合并初始化（seed 按域合并+同域校验+强制使用 seed 开关，注意 Agent 本地状态文件存在时跳过 seed 的交互）；失败策略（终止/继续，用户自担依赖）；登录失效检测提示+重试凭证刷新（重试用关联凭证，更新靠回写）。
+- 附：单数据模型方向分析（用户提议"任务一条数据+执行记录快照"替代多版本）——run 已冻结输入/阶段快照但步骤实时读版本，改造需运行详情/重试/审批/迁移多处联动且丢失发布基线语义，暂按"版本=发布基线+运行级覆盖"演进，列为远期评估。
+
 ## [2026-09-21] FEATURE | 配置任务版本生命周期：复制为新草稿/草稿删除/废弃/撤销发布
 
 - 背景：门店配置版本发布后不可编辑（update_version 锁定 DRAFT），且缺少配套出口——新建版本是空草稿（无复制能力）、无删除/废弃接口，改一个步骤超时时间都要重建整个版本。经分析确认"快照不可变"本身合理（运行消息下发时步骤实时读版本 steps_json，编辑/物理删除已发布版本会破坏运行可追溯），缺口在变更路径而非锁定本身。

@@ -16,7 +16,11 @@ from modules.configuration_task.entity.do.stage_artifact_do import (
     ConfigurationTaskStage,
     TaskRunStage,
 )
-from modules.configuration_task.entity.do.task_do import ConfigurationTask, ConfigurationTaskVersion
+from modules.configuration_task.entity.do.task_do import (
+    ConfigurationTask,
+    ConfigurationTaskCredentialMapping,
+    ConfigurationTaskVersion,
+)
 from modules.configuration_task.entity.do.task_run_do import ConfigurationTaskRun
 from modules.configuration_task.entity.vo.task_vo import (
     TaskRunCreateModel,
@@ -66,6 +70,7 @@ def db_session():
             ResourceObject.__table__,
             ConfigurationTaskStage.__table__,
             TaskRunStage.__table__,
+            ConfigurationTaskCredentialMapping.__table__,
         ],
     )
     with Session(engine) as session:

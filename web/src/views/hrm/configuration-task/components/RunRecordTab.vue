@@ -31,7 +31,7 @@
             <el-table-column label="开始时间" prop="startedAt" width="160" />
             <el-table-column label="时长(ms)" prop="durationMs" width="100" />
             <el-table-column label="错误" prop="errorMessage" min-width="180" show-overflow-tooltip />
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
                 <template #default="{ row }">
                     <el-button link type="primary" icon="View" @click="$emit('open-detail', row)">详情</el-button>
                     <el-button
@@ -41,6 +41,14 @@
                         icon="VideoPause"
                         @click="stop(row)"
                     >停止</el-button>
+                    <el-button
+                        v-if="['SUCCESS', 'FAILED'].includes(row.status)"
+                        link
+                        type="warning"
+                        icon="RefreshRight"
+                        :loading="rerunningId === row.taskRunId"
+                        @click="rerun(row)"
+                    >重跑</el-button>
                 </template>
             </el-table-column>
         </el-table>
@@ -50,11 +58,12 @@
 <script setup name="ConfigRunRecordTab">
 import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { listRuns, stopRun } from "@/api/hrm/configuration_task";
+import { listRuns, stopRun, createRun } from "@/api/hrm/configuration_task";
 
 const emit = defineEmits(["open-detail"]);
 
 const loading = ref(false);
+const rerunningId = ref("");
 const queryTaskId = ref("");
 const queryStatus = ref("");
 const runList = ref([]);
@@ -104,6 +113,43 @@ async function stop(row) {
         getList();
     } catch (e) {
         ElMessage.error(e.message || "停止失败");
+    }
+}
+
+// 历史记录重跑：按原版本号重新创建运行（凭证/映射取最新配置，登录态回写后重跑即生效）。
+// 注意：会真实执行外站操作，弹二次确认；与停止共用"同步等待执行完成"的交互。
+async function rerun(row) {
+    try {
+        await ElMessageBox.confirm(
+            `按 v${row.versionNo} 重新发起运行？将使用当前最新的凭证映射与登录态，并真实执行外站操作。`,
+            "重跑确认",
+            { type: "warning" }
+        );
+    } catch {
+        return;
+    }
+    try {
+        await ElMessageBox.confirm(
+            `再次确认：对任务 ${row.taskId} 发起 v${row.versionNo} 重跑？`,
+            "重跑二次确认",
+            { type: "warning" }
+        );
+    } catch {
+        return;
+    }
+    rerunningId.value = row.taskRunId;
+    try {
+        const res = await createRun(row.taskId, {
+            versionNo: row.versionNo,
+            triggerType: "manual",
+            failureStrategy: "stop"
+        });
+        ElMessage.success(`重跑完成：${res.data?.status || "已提交"}`);
+        getList();
+    } catch (e) {
+        ElMessage.error(e.message || "重跑失败");
+    } finally {
+        rerunningId.value = "";
     }
 }
 
