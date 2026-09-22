@@ -95,3 +95,42 @@ class ConfigurationTaskVersion(Base):
         onupdate=datetime.now,
         comment="更新时间",
     )
+
+
+class ConfigurationTaskCredentialMapping(Base):
+    """任务级"系统标识 → 凭证绑定"映射。
+
+    独立于版本快照的环境配置：阶段/阶段模板通过 system_key 声明目标系统，
+    凭证绑定在任务级统一维护，发布后仍可修改。
+    """
+
+    __tablename__ = "configuration_task_credential_mapping"
+    __table_args__ = (
+        UniqueConstraint("task_id", "system_key", name="uk_ct_cred_map_task_key"),
+        Index("idx_ct_cred_map_task", "task_id"),
+    )
+
+    mapping_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        nullable=False,
+        unique=True,
+        default=snowIdWorker.get_id,
+        comment="映射ID，Snowflake BIGINT",
+    )
+    task_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="任务ID")
+    system_key: Mapped[str] = mapped_column(String(64), nullable=False, comment="系统标识，任务内唯一")
+    credential_binding_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="统一凭证绑定ID，空表示未绑定"
+    )
+    remark: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="说明")
+    create_by: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="创建者")
+    create_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+    update_by: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="更新者")
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.now,
+        onupdate=datetime.now,
+        comment="更新时间",
+    )

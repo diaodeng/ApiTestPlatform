@@ -35,16 +35,20 @@
                 </template>
             </el-table-column>
             <el-table-column label="更新时间" prop="updateTime" width="160" />
-            <el-table-column label="操作" width="330" fixed="right">
+            <el-table-column label="操作" width="400" fixed="right">
                 <template #default="{ row }">
                     <el-button link type="primary" icon="Edit" @click="openEditDialog(row)">编辑</el-button>
                     <el-button link type="primary" icon="Files" @click="$emit('open-versions', row)">版本</el-button>
                     <el-button link type="success" icon="VideoPlay" @click="$emit('open-run', row)">运行</el-button>
                     <el-button link type="warning" icon="Timer" @click="$emit('open-schedule', row)">定时</el-button>
                     <el-button link type="info" icon="MagicStick" @click="$emit('open-convert', row)">录制转模板</el-button>
+                    <el-button link type="primary" icon="Key" @click="openCredentialMapping(row)">凭证映射</el-button>
                 </template>
             </el-table-column>
         </el-table>
+
+        <!-- 系统凭证映射：任务级"系统标识 → 凭证绑定"，独立于版本快照，发布后可改 -->
+        <CredentialMappingDialog v-model="mappingVisible" :task="mappingTask" />
 
         <!-- 新增/编辑任务 -->
         <el-dialog v-model="editVisible" :title="editForm.taskId ? '编辑任务' : '新增任务'" width="560px">
@@ -107,8 +111,17 @@ import { ref, reactive, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { listTasks, addTask, updateTask } from "@/api/hrm/configuration_task";
 import { useAgentOptions } from "../composables/useAgentOptions";
+import CredentialMappingDialog from "./CredentialMappingDialog.vue";
 
 defineEmits(["open-versions", "open-run", "open-schedule", "open-convert", "open-recording"]);
+
+const mappingVisible = ref(false);
+const mappingTask = ref(null);
+
+function openCredentialMapping(row) {
+    mappingTask.value = row;
+    mappingVisible.value = true;
+}
 
 const loading = ref(false);
 const keyword = ref("");

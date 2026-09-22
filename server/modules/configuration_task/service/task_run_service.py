@@ -26,6 +26,7 @@ from module_qtr.service.agent_service import send_message
 from modules.configuration_task.dao.resource_dao import ResourceDao
 from modules.configuration_task.dao.stage_artifact_dao import ConfigurationTaskStageDao
 from modules.configuration_task.dao.task_dao import (
+    ConfigurationTaskCredentialMappingDao,
     ConfigurationTaskDao,
     ConfigurationTaskRunDao,
     ConfigurationTaskVersionDao,
@@ -43,6 +44,14 @@ from modules.configuration_task.service.evidence_status_service import (
     ConfigurationTaskEvidenceStatusService,
 )
 from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
+from modules.credential.dao.credential_dao import CredentialDao
+from modules.credential.entity.vo.credential_vo import CredentialWritebackModel
+from modules.credential.service.credential_resolve_service import CredentialResolveService
+from modules.credential.service.credential_writeback_service import CredentialWritebackService
+
+# 登录失效启发式特征：失败页 URL / 错误信息命中即提示"疑似登录失效"。
+_LOGIN_PAGE_URL_FLAGS = ("login", "signin", "sign-in", "sso", "oauth", "cas/", "auth")
+_LOGIN_PAGE_MESSAGE_FLAGS = ("登录", "认证", "未登录", "login", "unauthorized", "401")
 
 RUN_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 # 运行下发 Agent 的默认超时（秒）：配置任务可能包含多步骤页面操作，
@@ -172,6 +181,16 @@ class ConfigurationTaskRunService:
         if snapshot_error:
             return None, "", "", {}, snapshot_error
 
+        # 阶段化凭证初始化：收集阶段声明的目标系统 → 查任务系统凭证映射 →
+        # 合并各系统凭证登录态（按域合并，同域冲突拒绝），作为浏览器初始化 seed。
+        stage_definitions = ConfigurationTaskStageDao.list_version_stages(db, version.version_id)
+        mapping_rows = ConfigurationTaskCredentialMappingDao.list_by_task(db, task_id)
+        merged_seed, seed_error = cls._merge_stage_credential_seed(
+            db, version, stage_definitions, mapping_rows
+        )
+        if seed_error:
+            return None, "", "", {}, seed_error
+
         manual_login_enabled = bool(model.manual_login_enabled)
         manual_login_wait_sec = int(model.manual_login_wait_sec or 120)
         timeout_seconds = int(
@@ -179,6 +198,17 @@ class ConfigurationTaskRunService:
             or (max(_MANUAL_LOGIN_PREPARE_BASE_SECONDS, manual_login_wait_sec + 600) + 600)
             or RUN_DEFAULT_TIMEOUT_SECONDS
         )
+        # 运行级步骤参数覆盖与凭证回写开关：仅作用于本次运行，不写回版本快照。
+        default_step_timeout_ms = (
+            int(model.default_step_timeout_ms) if model.default_step_timeout_ms else None
+        )
+        default_step_wait_ms = int(model.default_step_wait_ms) if model.default_step_wait_ms else None
+        step_param_apply_mode = model.step_param_apply_mode or "default"
+        writeback_credential_enabled = bool(model.writeback_credential_enabled)
+        force_refresh_seed_state = bool(model.force_refresh_seed_state)
+        # 失败策略：stop=失败后终止（Agent 默认行为）；continue=注入 continueOnFailure
+        # 让 Agent 失败后继续执行后续步骤与阶段，失败阶段照常标记失败。
+        failure_strategy = model.failure_strategy or "stop"
         now = datetime.now()
         run_params = {
             "browserName": version.browser_name,
@@ -189,7 +219,16 @@ class ConfigurationTaskRunService:
             "manualLoginEnabled": manual_login_enabled,
             "manualLoginWaitSec": manual_login_wait_sec,
             "timeoutSeconds": timeout_seconds,
+            "defaultStepTimeoutMs": default_step_timeout_ms,
+            "defaultStepWaitMs": default_step_wait_ms,
+            "stepParamApplyMode": step_param_apply_mode,
+            "writebackCredentialEnabled": writeback_credential_enabled,
+            "forceRefreshSeedState": force_refresh_seed_state,
+            "failureStrategy": failure_strategy,
         }
+        if merged_seed:
+            # 阶段引用的系统凭证登录态合并结果（可能含多系统多域 cookies/origins）。
+            run_params["persistContextSeedState"] = merged_seed
         run = ConfigurationTaskRunDao.add_run(
             db,
             {
@@ -439,6 +478,31 @@ class ConfigurationTaskRunService:
             runtime_options["stateSourceType"] = "credential"
         else:
             runtime_options["stateSourceType"] = "none"
+        # 阶段化凭证初始化：阶段引用的系统凭证登录态合并 seed 下发（结构与 web_case
+        # 的 runtimeOverrides 语义一致，Agent 端合并进生效 runtime 后按域注入 context）。
+        if run_params.get("persistContextSeedState"):
+            runtime_options["runtimeOverrides"] = {
+                **(runtime_options.get("runtimeOverrides") or {}),
+                "persistContextSeedState": run_params["persistContextSeedState"],
+            }
+        if run_params.get("forceRefreshSeedState"):
+            runtime_options["forceRefreshSeedState"] = True
+        # 失败策略：continue 时注入 continueOnFailure（Agent 既有能力），
+        # 步骤失败后继续执行后续步骤与阶段，失败阶段照常标记失败。
+        if run_params.get("failureStrategy") == "continue":
+            runtime_options["continueOnFailure"] = True
+        # 运行级步骤参数覆盖：default 模式走 Agent 既有解析链（步骤值优先）；
+        # force 模式下发 Override 键，Agent 端将其置于解析链最前强制覆盖所有步骤。
+        if run_params.get("stepParamApplyMode") == "force":
+            if run_params.get("defaultStepTimeoutMs"):
+                runtime_options["stepTimeoutOverride"] = run_params["defaultStepTimeoutMs"]
+            if run_params.get("defaultStepWaitMs"):
+                runtime_options["stepThinkTimeOverride"] = run_params["defaultStepWaitMs"]
+        else:
+            if run_params.get("defaultStepTimeoutMs"):
+                runtime_options["stepTimeoutMs"] = run_params["defaultStepTimeoutMs"]
+            if run_params.get("defaultStepWaitMs"):
+                runtime_options["stepThinkTimeMs"] = run_params["defaultStepWaitMs"]
         return {
             "requestType": 3,
             "command": "run_case",
@@ -675,13 +739,19 @@ class ConfigurationTaskRunService:
                 return
 
             if status in {"failed", "failure", "error"}:
+                # 登录失效启发式检测：失败页 URL / 错误信息命中登录特征时追加提示，
+                # 便于用户手动登录或更新凭证后重跑。
+                stage_error_message = cls._annotate_login_failure_hint(
+                    str(step_payload.get("errorMessage") or "步骤执行失败"),
+                    str(step_payload.get("pageUrl") or ""),
+                )
                 ConfigurationTaskStageService.mark_stage_finished(
                     db,
                     target.run_stage_id,
                     False,
                     {"lastStep": step_payload},
                     error_code="STEP_FAILED",
-                    error_message=str(step_payload.get("errorMessage") or "步骤执行失败"),
+                    error_message=stage_error_message,
                 )
                 return
             if status not in {"passed", "success", "succeeded", "skipped"}:
@@ -754,6 +824,177 @@ class ConfigurationTaskRunService:
                 ConfigurationTaskStageService.mark_stage_running(db, target.run_stage_id)
         except Exception as exc:
             logger.warning(f"步骤阶段映射失败（不影响事件处理）: task_run_id={task_run_id}, error={exc}")
+
+    @staticmethod
+    def _cookie_domain_matches(cookie_domain: str, host: str) -> bool:
+        """判断 origin 主机是否落在 cookie 域内（后缀匹配，用于同域冲突判定）。"""
+        cookie_domain = cookie_domain.lstrip(".").lower()
+        host = host.lower()
+        return host == cookie_domain or host.endswith(f".{cookie_domain}")
+
+    @classmethod
+    def _merge_stage_credential_seed(
+        cls,
+        db: Session,
+        version: ConfigurationTaskVersion,
+        stage_definitions: list,
+        mapping_rows: list,
+    ) -> tuple[dict[str, Any] | None, str]:
+        """合并阶段引用的系统凭证登录态为单一浏览器初始化 seed。
+
+        规则：
+        - 阶段声明了 system_key 但任务映射缺失/未绑定 → 阻断（避免意外使用错误登录态）；
+        - 合并集合 = 各阶段映射的凭证绑定（去重）+ 版本默认绑定（若有）；
+        - 同一 cookie 域 / origin 出现在两个不同绑定时视为冲突 → 阻断并列出来源；
+        - 单个凭证没有登录态（allow_empty_state）时跳过，阶段执行时靠手动登录。
+        :return: (merged_seed, "") 或 (None, 错误信息)。
+        """
+        mapping = {
+            (row.system_key or "").strip(): (row.credential_binding_id or "").strip()
+            for row in mapping_rows
+        }
+        missing: list[str] = []
+        binding_sources: dict[str, set[str]] = {}
+        for stage in stage_definitions:
+            key = (stage.system_key or "").strip()
+            if not key:
+                continue
+            binding_id = mapping.get(key, "")
+            if not binding_id:
+                missing.append(f"阶段[{stage.stage_name or stage.stage_key}] 的系统[{key}] 未配置凭证映射")
+                continue
+            binding_sources.setdefault(binding_id, set()).add(key)
+        if missing:
+            return None, "；".join(missing) + "。请先在「凭证映射」中补齐"
+
+        version_binding = (version.credential_binding_id or "").strip()
+        if version_binding:
+            binding_sources.setdefault(version_binding, set()).add("版本默认")
+
+        merged_cookies: list[dict[str, Any]] = []
+        merged_origins: list[dict[str, Any]] = []
+        cookie_domain_owner: dict[str, str] = {}
+        origin_owner: dict[str, str] = {}
+        conflicts: list[str] = []
+        for binding_id_text, sources in binding_sources.items():
+            source_desc = "+".join(sorted(sources))
+            try:
+                binding_id = int(binding_id_text)
+            except (TypeError, ValueError):
+                conflicts.append(f"凭证绑定ID不合法：{binding_id_text}（来源 {source_desc}）")
+                continue
+            try:
+                state = CredentialResolveService.resolve_playwright_storage_state(
+                    db, binding_id, allow_empty_state=True
+                )
+            except Exception as exc:  # noqa: BLE001 凭证解析失败需要反馈给用户
+                return None, f"凭证绑定 {binding_id_text}（来源 {source_desc}）解析失败：{exc}"
+            if not isinstance(state, dict):
+                continue
+            for cookie in state.get("cookies") or []:
+                if not isinstance(cookie, dict):
+                    continue
+                domain = str(cookie.get("domain") or "").lstrip(".").lower()
+                if not domain:
+                    merged_cookies.append(cookie)
+                    continue
+                owner = cookie_domain_owner.get(domain)
+                if owner and owner != binding_id_text:
+                    conflicts.append(f"cookie 域 {domain} 同时来自 {owner} 与 {binding_id_text}（来源 {source_desc}）")
+                    continue
+                cookie_domain_owner.setdefault(domain, binding_id_text)
+                merged_cookies.append(cookie)
+            for origin_entry in state.get("origins") or []:
+                if not isinstance(origin_entry, dict):
+                    continue
+                origin = str(origin_entry.get("origin") or "").strip()
+                if not origin:
+                    continue
+                origin_key = origin.lower()
+                owner = origin_owner.get(origin_key)
+                if owner and owner != binding_id_text:
+                    conflicts.append(f"origin {origin} 同时来自 {owner} 与 {binding_id_text}（来源 {source_desc}）")
+                    continue
+                origin_owner.setdefault(origin_key, binding_id_text)
+                merged_origins.append(origin_entry)
+        if conflicts:
+            return (
+                None,
+                "多凭证登录态存在同域冲突：" + "；".join(sorted(set(conflicts))[:5]) +
+                "。请调整阶段的目标系统或版本默认绑定",
+            )
+        if not merged_cookies and not merged_origins:
+            return None, ""
+        return {"cookies": merged_cookies, "origins": merged_origins}, ""
+
+    @staticmethod
+    def _looks_like_login_failure(page_url: str, error_message: str) -> bool:
+        """启发式判断失败是否疑似登录失效：失败页 URL 或错误信息命中登录特征。"""
+        url = (page_url or "").lower()
+        message = (error_message or "").lower()
+        if any(flag in url for flag in _LOGIN_PAGE_URL_FLAGS):
+            return True
+        return any(flag in message for flag in _LOGIN_PAGE_MESSAGE_FLAGS)
+
+    @classmethod
+    def _annotate_login_failure_hint(
+        cls, error_message: str, page_url: str = ""
+    ) -> str:
+        """失败信息追加登录失效提示；命中特征时前缀提示，便于用户手动登录后重跑。"""
+        message = (error_message or "").strip()
+        if cls._looks_like_login_failure(page_url, message):
+            return f"疑似登录失效，请手动登录或更新凭证后重跑。{message}".strip()
+        return message
+
+    @classmethod
+    def _writeback_credential_after_finish(
+        cls, db: Session, run: ConfigurationTaskRun, payload: dict[str, Any]
+    ) -> None:
+        """运行结束后按开关回写最终浏览器状态到版本绑定的统一凭证。
+
+        安全边界：绑定必须 writeback_enabled 且非 shared_read（回写服务内校验），
+        回写失败只记日志，不影响运行终态与证据状态。
+        """
+        try:
+            run_params = load_json_object(run.run_params_json)
+            binding_id_text = str(run_params.get("credentialBindingId") or "").strip()
+            if not binding_id_text:
+                logger.debug(f"配置任务运行未绑定凭证，跳过回写: task_run_id={run.task_run_id}")
+                return
+            runtime_debug = payload.get("runtimeDebug") or payload.get("runtime_debug") or {}
+            if not isinstance(runtime_debug, dict):
+                runtime_debug = {}
+            final_state = (
+                runtime_debug.get("persistContextFinalState")
+                or runtime_debug.get("persist_context_final_state")
+            )
+            if not isinstance(final_state, dict) or not final_state:
+                logger.info(
+                    f"配置任务运行结束事件缺少最终浏览器状态，跳过回写: task_run_id={run.task_run_id}"
+                )
+                return
+            binding_id = int(binding_id_text)
+            binding = CredentialDao.get_binding(db, binding_id)
+            if not binding:
+                logger.info(f"配置任务运行回写跳过：凭证绑定不存在 binding_id={binding_id}")
+                return
+            # 本地状态缓存启用（persistContextPath 非空）才允许回写，与回写服务约束一致。
+            local_cache_enabled = bool(
+                runtime_debug.get("persistContextPath") or runtime_debug.get("persist_context_path")
+            )
+            model = CredentialWritebackModel(
+                expected_revision=int(binding.revision or 1),
+                storage_state=final_state,
+                local_cache_enabled=local_cache_enabled,
+            )
+            operator = run.update_by or run.create_by or "system"
+            result = CredentialWritebackService.writeback_storage_state(db, binding_id, model, operator)
+            logger.info(
+                f"配置任务运行凭证回写: task_run_id={run.task_run_id}, binding_id={binding_id}, "
+                f"success={result.get('success')}, message={result.get('message')}"
+            )
+        except Exception as exc:  # noqa: BLE001 回写失败不影响运行终态
+            logger.warning(f"配置任务运行凭证回写异常: task_run_id={run.task_run_id}, error={exc}")
 
     @classmethod
     def handle_agent_run_event(cls, db: Session, agent_code: str, message_data: dict[str, Any]) -> bool:
@@ -864,7 +1105,22 @@ class ConfigurationTaskRunService:
                 )
             else:
                 final_status = "SUCCESS" if success is not False else "FAILED"
-                error_message = "" if final_status == "SUCCESS" else "执行失败"
+                if final_status == "FAILED":
+                    # 运行失败同样做登录失效启发式检测：取最后失败页 URL/既有错误信息。
+                    runtime_debug = payload.get("runtimeDebug") or payload.get("runtime_debug") or {}
+                    last_url = (
+                        runtime_debug.get("pageUrl")
+                        or payload.get("pageUrl")
+                        or (result_payload.get("lastStep") or {}).get("pageUrl")
+                        if isinstance(runtime_debug, dict)
+                        else ""
+                    )
+                    error_message = cls._annotate_login_failure_hint(
+                        "执行失败",
+                        str(last_url or ""),
+                    )
+                else:
+                    error_message = ""
             update_values.update(
                 {
                     "status": final_status,
@@ -888,6 +1144,9 @@ class ConfigurationTaskRunService:
             logger.info(
                 f"配置任务运行收到事件终态: task_run_id={run_id_int}, type={message_type}, status={final_status}"
             )
+            # 执行结束后的凭证回写（开关开启且绑定满足回写条件时生效）。
+            if load_json_object(run.run_params_json).get("writebackCredentialEnabled"):
+                cls._writeback_credential_after_finish(db, run, payload)
             return True
         return False
 

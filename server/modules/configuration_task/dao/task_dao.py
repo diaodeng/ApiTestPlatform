@@ -5,7 +5,11 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from modules.configuration_task.entity.do.task_do import ConfigurationTask, ConfigurationTaskVersion
+from modules.configuration_task.entity.do.task_do import (
+    ConfigurationTask,
+    ConfigurationTaskCredentialMapping,
+    ConfigurationTaskVersion,
+)
 from modules.configuration_task.entity.do.task_run_do import ConfigurationTaskRun
 
 
@@ -193,3 +197,34 @@ def load_json_list(raw: str | None) -> list:
     except (TypeError, ValueError):
         return []
     return value if isinstance(value, list) else []
+
+
+class ConfigurationTaskCredentialMappingDao:
+    """任务系统凭证映射数据访问。"""
+
+    @classmethod
+    def list_by_task(cls, db: Session, task_id: int) -> list[ConfigurationTaskCredentialMapping]:
+        """查询任务的全部映射，按 system_key 排序。"""
+        return (
+            db.query(ConfigurationTaskCredentialMapping)
+            .filter(ConfigurationTaskCredentialMapping.task_id == task_id)
+            .order_by(ConfigurationTaskCredentialMapping.system_key.asc())
+            .all()
+        )
+
+    @classmethod
+    def delete_by_task(cls, db: Session, task_id: int) -> int:
+        """删除任务的全部映射（批量替换式保存的前置清理）。"""
+        return (
+            db.query(ConfigurationTaskCredentialMapping)
+            .filter(ConfigurationTaskCredentialMapping.task_id == task_id)
+            .delete()
+        )
+
+    @classmethod
+    def add_mappings(cls, db: Session, values_list: list[dict]) -> list[ConfigurationTaskCredentialMapping]:
+        """批量新增映射实体。"""
+        rows = [ConfigurationTaskCredentialMapping(**values) for values in values_list]
+        db.add_all(rows)
+        db.flush()
+        return rows

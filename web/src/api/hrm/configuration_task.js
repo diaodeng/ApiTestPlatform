@@ -66,6 +66,14 @@ export function unpublishVersion(versionId) {
   return silent({ url: `/configuration-tasks/versions/${versionId}/unpublish`, method: 'post' })
 }
 
+export function getCredentialMappings(taskId) {
+  return silent({ url: `/configuration-tasks/${taskId}/credential-mappings`, method: 'get' })
+}
+
+export function saveCredentialMappings(taskId, mappings) {
+  return silent({ url: `/configuration-tasks/${taskId}/credential-mappings`, method: 'put', data: { mappings } })
+}
+
 // ---------- 阶段 ----------
 
 export function saveVersionStages(versionId, stages) {

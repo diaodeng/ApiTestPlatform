@@ -20,6 +20,7 @@ from modules.configuration_task.entity.vo.task_vo import (
     RecordingToTemplateModel,
     StageApproveModel,
     StageSplitRuleModel,
+    TaskCredentialMappingSaveModel,
     TaskRunCreateModel,
     TaskRunQueryModel,
     TaskRunStopModel,
@@ -31,6 +32,9 @@ from modules.configuration_task.service.artifact_access_service import (
     ConfigurationTaskArtifactAccessService,
 )
 from modules.configuration_task.service.artifact_service import ConfigurationTaskArtifactService
+from modules.configuration_task.service.credential_mapping_service import (
+    ConfigurationTaskCredentialMappingService,
+)
 from modules.configuration_task.service.report_service import ConfigurationTaskReportService
 from modules.configuration_task.service.stage_service import ConfigurationTaskStageService
 from modules.configuration_task.service.task_run_service import ConfigurationTaskRunService
@@ -244,6 +248,40 @@ async def unpublish_task_version(
     """撤销发布：回退为草稿；仅允许从未运行过的版本。"""
     result = await run_in_threadpool(
         ConfigurationTaskVersionLifecycleService.unpublish_version, query_db, version_id, current_user
+    )
+    return _result_response(result)
+
+
+@taskController.get(
+    "/{task_id}/credential-mappings",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:query"))],
+)
+async def list_task_credential_mappings(
+    request: Request,
+    task_id: int,
+    query_db: Session = Depends(get_db),
+):
+    """查询任务的系统凭证映射。"""
+    data = await run_in_threadpool(
+        ConfigurationTaskCredentialMappingService.list_mappings, query_db, task_id
+    )
+    return ResponseUtil.success(data=data)
+
+
+@taskController.put(
+    "/{task_id}/credential-mappings",
+    dependencies=[Depends(CheckUserInterfaceAuth("configuration_task:task:edit"))],
+)
+async def save_task_credential_mappings(
+    request: Request,
+    task_id: int,
+    model: TaskCredentialMappingSaveModel,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """批量替换式保存任务的系统凭证映射（独立于版本快照，发布后可改）。"""
+    result = await run_in_threadpool(
+        ConfigurationTaskCredentialMappingService.save_mappings, query_db, task_id, model, current_user
     )
     return _result_response(result)
 

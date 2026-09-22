@@ -1120,8 +1120,19 @@ def _resolve_seed_storage_state(runtime_options: dict[str, Any]) -> dict[str, An
 def _seed_context_state_file_if_needed(
     runtime_options: dict[str, Any], state_path: Path | None
 ) -> None:
-    """当本地状态文件不存在时，使用运行时下发的seed state初始化。"""
-    if state_path is None or state_path.exists():
+    """使用运行时下发的seed state初始化本地状态文件。
+
+    默认仅当本地状态文件不存在时写入（保留历史登录态）；运行参数
+    forceRefreshSeedState=true 时强制覆写，用于多凭证合并登录态或
+    凭证更新后让新 seed 生效。
+    """
+    if state_path is None:
+        return
+    force_refresh = bool(
+        runtime_options.get("forceRefreshSeedState")
+        or runtime_options.get("force_refresh_seed_state")
+    )
+    if not force_refresh and state_path.exists():
         return
     seed_state = _resolve_seed_storage_state(runtime_options)
     if not seed_state:
@@ -1196,6 +1207,9 @@ def _step_timeout_ms(
         case_data.get("runtimeSettings") or case_data.get("runtime_settings")
     )
     candidates = [
+        # 运行级强制覆盖（stepParamApplyMode=force 时由服务端下发），优先于步骤自身配置。
+        runtime_options.get("stepTimeoutOverride"),
+        runtime_options.get("step_timeout_override"),
         step.get("timeoutMs"),
         step.get("timeout_ms"),
         params.get("timeoutMs"),
@@ -1224,6 +1238,9 @@ def _step_think_time_ms(
         case_data.get("runtimeSettings") or case_data.get("runtime_settings")
     )
     candidates = [
+        # 运行级强制覆盖（stepParamApplyMode=force 时由服务端下发），优先于步骤自身配置。
+        runtime_options.get("stepThinkTimeOverride"),
+        runtime_options.get("step_think_time_override"),
         step.get("thinkTimeMs"),
         step.get("think_time_ms"),
         params.get("thinkTimeMs"),

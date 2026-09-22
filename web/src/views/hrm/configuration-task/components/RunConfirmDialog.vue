@@ -31,6 +31,48 @@
             <el-form-item label="登录等待(秒)" v-if="form.manualLoginEnabled">
                 <el-input-number v-model="form.manualLoginWaitSec" :min="1" :max="3600" />
             </el-form-item>
+            <el-form-item label="步骤超时(ms)">
+                <el-input-number
+                    v-model="form.defaultStepTimeoutMs"
+                    :min="500"
+                    :max="600000"
+                    :step="1000"
+                    placeholder="默认 10000"
+                />
+                <span class="hint">单步最长执行时间，留空用步骤自身配置</span>
+            </el-form-item>
+            <el-form-item label="步骤等待(ms)">
+                <el-input-number
+                    v-model="form.defaultStepWaitMs"
+                    :min="0"
+                    :max="600000"
+                    :step="500"
+                    placeholder="默认 0"
+                />
+                <span class="hint">每步执行前/后的缓冲等待，留空用步骤自身配置</span>
+            </el-form-item>
+            <el-form-item label="应用方式">
+                <el-radio-group v-model="form.stepParamApplyMode">
+                    <el-radio value="default">作为默认值</el-radio>
+                    <el-radio value="force">覆盖所有步骤</el-radio>
+                </el-radio-group>
+                <span class="hint">默认值仅对未单独设置的步骤生效；覆盖会忽略步骤自身配置</span>
+            </el-form-item>
+            <el-form-item label="失败策略">
+                <el-radio-group v-model="form.failureStrategy">
+                    <el-radio value="stop">失败后停止</el-radio>
+                    <el-radio value="continue">继续执行后续阶段</el-radio>
+                </el-radio-group>
+                <span class="hint">继续模式下失败阶段照常标记失败，后续阶段依赖上游产出时请自行评估</span>
+            </el-form-item>
+            <el-form-item label="回写凭证">
+                <el-switch v-model="form.writebackCredentialEnabled" />
+                <span class="hint">执行结束后把浏览器最终登录态回写到版本绑定的凭证（需绑定允许回写）</span>
+            </el-form-item>
+            <el-form-item label="强制刷新登录态">
+                <el-switch v-model="form.forceRefreshSeedState" />
+                <span class="hint">忽略 Agent 本地缓存的浏览器状态，强制用本次凭证合并的登录态初始化（凭证更新后建议开启）</span>
+            </el-form-item>
             <el-form-item label="超时(秒)">
                 <el-input-number v-model="form.timeoutSeconds" :min="30" :max="21600" :step="60" />
             </el-form-item>
@@ -76,7 +118,13 @@ const form = reactive({
     versionNo: undefined,
     manualLoginEnabled: false,
     manualLoginWaitSec: 120,
-    timeoutSeconds: 1800
+    timeoutSeconds: 1800,
+    defaultStepTimeoutMs: undefined,
+    defaultStepWaitMs: undefined,
+    stepParamApplyMode: "default",
+    failureStrategy: "stop",
+    writebackCredentialEnabled: false,
+    forceRefreshSeedState: false
 });
 
 async function startRun() {
@@ -89,6 +137,13 @@ async function startRun() {
             manualLoginEnabled: form.manualLoginEnabled,
             manualLoginWaitSec: form.manualLoginWaitSec,
             timeoutSeconds: form.timeoutSeconds,
+            // 运行级步骤参数覆盖：留空表示完全沿用步骤自身配置。
+            defaultStepTimeoutMs: form.defaultStepTimeoutMs || undefined,
+            defaultStepWaitMs: form.defaultStepWaitMs || undefined,
+            stepParamApplyMode: form.stepParamApplyMode,
+            failureStrategy: form.failureStrategy,
+            writebackCredentialEnabled: form.writebackCredentialEnabled,
+            forceRefreshSeedState: form.forceRefreshSeedState,
             triggerType: "manual"
         };
         const res = await createRun(props.task.taskId, payload);

@@ -218,6 +218,18 @@ class TaskRunCreateModel(TaskBaseModel):
     manual_login_enabled: bool = False
     manual_login_wait_sec: int = Field(default=120, ge=1, le=3600)
     timeout_seconds: int | None = Field(default=None, ge=30, le=21600)
+    # 运行级步骤参数覆盖：空值表示沿用步骤自身配置/全局默认。
+    default_step_timeout_ms: int | None = Field(default=None, ge=500, le=600000)
+    default_step_wait_ms: int | None = Field(default=None, ge=0, le=600000)
+    # 步骤参数应用方式：default=作为未单独设置步骤的默认值；force=强制覆盖所有步骤。
+    step_param_apply_mode: str = Field(default="default", pattern="^(default|force)$")
+    # 执行结束后是否把最终浏览器状态回写到版本绑定的统一凭证（绑定需允许回写）。
+    writeback_credential_enabled: bool = False
+    # 强制刷新登录态：忽略 Agent 本地缓存的浏览器状态文件，用本次凭证合并的登录态初始化。
+    force_refresh_seed_state: bool = False
+    # 失败策略：stop=步骤/阶段失败后终止（后续阶段不执行）；continue=继续执行后续步骤与阶段，
+    # 失败的阶段照常标记失败，运行终态按是否存在失败判定。
+    failure_strategy: str = Field(default="stop", pattern="^(stop|continue)$")
 
     @field_validator("agent_code", "trigger_type", mode="before")
     @classmethod
@@ -276,6 +288,8 @@ class StageSplitRuleModel(TaskBaseModel):
     step_indexes: list[int] = Field(default_factory=list)
     step_ids: list[str] = Field(default_factory=list)
     evidence_policy: EvidencePolicyModel = Field(default_factory=EvidencePolicyModel)
+    # 目标系统标识：引用任务系统凭证映射；空表示不使用独立凭证（沿用版本默认绑定）。
+    system_key: str = Field(default="", max_length=64)
 
     @field_validator("stage_key", mode="before")
     @classmethod
@@ -467,3 +481,22 @@ class TaskScheduleModel(TaskBaseModel):
         if len(fields) != 5:
             raise ValueError("cron 必须是 5 字段表达式：分 时 日 月 周")
         return normalized
+
+
+class TaskCredentialMappingModel(TaskBaseModel):
+    """任务系统凭证映射行：阶段通过 systemKey 声明目标系统。"""
+
+    system_key: str = Field(min_length=1, max_length=64)
+    credential_binding_id: str = Field(default="", max_length=64)
+    remark: str = Field(default="", max_length=255)
+
+    @field_validator("system_key", "credential_binding_id", mode="before")
+    @classmethod
+    def strip_text(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
+
+
+class TaskCredentialMappingSaveModel(TaskBaseModel):
+    """批量替换式保存任务的系统凭证映射。"""
+
+    mappings: list[TaskCredentialMappingModel] = Field(default_factory=list, max_length=50)
