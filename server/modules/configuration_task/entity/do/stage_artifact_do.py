@@ -31,6 +31,9 @@ class ConfigurationTaskStage(Base):
     )
     version_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="任务版本ID")
     stage_key: Mapped[str] = mapped_column(String(128), nullable=False, comment="阶段标识，版本内唯一")
+    system_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="目标系统标识，引用任务系统凭证映射，空表示不使用独立凭证"
+    )
     stage_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="阶段名称")
     mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default="READ", comment="阶段模式：READ/PREPARE_WRITE/WRITE/VERIFY"
@@ -63,6 +66,9 @@ class TaskRunStage(Base):
     task_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="运行ID")
     stage_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="来源版本阶段ID")
     stage_key: Mapped[str] = mapped_column(String(128), nullable=False, comment="阶段标识")
+    system_key: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", comment="目标系统标识快照，空表示不使用独立凭证"
+    )
     stage_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", comment="阶段名称")
     mode: Mapped[str] = mapped_column(String(32), nullable=False, default="READ", comment="阶段模式")
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="阶段顺序")

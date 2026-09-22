@@ -23,6 +23,20 @@
                     <el-option label="WRITE（写入，需审批）" value="WRITE" />
                     <el-option label="VERIFY（验证）" value="VERIFY" />
                 </el-select>
+                <el-select
+                    v-model="stage.systemKey"
+                    style="width: 150px"
+                    :disabled="!editable"
+                    clearable
+                    placeholder="目标系统"
+                >
+                    <el-option
+                        v-for="item in systemOptions"
+                        :key="item.systemKey"
+                        :label="item.systemKey"
+                        :value="item.systemKey"
+                    />
+                </el-select>
                 <el-input
                     :model-value="stepIndexesText(stage)"
                     placeholder="自动生成兼容索引"
@@ -124,7 +138,11 @@
 <script setup name="ConfigStageEditor">
 import { ref, watch, computed } from "vue";
 import { ElMessage } from "element-plus";
-import { listVersionStages, saveVersionStages } from "@/api/hrm/configuration_task";
+import {
+    listVersionStages,
+    saveVersionStages,
+    getCredentialMappings
+} from "@/api/hrm/configuration_task";
 
 const props = defineProps({ modelValue: Boolean, version: Object });
 const emit = defineEmits(["update:modelValue"]);
@@ -135,6 +153,8 @@ const visible = computed({
 });
 const saving = ref(false);
 const stages = ref([]);
+// 任务级系统凭证映射的 systemKey 清单：阶段"目标系统"下拉的选项来源。
+const systemOptions = ref([]);
 
 const editable = computed(() => props.version?.status === "DRAFT");
 
@@ -236,6 +256,7 @@ function stageFromResponse(item) {
     const missingStepIds = stepIds.filter((id) => !knownIds.has(id));
     return {
         stageKey: item.stageKey || item.stage_key || "",
+        systemKey: item.systemKey || item.system_key || "",
         stageName: item.stageName || item.stage_name || "",
         mode: item.mode || "READ",
         stepIds,
@@ -249,6 +270,13 @@ watch(
     () => [props.modelValue, props.version?.versionId],
     async ([opened]) => {
         if (!opened || !props.version) return;
+        // 加载任务系统凭证映射清单，作为"目标系统"下拉选项。
+        try {
+            const mappingRes = await getCredentialMappings(props.version.taskId);
+            systemOptions.value = mappingRes.data || [];
+        } catch {
+            systemOptions.value = [];
+        }
         try {
             const res = await listVersionStages(props.version.versionId);
             stages.value = (res.data || []).map(stageFromResponse);
@@ -263,6 +291,7 @@ function addStage() {
     stages.value.push({
         stageKey: "",
         stageName: "",
+        systemKey: "",
         mode: "READ",
         stepIds: [],
         missingStepIds: [],
@@ -341,6 +370,7 @@ async function save() {
         return {
             stageKey: stage.stageKey,
             stageName: stage.stageName,
+            systemKey: (stage.systemKey || "").trim(),
             mode: stage.mode,
             stepIndexes,
             stepIds,
