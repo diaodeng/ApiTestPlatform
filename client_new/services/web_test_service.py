@@ -1905,31 +1905,35 @@ def _resolve_upload_file_entries(
 ) -> list[tuple[Path, str | None]]:
     """解析 upload_file 的受控文件与建议上传文件名，绝不读取 params.filePath。
 
-    返回 (受控路径, 原始文件名) 列表；agentPath 模式天然是真实文件名，
-    manifest 模式取 original_file_name，注入 resolver 模式拿不到名字返回 None。
+    返回 (受控路径, 原始文件名) 列表。来源优先级（显式选择优先）：
+    1. 步骤参数 resourceIds（编辑器"资源绑定"模式）；
+    2. 步骤参数 agentPath（编辑器"Agent 目录文件"模式，天然真实文件名）；
+    3. 输入绑定 fileKey -> resourceIds（仅当步骤未显式选择来源时兜底，
+       对应"暂不指定"模式只填资源键的老用法）。
     """
     nested_runtime = _as_dict(params.get("runtimeOptions") or params.get("runtime_options"))
     effective_runtime = {**nested_runtime, **_as_dict(runtime_options)}
-    file_key = str(params.get("fileKey") or params.get("file_key") or "").strip()
-    bindings = effective_runtime.get("resourceBindings") or effective_runtime.get("resource_bindings")
-    if not isinstance(bindings, dict):
-        bindings = params.get("resourceBindings") or params.get("resource_bindings")
-    resource_ids = _upload_resource_binding_ids(bindings.get(file_key)) if file_key and isinstance(bindings, dict) else []
+    resource_ids = _normalize_upload_resource_ids(
+        params.get("resourceIds") or params.get("resource_ids")
+    )
     if not resource_ids:
-        resource_ids = _normalize_upload_resource_ids(
-            params.get("resourceIds") or params.get("resource_ids")
-        )
-    if not resource_ids:
-        # 无资源绑定时允许"Agent 目录文件"模式：受控上传根目录内的相对路径。
+        # 显式"Agent 目录文件"来源优先于输入绑定
         agent_path = str(params.get("agentPath") or params.get("agent_path") or "").strip()
         if agent_path:
             # agentPath 的末段就是真实文件名，无需改名
             return [(path, path.name) for path in _resolve_agent_upload_path(agent_path, effective_runtime)]
     if not resource_ids:
-        identifier = file_key or "resourceIds"
+        # 兜底：仅配置资源键（fileKey）时走运行时输入绑定
+        file_key = str(params.get("fileKey") or params.get("file_key") or "").strip()
+        bindings = effective_runtime.get("resourceBindings") or effective_runtime.get("resource_bindings")
+        if not isinstance(bindings, dict):
+            bindings = params.get("resourceBindings") or params.get("resource_bindings")
+        resource_ids = _upload_resource_binding_ids(bindings.get(file_key)) if file_key and isinstance(bindings, dict) else []
+    if not resource_ids:
+        identifier = str(params.get("fileKey") or params.get("file_key") or "").strip() or "resourceIds"
         raise UploadFileResolutionError(f"文件资源 {identifier} 未绑定")
     if len(resource_ids) > _MAX_UPLOAD_FILE_COUNT:
-        raise UploadFileResolutionError(f"文件资源 {file_key or resource_ids[0]} 数量超过限制")
+        raise UploadFileResolutionError(f"文件资源 {params.get('fileKey') or resource_ids[0]} 数量超过限制")
 
     active_resolver = resolver
     if active_resolver is None:
@@ -1945,13 +1949,13 @@ def _resolve_upload_file_entries(
         raw_paths = raw_paths if isinstance(raw_paths, (list, tuple, set)) else [raw_paths]
         paths = [Path(str(item).strip()) for item in raw_paths if str(item or "").strip()]
         if len(paths) != len(resource_ids):
-            raise UploadFileResolutionError(f"文件资源 {file_key or resource_ids[0]} 不可用")
+            raise UploadFileResolutionError(f"文件资源 {params.get('fileKey') or resource_ids[0]} 不可用")
         for path in paths:
             try:
                 if not path.is_absolute() or not path.resolve(strict=True).is_file():
                     raise OSError
             except (OSError, RuntimeError):
-                raise UploadFileResolutionError(f"文件资源 {file_key or resource_ids[0]} 不可用") from None
+                raise UploadFileResolutionError(f"文件资源 {params.get('fileKey') or resource_ids[0]} 不可用") from None
         return [(path.resolve(), None) for path in paths]
     return _resolve_manifest_upload_entries(resource_ids, effective_runtime)
 

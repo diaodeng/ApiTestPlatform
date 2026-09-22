@@ -145,18 +145,86 @@
                                     placement="top-start"
                                     class="field-help"
                                 >
-                                    <div>用于给步骤中的 <code>upload_file</code> 动作提供文件资源。JSON 键必须与步骤参数中的 <code>fileKey</code> 完全一致。</div>
-                                    <div>值是资源 ID 字符串数组，例如 <code>{"price_tag": ["900000000000001"]}</code>。每个 fileKey 最多绑定 20 个资源，不能填写 Agent 本地绝对路径。</div>
-                                    <div>资源必须已上传、状态为 READY，且属于任务执行 Agent；保存后发布版本时服务端会再次校验。</div>
+                                    <div>用于在<b>运行时</b>给步骤参数提供取值，键与步骤参数中的 <code>fileKey</code> 对应（也可用于其他运行时输入）。步骤里已直接选择文件时无需在此重复设置；两者同时存在时输入绑定优先（运行时覆盖步骤所选文件）。</div>
+                                    <div>值是资源 ID 数组：在下拉中选择（已按任务执行 Agent 过滤 READY 资源），也可以手输 ID。每个键最多绑定 20 个资源，不能填写 Agent 本地绝对路径。</div>
+                                    <div>注意：输入绑定只承载"运行时换文件"，普通固定参数（如 <code>venderId=1</code>）请放在「版本变量」中，步骤参数用 <code>${'{'}变量名{'}'}</code> 引用。</div>
+                                    <div>资源必须已上传、状态为 READY，且属于任务执行 Agent；运行时服务端会再次校验。</div>
                                 </PromptButton>
                             </span>
                         </template>
-                        <el-input
-                            v-model="bindingsText"
-                            type="textarea"
-                            :rows="4"
-                            placeholder='fileKey 到资源ID数组，如 {"price_tag": ["900000000000001"]}'
-                        />
+                        <template v-if="!bindingAdvanced">
+                            <div
+                                v-for="(rowItem, index) in bindingRows"
+                                :key="index"
+                                class="binding-row"
+                            >
+                                <el-select
+                                    v-model="rowItem.key"
+                                    filterable
+                                    allow-create
+                                    default-first-option
+                                    placeholder="键（fileKey）"
+                                    class="binding-key"
+                                >
+                                    <el-option
+                                        v-for="keyOption in bindingKeyOptions"
+                                        :key="keyOption"
+                                        :label="keyOption"
+                                        :value="keyOption"
+                                    />
+                                </el-select>
+                                <el-select
+                                    v-model="rowItem.ids"
+                                    multiple
+                                    filterable
+                                    allow-create
+                                    collapse-tags
+                                    collapse-tags-tooltip
+                                    placeholder="资源（下拉选择或手输 ID）"
+                                    class="binding-ids"
+                                    @visible-change="(visible) => visible && loadBindingResourceOptions()"
+                                >
+                                    <el-option
+                                        v-for="item in bindingResourceOptions"
+                                        :key="item.resourceId"
+                                        :label="item.label"
+                                        :value="item.resourceId"
+                                    />
+                                </el-select>
+                                <el-button
+                                    icon="Delete"
+                                    circle
+                                    text
+                                    type="danger"
+                                    @click="removeBindingRow(index)"
+                                />
+                            </div>
+                            <div class="binding-toolbar">
+                                <el-button icon="Plus" text type="primary" @click="addBindingRow">添加绑定</el-button>
+                                <el-link
+                                    type="primary"
+                                    :underline="false"
+                                    class="binding-mode-link"
+                                    @click="toggleBindingAdvanced"
+                                >高级 JSON</el-link>
+                            </div>
+                        </template>
+                        <template v-else>
+                            <el-input
+                                v-model="bindingsText"
+                                type="textarea"
+                                :rows="4"
+                                placeholder='fileKey 到资源ID数组，如 {"price_tag": ["900000000000001"]}'
+                            />
+                            <div class="binding-toolbar">
+                                <el-link
+                                    type="primary"
+                                    :underline="false"
+                                    class="binding-mode-link"
+                                    @click="toggleBindingAdvanced"
+                                >结构化编辑</el-link>
+                            </div>
+                        </template>
                     </el-form-item>
                     <el-form-item>
                         <template #label>
@@ -196,7 +264,7 @@
 </template>
 
 <script setup name="ConfigVersionDrawer">
-import { ref, reactive, watch } from "vue";
+import { ref, reactive, computed, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import StageEditor from "./StageEditor.vue";
 import WebStepEditor from "@/components/hrm/case/webcase/components/WebStepEditor.vue";
@@ -211,7 +279,8 @@ import {
     copyVersion,
     deleteVersion,
     deprecateVersion,
-    unpublishVersion
+    unpublishVersion,
+    listResources
 } from "@/api/hrm/configuration_task";
 
 const props = defineProps({ modelValue: Boolean, task: Object });
@@ -228,6 +297,94 @@ const stageVersion = ref(null);
 const editing = ref(null);
 const editorForm = reactive({ startUrl: "", browserName: "chromium", headless: false, credentialBindingId: "" });
 const bindingsText = ref("{}");
+
+// ---------- 输入绑定结构化编辑 ----------
+// 结构化模式按行动维护"键(fileKey) → 资源ID数组"，保存时序列化为 inputBindings JSON；
+// 高级 JSON 模式保留手写能力，两种模式共享 bindingsText 作为数据源。
+const bindingRows = ref([]);
+const bindingAdvanced = ref(false);
+const bindingResourceOptions = ref([]);
+
+// 键建议：自动收集当前版本步骤里所有 upload_file 的 fileKey，允许自定义键
+const bindingKeyOptions = computed(() => {
+    const keys = new Set();
+    for (const step of editorSteps.value || []) {
+        if (step?.actionType !== "upload_file") continue;
+        const key = `${step.params?.fileKey ?? ""}`.trim();
+        if (key) keys.add(key);
+    }
+    return Array.from(keys);
+});
+
+function addBindingRow() {
+    bindingRows.value.push({ key: "", ids: [] });
+}
+
+function removeBindingRow(index) {
+    bindingRows.value.splice(index, 1);
+}
+
+function toggleBindingAdvanced() {
+    if (!bindingAdvanced.value) {
+        // 结构化 → 高级 JSON：以当前行为准序列化
+        bindingsText.value = JSON.stringify(buildBindingsFromRows(), null, 2);
+        bindingAdvanced.value = true;
+        return;
+    }
+    // 高级 JSON → 结构化：解析当前文本，非法则留在高级模式
+    try {
+        syncRowsFromBindings(JSON.parse(bindingsText.value || "{}"));
+        bindingAdvanced.value = false;
+    } catch {
+        ElMessage.warning("当前 JSON 不是合法对象，无法切换到结构化编辑");
+    }
+}
+
+function syncRowsFromBindings(bindings) {
+    const source = bindings && typeof bindings === "object" && !Array.isArray(bindings) ? bindings : {};
+    bindingRows.value = Object.entries(source).map(([key, ids]) => ({
+        key: `${key ?? ""}`.trim(),
+        ids: Array.isArray(ids) ? ids.map((item) => `${item ?? ""}`.trim()).filter(Boolean) : []
+    }));
+}
+
+function buildBindingsFromRows() {
+    const result = {};
+    for (const rowItem of bindingRows.value) {
+        const key = `${rowItem.key || ""}`.trim();
+        const ids = (rowItem.ids || []).map((item) => `${item ?? ""}`.trim()).filter(Boolean);
+        if (!key || !ids.length) continue;
+        result[key] = ids;
+    }
+    return result;
+}
+
+async function loadBindingResourceOptions() {
+    const agentCode = `${props.task?.agentCode || ""}`.trim();
+    if (!agentCode || bindingResourceOptions.value.length) return;
+    try {
+        const response = await listResources({ agentCode, status: "READY", limit: 200 });
+        const rows = Array.isArray(response.data) ? response.data : [];
+        bindingResourceOptions.value = rows.map((item) => ({
+            resourceId: item.resourceId,
+            label: `${item.originalFileName} · ${formatBindingSize(item.fileSize)} · ${shortBindingId(item.resourceId)}`
+        }));
+    } catch (e) {
+        bindingResourceOptions.value = [];
+    }
+}
+
+function shortBindingId(value) {
+    const text = String(value || "");
+    return text.length > 10 ? `${text.slice(0, 6)}…${text.slice(-4)}` : text;
+}
+
+function formatBindingSize(size) {
+    const value = Number(size) || 0;
+    if (value < 1024) return `${value}B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`;
+    return `${(value / 1024 / 1024).toFixed(2)}MB`;
+}
 const versionVariablesText = ref("{}");
 // 步骤编辑交给公共组件 WebStepEditor：可视化表格与 JSON 双模式都在组件内部，
 // 保存前调用其 flush() 应用 JSON 编辑，步骤数据始终以 editorSteps 数组为准。
@@ -306,6 +463,8 @@ function openEditor(row) {
     // 可视化表格用独立数组持有步骤（WebStepEditor 打开时自动初始化 JSON 文本与选中行）。
     editorSteps.value = Array.isArray(row.steps) ? [...row.steps] : [];
     bindingsText.value = JSON.stringify(row.inputBindings || {}, null, 2);
+    syncRowsFromBindings(row.inputBindings);
+    bindingAdvanced.value = false;
     versionVariablesText.value = JSON.stringify(row.variables || {}, null, 2);
     editorVisible.value = true;
 }
@@ -322,11 +481,17 @@ async function saveVersion() {
         return;
     }
     let bindings, variables;
-    try {
-        bindings = JSON.parse(bindingsText.value || "{}");
-    } catch {
-        ElMessage.warning("输入绑定必须是合法 JSON 对象");
-        return;
+    if (bindingAdvanced.value) {
+        // 高级 JSON 模式：直接解析文本
+        try {
+            bindings = JSON.parse(bindingsText.value || "{}");
+        } catch {
+            ElMessage.warning("输入绑定必须是合法 JSON 对象");
+            return;
+        }
+    } else {
+        // 结构化模式：按行动态表序列化（空键或空资源的行忽略）
+        bindings = buildBindingsFromRows();
     }
     try {
         variables = JSON.parse(versionVariablesText.value || "{}");
@@ -458,6 +623,37 @@ function openStages(row) {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+}
+
+/* 输入绑定结构化编辑：键 + 资源多选 + 删除按钮 一行 */
+.binding-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-bottom: 8px;
+
+    .binding-key {
+        width: 220px;
+        flex-shrink: 0;
+    }
+
+    .binding-ids {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+.binding-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 2px;
+}
+
+.binding-mode-link {
+    font-size: 12px;
 }
 
 .field-help {

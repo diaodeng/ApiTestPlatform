@@ -218,54 +218,11 @@
                   </template>
                   <template v-else-if="scope.row.actionType === 'upload_file'">
                     <div class="upload-file-cell" @click.stop>
-                      <el-input
-                        v-model="scope.row.params.fileKey"
-                        @blur="finishStepCellEditing"
-                        placeholder="资源键，如 price_tag"
+                      <UploadFileSourceEditor
+                        :params="scope.row.params"
+                        :agent-code="uploadResourceAgentCode"
+                        @change="emitChange"
                       />
-                      <el-select
-                        v-if="uploadResourceAgentCode"
-                        :model-value="getUploadSource(scope.row)"
-                        placeholder="文件来源"
-                        @change="(value) => setUploadSource(scope.row, value)"
-                      >
-                        <el-option label="资源绑定" value="resource" />
-                        <el-option label="Agent 目录文件" value="agent" />
-                      </el-select>
-                      <el-select
-                        v-if="uploadResourceAgentCode && getUploadSource(scope.row) === 'resource'"
-                        :model-value="firstResourceId(scope.row)"
-                        filterable
-                        :loading="resourceOptionsLoading"
-                        placeholder="选择资源（READY）"
-                        @visible-change="onResourceDropdownVisible"
-                        @change="(value) => pickResource(scope.row, value)"
-                      >
-                        <el-option
-                          v-for="item in resourceOptions"
-                          :key="item.resourceId"
-                          :label="item.label"
-                          :value="item.resourceId"
-                        />
-                      </el-select>
-                      <el-select
-                        v-if="uploadResourceAgentCode && getUploadSource(scope.row) === 'agent'"
-                        :model-value="agentFileDisplayValue(scope.row)"
-                        :loading="agentFileOptionsLoading"
-                        placeholder="选择 Agent 目录文件"
-                        @visible-change="onAgentFileDropdownVisible"
-                        @change="(value) => pickAgentFile(scope.row, value)"
-                      >
-                        <el-option
-                          v-for="item in agentFileOptions"
-                          :key="item.path"
-                          :label="item.label"
-                          :value="item.path"
-                        />
-                      </el-select>
-                      <div v-if="sampleFileNames(scope.row).length" class="upload-sample">
-                        样本：{{ sampleFileNames(scope.row).join('、') }}
-                      </div>
                     </div>
                   </template>
                   <template v-else-if="scope.row.actionType === 'press'">
@@ -436,19 +393,20 @@
       :current-step="currentStep || {}"
       :step-index="selectedStepIndex"
       :show-fingerprint="showFingerprint"
+      :upload-resource-agent-code="uploadResourceAgentCode"
       @change="emitChange"
     />
   </div>
 </template>
 
 <script setup>
-  import { computed, onMounted, ref } from 'vue';
+  import { computed, onMounted } from 'vue';
   import { ElMessage } from 'element-plus';
   import AceEditor from '@/components/hrm/common/ace-editor.vue';
   import WebStepDetailDialog from './WebStepDetailDialog.vue';
+  import UploadFileSourceEditor from './UploadFileSourceEditor.vue';
   import { actionOptions, keyboardKeyOptions, locatorTypeOptions } from '../utils/shared.js';
   import { useStepEditorTable } from '../composables/useStepEditorTable.js';
-  import { listResources, listAgentUploadFiles } from '@/api/hrm/configuration_task';
 
   const props = defineProps({
     // 步骤数组：由调用方持有，组件只做原地变更（push/splice），
@@ -514,152 +472,8 @@
   // 存在截图步骤时展示证据列，与门店配置版本编辑器保持一致。
   const hasEvidenceStep = computed(() => props.steps.some((step) => step.actionType === 'capture_screenshot'));
 
-  // ---------- 上传步骤文件来源（资源绑定 / Agent 目录文件） ----------
-  // 仅当调用方传入 uploadResourceAgentCode 时启用；来源选择结果直接写入步骤
-  // params.resourceIds 或 params.agentPath，运行时解析优先级由 Agent 侧保证。
-
-  const resourceOptions = ref([]);
-  const resourceOptionsLoading = ref(false);
-  const agentFileOptions = ref([]);
-  const agentFileOptionsLoading = ref(false);
-  const agentFilePrefix = ref('');
-
-  function uploadedResourceIds(row) {
-    const ids = row?.params?.resourceIds;
-    return Array.isArray(ids) ? ids.filter((item) => `${item ?? ''}`.trim()) : [];
-  }
-
-  function uploadedAgentPath(row) {
-    return `${row?.params?.agentPath ?? ''}`.trim();
-  }
-
-  function getUploadSource(row) {
-    if (uploadedResourceIds(row).length) return 'resource';
-    if (uploadedAgentPath(row)) return 'agent';
-    return 'none';
-  }
-
-  function setUploadSource(row, value) {
-    if (!row?.params) return;
-    if (value === 'resource') {
-      // 切到资源绑定：清掉 Agent 目录路径，保留已有资源选择
-      delete row.params.agentPath;
-      if (!Array.isArray(row.params.resourceIds)) row.params.resourceIds = [];
-      emitChange();
-    } else if (value === 'agent') {
-      // 切到 Agent 目录文件：清掉资源绑定，等待选择受控相对路径
-      row.params.resourceIds = [];
-      if (!uploadedAgentPath(row)) row.params.agentPath = '';
-      agentFilePrefix.value = '';
-      emitChange();
-    }
-  }
-
-  function firstResourceId(row) {
-    return uploadedResourceIds(row)[0] || '';
-  }
-
-  function pickResource(row, value) {
-    if (!row?.params) return;
-    row.params.resourceIds = value ? [value] : [];
-    emitChange();
-  }
-
-  // Agent 目录下拉的展示值：目录导航期间显示当前已选路径，避免选中目录时误改步骤
-  function agentFileDisplayValue(row) {
-    return uploadedAgentPath(row);
-  }
-
-  async function loadResourceOptions() {
-    if (!props.uploadResourceAgentCode || resourceOptionsLoading.value) return;
-    resourceOptionsLoading.value = true;
-    try {
-      const response = await listResources({
-        agentCode: props.uploadResourceAgentCode,
-        status: 'READY',
-        limit: 200
-      });
-      const rows = Array.isArray(response.data) ? response.data : [];
-      resourceOptions.value = rows.map((item) => ({
-        resourceId: item.resourceId,
-        label: `${item.originalFileName}（${item.agentCode}）`
-      }));
-    } catch (error) {
-      resourceOptions.value = [];
-    } finally {
-      resourceOptionsLoading.value = false;
-    }
-  }
-
-  function onResourceDropdownVisible(visible) {
-    if (visible) {
-      loadResourceOptions();
-    } else {
-      finishStepCellEditing();
-    }
-  }
-
-  async function loadAgentFileOptions() {
-    if (!props.uploadResourceAgentCode || agentFileOptionsLoading.value) return;
-    agentFileOptionsLoading.value = true;
-    try {
-      const response = await listAgentUploadFiles({
-        agentCode: props.uploadResourceAgentCode,
-        prefix: agentFilePrefix.value
-      });
-      const entries = (response.data && response.data.entries) || [];
-      const items = [];
-      if (agentFilePrefix.value) {
-        items.push({ path: '__qtr_parent__', type: 'parent', label: '← 上级目录' });
-      }
-      for (const item of entries) {
-        const name = String(item.path || '').split('/').pop();
-        items.push({
-          path: item.path,
-          type: item.type,
-          label: item.type === 'directory' ? `📁 ${name}/` : `${name}（${item.size} 字节）`
-        });
-      }
-      agentFileOptions.value = items;
-    } catch (error) {
-      agentFileOptions.value = [];
-    } finally {
-      agentFileOptionsLoading.value = false;
-    }
-  }
-
-  function onAgentFileDropdownVisible(visible) {
-    if (visible) {
-      loadAgentFileOptions();
-    } else {
-      finishStepCellEditing();
-    }
-  }
-
-  function pickAgentFile(row, value) {
-    if (value === '__qtr_parent__') {
-      // 目录导航：回到上级目录，不改动步骤
-      agentFilePrefix.value = agentFilePrefix.value.split('/').slice(0, -1).join('/');
-      loadAgentFileOptions();
-      return;
-    }
-    const option = agentFileOptions.value.find((item) => item.path === value);
-    if (option && option.type === 'directory') {
-      // 目录条目：下钻一层，不改动步骤
-      agentFilePrefix.value = option.path;
-      loadAgentFileOptions();
-      return;
-    }
-    if (!row?.params) return;
-    row.params.agentPath = value;
-    row.params.resourceIds = [];
-    emitChange();
-  }
-
-  function sampleFileNames(row) {
-    const names = row?.params?.fileNames;
-    return Array.isArray(names) ? names.filter((item) => `${item ?? ''}`.trim()) : [];
-  }
+  // 上传步骤"文件来源"交互已抽到 UploadFileSourceEditor 公共组件：
+  // 表格单元格与步骤详情弹窗共用同一套资源/目录选择与样本展示逻辑。
 
   function handleApplyJson() {
     const result = applyStepsTextToForm(true);

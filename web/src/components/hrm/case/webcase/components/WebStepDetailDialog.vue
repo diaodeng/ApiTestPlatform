@@ -175,35 +175,19 @@
           <el-col v-else-if="currentStep.actionType === 'upload_file'" :span="24">
             <el-row :gutter="12">
               <el-col :span="8">
-                <el-form-item label="资源键">
-                  <el-input
-                    v-model="currentStep.params.fileKey"
-                    placeholder="例如 price_tag"
-                  />
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="资源ID">
-                  <el-select
-                    v-model="currentStep.params.resourceIds"
-                    multiple
-                    filterable
-                    allow-create
-                    default-first-option
-                    collapse-tags
-                    collapse-tags-tooltip
-                    style="width: 100%"
-                    placeholder="输入资源ID后回车"
-                  />
-                </el-form-item>
-              </el-col>
-              <el-col :span="4">
                 <el-form-item label="多文件">
                   <el-switch v-model="currentStep.params.multiple" />
                 </el-form-item>
               </el-col>
             </el-row>
-            <div class="locator-tip">仅填写资源键或资源ID，不要填写 Agent 本地绝对路径。</div>
+            <el-form-item label="文件来源">
+              <UploadFileSourceEditor
+                :params="currentStep.params"
+                :agent-code="uploadResourceAgentCode"
+                @change="emitChange"
+              />
+            </el-form-item>
+            <div class="locator-tip">文件来源决定运行时使用的文件；资源键仅在"暂不指定"时显示，配合输入绑定在运行时换文件。</div>
           </el-col>
           <el-col v-else-if="currentStep.actionType === 'press'" :span="24">
             <el-form-item label="按键值">
@@ -858,7 +842,9 @@
 </template>
 
 <script setup>
+  import { computed } from 'vue';
   import AceEditor from '@/components/hrm/common/ace-editor.vue';
+  import UploadFileSourceEditor from './UploadFileSourceEditor.vue';
   import {
     actionOptions,
     keyboardKeyOptions,
@@ -903,6 +889,9 @@
     // 是否显示"指纹"字段：用例管理显示（服务端已落库），
     // 门店配置版本步骤不落指纹，隐藏避免误导。
     showFingerprint: { type: Boolean, default: true },
+    // 上传步骤文件来源使用的执行 Agent 编码（由版本编辑器透传）；
+    // 为空时文件来源编辑器降级为只展示样本。
+    uploadResourceAgentCode: { type: String, default: '' },
   });
 
   const emit = defineEmits(['update:modelValue', 'change']);

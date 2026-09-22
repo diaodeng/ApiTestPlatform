@@ -43,6 +43,20 @@ def test_upload_file_resolves_agent_manifest_by_resource_id(tmp_path: Path):
     assert resolved == [path]
 
 
+def test_upload_file_explicit_resource_ids_override_bindings(tmp_path: Path):
+    """步骤显式选择资源时优先于输入绑定（绑定仅在"暂不指定"时兜底）。"""
+    store = ResourceManifestStore(tmp_path)
+    path_a = _resource(store, "res-a")
+    _resource(store, "res-b")
+
+    resolved = _resolve_upload_file_paths(
+        {"fileKey": "price_tag", "resourceIds": ["res-a"]},
+        {"resourceBindings": {"price_tag": ["res-b"]}, "resourceApplicationRoot": str(tmp_path)},
+    )
+
+    assert resolved == [path_a]
+
+
 def test_upload_file_rejects_multiple_files_when_disabled(tmp_path: Path):
     store = ResourceManifestStore(tmp_path)
     _resource(store, "res-a")
