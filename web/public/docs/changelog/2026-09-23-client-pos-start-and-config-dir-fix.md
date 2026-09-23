@@ -64,6 +64,16 @@
 - 默认包目录从应用根目录 `drive` 改为 **`payment_mock`**（避免与 POS 的 drive 目录名混淆）；不做旧单目录语义兼容，包内缺少 drive 和 mock 子目录时明确报错；
 - 备份/恢复只覆盖 `drive` 内文件，mock 写入根目录的文件不参与备份回滚。
 
+### 10. 修复启动确认弹窗无法应答导致的启动卡死（重要）
+
+**现象**：启动 POS 时弹出确认框（如"本地和服务端配置不一致，继续启动？"），点击任意选项后页面不再有反应、POS 不启动，约 5 分钟后日志出现"弹窗等待超时，按取消处理"。
+
+**根因**：`PosApi` 自建了一个 `WebDialogService` 实例，而前端弹窗应答（`resolve_dialog`）只会送达 `Bridge` 持有的那个实例——POS 启动引擎的等待挂在另一份 pending 表上，永远收不到应答，只能等 300 秒超时按取消处理。该问题影响新版 UI 中 POS 启动链路的**所有**确认框。
+
+**修复**：`Bridge` 创建全局唯一 `WebDialogService` 并下发给 `PosApi`/`AppApi` 共享，确认框应答可正常跨线程送达引擎。
+
+**顺带清理**：移除规则链中与引擎阶段重复的两条规则（`NoRemoteRule`、`MismatchRule`），消除"同一条件弹两次确认框"的问题——配置不一致时此前会连续弹两个几乎一样的三选项框，第二个叠在第一个之下无法操作，正是本次现象的放大器。规则链清空后所有确认逻辑收敛在引擎阶段一处，且引擎的一致性比对（6 字段）强于被移除的规则（3 字段），无覆盖遗漏。
+
 ## 变更文件
 
 - `client_new/do/config.py`：配置路径锚定、统一读取助手（缺失默认/损坏抛异常）、覆盖驱动目录取值
@@ -79,5 +89,7 @@
 - `client_new/services/pos/rules/local_env_rule.py`：改为校验 pos.ini
 - `client_new/services/pos/rules/uat_rule.py`：删除（与引擎确认弹窗重复）
 - `client_new/services/pos_service.py`：不再吞掉启动检查业务异常
+- `client_new/ui_web/api/bridge.py`、`client_new/ui_web/api/pos_api.py`：弹窗桥收敛为全局唯一实例（修复启动确认无法应答）
+- `client_new/services/pos/rules/`：删除 remote_rule.py、mismatch_rule.py、uat_rule.py（与引擎阶段重复）
 - `client_new/common/excptions.py`：新增 PosStartException/ConfigFileException
 - `client_new/ui_web/static/js/pages/pos.js`：引导失败 toast 提示、设置弹窗补回驱动目录配置项

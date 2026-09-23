@@ -31,7 +31,9 @@ class Bridge:
         self.dialog_service = WebDialogService()
         self.app = AppApi(self.dialog_service, window_holder)
         self.agent = AgentApi()
-        self.pos = PosApi()
+        # 传入全局唯一弹窗桥实例：前端 resolve_dialog 只应答 Bridge 持有的实例，
+        # 各子 API 必须共享它，否则引擎等待在另一份 pending 表上永远收不到应答
+        self.pos = PosApi(self.dialog_service)
         self.sqlite = SqliteApi()
         self.mitm = MitmApi()
         self.log = LogApi()

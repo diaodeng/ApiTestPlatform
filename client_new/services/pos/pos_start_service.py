@@ -4,8 +4,6 @@ from common.excptions import PosHandleException, PosStartException
 from model.config import PosParamsModel, ResolutionModel
 from server.config import PosConfig, StartConfig
 from server.pos_config_server import PosConfigServer
-from services.pos.rules.mismatch_rule import MismatchRule
-from services.pos.rules.remote_rule import NoRemoteRule
 from utils import file_handle
 
 from .context import PosStartContext
@@ -106,9 +104,10 @@ class PosStartService:
 
     @classmethod
     def _rules(cls):
-        return [
-            # UatNoLocalRule 已删除：UAT无本地配置的确认在 _env_decision 处理，
-            # 不在规则链重复弹窗；LocalEnvRule 在 _pre_check 就地硬校验（缺 pos.ini 阻断）。
-            NoRemoteRule(),
-            MismatchRule(),
-        ]
+        # 规则链已清空：全部确认逻辑收敛到引擎各阶段，避免同一条件重复弹窗——
+        # - UatNoLocalRule：与 _env_decision UAT分支重复（已删文件）；
+        # - NoRemoteRule：与 _env_decision 的"没获取到服务端配置"分支逐象限重复（已删文件）；
+        # - MismatchRule：与 _consistency_check 重复，且其 3 字段比对弱于 is_mismatch 的 6 字段；
+        #   勾选"切换云端POS"时不一致本就是要切的内容，补弹确认反而语义矛盾；
+        # - LocalEnvRule：在 _pre_check 就地硬校验（缺 pos.ini 阻断），不进规则链。
+        return []

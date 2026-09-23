@@ -40,11 +40,14 @@ class PosApi:
     - 扫描、启停、驱动/缓存/证书等操作语义与原实现一致。
     """
 
-    def __init__(self):
+    def __init__(self, dialog_service: WebDialogService):
         self.pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=_POOL_MAX_WORKERS, thread_name_prefix="pos-worker"
         )
-        self.dialog_service = WebDialogService()
+        # 弹窗桥必须使用 Bridge 下发的全局唯一实例：
+        # 前端 resolve_dialog 只应答 Bridge 持有的那个实例，自建实例会导致
+        # 引擎等待在另一份 pending 表上永远收不到应答，300 秒超时按取消处理
+        self.dialog_service = dialog_service
         self._scan_running = False
         self._scan_lock = threading.Lock()
         self._online_switching = False
