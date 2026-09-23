@@ -6,7 +6,6 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -19,7 +18,7 @@ from websockets.protocol import State
 from services.desktop_test_service import DesktopTestService
 from services.ticket_ai_analysis_service import TicketAiAnalysisService
 from services.web_test_service import WebTestService
-from utils.common import compress_dict_to_str, decompress_str_to_dict
+from utils.common import compress_dict_to_str, decompress_str_to_dict, get_client_root_dir
 
 # websocket发送数据分片大小
 DEFAULT_MESSAGE_SIZE = 5 * 1024
@@ -43,9 +42,9 @@ AI_TASK_CANCEL_FLAGS: set[int] = set()
 # 取消标记表的线程锁（handle_message_chunk 与 cancel 消息处理在不同协程）。
 _ai_task_cancel_flags_lock = asyncio.Lock()
 
-# 断连待补交清单文件：与 agent_config.json 同目录（storage/data），进程重启后仍可补交。
+# 断连待补交清单文件：与 agent_config.json 同目录（应用根 storage/data），进程重启后仍可补交。
 # 结构：{"<request_id>": {"payload": "<压缩后完整响应>", "queuedAt": "<ISO时间>", "retryCount": 0}}
-PENDING_RESPONSE_FILE = Path("storage/data/pending_response_deliveries.json")
+PENDING_RESPONSE_FILE = get_client_root_dir() / "storage" / "data" / "pending_response_deliveries.json"
 # 单次补交最多处理的条数，避免一次占用连接过久。
 PENDING_DELIVERY_BATCH_SIZE = 10
 # 清单文件最大条数，超出时丢弃最旧的记录（理论上极少达到）。

@@ -23,9 +23,6 @@ from utils import pos_network
 
 
 class SearchConfig:
-    config_file = "storage/data/config_search.json"
-    search_result_file = "storage/data/config_search_result.json"
-
     def __init__(self):
         pass
 
@@ -104,8 +101,6 @@ class StartConfig:
 
 
 class SetupConfig:
-    config_file = "storage/data/config_pos_setup.json"
-
     def __init__(self):
         pass
 

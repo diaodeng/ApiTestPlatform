@@ -13,7 +13,12 @@ from server.remote_config_server import RemoteConfigServer
 from services.pos_service import PosService
 from ui_web.dialog_bridge import WebDialogService
 from ui_web.event_bus import event_bus
-from utils.common import ExeVersionReader, get_active_mac, get_local_ip
+from utils.common import (
+    ExeVersionReader,
+    get_active_mac,
+    get_client_root_dir,
+    get_local_ip,
+)
 from utils.file_handle import open_file_location
 
 # POS 后台任务线程池上限（与原 QThreadPool maxThreadCount=4 对齐）。
@@ -21,8 +26,8 @@ _POOL_MAX_WORKERS = 4
 # 在线切换/退出账号的互斥锁：同一时刻只允许一个此类任务（与原实现一致）。
 _TASK_LOCK = threading.Lock()
 
-# 切换 POS 表单状态的持久化文件（沿用原 ChangePosDialog 的存储位置）。
-_CHANGE_POS_STATE_PATH = "storage/data/pos_change_state.json"
+# 切换 POS 表单状态的持久化文件：锚定应用根目录（打包态为 exe 目录），不随 cwd 漂移。
+_CHANGE_POS_STATE_PATH = str(get_client_root_dir() / "storage" / "data" / "pos_change_state.json")
 
 
 class PosApi:
@@ -50,14 +55,20 @@ class PosApi:
     def get_bootstrap(self) -> dict:
         """
         返回 POS 页面初始化所需的配置：搜索配置、启动配置、扫描历史。
+        配置文件损坏时不抛出（否则页面初始化直接失败），改为 ok=False
+        携带具体异常信息，由前端 toast 提示"配置文件异常"。
         """
-        return {
-            "ok": True,
-            "search_config": SearchConfig.read().model_dump(),
-            "start_config": StartConfig.read().model_dump(),
-            "history": SearchConfig.read_search_result(),
-            "pos_config": PosConfig.read_pos_config().model_dump(),
-        }
+        try:
+            return {
+                "ok": True,
+                "search_config": SearchConfig.read().model_dump(),
+                "start_config": StartConfig.read().model_dump(),
+                "history": SearchConfig.read_search_result(),
+                "pos_config": PosConfig.read_pos_config().model_dump(),
+            }
+        except Exception as e:
+            logger.error(f"POS 页面引导数据读取失败: {e}")
+            return {"ok": False, "message": str(e)}
 
     # ===== 搜索扫描 =====
 
@@ -165,8 +176,15 @@ class PosApi:
             return {"ok": False, "message": str(e)}
 
         if not ok:
-            self._push_status("启动已取消")
-            return {"ok": False, "message": "启动已取消"}
+            # 检查阶段可能已杀掉运行中的 POS（先杀后确认的既有行为），取消时需向用户说明
+            killed_hint = (
+                "（注意：已提前停止运行中的POS进程）"
+                if ctx and getattr(ctx, "killed_running", False)
+                else ""
+            )
+            self._push_status(f"启动已取消{killed_hint}")
+            self._push_log(f"启动已取消{killed_hint}")
+            return {"ok": False, "message": f"启动已取消{killed_hint}"}
 
         self._push_status("检查完成，开始启动...")
 
@@ -693,7 +711,13 @@ class PosApi:
         try:
             from model.config import PosConfigModel
 
-            PosConfig.save_pos_config(PosConfigModel.model_validate(data))
+            config = PosConfigModel.model_validate(data)
+            PosConfig.save_pos_config(config)
+            # 保存后立即刷新网络层 host 全局变量，避免必须重启应用才生效
+            # （与「同步配置」路径 remote_config_server 的刷新行为对齐）
+            from utils.pos_network import update_network_host
+
+            update_network_host(config)
             return {"ok": True, "pos_config": PosConfig.read_pos_config().model_dump(), "message": "配置已保存"}
         except Exception as e:
             logger.exception(f"保存 POS 配置失败: {e}")

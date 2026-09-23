@@ -1,14 +1,11 @@
-from shutil import ExecError
-
 from loguru import logger
 
+from common.excptions import PosHandleException, PosStartException
 from model.config import PosParamsModel, ResolutionModel
-from server.config import PosConfig, SearchConfig, StartConfig
+from server.config import PosConfig, StartConfig
 from server.pos_config_server import PosConfigServer
-from services.pos.rules.local_env_rule import LocalEnvRule
 from services.pos.rules.mismatch_rule import MismatchRule
 from services.pos.rules.remote_rule import NoRemoteRule
-from services.pos.rules.uat_rule import UatNoLocalRule
 from utils import file_handle
 
 from .context import PosStartContext
@@ -47,17 +44,25 @@ class PosStartService:
 
     @classmethod
     def execute_start(cls, ctx):
+        """
+        执行启动：按启动配置依次执行前置动作后拉起 POS 进程。
+
+        异常分层约定：
+        - PosHandleException / 带 message 的业务异常：文案已可读，原样上抛给前端展示；
+        - 其他未知异常：包装为 PosStartException，避免前端只看到笼统的"启动异常"。
+        """
         try:
-            if ctx.start_config.change_pos:
+            # 切换云端POS：勾选了启动配置，或用户在"配置不一致"弹窗选择了"切换后启动"
+            if (ctx.start_config.change_pos or ctx.need_switch) and not ctx.skip_dependent_actions:
                 PosConfigServer.change_pos_on_network(ctx.path)
 
-            if ctx.start_config.account_logout:
+            if ctx.start_config.account_logout and not ctx.skip_dependent_actions:
                 PosConfigServer.logout_pos_account(ctx.path)
 
             if ctx.start_config.replace_mitm_cert:
                 success, msg = PosConfig.replace_mitm_cert(ctx.path)
                 if not success:
-                    raise Exception(msg)
+                    raise PosStartException(msg)
 
             if ctx.start_config.backup:
                 PosConfig.backup_payment_driver(ctx.path)
@@ -65,7 +70,7 @@ class PosStartService:
             if ctx.start_config.cover_payment_driver:
                 success, msg = PosConfig.cover_payment_driver(ctx.path)
                 if not success:
-                    raise Exception(msg)
+                    raise PosStartException(msg)
 
             if ctx.start_config.remove_cache:
                 PosConfig.clean_cache(ctx.path)
@@ -75,9 +80,14 @@ class PosStartService:
             process = file_handle.start_file_independent(ctx.path, env)
 
             return process.pid if process else None
+        except (PosHandleException, PosStartException) as e:
+            # 业务异常：文案已明确（如"获取pos_params参数失败"、"支付mock驱动不存在"），原样上抛
+            logger.exception(f"启动前自动处理失败: {e}")
+            raise
         except Exception as e:
+            # 未知异常：包装后上抛，保留原始异常链
             logger.exception(e)
-            raise ExecError("启动异常") from e
+            raise PosStartException(f"启动前自动处理失败: {e}") from e
 
     @classmethod
     def _build_env(cls, ctx: PosStartContext):
@@ -97,8 +107,8 @@ class PosStartService:
     @classmethod
     def _rules(cls):
         return [
-            # LocalEnvRule(),
-            UatNoLocalRule(),
+            # UatNoLocalRule 已删除：UAT无本地配置的确认在 _env_decision 处理，
+            # 不在规则链重复弹窗；LocalEnvRule 在 _pre_check 就地硬校验（缺 pos.ini 阻断）。
             NoRemoteRule(),
             MismatchRule(),
         ]

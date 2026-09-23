@@ -15,7 +15,18 @@ from model.pos_network_model import (
 from utils.http_defaults import DEFAULT_HTTP_TIMEOUT
 from utils.common import ExeVersionReader, get_active_mac, get_local_ip
 
-pos_config_data = PosConfig.read_pos_config()
+# 模块导入时读取 POS 配置中的服务地址。
+# config_pos.json 损坏时不能让 import 失败（否则整个应用无法启动）：
+# 记录 critical 日志、host 置空降级，应用打开后 POS 页 bootstrap 会提示"配置文件异常"，
+# 远程操作则走 _require_host 的未配置提示。
+try:
+    pos_config_data = PosConfig.read_pos_config()
+except Exception as _e:
+    import sys as _sys
+
+    logger.critical(f"config_pos.json 读取失败，服务地址降级为空: {_e}")
+    _sys.stderr.write(f"config_pos.json 读取失败: {_e}\n")
+    pos_config_data = PosConfigModel()
 uat_host = pos_config_data.pos_tool_uat_host
 test_host = pos_config_data.pos_tool_test_host
 pos_test_host = pos_config_data.pos_test_host
@@ -39,6 +50,24 @@ def update_network_host(data: PosConfigModel):
     pos_pro_host = pos_config_data.pos_pro_host
 
 
+def _require_host(host: str, name: str) -> str:
+    """
+    校验服务地址已配置，未配置时给出明确业务提示。
+
+    host 为空时 httpx 会抛 InvalidURL 并被上层 except Exception 吞掉，
+    用户只能看到笼统的"获取失败"，这里提前拦截并说明真实原因。
+    :param host: 待使用的服务地址
+    :param name: 服务名称（用于提示语）
+    :return: 原样返回 host
+    :raises PosHandleException: host 未配置时
+    """
+    if not str(host or "").strip():
+        raise PosHandleException(
+            f"{name}服务地址未配置，请在 POS 设置中填写服务地址或使用同步配置"
+        )
+    return host
+
+
 def change_pos_from_network(data: PosChangeParamsModel) -> None:
     with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
         data_info = {
@@ -55,9 +84,9 @@ def change_pos_from_network(data: PosChangeParamsModel) -> None:
         }
         logger.info(f"c： {json.dumps(data_info)}")
         if "test" in data_info["env"].lower():
-            resp = client.post(f"{test_host}/tools/posChange", json=data_info)
+            resp = client.post(f"{_require_host(test_host, 'POS工具Test')}/tools/posChange", json=data_info)
         elif "uat" in data_info["env"].lower():
-            resp = client.post(f"{uat_host}/tools/posChange", json=data_info)
+            resp = client.post(f"{_require_host(uat_host, 'POS工具UAT')}/tools/posChange", json=data_info)
         else:
             raise Exception("非测试及UAT环境，禁止切换POS")
         if resp.status_code != 200:
@@ -74,9 +103,9 @@ def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
         data_info = data.model_dump()
         logger.info(f"POS账号注销参数： {json.dumps(data_info)}")
         if "uat" in data_info["env"].lower():
-            resp = client.post(f"{uat_host}/tools/kickOut", json=data_info)
+            resp = client.post(f"{_require_host(uat_host, 'POS工具UAT')}/tools/kickOut", json=data_info)
         else:
-            resp = client.post(f"{test_host}/tools/kickOut", json=data_info)
+            resp = client.post(f"{_require_host(test_host, 'POS工具Test')}/tools/kickOut", json=data_info)
         if resp.status_code != 200:
             logger.error(f"POS切换失败，状态码： {resp.status_code}")
             return False, f"POS切换失败，状态码： {resp.status_code}"
@@ -91,7 +120,7 @@ def pos_account_logout(data: PosLogoutModel) -> tuple[bool, str]:
 
 def pos_tool_init() -> PosInitRespModel | bool:
     with httpx.Client(verify=False, timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        resp = client.get(f"{test_host}/tools/init")
+        resp = client.get(f"{_require_host(test_host, 'POS工具Test')}/tools/init")
         if resp.status_code != 200:
             logger.error(f"POS初始化失败，状态码： {resp.status_code}")
             return False
@@ -112,9 +141,9 @@ async def get_user_info(
         data_info = data.model_dump()
         logger.info(f"查询POS账号信息： {json.dumps(data_info)}")
         if "uat" in data_info["env"].lower():
-            resp = await client.post(f"{uat_host}/tools/getuserinfo", json=data_info)
+            resp = await client.post(f"{_require_host(uat_host, 'POS工具UAT')}/tools/getuserinfo", json=data_info)
         else:
-            resp = await client.post(f"{test_host}/tools/getuserinfo", json=data_info)
+            resp = await client.post(f"{_require_host(test_host, 'POS工具Test')}/tools/getuserinfo", json=data_info)
         if resp.status_code != 200:
             logger.error(f"查询POS账号信息失败，状态码： {resp.status_code}")
             return None
@@ -139,9 +168,9 @@ async def reset_account_password(data: PosResetAccountRequestModel) -> tuple[boo
         data_info = data.model_dump()
         logger.info(f"重置POS账号密码： {json.dumps(data_info, ensure_ascii=False)}")
         if "uat" in data_info["env"].lower():
-            resp = await client.post(f"{uat_host}/tools/resetpwd", json=data_info)
+            resp = await client.post(f"{_require_host(uat_host, 'POS工具UAT')}/tools/resetpwd", json=data_info)
         else:
-            resp = await client.post(f"{test_host}/tools/resetpwd", json=data_info)
+            resp = await client.post(f"{_require_host(test_host, 'POS工具Test')}/tools/resetpwd", json=data_info)
         if resp.status_code != 200:
             logger.error(f"重置POS账号密码失败，状态码： {resp.status_code}")
             return False, f"重置密码失败: {resp.status_code}"
@@ -183,11 +212,11 @@ def pos_init(pos_path: str, version: str = "", group: str = "") -> PosParamsMode
 
         logger.info(f"pos/init参数： {json.dumps(data, ensure_ascii=False)}")
         if "uat" in env.lower() or "kh_test_s" in env.lower():
-            resp = client.post(f"{pos_uat_host}/pos/init", json=data, headers=headers)
+            resp = client.post(f"{_require_host(pos_uat_host, 'POS UAT')}/pos/init", json=data, headers=headers)
         elif "test" in env.lower() or "kh_test" in env.lower():
-            resp = client.post(f"{pos_test_host}/pos/init", json=data, headers=headers)
+            resp = client.post(f"{_require_host(pos_test_host, 'POS Test')}/pos/init", json=data, headers=headers)
         else:
-            resp = client.post(f"{pos_pro_host}/pos/init", json=data, headers=headers)
+            resp = client.post(f"{_require_host(pos_pro_host, 'POS 生产')}/pos/init", json=data, headers=headers)
         if resp.status_code != 200:
             logger.error(
                 f"获取pos初始配置（pos/init）失败，状态码： {resp.status_code}"

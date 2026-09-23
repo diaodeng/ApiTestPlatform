@@ -251,6 +251,11 @@ export function posPage(mount) {
       ["pos_uat_host", "POS UAT"],
       ["pos_pro_host", "POS 生产"],
     ];
+    // 目录类配置：mock 驱动源目录 + 支付驱动备份目录（对齐旧版 Flet 设置项）
+    const dirFields = [
+      ["payment_mock_driver_path", "支付MOCK驱动目录", "覆盖驱动/备份驱动时取 mock 驱动的源目录，留空用应用根目录 drive"],
+      ["payment_driver_back_up_path", "支付驱动备份目录", "备份支付驱动的存放目录，留空用 POS 目录下 drive_backup"],
+    ];
     const envFiles = listEditor(c.env_files || []);
     const cacheFiles = listEditor(c.cache_files || []);
     const envGroupText = el("textarea", { class: "input", rows: 6, style: "width:100%;font-family:var(--mono-font)" });
@@ -266,6 +271,12 @@ export function posPage(mount) {
         el("div", { class: "form-row" },
           el("label", { text: label }),
           textInput(c[key] || "", { style: "flex:1", onchange: (e) => (c[key] = e.target.value.trim()) }))
+      ),
+      el("div", { class: "form-section", text: "驱动目录" }),
+      dirFields.map(([key, label, tip]) =>
+        el("div", { class: "form-row" },
+          el("label", { text: label, title: tip }),
+          textInput(c[key] || "", { style: "flex:1", placeholder: tip, onchange: (e) => (c[key] = e.target.value.trim()) }))
       ),
       el("div", { class: "form-section", text: "环境文件清单（启动前按此备份/切换）" }),
       el("div", { style: "display:flex;flex-direction:column;gap:4px" }, envFiles.node),
@@ -525,7 +536,11 @@ export function posPage(mount) {
 
   async function reload() {
     const res = await call("pos", "get_bootstrap");
-    if (!res.ok) return;
+    // 引导数据读取失败（如配置文件损坏）：提示真实原因，页面保留可用骨架
+    if (!res.ok) {
+      toast(res.message || "POS 页面初始化失败", "error");
+      return;
+    }
     boot = res;
     posConfig = res.pos_config;
     for (const [key] of START_FIELDS) startChecks[key].querySelector("input").checked = !!res.start_config[key];

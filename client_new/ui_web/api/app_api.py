@@ -30,8 +30,17 @@ class AppApi:
         """
         前端启动引导：主题模式、插件状态、当前 POS。
         导航项由前端按固定清单渲染，并按插件安装状态过滤 mitmproxy 入口。
+        主题属于装饰性配置：文件损坏时降级为 auto 并提示，不让整个应用无法初始化。
         """
-        theme = ThemeConfig.read_config().mode or "auto"
+        try:
+            theme = ThemeConfig.read_config().mode or "auto"
+        except Exception as e:
+            logger.error(f"theme_config.json 读取失败，主题降级为 auto: {e}")
+            theme = "auto"
+            event_bus.push(
+                "ui_toast",
+                {"level": "error", "message": f"主题配置异常: {e}"},
+            )
         return {
             "ok": True,
             "version": VERSION,
