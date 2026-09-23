@@ -35,7 +35,9 @@ function bindPersistentBusOnce() {
     if (idx >= 0) session.flows[idx] = p.item;
     else session.flows.push(p.item);
     renderRef.renderFlows?.();
-    renderRef.renderDetail?.();
+    // 只有被更新的正是当前选中的那条流量时才重绘详情区（如选中请求刚拿到响应）；
+    // 其他流量的更新只刷列表，避免抓包活跃时详情区被无关流量反复重建、滚动位置归零。
+    if (p.item.id === session.selectedId) renderRef.renderDetail?.();
   });
 }
 
@@ -185,6 +187,10 @@ export function mitmPage(mount) {
   }
 
   let detailTab = "overview";
+  // 上一次详情渲染的 key（"流量id|tab"）：仅当同一条流量在同一 tab 下重绘时才恢复滚动位置；
+  // 切换选中行或切换 tab 时内容全新，应回到顶部。必须声明在首次 renderDetail() 调用之前
+  // （let 无提升，放在调用后会因暂时性死区抛 ReferenceError 导致整页初始化中断）。
+  let lastDetailKey = null;
   const TAB_LABELS = { overview: "总览", request: "请求", response: "响应" };
   ["overview", "request", "response"].forEach((tab) => {
     const btn = el("button", { class: "btn small", text: TAB_LABELS[tab] });
@@ -351,6 +357,13 @@ export function mitmPage(mount) {
   btnCopyCurl.addEventListener("click", () => { const f = getSelected(); if (f) copyText(buildCurl(f)); });
 
   function renderDetail() {
+    // 重绘前记录滚动位置：detailBody 是 overflow:auto 的滚动容器，子元素整体重建后
+    // scrollTop 必然归零；选中流量自身收到更新（如响应到达）需要重绘时，把位置还原，
+    // 用户正在阅读的内容不跳变。换选中行 / 换 tab 时不继承旧位置。
+    const f0 = getSelected();
+    const detailKey = f0 ? `${f0.id}|${detailTab}` : null;
+    const prevScrollTop = detailKey !== null && detailKey === lastDetailKey ? detailBody.scrollTop : 0;
+    lastDetailKey = detailKey;
     btnPass.style.display = "none";
     btnEditPass.style.display = "none";
     const f = getSelected();
@@ -423,6 +436,7 @@ export function mitmPage(mount) {
       btnPass.style.display = "";
       btnEditPass.style.display = "";
     }
+    detailBody.scrollTop = prevScrollTop;
   }
 
   function applyState() {

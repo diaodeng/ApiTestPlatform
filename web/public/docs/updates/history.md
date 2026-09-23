@@ -5,6 +5,7 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 ## 2026-09-23
+- mitmproxy 详情区滚动位置重置修复：选中抓包记录后在详情区滚动查看时，其他流量的更新事件会无条件重绘详情区导致滚动条回顶（数据没变、阅读位置丢失）；修复为详情区仅在被更新的正是当前选中流量时才重绘（如选中请求刚拿到响应、断点状态变化），其他流量只刷列表；重绘时按「流量id+标签页」保持滚动位置，切换选中行或标签页仍回到顶部。后端无改动。详见：[mitmproxy详情区滚动位置重置修复](2026-09-23-client-mitm-detail-scroll-reset-fix.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
 - Mock 响应头透传修复：客户端 mitmproxy 在 Mock 命中后重建响应时只保留 Content-Type，导致 Mock 服务端的命中标记头 `mockId`（`规则id_响应id`）与用户在响应头模板中配置的全部自定义头（业务 token 头、多条 `Set-Cookie` 等）无法到达被测应用，出现"直连 Mock 正常、走客户端代理异常"且无法从应用侧定位命中规则；修复为按 `multi_items()` 全量透传（保留重复头），仅剔除 `Content-Length`（自动重算）、`Content-Encoding`（探测已解压 body，保留压缩声明会解压失败）与 `Transfer-Encoding/Connection/Keep-Alive` 逐跳头，头键值按 utf-8 显式编码（`Response.make` 元组入参不自动转 bytes）。Mock 未命中/超时放行/断点链路不受影响，Mock 服务端无改动。详见：[Mock响应头透传修复](2026-09-23-client-mock-response-header-passthrough.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
 
 ## 2026-09-22
