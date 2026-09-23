@@ -1,0 +1,189 @@
+// WebStepEditor / WebStepDetailDialog 共用样式。
+// 从 views/hrm/webcase/styles/dialogs.scss 抽取步骤编辑相关类，
+// 保持与原用例编辑器相同的视觉呈现；dialogs.scss 中的同名类保留，
+// 供录制、运行等旧对话框继续引用，两侧样式需同步维护。
+
+.case-editor-tabs {
+    margin-top: 8px;
+}
+
+.step-table-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.step-table-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.step-edit-table :deep(.el-table__row) {
+    cursor: pointer;
+}
+
+.step-edit-table :deep(.selected-step-row > td) {
+    background: var(--el-color-primary-light-9);
+}
+
+.step-order-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.step-edit-cell {
+    width: 100%;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+}
+
+.step-cell-text {
+    width: 100%;
+    color: var(--el-text-color-regular);
+    line-height: 1.5;
+    /* 单行省略：完整内容在编辑态或详情弹窗中查看，避免表格行高被长文本撑开 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.step-inline-target {
+    display: grid;
+    grid-template-columns: 110px repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.step-cell-placeholder {
+    color: var(--el-text-color-placeholder);
+}
+
+.step-op-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.step-detail-tip {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.panel-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.panel-card {
+    margin-bottom: 16px;
+}
+
+.locator-list,
+.assertion-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.locator-item,
+.assertion-item {
+    padding: 12px;
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 8px;
+    background: var(--el-fill-color-extra-light);
+}
+
+.locator-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.locator-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.locator-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.locator-tip {
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+}
+
+.assertion-edit-table :deep(.el-table__expanded-cell) {
+    background: var(--el-fill-color-blank);
+}
+
+.mt8 {
+    margin-top: 8px;
+}
+
+.json-toolbar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.mb16 {
+    margin-bottom: 16px;
+}
+
+@media (max-width: 1200px) {
+    .step-table-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .step-table-toolbar-actions {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .step-inline-target {
+        grid-template-columns: 1fr;
+    }
+}
+
+// 上传步骤单元格：资源键 + 文件来源（资源绑定 / Agent 目录文件）纵向排列
+.upload-file-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-width: 220px;
+
+    .el-select {
+        width: 100%;
+    }
+
+    .upload-sample {
+        font-size: 12px;
+        color: #909399;
+        line-height: 1.4;
+        word-break: break-all;
+    }
+}

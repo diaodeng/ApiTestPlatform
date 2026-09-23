@@ -1,54 +1,6 @@
-<script lang="ts" setup>
-  import AceEditor from '@/components/hrm/common/ace-editor.vue';
-  import { computed } from 'vue';
-  import {
-    actionOptions,
-    keyboardKeyOptions,
-    safeJsonStringify,
-    locatorTypeOptions,
-  } from '../utils/shared.js';
-  import { stepNeedsTarget, normalizeStepParams } from '../domain/stepDomain';
-  import { createDefaultTargetSnapshot } from '../domain/snapshotDomain';
-  import {
-    addLocator,
-    setPrimaryLocator,
-    moveLocator,
-    removeLocator,
-    handleLocatorTypeChange,
-    resolveLocatorIndex,
-    updateLocatorNth,
-  } from '../domain/locatorDomain.js';
-
-  const props = defineProps({
-    currentStep: { type: Object, required: true },
-    stepIndex: { type: Number, required: true },
-  });
-  const showStepDetailDialog = defineModel('showStepDetailDialog', {
-    type: Boolean,
-    default: false,
-  });
-  const emit = defineEmits(['update']);
-
-  const stepDetailTitle = computed(() =>
-    props.stepIndex >= 0 ? `步骤详情 - #${props.stepIndex + 1}` : '步骤详情'
-  );
-
-  function handleStepActionTypeChange(step) {
-    step.params = normalizeStepParams(step.actionType, step.params);
-    if (stepNeedsTarget(step.actionType) && !step.targetSnapshot) {
-      step.targetSnapshot = createDefaultTargetSnapshot();
-    }
-  }
-
-  function dialogClose(evt) {
-    emit('update', props.currentStep, props.stepIndex);
-    showStepDetailDialog.value = false;
-  }
-</script>
-
 <template>
   <el-dialog
-    v-model="showStepDetailDialog"
+    v-model="visible"
     :title="stepDetailTitle"
     width="90%"
     destroy-on-close
@@ -56,21 +8,21 @@
     :close-on-click-modal="false"
     :close-on-press-escape="false"
   >
-    <template v-if="props.currentStep">
-      <el-form :model="props.currentStep" label-width="100px" class="mb16">
+    <template v-if="currentStep && currentStep.params">
+      <el-form :model="currentStep" label-width="100px" class="mb16">
         <el-row :gutter="16">
           <el-col :span="10">
             <el-form-item label="步骤名称">
-              <el-input v-model="props.currentStep.stepName" placeholder="请输入步骤名称" />
+              <el-input v-model="currentStep.stepName" placeholder="请输入步骤名称" />
             </el-form-item>
           </el-col>
           <el-col :span="6">
             <el-form-item label="动作类型">
               <el-select
-                v-model="props.currentStep.actionType"
+                v-model="currentStep.actionType"
                 filterable
                 style="width: 100%"
-                @change="handleStepActionTypeChange(props.currentStep)"
+                @change="handleStepActionTypeChange(currentStep)"
               >
                 <el-option
                   v-for="item in actionOptions"
@@ -83,18 +35,18 @@
           </el-col>
           <el-col :span="4">
             <el-form-item label="启用">
-              <el-switch v-model="props.currentStep.enabled" />
+              <el-switch v-model="currentStep.enabled" />
             </el-form-item>
           </el-col>
           <el-col :span="4">
             <el-form-item label="继续执行">
-              <el-switch v-model="props.currentStep.continueOnFailure" />
+              <el-switch v-model="currentStep.continueOnFailure" />
             </el-form-item>
           </el-col>
           <el-col :span="6">
             <el-form-item label="超时(ms)">
               <el-input-number
-                v-model="props.currentStep.timeoutMs"
+                v-model="currentStep.timeoutMs"
                 :min="0"
                 :step="1000"
                 controls-position="right"
@@ -105,7 +57,7 @@
           <el-col :span="6">
             <el-form-item label="思考(ms)">
               <el-input-number
-                v-model="props.currentStep.params.thinkTimeMs"
+                v-model="currentStep.params.thinkTimeMs"
                 :min="0"
                 :step="100"
                 controls-position="right"
@@ -115,28 +67,81 @@
           </el-col>
           <el-col :span="6">
             <el-form-item label="记录来源">
-              <el-input v-model="props.currentStep.recordOrigin" placeholder="manual / record" />
+              <el-input v-model="currentStep.recordOrigin" placeholder="manual / record" />
             </el-form-item>
           </el-col>
           <el-col :span="6">
             <el-form-item label="元素ID">
-              <el-input v-model="props.currentStep.elementId" placeholder="可选" />
+              <el-input v-model="currentStep.elementId" placeholder="可选" />
             </el-form-item>
           </el-col>
-          <el-col v-if="props.currentStep.actionType === 'goto'" :span="24">
+          <el-col v-if="currentStep.actionType === 'goto'" :span="24">
             <el-form-item label="跳转地址">
-              <el-input
-                v-model="props.currentStep.params.url"
-                placeholder="https://example.com/path"
-              />
+              <el-input v-model="currentStep.params.url" placeholder="https://example.com/path" />
             </el-form-item>
           </el-col>
-          <el-col v-else-if="props.currentStep.actionType === 'set_window_size'" :span="24">
+          <el-col v-else-if="currentStep.actionType === 'capture_screenshot'" :span="24">
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="证据类型">
+                  <el-select v-model="currentStep.params.evidenceType" style="width: 100%">
+                    <el-option
+                      v-for="item in getScreenshotEvidenceTypes()"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="证据键">
+                  <el-input v-model="currentStep.params.evidenceKey" placeholder="阶段策略匹配用，可选" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="展示名称">
+                  <el-input v-model="currentStep.params.label" placeholder="截图在证据列表中的名称" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="必需证据">
+                  <el-switch v-model="currentStep.params.required" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="整页截图">
+                  <el-switch v-model="currentStep.params.fullPage" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="等待(ms)">
+                  <el-input-number v-model="currentStep.params.waitMs" :min="0" :step="100" controls-position="right" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="遮罩选择器">
+                  <el-input
+                    :model-value="(currentStep.params.maskSelectors || []).join(', ')"
+                    placeholder="多个 CSS 选择器用逗号分隔"
+                    @update:model-value="(value) => (currentStep.params.maskSelectors = value.split(',').map((item) => item.trim()).filter(Boolean))"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item label="备注">
+                  <el-input v-model="currentStep.params.note" type="textarea" :rows="2" placeholder="说明该截图用于什么检查点" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <div class="locator-tip">截图正文只保存在 Agent 受控目录，服务端仅登记资源元数据和证据引用。</div>
+          </el-col>
+          <el-col v-else-if="currentStep.actionType === 'set_window_size'" :span="24">
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="窗口宽度">
                   <el-input-number
-                    v-model="props.currentStep.params.width"
+                    v-model="currentStep.params.width"
                     :min="1"
                     :step="100"
                     controls-position="right"
@@ -147,7 +152,7 @@
               <el-col :span="12">
                 <el-form-item label="窗口高度">
                   <el-input-number
-                    v-model="props.currentStep.params.height"
+                    v-model="currentStep.params.height"
                     :min="1"
                     :step="100"
                     controls-position="right"
@@ -157,20 +162,37 @@
               </el-col>
             </el-row>
           </el-col>
-          <el-col v-else-if="props.currentStep.actionType === 'fill'" :span="24">
+          <el-col v-else-if="currentStep.actionType === 'fill'" :span="24">
             <el-form-item label="输入内容">
               <el-input
-                v-model="props.currentStep.params.value"
+                v-model="currentStep.params.value"
                 type="textarea"
                 :rows="3"
                 placeholder="请输入内容"
               />
             </el-form-item>
           </el-col>
-          <el-col v-else-if="props.currentStep.actionType === 'press'" :span="24">
+          <el-col v-else-if="currentStep.actionType === 'upload_file'" :span="24">
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="多文件">
+                  <el-switch v-model="currentStep.params.multiple" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="文件来源">
+              <UploadFileSourceEditor
+                :params="currentStep.params"
+                :agent-code="uploadResourceAgentCode"
+                @change="emitChange"
+              />
+            </el-form-item>
+            <div class="locator-tip">文件来源决定运行时使用的文件；资源键仅在"暂不指定"时显示，配合输入绑定在运行时换文件。</div>
+          </el-col>
+          <el-col v-else-if="currentStep.actionType === 'press'" :span="24">
             <el-form-item label="按键值">
               <el-select
-                v-model="props.currentStep.params.key"
+                v-model="currentStep.params.key"
                 filterable
                 allow-create
                 default-first-option
@@ -186,10 +208,10 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-else-if="props.currentStep.actionType === 'select_option'" :span="24">
+          <el-col v-else-if="currentStep.actionType === 'select_option'" :span="24">
             <el-form-item label="选项值">
               <el-select
-                v-model="props.currentStep.params.values"
+                v-model="currentStep.params.values"
                 multiple
                 filterable
                 allow-create
@@ -201,10 +223,10 @@
               />
             </el-form-item>
           </el-col>
-          <el-col v-else-if="['sleep', 'wait'].includes(props.currentStep.actionType)" :span="24">
+          <el-col v-else-if="['sleep', 'wait'].includes(currentStep.actionType)" :span="24">
             <el-form-item label="等待时长(ms)">
               <el-input-number
-                v-model="props.currentStep.params.waitMs"
+                v-model="currentStep.params.waitMs"
                 :min="0"
                 :step="100"
                 controls-position="right"
@@ -214,46 +236,41 @@
           </el-col>
           <el-col
             v-else-if="
-              ['assert_page_contains', 'assert_page_not_contains'].includes(
-                props.currentStep.actionType
-              )
+              ['assert_page_contains', 'assert_page_not_contains'].includes(currentStep.actionType)
             "
             :span="24"
           >
             <el-form-item label="页面文本">
               <el-input
-                v-model="props.currentStep.params.text"
+                v-model="currentStep.params.text"
                 type="textarea"
                 :rows="2"
                 placeholder="请输入页面中应包含/不包含的文本"
               />
             </el-form-item>
           </el-col>
-          <el-col v-else-if="props.currentStep.actionType === 'assert_title_contains'" :span="24">
+          <el-col v-else-if="currentStep.actionType === 'assert_title_contains'" :span="24">
             <el-form-item label="标题关键字">
-              <el-input
-                v-model="props.currentStep.params.title"
-                placeholder="请输入页面标题关键字"
-              />
+              <el-input v-model="currentStep.params.title" placeholder="请输入页面标题关键字" />
             </el-form-item>
           </el-col>
-          <el-col v-else-if="props.currentStep.actionType === 'assert_url_contains'" :span="24">
+          <el-col v-else-if="currentStep.actionType === 'assert_url_contains'" :span="24">
             <el-form-item label="URL关键字">
               <el-input
-                v-model="props.currentStep.params.urlPart"
+                v-model="currentStep.params.urlPart"
                 placeholder="请输入 URL 中应包含的关键字"
               />
             </el-form-item>
           </el-col>
           <el-col
             v-else-if="
-              ['assert_text_equals', 'assert_text_contains'].includes(props.currentStep.actionType)
+              ['assert_text_equals', 'assert_text_contains'].includes(currentStep.actionType)
             "
             :span="24"
           >
             <el-form-item label="文本期望值">
               <el-input
-                v-model="props.currentStep.params.expected"
+                v-model="currentStep.params.expected"
                 type="textarea"
                 :rows="2"
                 placeholder="请输入元素文本期望值"
@@ -263,15 +280,11 @@
         </el-row>
       </el-form>
 
-      <el-card
-        v-if="stepNeedsTarget(props.currentStep.actionType)"
-        class="panel-card"
-        shadow="never"
-      >
+      <el-card v-if="stepNeedsTarget(currentStep.actionType)" class="panel-card" shadow="never">
         <template #header>
           <div class="panel-header">
             <span>定位与快照</span>
-            <el-button type="primary" plain icon="Plus" @click="addLocator(props.currentStep)"
+            <el-button type="primary" plain icon="Plus" @click="addLocator(currentStep)"
               >新增定位器
             </el-button>
           </div>
@@ -281,23 +294,20 @@
           <el-col :span="8">
             <el-form-item label="元素文本" label-width="90px">
               <el-input
-                v-model="props.currentStep.targetSnapshot.elementText"
+                v-model="currentStep.targetSnapshot.elementText"
                 placeholder="元素文本快照"
               />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col v-if="showFingerprint" :span="8">
             <el-form-item label="指纹" label-width="90px">
-              <el-input
-                v-model="props.currentStep.targetSnapshot.fingerprint"
-                placeholder="元素指纹"
-              />
+              <el-input v-model="currentStep.targetSnapshot.fingerprint" placeholder="元素指纹" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="showFingerprint ? 8 : 16">
             <el-form-item label="稳定分" label-width="90px">
               <el-input-number
-                v-model="props.currentStep.targetSnapshot.stableScore"
+                v-model="currentStep.targetSnapshot.stableScore"
                 :min="0"
                 :step="1"
                 controls-position="right"
@@ -308,7 +318,7 @@
           <el-col :span="12">
             <el-form-item label="页面URL" label-width="90px">
               <el-input
-                v-model="props.currentStep.targetSnapshot.context.pageUrl"
+                v-model="currentStep.targetSnapshot.context.pageUrl"
                 placeholder="页面 URL"
               />
             </el-form-item>
@@ -316,7 +326,7 @@
           <el-col :span="12">
             <el-form-item label="Frame URL" label-width="90px">
               <el-input
-                v-model="props.currentStep.targetSnapshot.context.frameUrl"
+                v-model="currentStep.targetSnapshot.context.frameUrl"
                 placeholder="Frame URL"
               />
             </el-form-item>
@@ -326,12 +336,12 @@
           执行顺序按列表从上到下，仅尝试“启用”定位器；命中后继续下一步，可用“设为首选”快速置顶。
         </div>
 
-        <div v-if="props.currentStep.targetSnapshot?.locators?.length" class="locator-list">
+        <div v-if="currentStep.targetSnapshot?.locators?.length" class="locator-list">
           <div
-            v-for="(locator, locatorIndex) in props.currentStep.targetSnapshot.locators"
+            v-for="(locator, locatorIndex) in currentStep.targetSnapshot.locators"
             :key="
               locator.locatorSnapshotId ||
-              `${props.currentStep.stepIndex || props.stepIndex}-${locatorIndex}`
+              `${currentStep.stepIndex || stepIndex}-${locatorIndex}`
             "
             class="locator-item"
           >
@@ -351,26 +361,26 @@
                   link
                   type="primary"
                   :disabled="locatorIndex === 0"
-                  @click="setPrimaryLocator(props.currentStep, locatorIndex)"
+                  @click="setPrimaryLocator(currentStep, locatorIndex)"
                   >设为首选
                 </el-button>
                 <el-button
                   link
                   icon="Top"
                   :disabled="locatorIndex === 0"
-                  @click="moveLocator(props.currentStep, locatorIndex, -1)"
+                  @click="moveLocator(currentStep, locatorIndex, -1)"
                 />
                 <el-button
                   link
                   icon="Bottom"
-                  :disabled="locatorIndex === props.currentStep.targetSnapshot.locators.length - 1"
-                  @click="moveLocator(props.currentStep, locatorIndex, 1)"
+                  :disabled="locatorIndex === currentStep.targetSnapshot.locators.length - 1"
+                  @click="moveLocator(currentStep, locatorIndex, 1)"
                 />
                 <el-button
                   link
                   type="danger"
                   icon="Delete"
-                  @click="removeLocator(props.currentStep, locatorIndex)"
+                  @click="removeLocator(currentStep, locatorIndex)"
                 />
               </div>
             </div>
@@ -473,15 +483,15 @@
         <template #header>
           <div class="panel-header">
             <span>断言</span>
-            <el-button type="primary" plain icon="Plus" @click="addAssertion(props.currentStep)"
+            <el-button type="primary" plain icon="Plus" @click="addAssertion(currentStep)"
               >新增断言
             </el-button>
           </div>
         </template>
 
-        <div v-if="props.currentStep.assertions?.length">
+        <div v-if="currentStep.assertions?.length">
           <el-table
-            :data="props.currentStep.assertions"
+            :data="currentStep.assertions"
             border
             table-layout="fixed"
             class="assertion-edit-table"
@@ -497,7 +507,7 @@
                       v-for="(locator, locatorIndex) in getAssertionLocatorList(scope.row)"
                       :key="
                         locator.locatorSnapshotId ||
-                        `${selectedStepIndex}-${scope.$index}-${locatorIndex}`
+                        `${stepIndex}-${scope.$index}-${locatorIndex}`
                       "
                       class="locator-item"
                     >
@@ -799,7 +809,7 @@
                   link
                   type="danger"
                   icon="Delete"
-                  @click="removeAssertion(props.currentStep, scope.$index)"
+                  @click="removeAssertion(currentStep, scope.$index)"
                   >删除
                 </el-button>
               </template>
@@ -818,7 +828,7 @@
           </div>
         </template>
         <AceEditor
-          :content="safeJsonStringify(props.currentStep.rawEvent || {})"
+          :content="safeJsonStringify(currentStep.rawEvent || {})"
           lang="json"
           :read-only="true"
           height="220px"
@@ -826,9 +836,85 @@
       </el-card>
     </template>
     <template #footer>
-      <el-button @click="dialogClose">关闭 </el-button>
+      <el-button @click="visible = false">关闭 </el-button>
     </template>
   </el-dialog>
 </template>
 
-<style scoped lang="scss"></style>
+<script setup>
+  import { computed } from 'vue';
+  import AceEditor from '@/components/hrm/common/ace-editor.vue';
+  import UploadFileSourceEditor from './UploadFileSourceEditor.vue';
+  import {
+    actionOptions,
+    keyboardKeyOptions,
+    safeJsonStringify,
+    locatorTypeOptions,
+    assertionTypeOptions,
+  } from '../utils/shared.js';
+  import { getScreenshotEvidenceTypes, stepNeedsTarget, normalizeStepParams } from '../domain/stepDomain.js';
+  import { createDefaultTargetSnapshot } from '../domain/snapshotDomain.js';
+  import {
+    addAssertion,
+    removeAssertion,
+    assertionNeedsTarget,
+    handleAssertionTypeChange,
+    getAssertionLocatorList,
+    getAssertionPrimaryLocator,
+    updateAssertionPrimaryLocatorType,
+    updateAssertionPrimaryLocatorValue,
+    addAssertionLocator,
+    moveAssertionLocator,
+    setAssertionPrimaryLocator,
+    removeAssertionLocator,
+  } from '../domain/assertDomain.js';
+  import {
+    addLocator,
+    setPrimaryLocator,
+    moveLocator,
+    removeLocator,
+    handleLocatorTypeChange,
+    resolveLocatorIndex,
+    updateLocatorNth,
+  } from '../domain/locatorDomain.js';
+
+  const props = defineProps({
+    // 弹窗显隐（v-model）
+    modelValue: { type: Boolean, default: false },
+    // 当前编辑的步骤对象；调用方负责在打开前完成 normalizeStep 标准化，
+    // 本组件直接改写对象内部字段（与原用例编辑器行为一致）。
+    currentStep: { type: Object, required: true },
+    // 步骤在数组中的下标，用于生成稳定的定位器列表 key。
+    stepIndex: { type: Number, default: -1 },
+    // 是否显示"指纹"字段：用例管理显示（服务端已落库），
+    // 门店配置版本步骤不落指纹，隐藏避免误导。
+    showFingerprint: { type: Boolean, default: true },
+    // 上传步骤文件来源使用的执行 Agent 编码（由版本编辑器透传）；
+    // 为空时文件来源编辑器降级为只展示样本。
+    uploadResourceAgentCode: { type: String, default: '' },
+  });
+
+  const emit = defineEmits(['update:modelValue', 'change']);
+
+  const visible = computed({
+    get: () => props.modelValue,
+    set: (value) => emit('update:modelValue', value),
+  });
+
+  const stepDetailTitle = computed(() =>
+    props.stepIndex >= 0 ? `步骤详情 - #${props.stepIndex + 1}` : '步骤详情',
+  );
+
+  // 动作类型切换时重置参数结构并补齐定位快照，与表格内联切换行为一致。
+  function handleStepActionTypeChange(step) {
+    step.params = normalizeStepParams(step.actionType, step.params);
+    if (stepNeedsTarget(step.actionType) && !step.targetSnapshot) {
+      step.targetSnapshot = createDefaultTargetSnapshot();
+    }
+    emit('change', step);
+  }
+</script>
+
+<style scoped lang="scss">
+  @import '../styles/web-step-editor.scss';
+</style>

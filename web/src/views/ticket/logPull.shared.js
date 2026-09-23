@@ -31,6 +31,8 @@ export function createDefaultLogPullForm() {
     resolvedItemKey: undefined,
     vendorId: undefined,
     storeId: undefined,
+    // 工单来源门店编码（store_code 空间），仅用于展示映射关系，绝不作为提交值
+    sourceStoreCode: '',
     posNo: undefined,
     commandDataType: 1,
     pullMethod: 'time',
@@ -220,6 +222,8 @@ export function applyLogPullRecordToForm(form, row) {
   form.environment = rawEnv.includes(':') ? rawEnv.split(':')[0] : rawEnv;
   form.vendorId = row.vendorId !== undefined ? row.vendorId : undefined;
   form.storeId = row.storeId || undefined;
+  // 复制参数来自历史记录（org_no 空间），没有来源门店编码，清空展示位避免残留误导
+  form.sourceStoreCode = '';
   form.posNo = row.posNo !== undefined ? row.posNo : undefined;
   form.commandDataType = row.commandDataType !== undefined ? row.commandDataType : 1;
   const pullMethod = row.pullMethod || (String(row.path || '').trim() ? 'path' : 'time');

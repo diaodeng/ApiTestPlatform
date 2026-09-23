@@ -3,7 +3,7 @@ title: 内容目录
 type: index
 source_type: code
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-09-21
 ---
 
 # 内容目录
@@ -34,6 +34,7 @@ updated: 2026-05-20
 - [任务调度核心数据模型](entities/data-models/task-core-models.md)
 - [工单核心数据模型](entities/data-models/ticket-core-models.md)
 - [统一凭证数据模型](entities/data-models/credential-management.md)
+- [配置任务资源与运行数据模型](entities/data-models/configuration-task-resource-models.md)
 - [HRM 枚举集](entities/enums/hrm-enums.md)
 - [工单枚举集](entities/enums/ticket-enums.md)
 - [前端启动骨架](entities/components/frontend-bootstrap.md)
@@ -50,6 +51,8 @@ updated: 2026-05-20
 - [新版客户端 pywebview 界面](entities/components/new-client-webview-ui.md)
 - [新版客户端运行时](entities/components/new-client-runtime.md)
 - [新版客户端服务模块](entities/services/new-client-services.md)
+- [门店配置任务域设计](entities/services/configuration-task-domain.md)
+- [门店配置运行取证与证据包实施方案](features/configuration-task-evidence-collection-plan.md)
 
 ## 流程
 
@@ -59,6 +62,11 @@ updated: 2026-05-20
 - [工单自动化链路流程](flows/ticket-automation-flow.md)
 - [工单自定义统计通知流程](flows/ticket-custom-statistics-notification.md)
 - [统一凭证刷新流程](flows/credential-refresh.md)
+- [Web 录制流程](flows/ticket-recording-flow.md)
+- [门店配置文件存储流程](flows/configuration-task-file-storage.md)
+- [配置任务复用 Web 录制与执行](flows/configuration-task-web-reuse.md)
+- [配置任务文件上传录制与回放流程](flows/configuration-task-upload-recording-flow.md)
+- [内存增长监控流程](flows/memory-growth-monitoring.md)
 - [工单日志拉取记录独立查看流程](flows/ticket-log-record-isolated-view.md)
 
 ## 契约
@@ -66,3 +74,4 @@ updated: 2026-05-20
 - [工单自定义统计接口与配置契约](contracts/ticket-custom-statistics.md)
 - [工单外部同步与内网拉取流程](flows/ticket-external-sync-flow.md)
 - [统一凭证接口契约](contracts/credential-api.md)
+- [配置任务文件协议](contracts/configuration-task-file-protocol.md)

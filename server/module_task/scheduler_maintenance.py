@@ -921,3 +921,63 @@ def scan_pending_recovery_ai_tasks(*args, **kwargs):
             f"waiting={result.get('waiting', 0)} failed={result.get('failed', 0)}"
         )
     return result
+
+
+@register_job("module_task.scheduler_maintenance.cleanup_configuration_task_resources")
+def cleanup_configuration_task_resources(*args, **kwargs):
+    """配置任务资源与传输过期清理任务。
+
+    周期执行：把超过保留期的资源收敛为 EXPIRED、超过 TTL 的活动传输收敛为
+    EXPIRED 并联动资源状态。任务只负责停止标记检查和会话创建，业务逻辑见
+    ConfigurationTaskMaintenanceService。
+
+    :return: 清理摘要字典。
+    """
+    from modules.configuration_task.service.task_maintenance_service import ConfigurationTaskMaintenanceService
+
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    limit = int(kwargs.get("limit") or 200)
+    try:
+        with SessionLocal() as db:
+            resource_result = ConfigurationTaskMaintenanceService.cleanup_expired_resources(db, limit=limit)
+            transfer_result = ConfigurationTaskMaintenanceService.cleanup_expired_transfers(db, limit=limit)
+    except Exception as exc:
+        logger.exception(f"配置任务资源过期清理任务执行失败: error={exc}")
+        raise
+    total = resource_result.get("expired", 0) + transfer_result.get("expired", 0)
+    if total:
+        logger.info(
+            f"配置任务资源过期清理任务完成 | resources={resource_result} transfers={transfer_result}"
+        )
+    return {"resources": resource_result, "transfers": transfer_result}
+
+
+@register_job("module_task.scheduler_maintenance.recover_configuration_task_runs")
+def recover_configuration_task_runs(*args, **kwargs):
+    """配置任务运行孤儿恢复任务。
+
+    周期执行：把超过阈值仍无进展的 RUNNING 运行收敛为 FAILED（服务重启或
+    Agent 断线导致的孤儿状态），供用户重试。业务逻辑见
+    ConfigurationTaskRunService.recover_orphan_running。
+
+    :return: 恢复摘要字典。
+    """
+    from modules.configuration_task.service.task_run_service import ConfigurationTaskRunService
+
+    task_id = int(kwargs.pop("_task_id", 0) or 0)
+    if task_id and is_task_stop_requested(task_id):
+        raise TaskStopRequestedError("任务已手动终止")
+    timeout_minutes = int(kwargs.get("timeout_minutes") or 60)
+    try:
+        with SessionLocal() as db:
+            result = ConfigurationTaskRunService.recover_orphan_running(db, timeout_minutes=timeout_minutes)
+    except Exception as exc:
+        logger.exception(f"配置任务运行恢复任务执行失败: error={exc}")
+        raise
+    if result.get("recovered", 0):
+        logger.info(
+            f"配置任务运行恢复任务完成 | scanned={result.get('scanned', 0)} recovered={result.get('recovered', 0)}"
+        )
+    return result

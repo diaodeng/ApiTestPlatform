@@ -19,13 +19,18 @@ class PosService:
 
     @classmethod
     def prepare_start(cls, dialog_pos, pos_path):
+        """
+        启动前检查。注意：这里不能吞掉业务异常（如配置文件异常），
+        否则前端只会看到"启动已取消"，真实原因到不了用户眼前；
+        未知异常仍兜底记录后返回失败。
+        """
         try:
             ok, ctx = PosStartService.prepare_start(dialog_pos, pos_path)
 
             return ok, ctx
         except Exception as e:
             logger.exception(e)
-            return False, None
+            raise
 
     @staticmethod
     def execute_start(ctx):

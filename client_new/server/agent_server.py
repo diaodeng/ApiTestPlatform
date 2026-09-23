@@ -6,7 +6,6 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -16,10 +15,14 @@ from loguru import logger
 from websockets.exceptions import InvalidStatus
 from websockets.protocol import State
 
+from services.agent_file_service import (
+    FILE_RESOURCE_REQUEST_TYPE,
+    AgentFileService,
+)
 from services.desktop_test_service import DesktopTestService
 from services.ticket_ai_analysis_service import TicketAiAnalysisService
 from services.web_test_service import WebTestService
-from utils.common import compress_dict_to_str, decompress_str_to_dict
+from utils.common import compress_dict_to_str, decompress_str_to_dict, get_client_root_dir
 
 # websocket发送数据分片大小
 DEFAULT_MESSAGE_SIZE = 5 * 1024
@@ -35,6 +38,9 @@ HEARTBEAT_WATCHDOG_SILENCE_SECONDS = 90
 # 看门狗检查间隔（秒）
 HEARTBEAT_WATCHDOG_CHECK_INTERVAL_SECONDS = 15
 
+# Agent 文件资源服务独立于普通 request/response/event，控制面仍返回小 JSON。
+AGENT_FILE_SERVICE = AgentFileService()
+
 request_all_chunk = defaultdict(str)
 
 # AI 分析任务取消标记表：服务端发送 cancel_task 消息后按 taskId 注册，
@@ -43,9 +49,9 @@ AI_TASK_CANCEL_FLAGS: set[int] = set()
 # 取消标记表的线程锁（handle_message_chunk 与 cancel 消息处理在不同协程）。
 _ai_task_cancel_flags_lock = asyncio.Lock()
 
-# 断连待补交清单文件：与 agent_config.json 同目录（storage/data），进程重启后仍可补交。
+# 断连待补交清单文件：与 agent_config.json 同目录（应用根 storage/data），进程重启后仍可补交。
 # 结构：{"<request_id>": {"payload": "<压缩后完整响应>", "queuedAt": "<ISO时间>", "retryCount": 0}}
-PENDING_RESPONSE_FILE = Path("storage/data/pending_response_deliveries.json")
+PENDING_RESPONSE_FILE = get_client_root_dir() / "storage" / "data" / "pending_response_deliveries.json"
 # 单次补交最多处理的条数，避免一次占用连接过久。
 PENDING_DELIVERY_BATCH_SIZE = 10
 # 清单文件最大条数，超出时丢弃最旧的记录（理论上极少达到）。
@@ -106,6 +112,22 @@ def _split_payload(payload: str, chunk_size: int) -> list[str]:
     return [payload[i : i + safe_chunk_size] for i in range(0, len(payload), safe_chunk_size)]
 
 
+def _safe_request_log_payload(message_data_dict: dict[str, Any]) -> str:
+    """生成脱敏请求日志，避免资源分片 Base64 内容进入日志。"""
+    if not isinstance(message_data_dict, dict):
+        return json.dumps(message_data_dict, ensure_ascii=True)
+    payload = dict(message_data_dict)
+    command = str(payload.get("command") or "").strip()
+    if command == "file_chunk" or payload.get("requestType") == FILE_RESOURCE_REQUEST_TYPE:
+        if "data" in payload:
+            encoded = payload["data"]
+            payload["data"] = f"<redacted:{len(encoded) if isinstance(encoded, str) else 0}>"
+        for key in ("content", "fileContent", "file_content"):
+            if key in payload:
+                payload[key] = "<redacted>"
+    return json.dumps(payload, ensure_ascii=True)
+
+
 class RequestByInput:
     def __init__(self):
         pass
@@ -118,12 +140,25 @@ class RequestByInput:
         event_sender: Callable[[dict], Awaitable[None]] | None = None,
     ) -> (dict, bool):
         """根据入参转发请求"""
-        logger.info(f"请求数据：{json.dumps(message_data_dict, ensure_ascii=True)}")
+        logger.info(f"请求数据：{_safe_request_log_payload(message_data_dict)}")
         client_status = True
 
-        request_type = message_data_dict.pop("requestType")
-        request_id = message_data_dict.pop("request_id")
+        request_type = message_data_dict.pop("requestType", None)
+        request_id = message_data_dict.pop("request_id", None)
         res_data = {}
+        if request_type == FILE_RESOURCE_REQUEST_TYPE or message_data_dict.get("command") in {
+            "file_publish_begin",
+            "file_chunk",
+            "file_publish_commit",
+            "file_stat",
+            "file_cleanup",
+        }:
+            resource_request = dict(message_data_dict)
+            resource_request["requestType"] = FILE_RESOURCE_REQUEST_TYPE
+            res_data = await AGENT_FILE_SERVICE.handle_command_async(resource_request)
+            res_data["request_id"] = request_id
+            res_data["request_type"] = FILE_RESOURCE_REQUEST_TYPE
+            return res_data, client_status
         if request_type == RequestTypeEnum.http.value:
             try:
                 res_response = await http_client.request(**message_data_dict)
@@ -439,6 +474,15 @@ class WebSocketClient:
         if not message_dict["finished"]:
             return
         request_data = decompress_str_to_dict(request_all_chunk.pop(request_id))
+        # 资源协议使用 requestType=7 或 command 分支，但仍通过普通 response_chunk 返回小 JSON。
+        # 文件正文只存在 file_chunk 的 Base64 输入中，不进入普通业务响应聚合。
+        if AgentFileService.is_resource_command(request_data):
+            response = await AGENT_FILE_SERVICE.handle_command_async(request_data)
+            response["request_id"] = request_id
+            response = compress_dict_to_str(response)
+            if response is not None:
+                await self._send_response_with_recovery(response, request_id=request_id)
+            return
         # 取消通知不是业务请求：注册取消标记后直接确认，不进入转发链路。
         if request_data.get("requestType") == "cancel_task":
             await self._handle_cancel_task(request_data)
@@ -793,6 +837,7 @@ class RequestTypeEnum(Enum):
     folder = 4
     desktopui = 5
     ai_analysis = 6
+    file_resource = FILE_RESOURCE_REQUEST_TYPE
 
 
 # 根据枚举值获取枚举名称

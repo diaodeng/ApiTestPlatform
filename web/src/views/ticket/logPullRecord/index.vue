@@ -371,6 +371,7 @@
             :data-type-options="logPullDataTypeOptions"
             :storage-mode-options="logPullStorageModeOptions"
             :show-auto-ai="false"
+            @store-match-change="handleCreateStoreMatchChange"
           />
           <LogPullNotifyConfigFields
             v-model="createForm.notifyConfig"
@@ -628,6 +629,13 @@ const storeConfigQuery = ref({
 
 const createForm = ref(createDefaultForm())
 
+// 门店匹配状态（LogPullConfigFields 组件回报），提交前未匹配时二次确认
+const createStoreMatchState = ref('empty')
+
+function handleCreateStoreMatchChange(state) {
+  createStoreMatchState.value = String(state || 'empty')
+}
+
 const createRules = {
   vendorId: [{ required: true, message: 'vendorId 不能为空', trigger: 'change' }],
   storeId: [{ required: true, message: 'storeId 不能为空', trigger: 'change' }],
@@ -641,6 +649,8 @@ function createDefaultForm() {
     resolvedItemKey: undefined,
     vendorId: undefined,
     storeId: undefined,
+    // 工单来源门店编码（store_code 空间），仅用于展示映射关系，不提交
+    sourceStoreCode: '',
     posNo: undefined,
     commandDataType: 1,
     pullMethod: 'time',
@@ -993,11 +1003,20 @@ function resolveTicketSyncSource(detail) {
   const externalSync = extraData.externalSync || extraData.external_sync || {}
   const source = externalSync.source || {}
   const logPullHints = extraData.logPullHints || extraData.log_pull_hints || {}
+  const externalFieldMapping = extraData.externalFieldMapping || extraData.external_field_mapping || {}
   const ticketAutomation = extraData.ticketAutomation || extraData.ticket_automation || {}
   const automationLogPullConfig = ticketAutomation.logPullConfig || ticketAutomation.log_pull_config || {}
   const latestLogPull = payload.latestLogPull || payload.latest_log_pull || {}
   const directLogPullConfig = payload.logPullConfig || payload.log_pull_config || {}
+  // 来源门店编码（store_code 空间）：仅用于展示映射关系，绝不回填 storeId 提交字段
+  const sourceStoreCode = pickFirstFilledValue([
+    logPullHints.sourceStoreCode,
+    logPullHints.source_store_code,
+    externalFieldMapping.ticketStore,
+    externalFieldMapping.ticket_store
+  ])
   return {
+    sourceStoreCode,
     vendorId: pickFirstFilledValue([
       source.vendorId,
       source.vendor_id,
@@ -1073,6 +1092,11 @@ function applyTicketLogPullPrefill(ticketDetail) {
   if (storeId) {
     createForm.value.storeId = storeId
   }
+  // 来源门店编码只进展示位（store_code 空间），绝不回填 storeId 提交字段
+  const sourceStoreCode = String(source.sourceStoreCode || '').trim()
+  if (sourceStoreCode) {
+    createForm.value.sourceStoreCode = sourceStoreCode
+  }
   const posNo = Number(source.posNo)
   if (Number.isFinite(posNo) && posNo > 0) {
     createForm.value.posNo = posNo
@@ -1144,17 +1168,36 @@ function submitCreateForm() {
       proxy.$modal.msgWarning('门店（storeId）不能为空，请输入正确的 org_no')
       return
     }
+    // 门店未匹配到当前商家配置时二次确认：放行手输新店 org_no 的合法场景，
+    // 同时拦住误填/残留的来源门店编码（store_code）被当 org_no 提交
+    if (createStoreMatchState.value === 'unmatched') {
+      proxy.$modal
+        .confirm(`门店 "${storeId}" 未匹配到当前商家的门店配置，确认按 org_no 直接提交？`)
+        .then(() => {
+          doSubmitCreateForm()
+        })
+        .catch(() => {})
+      return
+    }
+    doSubmitCreateForm()
+  })
+}
 
+function doSubmitCreateForm() {
     submitting.value = true
     const payload = {
       ...createForm.value,
       ticketId: createForm.value.ticketId || null,
       // 环境字段拼接为 group:item 格式存储
-      environment: envKey && resolvedKey ? `${envKey}:${resolvedKey}` : (envKey || undefined),
+      environment: String(createForm.value.environment || '').trim() && String(createForm.value.resolvedItemKey || '').trim()
+        ? `${String(createForm.value.environment).trim()}:${String(createForm.value.resolvedItemKey).trim()}`
+        : String(createForm.value.environment || '').trim() || undefined,
       notifyConfig: normalizeLogPullNotifyConfig(createForm.value.notifyConfig)
     }
     // 删除前端中间字段，不往后端传
     delete payload.resolvedItemKey
+    // 来源门店编码仅用于展示（store_code 空间），不提交
+    delete payload.sourceStoreCode
     if (payload.pullMethod === 'path') {
       delete payload.modifyTime
     } else {
@@ -1189,7 +1232,6 @@ function submitCreateForm() {
     }).finally(() => {
       submitting.value = false
     })
-  })
 }
 
 /**

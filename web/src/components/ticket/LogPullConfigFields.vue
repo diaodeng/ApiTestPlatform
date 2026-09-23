@@ -104,7 +104,7 @@
       <el-form-item label="" :prop="getProp('storeId')">
         <el-alert
           :title="storeHintMessage"
-          type="warning"
+          :type="storeHintType"
           :closable="false"
           show-icon
         />
@@ -357,6 +357,9 @@ const model = defineModel({
   default: () => ({})
 })
 
+// 门店匹配状态变化向外通报，供提交方做"未匹配 org_no 二次确认"
+const emits = defineEmits(['store-match-change'])
+
 const selectedParameterExample = ref('')
 const fetchedStoreOptions = ref([])
 const activeStoreVenderNo = ref('')
@@ -408,13 +411,64 @@ const filteredStoreOptions = computed(() => {
 })
 
 /**
- * 门店匹配状态提示：当已选商家但门店无法匹配时给出警告。
- * @returns {string|null} 提示文案，无需提示时返回 null
+ * 门店匹配状态：用于提交前二次确认。storeId 为空视为 empty（由必填校验拦截）；
+ * 选项未加载或按 org_no 匹配不到时视为 unmatched（提交时需要用户二次确认）。
+ */
+const storeMatchState = computed(() => {
+  const storeId = String(model.value?.storeId || '').trim()
+  if (!storeId) return 'empty'
+  if (!resolvedStoreOptions.value.length) return 'unmatched'
+  const matched = resolvedStoreOptions.value.some(
+    item =>
+      String(item.storeId || '').trim() === storeId ||
+      String(item.storeCode || '').trim() === storeId
+  )
+  return matched ? 'matched' : 'unmatched'
+})
+
+watch(storeMatchState, value => {
+  emits('store-match-change', value)
+}, { immediate: true })
+
+/**
+ * 门店提示文案与类型：
+ * 1. 携带来源门店编码（sourceStoreCode，store_code 空间）时优先展示映射关系——
+ *    已匹配且 sap 一致时给 info 提示；已匹配但 sap 与来源编码不一致时警告串店风险；
+ *    未匹配时警告并引导手动输入 org_no（来源编码绝不回填进 storeId 提交）。
+ * 2. 无来源编码时维持原提示逻辑（按 org_no 匹配）。
  */
 const storeHintMessage = computed(() => {
   const vendorId = String(model.value?.vendorId || '').trim()
   if (!vendorId) return null
   const storeId = String(model.value?.storeId || '').trim()
+  const sourceCode = String(model.value?.sourceStoreCode || '').trim()
+  if (sourceCode) {
+    const sourceMatches = resolvedStoreOptions.value.filter(
+      item => String(item.sapOrgNo || '').trim() === sourceCode
+    )
+    if (!storeId) {
+      if (!resolvedStoreOptions.value.length) {
+        return `工单门店编码 "${sourceCode}" 暂无法匹配（门店配置未加载），请手动输入正确的 org_no`
+      }
+      if (sourceMatches.length === 1) {
+        return `工单门店编码 ${sourceCode} → 已匹配 org_no ${sourceMatches[0].storeId}`
+      }
+      return `工单门店编码 "${sourceCode}" 未匹配到门店，请手动输入正确的 org_no`
+    }
+    const matchedStore = resolvedStoreOptions.value.find(
+      item =>
+        String(item.storeId || '').trim() === storeId ||
+        String(item.storeCode || '').trim() === storeId
+    )
+    if (matchedStore) {
+      const matchedSap = String(matchedStore.sapOrgNo || '').trim()
+      if (matchedSap === sourceCode) {
+        return `工单门店编码 ${sourceCode} → 已匹配门店 ${matchedStore.storeName || matchedStore.storeId}（org_no=${matchedStore.storeId}）`
+      }
+      return `工单门店编码 ${sourceCode} 与当前所选门店（sap_org_no=${matchedSap || '无'}）不一致，请确认是否选错门店`
+    }
+    return `输入的门店 "${storeId}" 未在配置中找到，请确认 org_no 是否正确`
+  }
   // 商家已选但门店列表为空（当前商家下无匹配门店）
   if (!resolvedStoreOptions.value.length) {
     return storeId
@@ -424,13 +478,20 @@ const storeHintMessage = computed(() => {
   // 门店列表不为空，但用户输入的值不在列表中
   if (storeId) {
     const matched = resolvedStoreOptions.value.some(
-      item => item.storeId === storeId || item.storeCode === storeId || item.sapOrgNo === storeId
+      item =>
+        String(item.storeId || '').trim() === storeId ||
+        String(item.storeCode || '').trim() === storeId
     )
     if (!matched) {
       return `输入的门店 "${storeId}" 未在配置中找到，请确认 org_no 是否正确`
     }
   }
   return null
+})
+
+const storeHintType = computed(() => {
+  const message = storeHintMessage.value || ''
+  return message.includes('已匹配') && !message.includes('不一致') ? 'info' : 'warning'
 })
 
 /**
@@ -481,20 +542,37 @@ function loadStoreOptions(venderNo) {
   })
 }
 
+/**
+ * 归一化门店选择：storeId 只承载 org_no 空间的提交值，匹配只按 org_no（storeId/storeCode）
+ * 进行，绝不与 sapOrgNo 跨列匹配（同一数字可能既是 A 店 org_no 又是 B 店 sap_org_no，
+ * 跨列匹配会把回显值改写到错误门店，如 INC00002013662 的 333 → 550944）。
+ * storeId 为空且表单携带来源门店编码（sourceStoreCode）时，才允许按 sapOrgNo 唯一
+ * 兜底匹配并回填 org_no；匹配不到时保留为空，由提示区引导用户手动输入。
+ */
 function syncStoreSelection() {
   const storeId = String(model.value?.storeId || '').trim()
   if (!storeId) {
+    const sourceCode = String(model.value?.sourceStoreCode || '').trim()
+    if (!sourceCode || !resolvedStoreOptions.value.length) {
+      return
+    }
+    const sapMatches = resolvedStoreOptions.value.filter(
+      item => String(item.sapOrgNo || '').trim() === sourceCode
+    )
+    if (sapMatches.length === 1) {
+      model.value.storeId = sapMatches[0].storeId
+    }
     return
   }
   if (!resolvedStoreOptions.value.length) {
     return
   }
-  // 先按规范门店编号匹配，再按 SAP 编号兼容历史工单值；未命中时保留原始输入。
+  // org_no 空间精确匹配：命中则归一为选项的 storeId；未命中保留原值，由提示区告警。
   const matchedStore = resolvedStoreOptions.value.find(item => {
-    const candidates = [item.storeId, item.storeCode, item.sapOrgNo]
-      .map(value => String(value || '').trim())
-      .filter(Boolean)
-    return candidates.includes(storeId)
+    return (
+      String(item.storeId || '').trim() === storeId ||
+      String(item.storeCode || '').trim() === storeId
+    )
   })
   if (matchedStore) {
     model.value.storeId = matchedStore.storeId
@@ -518,6 +596,8 @@ function handleStoreFilter(keyword) {
 
 function handleVendorChange() {
   model.value.storeId = undefined
+  // 来源门店编码归属于工单原商家，切换商家后不再适用，一并清空避免误导匹配
+  model.value.sourceStoreCode = undefined
   storeFilterKeyword.value = ''
   // 清空匹配状态
   envResolveMatchItems.value = []

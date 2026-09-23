@@ -4,6 +4,71 @@ title: 更新历史
 
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
+## 2026-09-23
+- mitmproxy 详情区滚动位置重置修复：选中抓包记录后在详情区滚动查看时，其他流量的更新事件会无条件重绘详情区导致滚动条回顶（数据没变、阅读位置丢失）；修复为详情区仅在被更新的正是当前选中流量时才重绘（如选中请求刚拿到响应、断点状态变化），其他流量只刷列表；重绘时按「流量id+标签页」保持滚动位置，切换选中行或标签页仍回到顶部。后端无改动。详见：[mitmproxy详情区滚动位置重置修复](2026-09-23-client-mitm-detail-scroll-reset-fix.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
+- Mock 响应头透传修复：客户端 mitmproxy 在 Mock 命中后重建响应时只保留 Content-Type，导致 Mock 服务端的命中标记头 `mockId`（`规则id_响应id`）与用户在响应头模板中配置的全部自定义头（业务 token 头、多条 `Set-Cookie` 等）无法到达被测应用，出现"直连 Mock 正常、走客户端代理异常"且无法从应用侧定位命中规则；修复为按 `multi_items()` 全量透传（保留重复头），仅剔除 `Content-Length`（自动重算）、`Content-Encoding`（探测已解压 body，保留压缩声明会解压失败）与 `Transfer-Encoding/Connection/Keep-Alive` 逐跳头，头键值按 utf-8 显式编码（`Response.make` 元组入参不自动转 bytes）。Mock 未命中/超时放行/断点链路不受影响，Mock 服务端无改动。详见：[Mock响应头透传修复](2026-09-23-client-mock-response-header-passthrough.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
+
+## 2026-09-22
+- 日志拉取门店编号空间治理（生产 INC00002013662 排查产物）：来源门店编码（store_code/SAP 编号）与日志接口机构号（org_no）在弹窗回显与 hints 落库两处混用——回显值 333 被前端三字段 OR 跨列匹配改写到 sap_org_no=333 的仓库门店（org 550944）且无告警，未匹配的来源编码会被当 org_no 落入 hints 并可被直接提交；修复为提交字段只承载 org_no（匹配收窄 org_no-only、hints 匹配失败不写并清除旧映射、来源编码仅展示映射关系），提交前对匹配不到 org_no 的值二次确认以保留手输新店 org_no 的合法场景。详见：[门店编号空间治理](2026-09-22-log-pull-store-id-space-fix.md)，用户说明：[日志拉取使用说明](../ticket_log_pull.md)。
+
+## 2026-09-21
+- 修复配置任务证据迁移在 MySQL/MariaDB 上为 `TEXT` 字段声明默认值导致的 1101 错误：改为先允许 NULL、回填空 JSON，再收紧为 NOT NULL；同时修正基线 SQL 中 `LONG BLOB DEFAULT NULL` 定义。
+- 配置任务阶段步骤选择体验优化：阶段编辑器将稳定 `stepId` 改为“步骤序号 · 动作 · 步骤名称”多选项，用户不再需要从 JSON 手工复制 ID；保存时按稳定 ID 自动生成兼容的 `stepIndexes`，并对历史缺失步骤保留异常提示。非草稿版本的阶段控件统一只读。
+- 配置任务证据策略与产物并发幂等收口：`requiredTypes` 按每种类型至少一项计算，同类型截图任意一项即可满足，精确证据继续使用 `requiredEvidenceKeys`；产物引用唯一键冲突时回滚并回查已存在记录，避免并发重复登记。新增 metadata-only 登记前 `file_stat` 探测、Agent `file_read` 完整性校验和运行产物 artifact 级 preview/download；外部访问统一使用 `artifactId`，并记录脱敏访问审计。测试数量以本轮完整定向验证结果为准。
+- 配置任务第一期取证契约与回归补齐：上线口径明确支持显式 `capture_screenshot` 步骤、`evidenceType`/阶段 `evidencePolicy` 字段、Agent-local 产物元数据登记和稳定 `stepId`；旧 `stepIndex`/Base64 事件保留兼容。运行状态与证据完整性分开理解；当前已提供 artifact 级 preview/download，必须使用 `artifactId`，并经过归属、状态、元数据一致性和正文摘要校验；证据包仍未上线。同步补充截图参数、metadata-only 事件、业务状态/证据字段和幂等语义的回归覆盖。
+- 配置任务证据状态收敛补齐：阶段成功/失败终态、阶段重试和孤儿运行恢复都会在同一事务内刷新证据状态；新增数据库增量迁移，补齐稳定步骤、阶段策略、运行/阶段双状态、产物元数据和引用级唯一约束。详见：[配置任务取证第一期更新](2026-09-21-configuration-task-evidence.md)。
+- AI 分析结果解析失败修复（生产 INC00002000624N 排查产物）：模型在结果字符串值内嵌请求体 JSON 示例且不转义双引号，旧版单遍引号修复启发式无法处理"内层键值对"形态导致整个有效分析被丢弃（`AI_WORKER_RESULT_INVALID`，重试亦复现）；按新结果处理流程修复——`json.loads` 失败后先经**回溯式 json-repair**（键/值字符串上下文判定 + 嵌入花括号剪枝，纯标准库，实测挽救两次生产失败样本），仍失败触发 **Agent 端补救重试**（转存首次现场后 resume 会话发送纠错指令再执行一轮，成功合并 token 走成功链路），两道防线都失败才落库失败；服务端把解析失败的诊断摘要并入任务错误信息，列表页直接可见具体断点。无数据库结构变更。详见：[AI结果JSON修复与补救重试](2026-09-20-ticket-ai-result-json-repair-retry.md)，用户说明：[工单深度AI分析说明](../ticket_ai_analysis.md)。
+- 桌面客户端 Agent 页补齐迁移遗漏配置：新增「AI 设置」弹窗（AI 工作区根目录 / AI 本地仓库路径 / Codex CLI 路径，迁移自旧版 PySide 页面的 AI 配置区，Codex CLI 为旧版缺失的新增入口），三项均支持「浏览」选择；浏览器设置弹窗手动下载恢复 chrome/msedge 两种内核（共 5 种）、chromium/firefox/webkit 手动路径补「浏览」按钮；无后端改动。详见：[Agent页AI设置与浏览器设置补齐](2026-09-20-client-agent-ai-setting-and-browser-fix.md)，用户说明：[Agent连接使用说明](../client/agent.md)。
+
+## 2026-09-20
+- 配置任务页面补充录制转模板、版本编辑和新建录制的操作提示：四个 JSON 配置字段新增可点击问号说明，明确步骤索引从 0 开始、变量/fileKey 的适用动作和输入绑定关系，并补充任务变量与版本变量的合并规则、资源 READY 状态和 Agent 归属要求。
+- 配置任务新建录制补充断言操作提示：按住 Alt 点击元素可生成“文本包含”或“元素可见”断言，Alt+点击不会触发真实点击，默认追加到上一条步骤；普通点击不会自动生成断言。
+- 修复配置任务版本步骤详情弹窗可能重复残留的问题：详情组件仅在打开时挂载，版本编辑器关闭时销毁子内容，连续查看不同步骤时只保留当前详情；同时补齐共享步骤详情断言编辑所需的领域方法引用，并修正录制转模板对 `select_option` 变量标记写入 `values` 的执行字段。
+- 共享 Web 用例编辑组件库 locatorDomain 缺失定义修复：`locatorDomain.js` 引用 `extractLocatorMeta` 与 `isPlainObject` 但从未导入/定义（2026-04 页面拆分时这两个函数只留在了 useCaseEditor 副本里），任何真实渲染步骤详情（定位序号输入框）都会抛 `ReferenceError: extractLocatorMeta is not defined`。此前无暴露是因为 Web 测试管理页使用 views/hrm/webcase 下自己的一套实现，共享库组件一直没有真实使用方；配置任务版本步骤编辑成为共享库 StepDetail 的首个使用方后暴露。已在模块内补齐定义（isPlainObject 从 shared 导入、extractLocatorMeta 就近私有实现，与 useCaseEditor 副本逻辑一致），node 运行时烟测通过。另排查确认 stepDomain 的表格编辑类导出（addStep/copyStep 等）同样存在拆分遗漏，但其深度耦合 useCaseEditor 闭包状态且当前无调用方，暂不处理。
+- 配置任务「新建录制」弹窗每次打开自动清空数据修复：弹窗显隐由父组件 v-model 控制、el-dialog 关闭不销毁组合函数内的表单状态，而状态复位函数此前没有任何调用方（死代码），导致第二次打开残留上一次的表单值/录制ID/失败提示；改为弹窗组件 watch 打开事件时调用 `resetRecordingState` 复位，并清理了组合函数中无用的弹窗显隐状态。
+- 录制状态回写接口 NameError 修复：`writeback_recording_state_services` 使用了 `CredentialWritebackModel` 但漏了函数内导入（模型导入加在了相邻的"保存新凭证"方法里，函数内导入作用域不跨方法），停止录制后回写必现 `NameError`；已在回写方法内补上导入并做作用域静态检查。
+- 配置任务「新建录制」保存凭证开关按凭证选择分语义（回写原凭证/保存新凭证）：此前无论是否选择登录凭证，开关都只会"创建新凭证"，选了凭证的用户会误以为登录态会写回原凭证；现改为——未选凭证时为「停止后保存为新凭证」（原有行为）；已选凭证时变为「停止后回写所选凭证」，把录制最终浏览器状态覆盖写回该凭证（要求绑定开启"允许回写"，开关在未开启时禁用并提示；乐观锁版本由服务端读取当前值，凭证期间被刷新会保留较新状态并提示）。新增后端接口 `POST /hrm/web-case/recording/{id}/credential/{bindingId}/writeback`（复用统一凭证回写服务的全部校验）。顺带修复一个历史缺陷：web_case_controller 缺失 `run_in_threadpool` 导入，导致既有「录制保存凭证」接口一调用即 NameError。详见：[配置任务管理](../configuration-task.md)。
+- 配置任务「新建录制」新增「停止后保存凭证」开关：此前独立录制弹窗缺少状态保存入口——录制停止时 Agent 总会上报最终浏览器状态，但服务端自动回写已废弃、保存必须显式触发，导致手动登录后的登录态只留在录制记录里，下次执行仍需登录。现对齐 Web 录制页行为：开启开关（可自定义新凭证名称，默认 `录制凭证-{录制ID}`）后，停止录制延迟 3 秒等待最终状态上报，调用既有显式创建接口把登录态保存为新的统一凭证（创建新凭证不覆盖已有凭证），提示可在版本/运行配置中选用。复用既有接口，后端无改动。详见：[配置任务管理](../configuration-task.md)。
+- 配置任务版本编辑弹窗两处体验修复：①浏览器下拉此前手写三项（chromium/firefox/webkit），漏掉 Chrome 和 Microsoft Edge，改为复用共享 `browserOptions` 常量（五项全集）；②「凭证绑定ID」由手工输入改为可选下拉，选项来自统一凭证的 `web_case` + `playwright_storage` 投影绑定（显示绑定名与凭证名，可搜索、可清空），不再要求用户手抄绑定 ID。
+
+- 配置任务版本编辑支持可视化步骤编辑：版本编辑弹窗的「步骤JSON」文本域升级为「可视化编辑 / JSON」双模式 Tab——可视化模式提供步骤表格（新增/删除/上移下移/启停/摘要展示），双击行或点「详情」打开步骤详情编辑弹窗，直接复用 Web 用例编辑的自包含组件 `StepDetail`（动作类型/定位器/参数/断言/目标快照完整编辑能力，配置任务版本 steps 与 Web 用例同为 WebStepModel 结构，零拷贝复用）；JSON 模式保留原文本编辑。两种视图保存时以激活视图为准互相同步。Web 测试管理相关组件与逻辑零改动。
+
+- 录制转模板成功后报 AttributeError 修复：转换本身已成功（版本草稿已创建），但服务端打日志时访问了 `result.result.versionNo`——`TaskVersionDetailModel` 的 Python 属性名是 `version_no`（camelCase 仅是 Pydantic 序列化别名），导致接口 500 但数据已落库；修正为 `version_no`。注意：遇到此报错时转换实际已生效，刷新版本列表即可看到草稿，无需重新转换。
+
+- 配置任务「新建录制」弹窗步骤计数修复：录制中始终显示 0 个步骤——轮询取的是 `resultSummary.stepCount`，但该字段只在录制结束（`record_finished`）时写入且不含步骤数；改为取录制详情接口实时重建的 `steps` 数组（录制中每个操作事件实时落库并重建步骤列表），录制中实时显示已捕获步骤数，完成时显示总步骤数。
+
+- Web 测试插件包补齐 playwright 传递依赖（pyee/greenlet）并修复录制弹窗体验：①插件构建脚本 `build_plugins.py` 此前只打包 playwright 本体，漏掉其声明的传递依赖 pyee 与 greenlet，导致插件安装后运行时 `import playwright` 报 `ModuleNotFoundError: No module named 'pyee'`，而守卫导入统一提示"插件未安装"误导用户反复重装；已补齐两个依赖条目，并在导入失败时区分"插件未安装"与"插件不完整/损坏"（后者附真实异常并提示重装插件）。②「新建录制」弹窗三处体验修复：状态信息由两列 descriptions 改为独立提示条（错误全文展示不再截断溢出）、录制失败后自动复位到表单态并显示"重新开始录制"按钮（不再停留在"停止录制"运行态）、失败原因以错误提示条常驻展示。
+
+- 手动登录链路允许浏览器凭证内容为空：此前录制/执行只要选择了浏览器状态凭证就要求凭证已配置 `storageState`，导致首次录制/首次执行（浏览器状态还不存在）被"浏览器凭证未配置 storageState"拦死；修复为开启手动登录时凭证仅作为目标站点与回写目标的引用、允许空状态启动，登录后的最终状态由 Agent 上报（可显式保存新凭证或按绑定回写）；未开启手动登录时仍要求凭证有内容（无人工补录机会）。覆盖开始录制与 Web 用例运行两条链路，回放链路无手动登录参数维持原行为。详见：[统一凭证管理](../credential_management.md)。
+
+- 配置任务「新建录制」弹窗浏览器选项补齐：弹窗内浏览器下拉此前手写为 Chromium/Firefox/WebKit 三项，漏掉了 Chrome 和 Microsoft Edge；改为复用 Web 用例录制页共享的 `browserOptions` 常量（Chromium/Chrome/Microsoft Edge/Firefox/WebKit 五项），与既有录制页保持一致。客户端 Agent 浏览器规格表本就支持全部五种（chrome/msedge 经 channel 启动本机安装浏览器），后端原样透传，无需后端改动。
+
+- 配置任务页新增「新建录制」入口：任务管理 Tab 顶部新增录制按钮，弹窗内填写起始地址/执行 Agent/浏览器/手动登录/登录凭证投影后直接开始录制，支持实时状态轮询与停止；录制不关联 Web 用例（`webCaseId` 留空，后端本就支持），录制记录与 Web 测试管理共用同一会话表，完成后用「录制转模板」生成版本草稿。前端新建独立录制组合函数与弹窗组件，复用既有录制接口，后端无改动。详见：[配置任务管理](../configuration-task.md)。
+
+- 修复录制记录列表接口 `isPage=false` 报错：`GET /hrm/web-case/recording/list` 在 `isPage=false` 时 DAO 返回模型列表，但控制器固定按分页对象处理导致 `AttributeError: 'list' object has no attribute 'model_dump'`；修复为按 `is_page` 分支返回（与 Agent 列表接口同模式），分页调用方行为不变。
+
+- 录制转模板支持下拉搜索录制记录：「录制记录ID」手工输入改为可搜索下拉，弹窗打开自动加载最近录制记录（显示会话名称/ID/状态），支持按名称远程搜索；草稿和录制中的记录不在可选范围。任务列表操作说明已补充到用户文档（运行=立即同步执行、定时=仅保存配置需配合调度任务、版本=可执行快照）。详见：[配置任务管理](../configuration-task.md)。
+
+- 配置任务执行 Agent 改为下拉选择：新增/编辑任务、运行确认、定时配置三处弹窗的「执行Agent」由手工输入改为下拉选择，选项来自系统已登记 Agent（显示名称/编码/在线状态），三处共享同一份列表避免重复请求；定时配置弹窗提示文案明确「保存定时配置不会自动创建调度任务，需到系统监控→定时任务手工创建」的两段式约定。详见：[配置任务管理](../configuration-task.md)。
+
+- 配置任务菜单注册上线：新增顶级目录「门店配置」（独立于测试管理、工单管理，集中存放生产配置类功能），其下挂载「配置任务」页面菜单（组件 `hrm/configuration-task/index`）与全部任务/资源/产物/报告权限按钮；菜单和按钮由后端启动时的菜单同步自动写入，首次部署重启后端即可在左侧菜单看到「门店配置 → 配置任务」入口。详见：[配置任务管理](../configuration-task.md)。
+
+## 2026-09-19
+- 配置任务前端管理页面、录制转模板与定时触发上线：新增「配置任务」页面（任务管理 + 运行记录两个 Tab，版本抽屉含草稿编辑/发布/阶段切分，运行详情含阶段审批/重试/产物/报告入口，定时配置弹窗与录制转换弹窗）；后端新增 `POST /templates/from-recording`（录制步骤重建→变量/fileKey 标记→版本草稿）与任务级定时配置接口（5 字段 cron，存任务 remark 受控段），定时执行入口 `module_task.scheduler_configuration.trigger_configuration_task_run`（同步执行复用运行编排，triggerType=scheduled）。详见：[配置任务管理](../configuration-task.md)。
+
+- 配置任务 SFTP 资源、下载回传与删除保护上线：新增 SFTP Provider（复用统一凭证绑定，远端先写 `.part` 再原子 rename，凭证加密保存不回显明文）；`POST /resources/sftp` 上传文件并登记 READY 资源；`GET /resources/{id}/download` 按 Provider 下载回传（SFTP 服务端直连 / Agent 本地经 `file_read` 命令），回传前重新校验 SHA-256；`POST /resources/{id}/delete` 带引用保护——被产物引用默认拒绝、管理员可 force，删除走 `DELETING → DELETED` 状态机，远端文件清理失败保留 `DELETING` 可重试。Agent 端新增 `file_read/file_delete` 受控命令。详见：[配置任务资源](../configuration-task-resource.md)。
+
+- 配置任务阶段审批闸门、截图产物与报告归档上线：版本支持按步骤切分阶段（READ/PREPARE_WRITE/WRITE/VERIFY 模式），WRITE 阶段执行前强制审批（拒绝即取消运行，重试需重新审批）；Agent 失败步骤自动截图上报，服务端登记为受控资源并建立产物引用（task_artifact）；运行报告归档为 Word 兼容文件（零依赖，Word/WPS 直接打开）并登记产物，可选飞书机器人通知。需执行 `server/sql/20260919_configuration_task_stage_artifact.sql`。详见：[配置任务管理](../configuration-task.md)。
+
+- 配置任务运行控制与维护能力补齐：运行接口新增停止/取消（复用 Agent `stop_run_case`，终态收敛 `CANCELLED`）、手动登录两阶段执行（先开浏览器等人工登录再继续步骤）、可配置超时（默认 1800 秒）；同一 Agent 同时只允许一个运行（并发租约拒绝新运行）；Agent `web_run_*` 实时事件按 ID+Agent 归属接入配置任务运行，步骤进度实时落库且不影响 Web 用例链路；新增两个定时任务——资源/传输过期清理（收敛 `EXPIRED`）与孤儿运行恢复（超时无进展的 `RUNNING` 收敛 `FAILED`）。详见：[配置任务管理](../configuration-task.md)。
+
+- 配置任务运行域最小闭环上线：新增任务定义、版本快照（含 fileKey→资源 ID 输入绑定）和运行实例三张表与接口；版本发布校验绑定资源就绪且归属执行 Agent，运行时冻结输入快照并复用既有 Web `run_case` 协议下发 Agent（输入绑定注入 `resourceBindings`），同步返回终态。阶段审批、截图产物和报告归档仍未提供。详见：[配置任务运行域](2026-09-19-configuration-task-run-domain.md)，用户说明：[配置任务管理](../configuration-task.md)。
+
+- 配置任务资源与 Agent 传输切片上线：在资源元数据表基础上新增资源传输表和服务端 `begin/chunk/commit` 编排，绑定 Agent WebSocket `session_id`，只有 Agent commit 返回的实际大小和 SHA-256 与资源元数据匹配时才进入 `READY`；旧 `ready` 入口不能绕过 Agent commit。资源创建者范围、已登记 Agent 和在线 session 校验已接入，资源 ID 继续按字符串返回。详见：[配置任务资源与 Agent 传输切片](2026-09-19-configuration-task-resource.md)。
+
+- Agent 本地资源 manifest 与分片发布协议上线：新增受控 `storage/resources` 文件存储与原子 manifest，支持 `requestType=7` 的 `file_publish_begin/file_chunk/file_publish_commit/file_stat/file_cleanup` 小 JSON 控制命令，校验分片/文件大小与 SHA-256，支持乱序与同 hash 重复分片幂等；拒绝路径穿越、符号链接逃逸、目录和超限输入，不实现任意文件读取、目录浏览、SFTP 或 AI workspace 改造。详见：[Agent 本地资源分片发布](../client/agent-resource-protocol.md)。
+
+- 门店配置任务文件存储设计规划：明确复用 Web 录制与 Agent 执行能力，首期允许输入文件保存在执行 Agent 的受控目录，服务端通过资源 ID、版本、大小和 SHA-256 追踪；后续以独立 Provider 接入 SFTP。该记录仅说明设计边界，文件上传、截图归档和 SFTP 功能尚未上线。详见：[门店配置任务文件存储设计](2026-09-19-configuration-task-file-storage-design.md)。
 
 ## 2026-09-18
 - 自动拉日志 AI 门店编码映射修复（生产 INC00001988278 排查产物）：AI 统一提取的门店是外部门店编码（如 8555），而运行参数合并优先级 AI 高于字段识别，会把已映射好的内部 org_no（如 558464）覆盖回外部编码，提交前按 org_no 校验门店配置失败，自动拉日志被记为"参数不完整"跳过、只能人工补拉；修复为合并前先将 AI 门店按门店配置（`sap_org_no → org_no`，仅唯一候选）映射为内部 org_no 再参与合并，映射失败保留原值由提交前校验拦截，自动化审计新增 `aiStoreMappedFrom` 保留 AI 原始编码。详见：[自动拉日志门店映射修复](2026-09-18-ticket-auto-log-pull-ai-store-mapping.md)，用户说明：[工单同步自动化](../ticket-sync-automation.md)、[日志拉取使用说明](../ticket_log_pull.md)。

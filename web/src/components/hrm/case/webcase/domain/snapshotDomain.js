@@ -1,3 +1,15 @@
+import { cloneData, isPlainObject } from '../utils/shared.js';
+import { createDefaultLocator, normalizeLocator } from './locatorDomain.js';
+
+function createDefaultContext() {
+  return {
+    pageUrl: '',
+    frameUrl: '',
+    frameChain: [],
+    shadowChain: [],
+  };
+}
+
 export function normalizeTargetSnapshot(snapshot) {
   if (!snapshot) {
     return null;

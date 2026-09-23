@@ -1,3 +1,78 @@
+## [2026-09-22] FEATURE | 配置任务阶段三：失败策略 + 登录失效检测 + 历史记录重跑
+
+- 背景：失败后只能整体重来的语义过严；凭证失效导致失败时用户不知道原因、也不知道失败后该怎么办。阶段三确认方向：重试用关联凭证（更新靠回写）；失败继续/停止由用户自担依赖判断；"执行中人工介入"因 Agent 为单次平铺执行（run_case）且无阶段级命令消费端而暂不具备条件，当前闭环为失败（带失效提示）→ 手动登录/更新凭证映射 → 重跑（最新登录态生效）。
+- 实现：①TaskRunCreateModel.failureStrategy(stop|continue)→run_params→continue 时注入 runtime_options.continueOnFailure（Agent 既有能力零改动）；②模块常量 _LOGIN_PAGE_URL_FLAGS/_LOGIN_PAGE_MESSAGE_FLAGS + _looks_like_login_failure/_annotate_login_failure_hint 启发式检测（失败页 URL 或错误信息命中 login/sso/登录/401 等特征即在错误信息前缀"疑似登录失效，请手动登录或更新凭证后重跑"），在阶段 STEP_FAILED 与运行 EXECUTION_FAILED 两处收敛点接线；③RunRecordTab SUCCESS/FAILED 行新增"重跑"按钮（双确认+loading），按原 versionNo 调 createRun，凭证/映射/登录态取当前最新配置——重跑定位是"以最新环境重新执行"而非重放快照，正是凭证失效场景所需。
+- 中断恢复：会话中断于 RunRecordTab 重跑函数引用 createRun 未导入，补齐后构建通过。
+- 验证：回归 16 用例通过；ruff 通过；build:prod 通过；后端已重启。浏览器实测：运行弹窗失败策略区渲染确认；运行记录按任务 ID 查询后 4 条 FAILED 运行全部显示重跑按钮；点击后确认框文案正确（"将使用当前最新的凭证映射与登录态，并真实执行外站操作"），取消无副作用。失效检测真实命中场景待下次真实调试运行观察。
+- 文档：configuration-task.md 运行行补失败策略/强制刷新说明；更新记录 2026-09-22-configuration-task-stage3-failure-strategy.md。
+- 备注：阶段三接线后阶段化执行三阶段（运行级参数/多凭证合并/失败策略与重跑）全部落地；"执行中人工介入+阶段级暂停恢复"需 Agent 新增命令消费端，列为后续演进。
+
+## [2026-09-22] FEATURE | 配置任务阶段二：阶段目标系统声明 + 多凭证合并初始化
+
+- 背景：阶段一落了任务级系统凭证映射台账但运行未消费；阶段二补全"阶段声明目标系统 → 运行合并各系统凭证登录态"的主链路。**排查发现配置任务链路此前版本凭证绑定只透传绑定 ID 作调试信息，persistContextSeedState 从未下发**（登录态一直依赖本地状态文件/手动登录）——本阶段补齐该主链路，多系统以"按域合并 seed"方式一次初始化。
+- 实现：①阶段 DO/运行阶段快照 DO/建表加 system_key（ALTER SQL 20260922，dev 库已执行）；阶段保存链（StageSplitRuleModel.systemKey→stage_rows）、定义响应 to_stage_def_model、snapshot_run_stages 快照透传；②task_run_service._prepare_run 收集阶段 system_key→查映射→缺失/未绑定阻断（列出阶段与系统）→resolve_playwright_storage_state 逐绑定取登录态→按 cookie 域/origin 合并（不同绑定同域即冲突阻断，同绑定多阶段去重不冲突；版本默认绑定一并参与）→合并 seed 进 run_params.persistContextSeedState；③_build_run_case_message 下发 runtimeOptions.runtimeOverrides.persistContextSeedState（与 web_case 链路语义对齐，Agent 端 _resolve_runtime_settings 展开合并）+ forceRefreshSeedState；④Agent _seed_context_state_file_if_needed 支持 forceRefreshSeedState 强制覆写本地状态文件；⑤前端 StageEditor 阶段行"目标系统"下拉（选项取任务凭证映射）、RunConfirmDialog"强制刷新登录态"开关。
+- 验证：回归 16 用例通过；ruff 通过；build:prod 通过；dev 库加列完成。浏览器/脚本端到端：阶段 system_key 保存/回读一致（v13 三阶段=erp，阶段弹窗下拉回显 erp）；映射缺失时合并阻断并正确列出"阶段[基础信息1] 的系统[erp] 未配置凭证映射"；erp 绑定真实凭证（生产数据更新专用）后合并产出 22 cookies/6 域/2 origins；测试草稿 v13 已删除清理。
+- 风险：同域多账号（两个绑定同域）被设计性阻断（浏览器同域 cookie 唯一）；forceRefreshSeedState 覆写会清掉本地文件中未包含在 seed 内的其它站点登录态（合并 seed 已含全部所需系统时无影响）；真实运行的多系统登录态行为建议下次真实调试运行确认。
+- 文档：configuration-task.md 阶段章节补"目标系统"与合并规则；更新记录 2026-09-22-configuration-task-stage-credential-seed.md。
+
+## [2026-09-22] FEATURE | 配置任务阶段一：运行级步骤参数覆盖 + 回写凭证开关 + 任务级系统凭证映射
+
+- 背景：发布后改凭证/超时需复制重发布、所有步骤默认 10s 超时要逐个改、单任务多系统无法配多凭证、运行无回写凭证开关。分析确认 Agent 执行器已有运行级覆盖解析链（runtimeOptions.stepTimeoutMs/stepThinkTimeMs 在步骤值之后作为默认值）与结束事件最终 storageState 上报（persistContextFinalState），统一凭证域已有回写服务（writeback_enabled 约束），故第一批全部走"参数通道"，Agent 端仅加 force 覆盖优先级。
+- 实现：①TaskRunCreateModel 新增 defaultStepTimeoutMs/defaultStepWaitMs/stepParamApplyMode(default|force)/writebackCredentialEnabled；task_run_service 写入 run_params 并按模式组装 runtimeOptions（default→stepTimeoutMs/stepThinkTimeMs 走既有默认值链；force→stepTimeoutOverride/stepThinkTimeOverride）；②web_run_finished 终态后 _writeback_credential_after_finish 消费事件 runtimeDebug.persistContextFinalState 调 CredentialWritebackService（约束保留：writeback_enabled/非 shared_read/本地缓存启用，失败仅日志不影响终态）；③新表 configuration_task_credential_mapping（task_id+system_key 唯一）+ credential_mapping_service 批量替换式保存 + GET/PUT credential-mappings 路由 + 前端 CredentialMappingDialog（任务行「凭证映射」入口）；④Agent web_test_service 两个解析函数 candidates 头部加 Override 键（force 模式优先于步骤值）。
+- 设计决策：运行参数定位为"运行级覆盖"不写回版本快照——调试（改凭证/超时）直接改参数运行，长期生效走复制发布；凭证映射独立于版本快照（环境配置不冻结），发布后可改；凭证放任务级映射表而非阶段表（阶段经 system_key 引用，映射表即多系统清单），版本快照零解冻。
+- 验证：回归 16 用例通过；ruff 通过；build:prod 通过；建表 SQL 已在 dev 库执行；浏览器端到端：凭证映射弹窗添加 erp→保存→落库查询一致；运行弹窗四参数区渲染截图确认。运行参数真实执行链路建议下次真实调试运行时确认（避免 dev 环境真实外站执行）。
+- 文档：configuration-task.md 运行/凭证映射操作说明；更新记录 2026-09-22-configuration-task-run-params-credential-mapping.md。
+- 待办（阶段二/三已确认方向）：多凭证合并初始化（seed 按域合并+同域校验+强制使用 seed 开关，注意 Agent 本地状态文件存在时跳过 seed 的交互）；失败策略（终止/继续，用户自担依赖）；登录失效检测提示+重试凭证刷新（重试用关联凭证，更新靠回写）。
+- 附：单数据模型方向分析（用户提议"任务一条数据+执行记录快照"替代多版本）——run 已冻结输入/阶段快照但步骤实时读版本，改造需运行详情/重试/审批/迁移多处联动且丢失发布基线语义，暂按"版本=发布基线+运行级覆盖"演进，列为远期评估。
+
+## [2026-09-21] FEATURE | 配置任务版本生命周期：复制为新草稿/草稿删除/废弃/撤销发布
+
+- 背景：门店配置版本发布后不可编辑（update_version 锁定 DRAFT），且缺少配套出口——新建版本是空草稿（无复制能力）、无删除/废弃接口，改一个步骤超时时间都要重建整个版本。经分析确认"快照不可变"本身合理（运行消息下发时步骤实时读版本 steps_json，编辑/物理删除已发布版本会破坏运行可追溯），缺口在变更路径而非锁定本身。
+- 实现：新增 version_lifecycle_service.py（ConfigurationTaskVersionLifecycleService）四个方法——copy_version（任意状态可复制；steps/inputBindings/variables/浏览器参数原样保留 stepId，阶段切分经 replace_version_stages 一并复制）、delete_version（仅 DRAFT 且校验 task_run 无引用，阶段定义一并清理）、deprecate_version（PUBLISHED→DEPRECATED）、unpublish_version（PUBLISHED→DRAFT，仅限 count_runs_by_version==0，否则拒绝并提示废弃+复制）；废弃/撤销后任务 current_version_id/no 指针自动回退到最近一个未废弃的已发布版本（无则置空）。DAO 补 delete_version/count_runs_by_version；controller 四路由（copy/delete 用 task:edit 权限，deprecate/unpublish 用 task:publish）。运行入口 create_run 现有 status==PUBLISHED 校验天然拦截 DEPRECATED，无需改动。前端 VersionDrawer 操作列按状态渲染四按钮，非草稿版本编辑弹窗显示只读提示条并禁用保存。
+- 踩坑记录：①复制阶段时 replace_version_stages 构造的 dict 必须显式携带 version_id（Stage DO 无默认值，漏掉 INSERT 报 1048 cannot be null）；②新增 DAO 方法漏写 @classmethod 导致类调用时 cls 吃掉 db 参数（TypeError missing 'version_id'，签名 inspect 正确但行为错误，靠字节码+装饰器检查定位）；③dev 环境曾并存两个 vite/后端进程与 HMR 污染导致页面空白假象，验证一律在干净进程+全新标签页进行。
+- 验证：配置任务回归测试 20 用例通过；ruff 通过；build:prod 通过；浏览器端到端（admin/.env.dev，全程只操作复制出的版本）：复制 v6→v9（阶段一并复制）、v9 发布→撤销发布→回草稿（无运行校验通过）、再发布→废弃→已废弃且任务当前版本指针自动回退 v8、复制 v6→v10→删除成功、已发布版本编辑弹窗只读提示条+保存禁用（截图确认）。
+- 文档：web/public/docs/configuration-task.md 新增"版本生命周期"章节（状态×操作矩阵）；更新记录 2026-09-21-configuration-task-version-lifecycle.md。
+
+## [2026-09-21] UX | 步骤区域交互优化：单滚动条/移除冗余按钮/表格单行省略
+
+- 诉求：版本编辑弹窗可视化步骤区域出现两个竖向滚动条；"编辑当前步骤"按钮与行内"编辑"重复；表格长文本换行撑高行。
+- 修复：①WebStepEditor 新增 tableMaxHeight 属性（默认 560 保持用例管理行为），门店配置传空值取消表格内部限高；②VersionDrawer 弹窗 body 作为唯一竖向滚动容器（.version-editor-dialog .el-dialog__body max-height calc(100vh-180px) + overflow-y auto，footer 固定在外，内容滚动可达），删除此前加在 tabs content 上的 480px 限高（双滚动条来源）；注意 append-to-body 后 scoped :deep 无法命中 teleport DOM，需用全局 class 选择器；③工具栏移除"编辑当前步骤"按钮（两侧统一，行内"编辑"已覆盖）；④步骤名称/定位信息/输入参数列加 show-overflow-tooltip，step-cell-text 改单行省略（完整内容走编辑态/详情/tooltip）。
+- 验证：浏览器实测弹窗 body 唯一竖向滚动（clientH 529/scrollH 890 可滚动）、表格无内滚、滚动到底输入绑定/版本变量完整可见、省略号与悬浮 tooltip 正常（截图确认）、"编辑当前步骤"两侧均移除；用例管理侧表格保持 560 内滚不变。dev server 在 HMR 大量变更后模块图易污染（页面空白假象），重启实例 + 全新标签页即恢复，与业务代码无关。
+
+## [2026-09-21] FIX | 版本管理抽屉内弹窗全窗口覆盖：编辑版本与阶段切分补 append-to-body
+
+- 背景：版本编辑与阶段切分弹窗嵌在版本管理 el-drawer 的 DOM 内，抽屉滑入动画的 transform 祖先使弹窗 fixed 遮罩的包含块变成抽屉，弹窗与遮罩被限制在抽屉区域而非覆盖整个视口。
+- 修复：VersionDrawer 的编辑版本 el-dialog 与 StageEditor 根 el-dialog 补 append-to-body，挂载到 body；抽屉内的步骤详情弹窗（WebStepDetailDialog）此前已是 append-to-body。任务页直开的定时/录制转模板/运行配置弹窗在页面级无 transform 祖先，不需要调整。
+- 验证：浏览器实测两弹窗均全窗口居中覆盖（遮罩盖住侧边菜单与背景抽屉），getBoundingClientRect 宽度约 71% 视口、closest('body') 为真；截图确认视觉。
+- 文档：updates/2026-09-21-configuration-task-web-step-editor.md 补充"弹窗层级修复"一节。
+
+## [2026-09-21] FIX | WebStepEditor 统一后两处回归修复：domain 层 describeLocator 缺失与 index.vue 三函数引用丢失
+
+- 背景：统一改造后在浏览器实测发现两类问题。①门店配置 v6 版本步骤表格从第 3 步（首个带定位器的步骤）起渲染中断（行内列缺失、后续空行），多次开关详情弹窗出现叠加，控制台报 Uncaught TypeError: Cannot read properties of null (reading 'emitsOptions')；②Web 测试管理页面整页空白（404 或 app-main 空）。
+- 根因一：stepDomain.js 的 describeStepTarget 调用 describeLocator，但该函数既未定义也未导入——与 locatorDomain 头注释记录的历史拆分遗留同款；manager 本地副本掩盖了问题，新组件是 domain 版首个真实使用方，渲染含定位快照的行时 ReferenceError 中断 Vue patch（emitsOptions 报错即渲染中断的表象）。
+- 根因二：index.vue 的 useRecordingManager 依赖注入引用 getActionLabel/describeStepTarget/summarizeStepParams，三者原本来自 caseEditorManager 解构，精简 manager 返回值后漏改该处，setup 抛 ReferenceError 导致页面渲染空。二分验证（stash 后正常、pop 后必现，均在干净 dev server + 全新标签页操作）确认因果，此前一度误判为 HMR/keep-alive 污染。
+- 修复：locatorDomain.js 新增并导出 describeLocator（移植 manager 原实现，含 nth 后缀与 role/text/testId/id/name/css 分支），stepDomain.js 导入使用；stepDomain.js 补导出 getActionLabel；index.vue 从 domain 层导入三函数；同时删除 stepDomain 中引用未定义符号的死导出 addStep/insertStep/copyStep/removeStep/moveStep。
+- 排查副产品：本机曾并存两个 vite dev server（80 与 127.0.0.1:81），HMR 大量文件变更后模块图被污染，页面渲染忽好忽坏；已统一为单实例，回归验证均在干净实例 + 全新标签页进行。
+- 验证（浏览器实测，admin 登录 .env.dev）：门店配置 v6 步骤表格 9 行完整渲染、证据列按需显隐、详情弹窗 #3/#5/#8 连续开关标题正确、指纹字段按 showFingerprint=false 正确隐藏、页面错误收集器零报错；用例管理新增弹窗 3 步新增/前插/名称列内联编辑生效、详情 #3 到 #1 切换正确、指纹字段正确显示、高级 JSON 为提交格式；npm run build:prod 通过。
+- 文档：web/public/docs/updates/2026-09-21-configuration-task-web-step-editor.md 已补充"回归修复（同日补充）"一节。
+
+## [2026-09-21] REFACTOR | 步骤编辑公共组件 WebStepEditor：统一用例管理与门店配置版本编辑
+
+- 背景：对比 7bb5f7d0（门店配置前端产生之前）确认，用例编辑的步骤表格支持内联编辑/前插/选中行高亮/JSON 双向同步，而门店配置 VersionStepTable 是独立简化实现（无内联编辑、纯文本 JSON 框、样式不一致），详情弹窗"指纹"永远为空（录制 buildSnapshot 不生成 fingerprint，用例指纹是保存时服务端 _build_fingerprint 计算入库，版本 steps_json 链路从不计算）。另发现共享层存在死代码：webcase/components/CaseEditor.vue（495 行，模板引用未定义变量、零引用）与 composables/useCaseEditor.js（594 行，零引用），真正逻辑在视图级 useCaseEditorManager（1360 行，内含与 domain 层重复的 normalizeStep 等副本）；stepDomain.js 中 addStep/insertStep/copyStep 等 5 个导出引用未定义变量属死代码。
+- 方案：抽取公共组件 WebStepEditor + WebStepDetailDialog + useStepEditorTable 组合函数（components/hrm/case/webcase/），表格/详情逻辑平移自 useCaseEditorManager 并改为调用既有 domain 层；JSON 序列化经 serializeSteps prop 注入（用例侧保持 prepareStepForSubmit 提交格式预览，配置侧默认原始序列化）；保存前由父组件调用 expose 的 flush() 应用 JSON Tab 编辑；详情弹窗合并截图证据与上传文件区块（取自 StepDetail.vue），指纹字段经 showFingerprint prop 显隐——用例显示（服务端落库），配置隐藏（不落指纹，避免误导）。
+- 改造：CaseEditorDialogs 变薄壳（用例表单 + WebStepEditor），useCaseEditorManager 删除 41 个已平移函数及相关状态/watch，return 缩减为表单/校验/提交链路（1360→787 行）；VersionDrawer 用 WebStepEditor 替换 VersionStepTable + 纯文本 JSON 框，保存前 flush；删除死代码 CaseEditor.vue、useCaseEditor.js、StepDetail.vue、空 index.js、VersionStepTable.vue。
+- 文档：web/public/docs/configuration-task.md 版本编辑章节、web_case_use.md 4.2/4.3 章节更新；更新记录 2026-09-21-configuration-task-web-step-editor.md。
+- 验证：npm run build:prod 通过；被删文件全仓库零引用（grep 校验）；manager node --check 语法通过。建议回归：用例管理编辑/JSON 应用/保存，门店配置版本草稿编辑/阶段切分/发布，录制转模板。
+- 风险：dialogs.scss 与 web-step-editor.scss 存在同名类需同步维护（录制/运行对话框仍引用前者）；版本步骤指纹按设计不显示，若未来需要元素库匹配需在版本保存链路补服务端计算。
+
+## [2026-09-21] FIX | 配置任务版本步骤详情弹窗空指针修复 + 阶段证据预校验
+
+- 背景：门店配置版本发布报"阶段 门店信息 要求证据，但未配置 capture_screenshot 步骤"，且版本编辑弹窗新增步骤后点详情无响应（控制台 Uncaught TypeError: Cannot read properties of null (reading elementText)）。分析确认两点：阶段证据模式是对步骤的约束声明而非阶段结束自动截图（设计见 wiki/features/configuration-task-evidence-collection-plan.md 两层模型）；详情弹窗崩溃点在共享组件 StepDetail.vue 定位卡片直接绑定 targetSnapshot.elementText。
+- 根因：VersionStepTable.addStep 手工构造步骤把 targetSnapshot 写死 null，默认动作 fill 属于需要定位动作（stepNeedsTarget=true），弹窗渲染时 null.elementText 抛错中断；正常链路 normalizeStep 会自动补默认快照，但配置任务侧 addStep/openEditor 均未走标准化。崩溃与证据配置连锁——弹窗打不开导致无法把新增步骤改成截图动作，发布校验必然失败。
+- 前端：VersionStepTable.vue addStep 改用 webcase 域层 createDefaultStep 工厂（需要定位的动作自动带默认 targetSnapshot），openDetail 打开前对需要定位但缺快照的步骤补 createDefaultTargetSnapshot 兜底历史数据；StepDetail.vue 定位卡片 v-if 增加 targetSnapshot 存在性守卫，并新增"当前步骤缺少定位快照数据"空态；StageEditor.vue 保存时按后端 stage_service.validate_version_stages_for_publish 同口径预校验证据模式（REQUIRED 无截图步骤 / BEFORE_AFTER 缺 before 或 after / NONE 声明必需类型 / requiredTypes 在阶段截图步骤中缺失），错误提前到保存阶段时提示。
+- 文档：web/public/docs/configuration-task.md 新增"证据模式与截图步骤的关系"章节（含各模式校验规则表和发布报错处理路径）；更新记录 2026-09-21-configuration-task-step-detail-fix.md。
+- 验证：npm run build:prod 通过；修复路径核验——新增步骤自动弹详情可正常渲染，历史缺快照步骤点详情不再抛 elementText 空指针。后端无改动，发布校验语义不变。
+
 
 ## [2026-09-16] PERF | 工单编辑弹窗打开慢治理：新增轻量编辑详情接口，切断编辑链路与相似检索/消息/快照的耦合
 

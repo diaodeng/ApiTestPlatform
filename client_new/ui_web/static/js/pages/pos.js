@@ -1,11 +1,44 @@
 /** POS 页面：扫描、启停、维护操作、设置/切换/进程/账号/本地环境弹窗。 */
 const { Bus, call, el, $, clear, toast, openModal, textInput, checkbox, select, listEditor, copyText, icon } = window.QTR;
 
+// ===== 模块级会话（跨页面切换保持，对齐 logs / mitm 页的 session 模式）=====
+// 切到其他页面再切回来时：扫描结果、环境信息、状态文本、运行日志、过滤关键字
+// 均保留；pos_status / pos_log 为常驻订阅，切页期间的启动日志照常累计不丢失。
+const session = {
+  statusText: "",   // 状态区文本
+  logLines: [],     // 运行日志（数组累计，渲染时拼接，上限 MAX_LOG_LINES）
+  filter: "",       // 过滤关键字
+  statusExpanded: true, // 状态区收起/展开
+  envState: new Map(),  // path -> {loading, text} 环境信息
+};
+const MAX_LOG_LINES = 2000;
+
+// 当前页面实例的渲染引用（页面挂载期间有效，供常驻订阅刷新显示）。
+// 必须放模块级：常驻订阅只绑一次，回调永远走这里，页面销毁时置空跳过渲染。
+const renderRef = { renderLog: null, setStatus: null };
+
+// pos_status / pos_log 常驻订阅：整个应用生命周期只绑一次（幂等）。
+// 切页期间日志与状态照常写入 session，仅当页面挂载时刷新 DOM。
+let persistentBound = false;
+function bindPersistentBusOnce() {
+  if (persistentBound) return;
+  persistentBound = true;
+  Bus.on("pos_status", (p) => {
+    session.statusText = p.message || "";
+    renderRef.setStatus?.(session.statusText);
+  });
+  Bus.on("pos_log", (p) => {
+    session.logLines.push(p.message || "");
+    if (session.logLines.length > MAX_LOG_LINES) session.logLines.splice(0, session.logLines.length - MAX_LOG_LINES);
+    renderRef.renderLog?.();
+  });
+}
+
 export function posPage(mount) {
   let boot = null; // get_bootstrap 结果
   let posConfig = null;
   // 每个 POS 路径的环境信息状态：path -> {loading, text}，供左侧列动态展示
-  const envState = new Map();
+  const envState = session.envState;
   // 当前渲染的行内环境信息节点：path -> DOM 节点（重渲染时重建）
   const envNodes = new Map();
 
@@ -34,24 +67,30 @@ export function posPage(mount) {
   for (const [key, label] of START_FIELDS) startChecks[key] = checkbox(label, false, saveStartConfig);
 
   // ===== 列表 =====
-  const filterInput = textInput("", { placeholder: "过滤关键字", style: "width:200px" });
+  const filterInput = textInput(session.filter, { placeholder: "过滤关键字", style: "width:200px" });
   const resultTbody = el("tbody", {});
   const resultTable = el(
     "table", { class: "data pos-table" },
     el("thead", {}, el("tr", {},
       el("th", { text: "POS 路径" }), el("th", { text: "操作" }))));
 
-  const statusLabel = el("span", { class: "muted selectable", text: "就绪" });
+  const statusLabel = el("span", { class: "muted selectable", text: session.statusText || "就绪" });
   const logPre = el("pre", { class: "panel", style: "height:120px;flex:none" });
   // 状态区收起/展开：收起时隐藏状态文本与日志面板，按钮本身保持可见
-  const btnToggleStatus = el("button", { class: "btn small", text: "收起" });
-  let statusExpanded = true;
+  const btnToggleStatus = el("button", { class: "btn small", text: session.statusExpanded ? "收起" : "展开" });
+  let statusExpanded = session.statusExpanded;
   btnToggleStatus.addEventListener("click", () => {
     statusExpanded = !statusExpanded;
+    session.statusExpanded = statusExpanded;
     statusLabel.style.display = statusExpanded ? "" : "none";
     logPre.style.display = statusExpanded ? "" : "none";
     btnToggleStatus.textContent = statusExpanded ? "收起" : "展开";
   });
+  // 恢复跨页保留的收起状态
+  if (!statusExpanded) {
+    statusLabel.style.display = "none";
+    logPre.style.display = "none";
+  }
 
   mount.append(
     el("div", { class: "toolbar" },
@@ -143,7 +182,9 @@ export function posPage(mount) {
   }
 
   async function startPos(path) {
-    statusLabel.textContent = "启动中: " + path;
+    const msg = "启动中: " + path;
+    session.statusText = msg;
+    statusLabel.textContent = msg;
     const res = await call("pos", "start_pos", path);
     if (!res.ok && res.message) toast(res.message, res.message.includes("取消") ? "info" : "error");
   }
@@ -251,6 +292,11 @@ export function posPage(mount) {
       ["pos_uat_host", "POS UAT"],
       ["pos_pro_host", "POS 生产"],
     ];
+    // 目录类配置：mock 包根目录 + 支付驱动备份目录（对齐旧版 Flet 设置项）
+    const dirFields = [
+      ["payment_mock_driver_path", "支付MOCK驱动包目录", "填包含 drive 和 mock 两个子目录的包根目录；留空用应用根目录 payment_mock"],
+      ["payment_driver_back_up_path", "支付驱动备份目录", "备份支付驱动的存放目录，留空用 POS 目录下 drive_backup"],
+    ];
     const envFiles = listEditor(c.env_files || []);
     const cacheFiles = listEditor(c.cache_files || []);
     const envGroupText = el("textarea", { class: "input", rows: 6, style: "width:100%;font-family:var(--mono-font)" });
@@ -266,6 +312,12 @@ export function posPage(mount) {
         el("div", { class: "form-row" },
           el("label", { text: label }),
           textInput(c[key] || "", { style: "flex:1", onchange: (e) => (c[key] = e.target.value.trim()) }))
+      ),
+      el("div", { class: "form-section", text: "驱动目录" }),
+      dirFields.map(([key, label, tip]) =>
+        el("div", { class: "form-row", title: tip },
+          el("label", { text: label }),
+          textInput(c[key] || "", { style: "flex:1", placeholder: tip, onchange: (e) => (c[key] = e.target.value.trim()) }))
       ),
       el("div", { class: "form-section", text: "环境文件清单（启动前按此备份/切换）" }),
       el("div", { style: "display:flex;flex-direction:column;gap:4px" }, envFiles.node),
@@ -513,7 +565,14 @@ export function posPage(mount) {
   }
 
   function appendLog(text) {
-    logPre.textContent += (logPre.textContent ? "\n" : "") + text;
+    session.logLines.push(text);
+    if (session.logLines.length > MAX_LOG_LINES) session.logLines.splice(0, session.logLines.length - MAX_LOG_LINES);
+    renderLog();
+  }
+
+  /** 按 session.logLines 渲染日志面板（页面挂载/新日志时调用） */
+  function renderLog() {
+    logPre.textContent = session.logLines.join("\n");
     logPre.scrollTop = logPre.scrollHeight;
   }
 
@@ -525,7 +584,11 @@ export function posPage(mount) {
 
   async function reload() {
     const res = await call("pos", "get_bootstrap");
-    if (!res.ok) return;
+    // 引导数据读取失败（如配置文件损坏）：提示真实原因，页面保留可用骨架
+    if (!res.ok) {
+      toast(res.message || "POS 页面初始化失败", "error");
+      return;
+    }
     boot = res;
     posConfig = res.pos_config;
     for (const [key] of START_FIELDS) startChecks[key].querySelector("input").checked = !!res.start_config[key];
@@ -542,7 +605,7 @@ export function posPage(mount) {
   btnStopPos.addEventListener("click", async () => {
     const res = await call("pos", "stop_pos");
     // 停止后不再保留之前 POS 的运行信息，状态区直接以停止结果为准
-    if (res && res.message) statusLabel.textContent = res.message;
+    if (res && res.message) { session.statusText = res.message; statusLabel.textContent = res.message; }
   });
   btnStopOffline.addEventListener("click", () => call("pos", "stop_offline"));
   btnSyncCfg.addEventListener("click", async () => {
@@ -550,20 +613,29 @@ export function posPage(mount) {
     if (!url) return toast("请先在设置中填写配置拉取地址", "error");
     await call("pos", "sync_remote_config", url);
   });
-  filterInput.addEventListener("input", debounce(renderRows, 200));
+  filterInput.addEventListener("input", () => { session.filter = filterInput.value; debounce(renderRows, 200)(); });
 
   // ===== 事件订阅 =====
-  const on = (event, handler) => { Bus.on(event, handler); return () => Bus.off(event, handler); };
-  const unsubs = [
-    on("pos_status", (p) => (statusLabel.textContent = p.message || "")),
-    on("pos_log", (p) => appendLog(p.message || "")),
-  ];
+  // pos_status / pos_log 为模块级常驻订阅：切页期间启动/停止日志与状态照常累计，
+  // 回到页面时完整恢复；渲染引用经模块级 renderRef，页面不在时只更新数据。
+  // 页面级无需退订的事件：无（当前两个事件均常驻）。
+  const unsubs = [];
+
+  // 绑定 POS 常驻订阅（幂等；首次进入页面时执行）
+  bindPersistentBusOnce();
+
+  // 注册渲染引用并恢复显示历史日志（切页保留）
+  renderRef.renderLog = renderLog;
+  renderRef.setStatus = (text) => { statusLabel.textContent = text; };
+  renderLog();
 
   reload();
 
   const observer = new MutationObserver(() => {
     if (!document.body.contains(mount)) {
       unsubs.forEach((u) => u());
+      renderRef.renderLog = null;
+      renderRef.setStatus = null;
       observer.disconnect();
     }
   });

@@ -6,9 +6,9 @@ source_type: code
 canonical: true
 knowledge_state: stable
 confidence: high
-freshness: 2026-09-13
+freshness: 2026-09-20
 created: 2026-09-13
-updated: 2026-09-13
+updated: 2026-09-20
 related_files:
   - client_new/main.py
   - client_new/ui_web/app.py
@@ -45,6 +45,7 @@ graph TD
 - **主题**：原 ThemeTokens/QPalette 改为 CSS 变量（light/dark 两套 + `prefers-color-scheme` auto），模式持久化沿用 `ThemeConfig`。
 - **日志页双路 tail**：`api/log_api.py` 按 source（`local`=本地日志 / `app`=程序日志）各自维护独立的 `LogTailThread`，`start_tail(source, path)` / `stop_tail(source)` 互不影响（停止/重启其中一路不影响另一路）；`log_tail` 事件携带 `source` 字段供前端分发到对应页签；`shutdown()` 供 Bridge 在应用退出时停止全部 tail。
 - **Agent 服务器配置契约**：`AgentConfigModel.server_list` 结构为 `{服务地址: 服务名称}`、`current_server` 存服务地址（与旧 PySide6 版一致，pywebview 迁移时曾写反已修正）；Agent 页用下拉框按名称选择服务，连接中禁用切换；连接地址只在应用日志中记录，状态提示与界面均不展示。
+- **Agent AI 配置契约**：`AgentConfigModel` 的 `ticket_ai_workspace_root`（AI 工作区根目录，留空用 `storage/ticket_ai_analysis`）、`ticket_ai_local_repo_path`（AI 本地仓库，留空回退任务映射）、`ticket_ai_codex_cli_path`（Codex CLI 可执行文件，留空按 PATH 查找）三字段由 Agent 页「AI 设置」弹窗维护（2026-09-20 补齐，迁移时曾遗漏前两项）；保存走 `agent.save_config` 全量链路，消费点在 `services/ticket_ai_analysis_service.py`（工作区解析与 Codex CLI 解析；`ticket_ai_local_repo_path` 当前 client_new 后端暂无直接消费点，仅保留配置入口）。
 - **文件对话框契约**：`app.choose_file` 的 `file_types` 过滤串（形如 `"日志文件 (*.log;*.txt)|所有文件 (*.*)"`）解析为 pywebview 要求的**字符串列表** `"描述 (*.a;*.b)"`；pywebview 内部用正则对每项做字符串匹配，传元组会抛 `TypeError`。目录选择使用 `webview.FileDialog.FOLDER`（`FOLDER_DIALOG` 常量已弃用）。
 - **前端错误上报**：`index.html` 全局 error/unhandledrejection 钩子经 `app.log_js_error` 写后端日志，便于排查页面问题。
 

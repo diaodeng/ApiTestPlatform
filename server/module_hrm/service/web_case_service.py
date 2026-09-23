@@ -1440,14 +1440,27 @@ class WebCaseService:
         return runtime_overrides
 
     @classmethod
-    def _resolve_credential_runtime_overrides(cls, query_db: Session, binding_id: str | None) -> dict[str, Any]:
-        """将统一凭证的 Playwright storageState 转为本次只读浏览器初始化状态。"""
+    def _resolve_credential_runtime_overrides(
+        cls,
+        query_db: Session,
+        binding_id: str | None,
+        allow_empty_state: bool = False,
+    ) -> dict[str, Any]:
+        """将统一凭证的 Playwright storageState 转为本次只读浏览器初始化状态。
+
+        :param allow_empty_state: 允许凭证内容为空（storageState 未配置）。
+            手动登录场景下浏览器状态可能尚未产生（首次录制/首次执行登录），
+            此时凭证只作为"目标站点 + 回写目标"的引用，登录完成后的最终状态
+            由 Agent 上报并显式保存/回写，因此允许空状态继续执行。
+        """
         binding_id_value = str(binding_id or "").strip()
         if not binding_id_value:
             return {}
         from modules.credential.service.credential_resolve_service import CredentialResolveService
 
-        storage_state = CredentialResolveService.resolve_playwright_storage_state(query_db, binding_id_value)
+        storage_state = CredentialResolveService.resolve_playwright_storage_state(
+            query_db, binding_id_value, allow_empty_state=allow_empty_state
+        )
         return {"persistContextSeedState": cls._normalize_storage_state_payload(storage_state)}
 
     @classmethod
@@ -2989,6 +3002,59 @@ class WebCaseService:
         return CrudResponseModel(is_success=True, message="已从录制状态创建统一凭证和 Web 绑定", result={"credentialId": credential_result.result["credentialId"], "bindingId": binding_result.result["bindingId"]})
 
     @classmethod
+    def writeback_recording_state_services(cls, query_db: Session, recording_id: int, binding_id: str, current_user) -> CrudResponseModel:
+        """把录制会话上报的最终浏览器状态回写到指定的 Web 凭证绑定。
+
+        与 create_credential_from_recording_services（保存为新凭证）互补：
+        录制时选择了已有凭证且希望登录态覆盖写回时使用。expectedRevision 由
+        服务端读取当前值，避免前端持有过期版本号导致必然冲突。
+        回写前置校验（绑定存在、business/projection 类型、writeback_enabled、
+        storageState 结构合法、乐观锁冲突）统一由 CredentialWritebackService 负责。
+        """
+        session = WebCaseDao.get_recording_session(query_db, recording_id)
+        if not session:
+            return CrudResponseModel(is_success=False, message="录制记录不存在")
+        summary = cls._loads(session.result_summary_json, {})
+        options = cls._loads(session.options_json, {}).get("runtimeOptions", {})
+        final_state = cls._extract_persist_final_state(summary, options)
+        if not final_state:
+            return CrudResponseModel(is_success=False, message="录制未上报最终浏览器状态，请先完成录制并停止浏览器")
+
+        from modules.credential.dao.credential_dao import CredentialDao
+        from modules.credential.entity.vo.credential_vo import CredentialWritebackModel
+        from modules.credential.service.credential_writeback_service import CredentialWritebackService
+
+        try:
+            binding_int = int(binding_id)
+        except (TypeError, ValueError):
+            return CrudResponseModel(is_success=False, message="凭证绑定 ID 不合法")
+        binding = CredentialDao.get_binding(query_db, binding_int)
+        if not binding:
+            return CrudResponseModel(is_success=False, message="凭证绑定不存在")
+        credential = CredentialDao.get_credential(query_db, binding.credential_id)
+        if not credential:
+            return CrudResponseModel(is_success=False, message="绑定的凭证不存在")
+
+        writeback = CredentialWritebackService.writeback_storage_state(
+            query_db,
+            binding_int,
+            CredentialWritebackModel(
+                expectedRevision=credential.revision,
+                storageState=final_state,
+                # 回写的是录制会话上报的状态，与客户端本地缓存无关，直接放行该项检查。
+                localCacheEnabled=True,
+            ),
+            current_user.user.user_name if current_user.user else "system",
+        )
+        if not writeback.get("success"):
+            return CrudResponseModel(is_success=False, message=writeback.get("message") or "回写失败")
+        return CrudResponseModel(
+            is_success=True,
+            message=f"浏览器状态已回写到凭证「{credential.credential_name}」",
+            result={"bindingId": str(binding_int), "revision": writeback.get("revision")},
+        )
+
+    @classmethod
     async def start_recording_services(
         cls,
         query_db: Session,
@@ -3004,8 +3070,13 @@ class WebCaseService:
 
         credential_binding_id = str(request_model.credential_binding_id or "").strip()
         state_source_type = "credential" if credential_binding_id else "none"
+        manual_login_enabled = bool(request_model.manual_login_enabled)
         try:
-            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            # 手动登录时凭证内容允许为空：首次录制/执行还没有浏览器状态，
+            # 凭证仅作为目标站点与回写目标的引用，登录后的最终状态由 Agent 上报。
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(
+                query_db, credential_binding_id, allow_empty_state=manual_login_enabled
+            )
             browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))
@@ -3016,7 +3087,6 @@ class WebCaseService:
             runtime_options_payload["runtimeOverrides"] = merged_runtime_overrides
         runtime_options_payload["stateSourceType"] = state_source_type
         runtime_options_payload["credentialBindingId"] = credential_binding_id
-        manual_login_enabled = bool(request_model.manual_login_enabled)
         manual_login_wait_sec = cls._normalize_manual_login_wait_sec(request_model.manual_login_wait_sec)
         manual_login_require_confirm = bool(request_model.manual_login_require_confirm)
         persist_context_enabled = bool(credential_binding_id and request_model.persist_context_enabled)
@@ -3552,7 +3622,10 @@ class WebCaseService:
         state_source_type = "credential" if str(request_model.credential_binding_id or "").strip() else "none"
         credential_binding_id = str(request_model.credential_binding_id or "").strip()
         try:
-            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(query_db, credential_binding_id)
+            # 手动登录时凭证内容允许为空：首次执行还没有浏览器状态，登录后由 Agent 上报。
+            profile_runtime_overrides = cls._resolve_credential_runtime_overrides(
+                query_db, credential_binding_id, allow_empty_state=bool(request_model.manual_login_enabled)
+            )
             browser_session_runtime_overrides = {}
         except ValueError as exc:
             return CrudResponseModel(is_success=False, message=str(exc))

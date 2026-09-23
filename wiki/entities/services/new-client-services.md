@@ -10,7 +10,8 @@ freshness: 2026-05-20
 created: 2026-05-20
 updated: 2026-05-20
 related_files:
-  - client_new/services/agent_client_service.py
+  - client_new/services/agent_resource_storage.py
+  - client_new/services/agent_file_service.py
   - client_new/services/desktop_test_service.py
   - client_new/services/playwright_browser_runtime.py
   - client_new/services/pos_service.py
@@ -59,6 +60,13 @@ graph TD
   MAC 解析与配置读取在 `_ConnectPrepareThread` 后台完成，主线程回调中再发起连接；
   连接准备阶段（尚无连接线程）点停止直接取消启动。
 - 页面在 `starting` 状态即置灰连接按钮（`set_running(True)`），失败落回 `stopped` 后恢复可点。
+
+## Agent 本地资源服务（2026-09-19）
+
+`agent_resource_storage.py` 维护受控资源 manifest 与稳定应用数据目录，`agent_file_service.py` 负责 `requestType=7` 的发布、分片、提交、stat 和过期清理。资源协议与普通 Agent 业务请求/响应/事件隔离，文件内容不进入普通 response；详细字段和边界见[配置任务文件协议](../../contracts/configuration-task-file-protocol.md)。
+
+
+门店配置任务文件协议：[配置任务文件协议](../../contracts/configuration-task-file-protocol.md)。文件生命周期和 Agent/SFTP 存储流程见：[门店配置文件存储流程](../../flows/configuration-task-file-storage.md)。
 
 ## 参见
 

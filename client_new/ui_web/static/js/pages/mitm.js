@@ -1,16 +1,60 @@
 /** mitmproxy 页面：启停控制、流量表、详情、断点放行、证书、设置。 */
 const { Bus, call, el, $, clear, toast, openModal, textInput, checkbox, select, copyText, kvTable } = window.QTR;
 
+const FLOW_LIMIT_DEFAULT = 500;
+
+// ===== 模块级会话（跨页面切换保持，对齐 logs 页的 session 模式）=====
+// 切到其他页面再切回来时流量列表与选中项不丢失；切换期间后端推送的流量
+// 仍会累计到 flows（订阅常驻），不会出现"切页期间数据看不到"的空窗。
+const session = {
+  flows: [],          // FlowItem 字典数组
+  selectedId: null,   // 选中流量的 id（存 id 而非对象引用，避免 flow_update 后引用过期）
+  filter: "",         // URL 过滤关键字
+  showDetail: true,   // 详情区显隐
+  config: null,       // 最近一次 get_state / save_config 返回的配置
+};
+
+// 当前页面实例的渲染函数引用（页面挂载期间有效，供常驻订阅刷新显示）。
+// 必须放模块级：常驻订阅只绑一次，回调永远走这里，页面销毁时置空跳过渲染。
+const renderRef = { renderFlows: null, renderDetail: null };
+
+// 流量事件的常驻订阅：整个应用生命周期只绑一次（幂等）。
+// 数据始终写入 session.flows（切页期间不丢流量），仅当页面处于挂载状态时刷新视图。
+let persistentBound = false;
+function bindPersistentBusOnce() {
+  if (persistentBound) return;
+  persistentBound = true;
+  Bus.on("mitm_flow_new", (p) => {
+    session.flows.push(p.item);
+    const limit = session.config?.flow_record_limit || FLOW_LIMIT_DEFAULT;
+    if (session.flows.length > limit) session.flows.splice(0, session.flows.length - limit);
+    renderRef.renderFlows?.();
+  });
+  Bus.on("mitm_flow_update", (p) => {
+    const idx = session.flows.findIndex((f) => f.id === p.item.id);
+    if (idx >= 0) session.flows[idx] = p.item;
+    else session.flows.push(p.item);
+    renderRef.renderFlows?.();
+    // 只有被更新的正是当前选中的那条流量时才重绘详情区（如选中请求刚拿到响应）；
+    // 其他流量的更新只刷列表，避免抓包活跃时详情区被无关流量反复重建、滚动位置归零。
+    if (p.item.id === session.selectedId) renderRef.renderDetail?.();
+  });
+}
+
 export function mitmPage(mount) {
-  let config = null;
+  let config = session.config;
   let state = "stopped";
   let webUrl = "";
-  let flows = []; // FlowItem 字典数组
-  let selectedFlow = null;
-  let showDetail = true;
+  let flows = session.flows; // 页面内操作别名，实际数据保存在 session.flows
+  let showDetail = session.showDetail;
   // 后端解析出的默认证书路径（证书路径留空时的实际生效值，用于设置弹窗占位提示）
   let defaultCertPath = "";
-  const FLOW_LIMIT_DEFAULT = 500;
+
+  /** 选中项实时按 session.selectedId 从 flows 解析，避免与 flow_update 产生双份状态 */
+  function getSelected() {
+    if (session.selectedId == null) return null;
+    return session.flows.find((f) => f.id === session.selectedId) || null;
+  }
 
   // ===== 工具栏 =====
   const stateChip = el("span", { class: "chip", text: "已停止" });
@@ -26,7 +70,7 @@ export function mitmPage(mount) {
   const btnOpenWeb = el("button", { class: "btn", text: "打开 Web 页面" });
   const btnSettings = el("button", { class: "btn", text: "设置" });
   const btnInstallCert = el("button", { class: "btn small", text: "安装当前用户证书" });
-  const filterInput = textInput("", { placeholder: "按 URL 过滤", style: "width:200px" });
+  const filterInput = textInput(session.filter, { placeholder: "按 URL 过滤", style: "width:200px" });
 
   // ===== 流量表 =====
   const flowTbody = el("tbody", {});
@@ -74,7 +118,12 @@ export function mitmPage(mount) {
     el("div", { class: "split-v flex-fill" }, flowTableWrap, detailCol)
   );
   flowTable.append(flowTbody);
-  setupColumnResize();
+
+  // 恢复跨页面保持的详情显隐状态（session.showDetail）
+  if (!showDetail) {
+    btnToggleDetail.textContent = "显示详情";
+    detailCol.style.display = "none";
+  }
 
   // ===== 列宽拖拽调整 =====
   // Path 列保持弹性占满剩余空间，不设手柄；拖动其他列手柄时 Path 自动反向伸缩
@@ -82,6 +131,9 @@ export function mitmPage(mount) {
   const COL_WIDTH_STORE_KEY = "qtr-mitm-flow-col-widths";
   // Path 列在 colgroup / 表头中占下标 3，可拖拽列按下标 3 之后整体 +1 映射
   const colIndex = (i) => (i >= 3 ? i + 1 : i);
+  // 必须在上方常量声明之后调用：setupColumnResize 内部引用 RESIZE_COL_KEYS / colIndex，
+  // 若提前调用会因 const 暂时性死区抛 ReferenceError，导致页面后续初始化全部中断
+  setupColumnResize();
 
   /** 读取用户手动调整过的列宽（localStorage 持久化，跨会话保留） */
   function loadColWidths() {
@@ -135,6 +187,10 @@ export function mitmPage(mount) {
   }
 
   let detailTab = "overview";
+  // 上一次详情渲染的 key（"流量id|tab"）：仅当同一条流量在同一 tab 下重绘时才恢复滚动位置；
+  // 切换选中行或切换 tab 时内容全新，应回到顶部。必须声明在首次 renderDetail() 调用之前
+  // （let 无提升，放在调用后会因暂时性死区抛 ReferenceError 导致整页初始化中断）。
+  let lastDetailKey = null;
   const TAB_LABELS = { overview: "总览", request: "请求", response: "响应" };
   ["overview", "request", "response"].forEach((tab) => {
     const btn = el("button", { class: "btn small", text: TAB_LABELS[tab] });
@@ -146,6 +202,18 @@ export function mitmPage(mount) {
     for (const b of detailTabs.children) b.classList.toggle("primary", b.dataset.tab === tab);
   }
 
+  // 注册渲染引用并绑定流量常驻订阅：常驻回调只经模块级 renderRef 刷新当前页面 DOM。
+  // 必须放在 detailTab 声明之后：renderDetail 内部经 markTab 读取 detailTab（let 无提升，
+  // 提前执行会因暂时性死区抛 ReferenceError 导致整页初始化中断）。
+  // 空值统一显示 "-"（与旧版 InfoCard 行为一致）；须在初始渲染前声明（renderDetail 会用到）
+  const dash = (v) => (v === null || v === undefined || v === "" ? "-" : v);
+  renderRef.renderFlows = renderFlows;
+  renderRef.renderDetail = renderDetail;
+  bindPersistentBusOnce();
+  // 恢复显示历史流量与选中项详情（切页保留数据）
+  renderFlows();
+  renderDetail();
+
   // ===== 渲染 =====
   function renderFlows() {
     const keyword = filterInput.value.trim().toLowerCase();
@@ -153,8 +221,8 @@ export function mitmPage(mount) {
     const list = flows.filter((f) => !keyword || (f.url || "").toLowerCase().includes(keyword) || (f.host || "").toLowerCase().includes(keyword));
     for (const f of list) {
       const tr = el("tr", {
-        class: selectedFlow && selectedFlow.id === f.id ? "selected" : "",
-        onclick: () => { selectedFlow = f; renderFlows(); renderDetail(); },
+        class: getSelected() && getSelected().id === f.id ? "selected" : "",
+        onclick: () => { session.selectedId = f.id; renderFlows(); renderDetail(); },
       },
         el("td", { class: "mono small", text: f.time || "" }),
         el("td", { text: f.method || "" }),
@@ -181,9 +249,6 @@ export function mitmPage(mount) {
     if (ms == null) return "-";
     return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
   }
-
-  /** 空值统一显示 "-"（与旧版 InfoCard 行为一致） */
-  const dash = (v) => (v === null || v === undefined || v === "" ? "-" : v);
 
   /** 键值信息卡内容表 */
   function infoRows(rows) {
@@ -283,17 +348,26 @@ export function mitmPage(mount) {
     if (body.startsWith("<binary content:")) body = "";
     if (!body) body = (f.request_form || "").trim();
     if (body) lines.push(`--data-raw ${quote(body)}`);
-    return "`\n".join([lines[0], ...lines.slice(1).map((l) => "  " + l)]);
+    // PowerShell 反引号续行：行尾以「 空格+反引号」结尾，下一行缩进两格（对齐旧版 _build_curl）
+    return [lines[0], ...lines.slice(1).map((l) => "  " + l)].join(" `\n");
   }
 
-  btnCopyRequest.addEventListener("click", () => selectedFlow && copyText(buildRequestText(selectedFlow)));
-  btnCopyResponse.addEventListener("click", () => selectedFlow && copyText(buildResponseText(selectedFlow)));
-  btnCopyCurl.addEventListener("click", () => selectedFlow && copyText(buildCurl(selectedFlow)));
+  btnCopyRequest.addEventListener("click", () => { const f = getSelected(); if (f) copyText(buildRequestText(f)); });
+  btnCopyResponse.addEventListener("click", () => { const f = getSelected(); if (f) copyText(buildResponseText(f)); });
+  btnCopyCurl.addEventListener("click", () => { const f = getSelected(); if (f) copyText(buildCurl(f)); });
 
   function renderDetail() {
+    // 重绘前记录滚动位置：detailBody 是 overflow:auto 的滚动容器，子元素整体重建后
+    // scrollTop 必然归零；选中流量自身收到更新（如响应到达）需要重绘时，把位置还原，
+    // 用户正在阅读的内容不跳变。换选中行 / 换 tab 时不继承旧位置。
+    const f0 = getSelected();
+    const detailKey = f0 ? `${f0.id}|${detailTab}` : null;
+    const prevScrollTop = detailKey !== null && detailKey === lastDetailKey ? detailBody.scrollTop : 0;
+    lastDetailKey = detailKey;
     btnPass.style.display = "none";
     btnEditPass.style.display = "none";
-    const hasFlow = !!selectedFlow;
+    const f = getSelected();
+    const hasFlow = !!f;
     btnCopyRequest.disabled = !hasFlow;
     btnCopyResponse.disabled = !hasFlow;
     btnCopyCurl.disabled = !hasFlow;
@@ -303,7 +377,6 @@ export function mitmPage(mount) {
       detailBody.append(el("div", { class: "hint", text: "点击左侧流量查看详情" }));
       return;
     }
-    const f = selectedFlow;
 
     if (detailTab === "overview") {
       detailBody.append(
@@ -363,6 +436,7 @@ export function mitmPage(mount) {
       btnPass.style.display = "";
       btnEditPass.style.display = "";
     }
+    detailBody.scrollTop = prevScrollTop;
   }
 
   function applyState() {
@@ -387,9 +461,10 @@ export function mitmPage(mount) {
   // ===== 事件 =====
   btnStart.addEventListener("click", () => call("mitm", "start"));
   btnStop.addEventListener("click", () => call("mitm", "stop"));
-  btnClear.addEventListener("click", () => { flows = []; selectedFlow = null; renderFlows(); renderDetail(); });
+  btnClear.addEventListener("click", () => { flows.length = 0; session.selectedId = null; renderFlows(); renderDetail(); });
   btnToggleDetail.addEventListener("click", () => {
     showDetail = !showDetail;
+    session.showDetail = showDetail;
     btnToggleDetail.textContent = showDetail ? "隐藏详情" : "显示详情";
     // 整列隐藏，列表列 flex 自动占满剩余空间
     detailCol.style.display = showDetail ? "" : "none";
@@ -403,14 +478,15 @@ export function mitmPage(mount) {
     const res = await call("mitm", "install_cert");
     toast(res.message || (res.ok ? "安装成功" : "安装失败"), res.ok ? "success" : "error");
   });
-  filterInput.addEventListener("input", renderFlows);
+  filterInput.addEventListener("input", () => { session.filter = filterInput.value; renderFlows(); });
 
   btnPass.addEventListener("click", () => passFlow({}));
-  btnEditPass.addEventListener("click", () => openBreakpointEditor(selectedFlow));
+  btnEditPass.addEventListener("click", () => { const f = getSelected(); if (f) openBreakpointEditor(f); });
   async function passFlow(payload) {
-    if (!selectedFlow) return;
+    const f = getSelected();
+    if (!f) return;
     const stage = detailTab === "response" ? "response" : "request";
-    const res = await call("mitm", "continue_flow", selectedFlow.id, stage, payload);
+    const res = await call("mitm", "continue_flow", f.id, stage, payload);
     if (!res.ok) toast(res.message, "error");
     else toast("断点已放行", "success", 1500);
   }
@@ -637,6 +713,7 @@ export function mitmPage(mount) {
           const res = await call("mitm", "save_config", config);
           if (res.ok) {
             config = res.config;
+            session.config = res.config; // 同步到会话，供常驻订阅读取流量记录上限等
             applyState();
             toast("配置已保存" + (res.state === "stopped" ? "" : "（运行中的关键变更将自动重启生效）"), "success");
           } else toast(res.message, "error");
@@ -648,26 +725,15 @@ export function mitmPage(mount) {
   });
 
   // ===== 事件订阅 =====
+  // 流量事件为模块级常驻订阅（见文件头部 bindPersistentBusOnce），
+  // 切到其他页面时继续累计，不会出现切页期间流量看不到的空窗。
   const on = (event, handler) => { Bus.on(event, handler); return () => Bus.off(event, handler); };
+  // 页面级订阅（state/证书状态只影响当前 DOM，离开页面即退订）
   const unsubs = [
     on("mitm_state", (p) => {
       state = p.state;
       webUrl = p.web_url || "";
       applyState();
-    }),
-    on("mitm_flow_new", (p) => {
-      flows.push(p.item);
-      const limit = config?.flow_record_limit || FLOW_LIMIT_DEFAULT;
-      if (flows.length > limit) flows.splice(0, flows.length - limit);
-      renderFlows();
-    }),
-    on("mitm_flow_update", (p) => {
-      const idx = flows.findIndex((f) => f.id === p.item.id);
-      if (idx >= 0) flows[idx] = p.item;
-      else flows.push(p.item);
-      if (selectedFlow && selectedFlow.id === p.item.id) selectedFlow = p.item;
-      renderFlows();
-      renderDetail();
     }),
     on("mitm_cert_status", (p) => {
       certLabel.textContent = "证书状态：" + (p.message || (p.trusted ? "已信任" : "未信任"));
@@ -678,6 +744,7 @@ export function mitmPage(mount) {
   (async function init() {
     const res = await call("mitm", "get_state");
     if (!res.ok) return;
+    session.config = res.config;
     config = res.config;
     state = res.state;
     webUrl = res.web_url || "";
@@ -688,7 +755,10 @@ export function mitmPage(mount) {
 
   const observer = new MutationObserver(() => {
     if (!document.body.contains(mount)) {
+      // 只退订页面级事件与断开 DOM 引用；流量常驻订阅保持，数据留在 session
       unsubs.forEach((u) => u());
+      renderRef.renderFlows = null;
+      renderRef.renderDetail = null;
       observer.disconnect();
     }
   });

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
+import shutil
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
@@ -19,6 +23,8 @@ except Exception:  # pragma: no cover - optional dependency
     Frame = FrameLocator = Locator = Page = Any
 
 from services.playwright_browser_runtime import start_playwright_browser
+from services.agent_resource_storage import ManifestValidationError, ResourceManifestStore
+from services.evidence_file_service import AgentEvidenceFileService
 
 EventSender = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -381,6 +387,8 @@ RECORDER_SCRIPT = """
   const windowCaptureStartedAt = Date.now();
   let windowResizeTimer = null;
   let lastWindowStepSignature = "";
+  // 文件上传占位步骤的 fileKey 自增序号，仅用于生成编辑阶段可修改的占位键
+  let fileKeySeq = 0;
   const isNearScreenBounds = (value, target, tolerance = 20) => {
     if (!value || !target) return false;
     return Math.abs(value - target) <= tolerance || value > target;
@@ -508,6 +516,28 @@ RECORDER_SCRIPT = """
     const tag = (target.tagName || "").toLowerCase();
     if (tag === "input") {
       const type = (target.getAttribute("type") || "text").toLowerCase();
+      // 文件选择：浏览器原生弹窗由人工操作完成（录制不拦截），这里只记录占位步骤。
+      // 定位器直接指向 input 本身，回放时由 upload_file 动作 set_input_files 赋值，
+      // 编辑阶段只需绑定文件资源或 Agent 受控目录文件，无需修改定位元素。
+      // 注意 file input 的 value 是 fakepath 假路径，绝不能落进 fill 分支。
+      if (type === "file") {
+        const pickedFiles = Array.from(target.files || []);
+        const pickedNames = pickedFiles.map((item) => (item && item.name) || "").filter(Boolean);
+        fileKeySeq += 1;
+        emit({
+          stepName: pickedNames.length ? `上传文件 ${pickedNames.join("、")}` : "上传文件",
+          actionType: "upload_file",
+          params: {
+            fileKey: `file_${fileKeySeq}`,
+            multiple: pickedFiles.length > 1,
+            fileNames: pickedNames
+          },
+          assertions: [],
+          rawEvent: { eventType: "change", tagName: target.tagName, fileCount: pickedFiles.length },
+          targetSnapshot: buildSnapshot(target, { preferStableLocators: true })
+        });
+        return;
+      }
       if (["checkbox", "radio"].includes(type)) {
         emit({
           stepName: target.checked ? "勾选元素" : "取消勾选元素",
@@ -1090,8 +1120,19 @@ def _resolve_seed_storage_state(runtime_options: dict[str, Any]) -> dict[str, An
 def _seed_context_state_file_if_needed(
     runtime_options: dict[str, Any], state_path: Path | None
 ) -> None:
-    """当本地状态文件不存在时，使用运行时下发的seed state初始化。"""
-    if state_path is None or state_path.exists():
+    """使用运行时下发的seed state初始化本地状态文件。
+
+    默认仅当本地状态文件不存在时写入（保留历史登录态）；运行参数
+    forceRefreshSeedState=true 时强制覆写，用于多凭证合并登录态或
+    凭证更新后让新 seed 生效。
+    """
+    if state_path is None:
+        return
+    force_refresh = bool(
+        runtime_options.get("forceRefreshSeedState")
+        or runtime_options.get("force_refresh_seed_state")
+    )
+    if not force_refresh and state_path.exists():
         return
     seed_state = _resolve_seed_storage_state(runtime_options)
     if not seed_state:
@@ -1166,6 +1207,9 @@ def _step_timeout_ms(
         case_data.get("runtimeSettings") or case_data.get("runtime_settings")
     )
     candidates = [
+        # 运行级强制覆盖（stepParamApplyMode=force 时由服务端下发），优先于步骤自身配置。
+        runtime_options.get("stepTimeoutOverride"),
+        runtime_options.get("step_timeout_override"),
         step.get("timeoutMs"),
         step.get("timeout_ms"),
         params.get("timeoutMs"),
@@ -1194,6 +1238,9 @@ def _step_think_time_ms(
         case_data.get("runtimeSettings") or case_data.get("runtime_settings")
     )
     candidates = [
+        # 运行级强制覆盖（stepParamApplyMode=force 时由服务端下发），优先于步骤自身配置。
+        runtime_options.get("stepThinkTimeOverride"),
+        runtime_options.get("step_think_time_override"),
         step.get("thinkTimeMs"),
         step.get("think_time_ms"),
         params.get("thinkTimeMs"),
@@ -1591,11 +1638,344 @@ _ACTIONS_WITHOUT_TARGET = {
     "set_window_size",
     "sleep",
     "wait",
+    "capture_screenshot",
     "assert_page_contains",
     "assert_page_not_contains",
     "assert_title_contains",
     "assert_url_contains",
 }
+
+# 单个 upload_file 步骤允许的最大文件数；即使运行参数被篡改也不能无限制注入文件。
+_MAX_UPLOAD_FILE_COUNT = 20
+
+
+class UploadFileResolutionError(RuntimeError):
+    """上传资源解析失败，错误消息只包含资源标识，不包含本地绝对路径。"""
+
+
+UploadResourceResolver = Callable[[list[str], dict[str, Any]], Any]
+
+
+def _normalize_upload_resource_ids(value: Any) -> list[str]:
+    """将 resourceId/resourceIds 归一化为去重后的非空字符串列表。"""
+    values = value if isinstance(value, list) else [value]
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if isinstance(item, dict):
+            item = item.get("resourceId") or item.get("resource_id") or item.get("id")
+        normalized = str(item or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _upload_resource_binding_ids(binding: Any) -> list[str]:
+    """从 fileKey 绑定值中提取资源 ID，不把绑定值中的路径当作资源路径。"""
+    if isinstance(binding, dict):
+        for key in ("resourceIds", "resource_ids", "resourceId", "resource_id", "id"):
+            ids = _normalize_upload_resource_ids(binding.get(key))
+            if ids:
+                return ids
+        return []
+    return _normalize_upload_resource_ids(binding)
+
+
+def _is_path_inside_root(candidate: Path, root: Path) -> bool:
+    """判断解析后的路径是否仍位于 Agent 受控资源根目录内。"""
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_manifest_path(raw_path: Any, root: Path | None, resource_id: str) -> Path:
+    """校验 manifest 返回的文件路径，拒绝越级、目录和不存在文件。"""
+    path_text = str(raw_path or "").strip()
+    if not path_text or root is None:
+        raise UploadFileResolutionError(f"资源 {resource_id} 未绑定受控文件")
+    candidate = Path(path_text)
+    try:
+        resolved_root = root.expanduser().resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise UploadFileResolutionError(f"资源 {resource_id} 不可用") from None
+    if not _is_path_inside_root(resolved_candidate, resolved_root):
+        raise UploadFileResolutionError(f"资源 {resource_id} 不在受控目录内")
+    if not resolved_candidate.is_file():
+        raise UploadFileResolutionError(f"资源 {resource_id} 不是可上传文件")
+    return resolved_candidate
+
+
+def _manifest_items(manifest: Any) -> dict[str, Any]:
+    """读取 manifest 的常见映射/列表形态，避免业务层依赖具体资源模型。"""
+    if isinstance(manifest, dict):
+        entries = manifest.get("resources") or manifest.get("entries")
+        if isinstance(entries, (dict, list)):
+            manifest = entries
+        else:
+            return manifest
+    if isinstance(manifest, list):
+        result: dict[str, Any] = {}
+        for item in manifest:
+            if not isinstance(item, dict):
+                continue
+            resource_id = str(
+                item.get("resourceId") or item.get("resource_id") or item.get("id") or ""
+            ).strip()
+            if resource_id:
+                result[resource_id] = item
+        return result
+    return {}
+
+
+def _resolve_manifest_upload_paths(
+    resource_ids: list[str], runtime_options: dict[str, Any]
+) -> list[Path]:
+    """通过 Agent manifest 解析资源路径（旧签名，仅供兼容调用）。"""
+    return [path for path, _name in _resolve_manifest_upload_entries(resource_ids, runtime_options)]
+
+
+def _resolve_manifest_upload_entries(
+    resource_ids: list[str], runtime_options: dict[str, Any]
+) -> list[tuple[Path, str | None]]:
+    """通过 Agent manifest 解析资源，返回 (受控路径, 原始文件名) 列表。
+
+    原始文件名取自 manifest 的 original_file_name；注入 manifest 形态尽力读取
+    originalFileName/original_file_name 字段，读不到时返回 None（回退受控路径名）。
+    只接受受控根目录下的路径。
+    """
+    manifest = runtime_options.get("resourceManifest")
+    if manifest is None:
+        manifest = runtime_options.get("resource_manifest")
+    application_root_value = (
+        runtime_options.get("resourceApplicationRoot")
+        or runtime_options.get("resource_application_root")
+    )
+    if manifest is None:
+        # Web 执行和文件协议运行在同一 Agent 进程时，默认读取同一份受控 manifest。
+        # 运行参数只传资源 ID，不需要携带本地绝对路径或 Python callable。
+        try:
+            store = ResourceManifestStore(
+                str(application_root_value).strip()
+                if str(application_root_value or "").strip()
+                else None
+            )
+            result: list[tuple[Path, str | None]] = []
+            for resource_id in resource_ids:
+                item = store.get(resource_id)
+                if item is None:
+                    raise UploadFileResolutionError(f"资源 {resource_id} 未绑定或不存在")
+                try:
+                    path = store.resolve_locator(item.locator, item.resource_id)
+                except ManifestValidationError:
+                    raise UploadFileResolutionError(f"资源 {resource_id} 不可用") from None
+                if not path.is_file() or path.is_symlink():
+                    raise UploadFileResolutionError(f"资源 {resource_id} 不是可上传文件")
+                result.append((path, str(item.original_file_name or "").strip() or None))
+            return result
+        except UploadFileResolutionError:
+            raise
+        except (ManifestValidationError, OSError, RuntimeError):
+            raise UploadFileResolutionError("Agent 资源 manifest 不可用") from None
+
+    items = _manifest_items(manifest)
+    root_value = (
+        runtime_options.get("resourceRoot")
+        or runtime_options.get("resource_root")
+        or runtime_options.get("resourceStorageRoot")
+        or runtime_options.get("resource_storage_root")
+        or runtime_options.get("resourceTempRoot")
+        or runtime_options.get("resource_temp_root")
+    )
+    root = Path(str(root_value).strip()) if str(root_value or "").strip() else None
+    result = []
+    for resource_id in resource_ids:
+        entry = items.get(resource_id)
+        if entry is None:
+            raise UploadFileResolutionError(f"资源 {resource_id} 未绑定或不存在")
+        original_name: str | None = None
+        if isinstance(entry, str):
+            raw_path = entry
+        else:
+            entry_dict = _as_dict(entry)
+            raw_path = (
+                entry_dict.get("relativePath")
+                or entry_dict.get("relative_path")
+                or entry_dict.get("path")
+                or entry_dict.get("localPath")
+                or entry_dict.get("local_path")
+                or entry_dict.get("locator")
+            )
+            original_name = str(
+                entry_dict.get("originalFileName") or entry_dict.get("original_file_name") or ""
+            ).strip() or None
+        result.append((_validate_manifest_path(raw_path, root, resource_id), original_name))
+    return result
+
+
+def _suppress_replay_file_chooser(page: Any) -> None:
+    """回放会话抑制原生文件选择弹窗。
+
+    录制步骤序列是"点击上传按钮 + upload_file"：回放执行 click 时若未开启
+    CDP file chooser 拦截，Agent 机器会弹出原生文件选择框并挂起等待人工操作。
+    Playwright 只在页面存在 filechooser 监听者时才开启拦截，因此注册空监听
+    即可吞掉弹窗，input 保持为空，随后由 upload_file 步骤通过 set_input_files
+    直接赋值并触发 change。录制会话不得调用本函数（录制依赖原生弹窗人工选文件）。
+    """
+    if page is None:
+        return
+    try:
+        if getattr(page, "_qtr_file_chooser_suppressed", False):
+            return
+        page.on("filechooser", lambda _chooser: None)
+        page._qtr_file_chooser_suppressed = True
+    except Exception as error:
+        # 防御：个别 Page 实现可能禁止动态属性或重复注册；抑制失败只影响弹窗体验，
+        # 不应中断整次回放，记录日志便于排查。
+        logger.warning(f"注册回放 filechooser 抑制监听失败: {error}")
+
+
+def _resolve_agent_upload_path(agent_path: str, runtime_options: dict[str, Any]) -> list[Path]:
+    """解析"Agent 目录文件"模式的受控相对路径，只接受受控上传根目录内的文件。
+
+    agentPath 由编辑器/服务端下发，是受控相对路径而非任意绝对路径：拒绝反斜杠、
+    盘符、绝对路径与 .. 逃逸。文件存在性由使用方保证（用户自行放置文件到
+    Agent 受控上传目录），回放前仍做存在性与文件类型校验。
+    """
+    if not agent_path or "\\" in agent_path or ":" in agent_path or agent_path.startswith("/"):
+        raise UploadFileResolutionError("Agent 目录文件路径不合法")
+    normalized = agent_path.strip("/")
+    parts = [part for part in normalized.split("/") if part and part != "."]
+    if not parts or any(part == ".." for part in parts):
+        raise UploadFileResolutionError("Agent 目录文件路径不合法")
+    root_override = str(
+        runtime_options.get("agentUploadRoot") or runtime_options.get("agent_upload_root") or ""
+    ).strip()
+    try:
+        if root_override:
+            upload_root = Path(root_override).expanduser().resolve(strict=True)
+        else:
+            # 与资源 manifest 同一应用根，上传目录与其平级，独立于资源生命周期管理
+            store = ResourceManifestStore(None)
+            upload_root = store.storage_root / "upload_inputs"
+            upload_root.mkdir(parents=True, exist_ok=True)
+            upload_root = upload_root.resolve(strict=True)
+        candidate = upload_root.joinpath(*parts).resolve(strict=True)
+    except (OSError, RuntimeError, ManifestValidationError):
+        raise UploadFileResolutionError("Agent 目录文件不存在或不可用") from None
+    if candidate == upload_root or not _is_path_inside_root(candidate, upload_root):
+        raise UploadFileResolutionError("Agent 目录文件路径越界")
+    if candidate.is_symlink() or not candidate.is_file():
+        raise UploadFileResolutionError("Agent 目录文件不是可上传文件")
+    return [candidate]
+
+
+def _stage_upload_files(entries: list[tuple[Path, str | None]]) -> list[Path]:
+    """把受控文件准备成保留原始文件名的上传路径，返回实际注入页面的路径列表。
+
+    manifest 落盘文件名是 resourceId，而被测页面常按文件名/扩展名处理上传文件，
+    因此 manifest 模式需要以 original_file_name 命名临时副本后再注入；文件名已经
+    一致（agentPath 模式、拿不到原始名）时直接使用原路径。副本放在系统临时目录，
+    注入完成且浏览器读取后由调用方清理（清理失败不阻断步骤，交由系统回收）。
+    """
+    staged: list[Path] = []
+    staging_dir: Path | None = None
+    for path, upload_name in entries:
+        name = str(upload_name or "").strip()
+        if not name or name == path.name or "/" in name or "\\" in name or name in {".", ".."}:
+            staged.append(path)
+            continue
+        if staging_dir is None:
+            staging_dir = Path(tempfile.mkdtemp(prefix="qtr-upload-"))
+        target = staging_dir / name
+        shutil.copyfile(path, target)
+        staged.append(target)
+    return staged
+
+
+def _cleanup_upload_staging(staged: list[Path]) -> None:
+    """清理 upload_file 注入使用的临时副本目录；文件被占用时忽略，交由系统回收。"""
+    for directory in {path.parent for path in staged if "qtr-upload-" in path.parent.name}:
+        try:
+            shutil.rmtree(directory, ignore_errors=True)
+        except OSError as error:
+            logger.warning(f"清理上传临时副本失败（忽略）: {directory}, error={error}")
+
+
+def _resolve_upload_file_paths(
+    params: dict[str, Any],
+    runtime_options: dict[str, Any],
+    resolver: UploadResourceResolver | None = None,
+) -> list[Path]:
+    """解析 upload_file 的受控文件路径（旧签名，仅供兼容调用）。"""
+    return [path for path, _name in _resolve_upload_file_entries(params, runtime_options, resolver)]
+
+
+def _resolve_upload_file_entries(
+    params: dict[str, Any],
+    runtime_options: dict[str, Any],
+    resolver: UploadResourceResolver | None = None,
+) -> list[tuple[Path, str | None]]:
+    """解析 upload_file 的受控文件与建议上传文件名，绝不读取 params.filePath。
+
+    返回 (受控路径, 原始文件名) 列表。来源优先级（显式选择优先）：
+    1. 步骤参数 resourceIds（编辑器"资源绑定"模式）；
+    2. 步骤参数 agentPath（编辑器"Agent 目录文件"模式，天然真实文件名）；
+    3. 输入绑定 fileKey -> resourceIds（仅当步骤未显式选择来源时兜底，
+       对应"暂不指定"模式只填资源键的老用法）。
+    """
+    nested_runtime = _as_dict(params.get("runtimeOptions") or params.get("runtime_options"))
+    effective_runtime = {**nested_runtime, **_as_dict(runtime_options)}
+    resource_ids = _normalize_upload_resource_ids(
+        params.get("resourceIds") or params.get("resource_ids")
+    )
+    if not resource_ids:
+        # 显式"Agent 目录文件"来源优先于输入绑定
+        agent_path = str(params.get("agentPath") or params.get("agent_path") or "").strip()
+        if agent_path:
+            # agentPath 的末段就是真实文件名，无需改名
+            return [(path, path.name) for path in _resolve_agent_upload_path(agent_path, effective_runtime)]
+    if not resource_ids:
+        # 兜底：仅配置资源键（fileKey）时走运行时输入绑定
+        file_key = str(params.get("fileKey") or params.get("file_key") or "").strip()
+        bindings = effective_runtime.get("resourceBindings") or effective_runtime.get("resource_bindings")
+        if not isinstance(bindings, dict):
+            bindings = params.get("resourceBindings") or params.get("resource_bindings")
+        resource_ids = _upload_resource_binding_ids(bindings.get(file_key)) if file_key and isinstance(bindings, dict) else []
+    if not resource_ids:
+        identifier = str(params.get("fileKey") or params.get("file_key") or "").strip() or "resourceIds"
+        raise UploadFileResolutionError(f"文件资源 {identifier} 未绑定")
+    if len(resource_ids) > _MAX_UPLOAD_FILE_COUNT:
+        raise UploadFileResolutionError(f"文件资源 {params.get('fileKey') or resource_ids[0]} 数量超过限制")
+
+    active_resolver = resolver
+    if active_resolver is None:
+        candidate_resolver = effective_runtime.get("resourceResolver") or effective_runtime.get("resource_resolver")
+        if callable(candidate_resolver):
+            active_resolver = candidate_resolver
+    if callable(active_resolver):
+        try:
+            resolved = active_resolver(resource_ids, effective_runtime)
+        except TypeError:
+            resolved = active_resolver(resource_ids)
+        raw_paths = resolved.values() if isinstance(resolved, dict) else resolved
+        raw_paths = raw_paths if isinstance(raw_paths, (list, tuple, set)) else [raw_paths]
+        paths = [Path(str(item).strip()) for item in raw_paths if str(item or "").strip()]
+        if len(paths) != len(resource_ids):
+            raise UploadFileResolutionError(f"文件资源 {params.get('fileKey') or resource_ids[0]} 不可用")
+        for path in paths:
+            try:
+                if not path.is_absolute() or not path.resolve(strict=True).is_file():
+                    raise OSError
+            except (OSError, RuntimeError):
+                raise UploadFileResolutionError(f"文件资源 {params.get('fileKey') or resource_ids[0]} 不可用") from None
+        return [(path.resolve(), None) for path in paths]
+    return _resolve_manifest_upload_entries(resource_ids, effective_runtime)
+
 
 _LOCATOR_TYPE_WEIGHT = {
     "test_id": 0,
@@ -2790,6 +3170,8 @@ class WebTestService:
                 default_scope=f"run-{run_id}",
             )
             prepared.page = await prepared.context.new_page()
+            # 回放会话抑制原生文件选择弹窗，文件由 upload_file 步骤自动注入
+            _suppress_replay_file_chooser(prepared.page)
             prepared.cookie_variables = runtime_variables
             prepared.cookie_rules = _normalize_cookie_rules(effective_runtime)
             prepared.runtime_debug = {
@@ -3075,6 +3457,8 @@ class WebTestService:
                     case_data=case_data,
                     cookie_rules=cookie_rules,
                     cookie_variables=cookie_variables,
+                    run_id=run_id,
+                    event_sender=event_sender,
                 )
                 step_result["stepIndex"] = step_display_index
                 if active_session.cancel_event.is_set():
@@ -3095,6 +3479,15 @@ class WebTestService:
                         finished_steps=finished_steps,
                     ),
                 )
+                # 失败步骤自动截图上报（配置任务产物链路；截图失败不影响主流程）。
+                if step_result["status"] == "failed" and page is not None:
+                    shot_b64 = await _capture_step_screenshot_b64(page)
+                    artifact_event = _build_step_screenshot_event(run_id, step_result, shot_b64)
+                    if artifact_event and event_sender is not None:
+                        try:
+                            await event_sender(artifact_event)
+                        except Exception as exc:
+                            logger.debug(f"发送步骤截图事件失败（忽略）: error={exc}")
                 if active_session.cancel_event.is_set():
                     overall_success = False
                     break
@@ -3462,6 +3855,8 @@ class WebTestService:
                 browser = reused_session.browser
                 context = reused_session.context
                 page = reused_session.page
+                # 复用的保留页面同样补挂抑制监听（函数内幂等），避免旧会话创建的页面缺监听
+                _suppress_replay_file_chooser(page)
                 context_state_path = reused_session.context_state_path
                 runtime_debug["reusedRetainedSession"] = True
                 runtime_debug["reuseRetainedSessionId"] = reuse_retained_session_id
@@ -3481,6 +3876,8 @@ class WebTestService:
                     default_scope=f"run-{run_id}" if run_id > 0 else "run-default",
                 )
                 page = await context.new_page()
+                # 回放会话抑制原生文件选择弹窗，文件由 upload_file 步骤自动注入
+                _suppress_replay_file_chooser(page)
                 runtime_debug["reusedRetainedSession"] = False
                 if reuse_retained_session_id:
                     runtime_debug["reuseRetainedSessionId"] = reuse_retained_session_id
@@ -3620,6 +4017,8 @@ class WebTestService:
                     case_data=case_data,
                     cookie_rules=cookie_rules,
                     cookie_variables=cookie_variables,
+                    run_id=run_id,
+                    event_sender=event_sender,
                 )
                 step_result["stepIndex"] = step_display_index
                 if active_session is not None and active_session.cancel_event.is_set():
@@ -3640,6 +4039,15 @@ class WebTestService:
                         finished_steps=finished_steps,
                     ),
                 )
+                # 失败步骤自动截图上报（配置任务产物链路；截图失败不影响主流程）。
+                if step_result["status"] == "failed" and page is not None:
+                    shot_b64 = await _capture_step_screenshot_b64(page)
+                    artifact_event = _build_step_screenshot_event(run_id, step_result, shot_b64)
+                    if artifact_event and event_sender is not None:
+                        try:
+                            await event_sender(artifact_event)
+                        except Exception as exc:
+                            logger.debug(f"发送步骤截图事件失败（忽略）: error={exc}")
                 if active_session is not None and active_session.cancel_event.is_set():
                     overall_success = False
                     break
@@ -3822,6 +4230,8 @@ class WebTestService:
         case_data: dict[str, Any],
         cookie_rules: list[dict[str, Any]],
         cookie_variables: dict[str, Any],
+        run_id: int = 0,
+        event_sender: EventSender | None = None,
     ) -> dict[str, Any]:
         action_type = (
             str(step.get("actionType") or step.get("action_type") or "").strip().lower()
@@ -3870,13 +4280,27 @@ class WebTestService:
                     timeout_ms,
                     runtime_options=runtime_options,
                 )
-            await asyncio.wait_for(
-                cls._execute_action(
+            action_result = await asyncio.wait_for(
+                cls._capture_explicit_screenshot(
+                    page,
+                    step,
+                    params,
+                    runtime_options=runtime_options,
+                    run_id=run_id,
+                    event_sender=event_sender,
+                    timeout_ms=timeout_ms,
+                )
+                if action_type == "capture_screenshot"
+                else cls._execute_action(
                     page,
                     locator,
                     action_type,
                     params,
                     timeout_ms=timeout_ms,
+                    runtime_options=runtime_options,
+                    step=step,
+                    run_id=run_id,
+                    event_sender=event_sender,
                 ),
                 timeout=timeout_ms / 1000.0,
             )
@@ -3888,7 +4312,7 @@ class WebTestService:
                 step_deadline=step_deadline,
                 runtime_options=runtime_options,
             )
-            return {
+            result_payload = {
                 "stepId": step_id,
                 "stepName": step_name,
                 "status": "passed",
@@ -3897,6 +4321,29 @@ class WebTestService:
                 "cookieApply": cookie_apply,
                 "pageUrl": page.url,
             }
+            if isinstance(action_result, dict) and action_type == "capture_screenshot":
+                # 步骤结果只保留索引元数据，不携带截图正文。
+                result_payload["evidence"] = {
+                    key: action_result.get(key)
+                    for key in (
+                        "resourceId",
+                        "objectKey",
+                        "fileName",
+                        "mimeType",
+                        "fileSize",
+                        "sha256",
+                        "taskRunId",
+                        "stageKey",
+                        "stepId",
+                        "evidenceType",
+                        "evidenceKey",
+                        "sequenceNo",
+                        "capturedAt",
+                        "maskApplied",
+                    )
+                    if action_result.get(key) is not None
+                }
+            return result_payload
         except Exception as exc:
             logger.exception(exc)
             error_message = str(exc or "").strip()
@@ -4527,6 +4974,114 @@ class WebTestService:
         return "auto"
 
     @classmethod
+    async def _capture_explicit_screenshot(
+        cls,
+        page: Any,
+        step: dict[str, Any],
+        params: dict[str, Any],
+        *,
+        runtime_options: dict[str, Any],
+        run_id: int,
+        event_sender: EventSender | None,
+        timeout_ms: int,
+    ) -> dict[str, Any]:
+        """执行显式截图步骤，正文只落 Agent 受控目录并上报元数据。"""
+        wait_ms = max(
+            _as_int(
+                params.get("waitMs")
+                or params.get("wait_ms")
+                or params.get("durationMs")
+                or params.get("duration_ms"),
+                0,
+            ),
+            0,
+        )
+        if wait_ms:
+            await asyncio.sleep(wait_ms / 1000.0)
+
+        full_page = _as_bool(params.get("fullPage") or params.get("full_page"), False)
+        raw_masks = params.get("maskSelectors") or params.get("mask_selectors") or []
+        if isinstance(raw_masks, str):
+            raw_masks = [raw_masks]
+        mask_selectors = [str(item or "").strip() for item in raw_masks if str(item or "").strip()]
+        mask_locators = [page.locator(selector) for selector in mask_selectors]
+        screenshot_kwargs: dict[str, Any] = {
+            "type": "png",
+            "full_page": full_page,
+            "timeout": timeout_ms,
+        }
+        if mask_locators:
+            screenshot_kwargs["mask"] = mask_locators
+        content = await page.screenshot(**screenshot_kwargs)
+
+        step_id = str(step.get("stepId") or step.get("step_id") or "").strip()
+        evidence_plan = _as_dict(runtime_options.get("evidencePlan"))
+        plan_steps = _as_dict(evidence_plan.get("steps"))
+        plan_item = _as_dict(plan_steps.get(step_id))
+        evidence_type = str(
+            params.get("evidenceType")
+            or params.get("evidence_type")
+            or plan_item.get("evidenceType")
+            or "checkpoint_screenshot"
+        ).strip()
+        evidence_key = str(
+            params.get("evidenceKey")
+            or params.get("evidence_key")
+            or plan_item.get("evidenceKey")
+            or step_id
+        ).strip()
+        stage_key = str(
+            plan_item.get("stageKey")
+            or step.get("stageKey")
+            or step.get("stage_key")
+            or ""
+        ).strip()
+        sequence_no = max(_as_int(params.get("sequenceNo") or plan_item.get("sequenceNo"), 1), 1)
+        captured_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        file_name = str(params.get("fileName") or f"{evidence_key or step_id or 'screenshot'}.png")
+        root_value = (
+            runtime_options.get("resourceApplicationRoot")
+            or runtime_options.get("resource_application_root")
+        )
+        store = ResourceManifestStore(str(root_value).strip()) if str(root_value or "").strip() else ResourceManifestStore()
+        metadata = AgentEvidenceFileService(store).save_screenshot(
+            content,
+            original_file_name=file_name,
+            mime_type="image/png",
+        )
+        metadata.update(
+            {
+                "taskRunId": str(run_id),
+                "stageKey": stage_key,
+                "stepId": step_id,
+                "evidenceType": evidence_type,
+                "evidenceKey": evidence_key,
+                "sequenceNo": sequence_no,
+                "capturedAt": captured_at,
+                "maskApplied": bool(mask_locators),
+                "pageUrl": str(page.url or ""),
+            }
+        )
+        if event_sender is not None and run_id > 0:
+            event_payload = {
+                "type": "web_run_artifact",
+                "web_case_run_id": run_id,
+                "taskRunId": str(run_id),
+                "payload": {
+                    "artifactType": "step_screenshot",
+                    "providerType": "agent_local",
+                    "agentCode": str(runtime_options.get("agentCode") or ""),
+                    **metadata,
+                },
+            }
+            try:
+                await event_sender(event_payload)
+            except Exception as exc:
+                # 事件上报失败只导致服务端暂时缺少索引，不覆盖截图步骤本身的成功结果。
+                logger.warning(f"显式截图元数据上报失败（不影响步骤）: run_id={run_id}, error={exc}")
+        return metadata
+
+    @classmethod
     async def _execute_action(
         cls,
         page: Any,
@@ -4535,6 +5090,10 @@ class WebTestService:
         params: dict[str, Any],
         *,
         timeout_ms: int,
+        runtime_options: dict[str, Any] | None = None,
+        step: dict[str, Any] | None = None,
+        run_id: int = 0,
+        event_sender: EventSender | None = None,
     ) -> None:
         if action_type == "goto":
             await page.goto(str(params.get("url") or ""), timeout=timeout_ms)
@@ -4552,6 +5111,22 @@ class WebTestService:
                 params=params,
                 maximize=False,
             )
+            return
+        if action_type == "upload_file":
+            upload_entries = _resolve_upload_file_entries(params, _as_dict(runtime_options))
+            upload_paths = [path for path, _name in upload_entries]
+            multiple = _as_bool(params.get("multiple"), False)
+            if not multiple and len(upload_paths) > 1:
+                raise UploadFileResolutionError("上传动作未启用多文件")
+            # 以原始文件名准备临时副本再注入，保证页面收到的 File.name 与登记资源一致
+            staged_paths = _stage_upload_files(upload_entries)
+            try:
+                await locator.set_input_files(
+                    [str(path) for path in staged_paths],
+                    timeout=timeout_ms,
+                )
+            finally:
+                _cleanup_upload_staging(staged_paths)
             return
         if action_type in {"sleep", "wait"}:
             wait_ms = _as_int(
@@ -4902,3 +5477,43 @@ class WebTestService:
                     f"{assertion_label}超时（{assertion_wait_ms}ms），最后错误：{last_message}"
                 ) from last_error
             raise AssertionError(f"{assertion_label}超时（{assertion_wait_ms}ms）")
+
+
+# ---------------------------------------------------------------------------
+# 配置任务产物上报：失败步骤自动截图并通过事件推送 Base64，
+# 服务端事件接入点转存为 Agent 本地资源 + task_artifact 引用。
+# ---------------------------------------------------------------------------
+
+
+async def _capture_step_screenshot_b64(page: Any) -> str:
+    """抓取当前页面截图并返回 Base64；失败返回空串，不影响主流程。"""
+    try:
+        raw = await page.screenshot(type="png", timeout=10000)
+        return base64.b64encode(raw).decode("ascii")
+    except Exception as exc:
+        logger.debug(f"步骤截图抓取失败（忽略）: error={exc}")
+        return ""
+
+
+def _build_step_screenshot_event(
+    run_id: int,
+    step_result: dict[str, Any],
+    screenshot_b64: str,
+) -> dict[str, Any]:
+    """构造步骤截图事件载荷；无截图时返回空 dict 表示跳过。"""
+    if not screenshot_b64:
+        return {}
+    return {
+        "type": "web_run_artifact",
+        "web_case_run_id": run_id,
+        "payload": {
+            "artifactType": "failure_screenshot"
+            if step_result.get("status") == "failed"
+            else "step_screenshot",
+            "stepIndex": step_result.get("stepIndex") or 0,
+            "stepName": step_result.get("stepName") or "",
+            "fileName": f"step-{step_result.get('stepIndex') or 0}.png",
+            "mimeType": "image/png",
+            "data": screenshot_b64,
+        },
+    }

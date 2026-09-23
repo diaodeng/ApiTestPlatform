@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from config.get_db import get_db
@@ -583,6 +584,33 @@ async def create_credential_from_recording(request: Request, recording_id: int, 
     return ResponseUtil.success(msg=result.message, data=result.result) if result.is_success else ResponseUtil.failure(msg=result.message)
 
 
+@webCaseController.post(
+    "/recording/{recording_id}/credential/{binding_id}/writeback",
+    dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:record"))],
+)
+@log_decorator(title="录制状态回写凭证", business_type=2)
+async def writeback_recording_state(
+    request: Request,
+    recording_id: int,
+    binding_id: str,
+    query_db: Session = Depends(get_db),
+    current_user: CurrentUserModel = Depends(LoginService.get_current_user),
+):
+    """将录制最终浏览器状态回写到指定 Web 凭证绑定（要求绑定开启允许回写）。"""
+    result = await run_in_threadpool(
+        WebCaseService.writeback_recording_state_services,
+        query_db,
+        recording_id,
+        binding_id,
+        current_user,
+    )
+    return (
+        ResponseUtil.success(msg=result.message, data=result.result)
+        if result.is_success
+        else ResponseUtil.failure(msg=result.message)
+    )
+
+
 @webCaseController.delete(
     "/recording/{recording_ids}",
     dependencies=[Depends(CheckUserInterfaceAuth("hrm:webCase:remove"))],
@@ -615,7 +643,11 @@ async def list_recording(
 ):
     try:
         result = WebCaseService.list_recording_services(query_db, page_query)
-        return ResponseUtil.success(model_content=result)
+        # is_page=true 返回分页对象；is_page=false 时 DAO 直接返回模型列表，
+        # 与 Agent 列表接口的分支模式一致，不能把 list 传给 model_content。
+        if page_query.is_page:
+            return ResponseUtil.success(model_content=result)
+        return ResponseUtil.success(data=result)
     except Exception as exc:
         logger.exception(exc)
         return ResponseUtil.error(msg=str(exc))

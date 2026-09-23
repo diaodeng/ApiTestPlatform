@@ -176,6 +176,7 @@ def load_model_modules() -> None:
     model_packages = {
         "module_admin.entity.do": BASE_DIR / "module_admin" / "entity" / "do",
         "module_hrm.entity.do": BASE_DIR / "module_hrm" / "entity" / "do",
+        "modules.configuration_task.entity.do": BASE_DIR / "modules" / "configuration_task" / "entity" / "do",
     }
     for package_name, package_dir in model_packages.items():
         for file_path in sorted(package_dir.glob("*_do.py")):

@@ -6,15 +6,18 @@ source_type: code
 knowledge_state: stable
 confidence: high
 created: 2026-08-12
-updated: 2026-08-29
+updated: 2026-09-22
 related_files:
   - server/modules/ticket/entity/vo/ticket_log_pull_vo.py
   - server/modules/ticket/controller/ticket_log_pull_controller.py
   - server/modules/ticket/service/log_pull/ticket_log_pull_service.py
   - server/modules/ticket/dao/ticket_log_pull_dao.py
   - server/modules/ticket/service/sync/ticket_sync_field_mapping_service.py
+  - server/modules/ticket/service/sync/ticket_sync_automation_service.py
+  - server/modules/ticket/service/sync/ticket_sync_payload_service.py
   - web/src/components/ticket/LogPullConfigFields.vue
   - web/src/views/ticket/logPullRecord/index.vue
+  - web/src/views/ticket/hooks/useLogViewer.js
   - web/src/views/ticket/syncAutomation/index.vue
   - web/src/views/ticket/syncAutomation/hooks/useLogPullExternalConfig.js
   - web/src/api/ticket/logPull.js
@@ -96,6 +99,25 @@ related_files:
 
 - `TicketLogPullRecord.environment` 字段存储 `group_key:item_key` 格式（如 `uat:uat2`）
 - 历史记录存储旧环境 key 仍可兼容，`_get_external_config_dict` 会遍历分组查找匹配
+
+## 门店编号空间治理（2026-09-22 新增，INC00002013662）
+
+门店存在两个编号空间，全链路禁止混用：
+
+| 字段 | 空间 | 用途 |
+|------|------|------|
+| `sourceStoreCode` | 商家业务编码（如 SAP 编号 215087） | 仅展示来源与 AI 一致性判断，**永不作为提交值** |
+| `storeId` / `org_no` | 日志平台门店机构号（333） | 提交给外部日志接口 |
+
+碰撞陷阱：同一数字可既是 A 店 `org_no` 又是 B 店 `sap_org_no`（惠康 vender5 下 org_no=333=WATERSIDE，而 org_no=550944 仓库的 sap_org_no=333），跨列匹配会把值改写到错误门店。
+
+规则与实现：
+
+- **自动链路**：`resolve_store_by_external_value` 按 `sap_org_no → org_no` 唯一候选映射；失败透传原值。`detect_fields` 输出 `storeMappingMatched` 标记（唯一映射=True，透传/回填=False）；自动化门禁 `verify_store_by_org_no` 拦截透传值（跳过并通知），歧义（多 org_no 命中）中断并留候选审计。
+- **hints 写入**：`refresh_log_pull_hints` 仅在 `storeMappingMatched=True` 时写 `storeId`；透传场景（storeId==sourceStoreCode）不写并**清除旧值**；本次无门店字段时保留旧值；键缺失按旧口径写入（向后兼容）。保证 `hints.storeId` 恒为 org_no 空间或缺失。
+- **web 回显**：`storeId` 回填候选中移除 store_code 空间的 `ticketStore`；`sourceStoreCode` 只进展示位（提示区展示映射关系/未匹配警告）。`syncStoreSelection` 匹配收窄为 org_no-only（storeId/storeCode 两列）；storeId 为空且 sourceStoreCode 存在时允许按 `sapOrgNo` 唯一兜底回填；切换商家清空 sourceStoreCode。
+- **web 提交**：`store-match-change` 事件回报匹配状态；门店按 org_no 匹配不到配置时二次确认"确认按 org_no 直接提交？"（放行手输新店 org_no，拦住误填来源编码）；`sourceStoreCode` 不进提交 payload。
+- 回归测试：`tests/test_ticket_sync_store_hints_space.py`。
 
 ## 门店配置的环境隔离（2026-08-29 新增）
 

@@ -7,6 +7,7 @@ from typing import Optional
 
 from loguru import logger
 
+from common.excptions import ConfigFileException
 from model.config import (
     AgentConfigModel,
     FtpConfigModel,
@@ -15,23 +16,59 @@ from model.config import (
     PosConfigModel,
     PosParamsModel,
     SearchConfigModel,
-    SqliteQueryConfigModel,
     SetupConfigModel,
+    SqliteQueryConfigModel,
     StartConfigModel,
     ThemeConfigModel,
     VendorConfigModel,
 )
 from model.pos_network_model import PosInitRespModel
+from utils.common import get_client_root_dir
 from utils.file_handle import IniFileHandel
 
-if not os.path.exists("storage/data"):
-    os.makedirs("storage/data")
+# 数据目录基准：打包态固定为 exe 所在目录，源码态为 client_new 项目根。
+# 不能用 cwd：快捷方式起始位置、脚本/计划任务启动都会让 cwd 漂移，
+# 相对路径会导致配置静默散落到其他目录（与插件链路 PluginsConfig 同源问题）。
+_DATA_DIR = get_client_root_dir() / "storage" / "data"
+if not os.path.exists(_DATA_DIR):
+    os.makedirs(_DATA_DIR)
+
+
+def _data_file(file_name: str) -> str:
+    """
+    返回 storage/data 下指定配置文件的绝对路径。
+    :param file_name: 配置文件名（如 config_pos.json）
+    :return: 绝对路径字符串
+    """
+    return str(_DATA_DIR / file_name)
+
+
+def _read_config_file(file_path: str, model_cls):
+    """
+    读取 JSON 配置文件并构造模型实例，统一"缺失/损坏"语义：
+    - 文件不存在：返回默认模型（首次运行正常路径）；
+    - 文件存在但内容损坏（JSON 解析失败或模型校验失败）：
+      抛 ConfigFileException，绝不静默回退默认值——静默回退会让用户配置
+      （host、商家配置等）被悄悄清空，问题只在事后才暴露。
+    :param file_path: 配置文件绝对路径
+    :param model_cls: Pydantic 模型类
+    :return: 模型实例
+    :raises ConfigFileException: 文件损坏时
+    """
+    if not os.path.exists(file_path):
+        return model_cls()
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            config = json.load(f)
+        return model_cls.model_validate(config)
+    except Exception as e:
+        logger.error(f"配置文件异常:{file_path}, {e}")
+        raise ConfigFileException(f"配置文件异常:{file_path}: {e}") from e
 
 
 class SearchConfig:
-    config_file = "storage/data/config_search.json"
-    search_result_file = "storage/data/config_search_result.json"
-
+    config_file = _data_file("config_search.json")
+    search_result_file = _data_file("config_search_result.json")
     def __init__(self):
         pass
 
@@ -108,11 +145,7 @@ class SearchConfig:
 
     @classmethod
     def read(cls) -> SearchConfigModel:
-        if not os.path.exists(cls.config_file):
-            return SearchConfigModel()
-        with open(cls.config_file) as f:
-            config = json.load(f)
-            return SearchConfigModel(**config)
+        return _read_config_file(cls.config_file, SearchConfigModel)
 
     @classmethod
     def write(cls, data: dict | SearchConfigModel):
@@ -124,20 +157,16 @@ class SearchConfig:
 
 
 class MitmproxyConfig:
-    config_file = "storage/data/config_mitmproxy.json"
+    config_file = _data_file("config_mitmproxy.json")
 
     def __init__(self):
         pass
 
     @classmethod
     def read(cls) -> MitmProxyConfigModel:
-
         if not os.path.exists(cls.config_file):
             cls.write({})
-            # return MitmProxyConfigModel()
-        with open(cls.config_file) as f:
-            config = json.load(f)
-            return MitmProxyConfigModel(**config)
+        return _read_config_file(cls.config_file, MitmProxyConfigModel)
 
     @classmethod
     def write(cls, data: dict | MitmProxyConfigModel):
@@ -152,21 +181,12 @@ class PluginsConfig:
     @classmethod
     def _config_file(cls) -> str:
         """
-        配置文件路径：打包态固定到 exe 目录（helper 子进程 cwd 可能是临时解压目录，
-        cwd 相对路径会导致 helper 读不到自定义安装目录），开发态沿用 cwd 相对约定。
+        配置文件路径：统一锚定到应用根目录（打包态为 exe 目录）的 storage/data。
+        早期用 cwd 相对路径，helper 子进程 cwd 可能是临时解压目录导致读不到配置，
+        现由 _DATA_DIR 统一保证，开发/打包行为一致。
         :return: 配置文件路径
         """
-        import sys
-        from pathlib import Path
-
-        if getattr(sys, "frozen", False):
-            return str(
-                Path(sys.executable).resolve().parent
-                / "storage"
-                / "data"
-                / "config_plugins.json"
-            )
-        return "storage/data/config_plugins.json"
+        return _data_file("config_plugins.json")
 
     def __init__(self):
         pass
@@ -204,18 +224,14 @@ class PluginsConfig:
 
 
 class StartConfig:
-    config_file = "storage/data/config_pos_start.json"
+    config_file = _data_file("config_pos_start.json")
 
     def __init__(self):
         pass
 
     @classmethod
     def read(cls) -> StartConfigModel:
-        if not os.path.exists(cls.config_file):
-            return StartConfigModel()
-        with open(cls.config_file) as f:
-            config = json.load(f)
-            return StartConfigModel(**config)
+        return _read_config_file(cls.config_file, StartConfigModel)
 
     @classmethod
     def write(cls, data: dict | StartConfigModel):
@@ -227,18 +243,14 @@ class StartConfig:
 
 
 class SetupConfig:
-    config_file = "storage/data/config_pos_setup.json"
+    config_file = _data_file("config_pos_setup.json")
 
     def __init__(self):
         pass
 
     @classmethod
     def read(cls) -> SetupConfigModel:
-        if not os.path.exists(cls.config_file):
-            return SetupConfigModel()
-        with open(cls.config_file) as f:
-            config = json.load(f)
-            return SetupConfigModel(**config)
+        return _read_config_file(cls.config_file, SetupConfigModel)
 
     @classmethod
     def write(cls, data: dict | SetupConfigModel):
@@ -257,7 +269,7 @@ class Config:
 
 
 class PosConfig:
-    pos_path: str = "storage/data/config_pos.json"
+    pos_path: str = _data_file("config_pos.json")
 
     def __init__(self):
         self.pos_config = self.read_pos_config()
@@ -284,15 +296,10 @@ class PosConfig:
             data = PosConfigModel()
             with open(cls.pos_path, "w") as f:
                 f.write(data.model_dump_json())
-        else:
-            with open(cls.pos_path) as f:
-                data = f.read()
-                try:
-                    data = json.loads(data)
-                    data = PosConfigModel.model_validate(data)
-                except Exception:
-                    data = PosConfigModel()
-        return data
+            return data
+        # 文件损坏时不允许静默回退默认值：那会悄悄清掉用户的 host/商家配置，
+        # 必须抛 ConfigFileException 让用户感知并修复
+        return _read_config_file(cls.pos_path, PosConfigModel)
 
         # if not os.path.exists(pos_path):
         #     return data
@@ -519,40 +526,66 @@ class PosConfig:
         return True, "mitm证书已存在，不用替换"
 
     @classmethod
+    def _get_mock_package_dir(cls, pos_config: PosConfigModel) -> str | None:
+        """
+        解析支付 mock 包根目录（包内应包含 drive/ 和 mock/ 两个子目录）。
+
+        取值优先级：配置 payment_mock_driver_path -> 应用根目录 payment_mock。
+        不做旧语义兼容：源目录必须是包根，缺失或不存在返回 None（调用方报错）。
+        :param pos_config: 当前 POS 配置
+        :return: 包根目录绝对路径；未配置或目录不存在时返回 None
+        """
+        configured_dir = pos_config.payment_mock_driver_path
+        if not configured_dir:
+            configured_dir = str(get_client_root_dir() / "payment_mock")
+        if not os.path.isdir(configured_dir):
+            logger.warning(f"支付mock包目录不存在:{configured_dir}")
+            return None
+        return configured_dir
+
+    @classmethod
     def backup_payment_driver(cls, pos_file):
         """
-        备份支付驱动
+        备份支付驱动：把 POS 目录 drive 下与 mock 包 drive/ 内同名的文件备份出来。
+
+        注意：备份/恢复只覆盖 drive 内文件，不涉及 mock 包 mock/ 映射到 POS 根目录的文件。
+
+        目录取值：
+        - mock 包根：配置 payment_mock_driver_path（内含 drive/、mock/），
+          未配置时回退应用根目录 payment_mock；
+        - 备份目录：配置 payment_driver_back_up_path，未配置（或目录不存在）时
+          回退 POS 目录下 drive_backup。
         """
+        pos_dir = os.path.dirname(pos_file)
         pos_config = cls.read_pos_config()
-        mock_dirver_dir = pos_config.payment_mock_driver_path
-        if not os.path.exists(mock_dirver_dir):
-            logger.error(f"支付mock驱动不存在:{mock_dirver_dir}，请设置支付mock驱动的目录")
+
+        mock_package_dir = cls._get_mock_package_dir(pos_config)
+        if not mock_package_dir:
+            logger.error("支付mock包目录未配置或不存在，无法备份支付驱动")
             return
-        backup_dir = pos_config.payment_mock_driver_backup_dir
-        if not os.path.exists(backup_dir):
-            pos_dir = os.path.dirname(pos_file)
+        mock_drive_dir = os.path.join(mock_package_dir, "drive")
+
+        # 备份目录：配置优先，目录不存在则回退 POS 目录下 drive_backup
+        backup_dir = pos_config.payment_driver_back_up_path
+        if not backup_dir or not os.path.exists(backup_dir):
+            if backup_dir:
+                logger.warning(f"配置的支付驱动备份目录不存在，回退POS目录drive_backup: {backup_dir}")
             backup_dir = os.path.join(pos_dir, "drive_backup")
         if not os.path.exists(backup_dir):
             os.makedirs(backup_dir)
+        logger.info(f"备份支付驱动: mock包drive={mock_drive_dir}, 备份目录={backup_dir}")
 
-        for root, dirs, files in os.walk(mock_dirver_dir):
+        for root, dirs, files in os.walk(mock_drive_dir):
             for file in files:
                 file_path = os.path.join(root, file)
-                rel_path = os.path.relpath(os.path.dirname(file_path), mock_dirver_dir)
+                rel_path = os.path.relpath(os.path.dirname(file_path), mock_drive_dir)
                 backup_path = os.path.join(backup_dir, rel_path)
                 old_payment_driver_dir = os.path.join(pos_dir, "drive", rel_path)
                 if not os.path.exists(backup_path):
                     os.makedirs(backup_path)
-                # copytree(file_path, backup_path, dirs_exist_ok=True)
                 old_driver_file = os.path.join(old_payment_driver_dir, file)
                 if os.path.exists(old_driver_file):
                     copyfile(old_driver_file, os.path.join(backup_path, file))
-                # os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                # copytree(file_path, backup_path, dirs_exist_ok=True)
-
-        # if not os.path.exists(cls.config_file):
-        #     return
-        # pos_key = hashlib.md5(pos_file.encode('utf-8')).hexdigest()
 
     @classmethod
     def restore_payment_driver(cls, pos_file):
@@ -567,19 +600,48 @@ class PosConfig:
         copytree(backup_dir, os.path.join(pos_dir, "drive"), dirs_exist_ok=True)
 
     @classmethod
-    def cover_payment_driver(cls, pos_file):
+    def cover_payment_driver(cls, pos_file) -> tuple[bool, str]:
+        """
+        用支付 mock 包覆盖 POS 驱动。
+
+        mock 包结构（配置项填包根目录）：
+        - drive/：整体内容复制到 POS 目录下 drive/，同名覆盖、原有其他文件保留；
+        - mock/：整体内容复制到 POS 安装根目录，同名覆盖、原有其他文件保留。
+
+        未配置 payment_mock_driver_path 时使用应用根目录下的 payment_mock 包。
+        """
         if not os.path.exists(pos_file):
             logger.warning(f"POS文件不存在:{pos_file}")
             return False, "POS文件不存在"
-        drive_file = os.path.join(os.path.dirname(pos_file), "drive")
+        pos_dir = os.path.dirname(pos_file)
 
-        mock_file = os.path.abspath("drive")
-        if not os.path.exists(mock_file):
-            logger.warning(f"支付mock驱动不存在:{mock_file}")
-            return False, "支付mock驱动不存在"
-        logger.info(f"用mock驱动【{mock_file}】覆盖支付驱动:{drive_file}")
-        # pos_key = hashlib.md5(pos_file.encode('utf-8')).hexdigest()
-        copytree(mock_file, drive_file, dirs_exist_ok=True)
+        mock_package_dir = cls._get_mock_package_dir(cls.read_pos_config())
+        if not mock_package_dir:
+            msg = (
+                "支付mock包目录未配置或不存在，请在 POS 设置中配置"
+                "（目录内应包含 drive 和 mock 两个子目录）"
+            )
+            logger.warning(msg)
+            return False, msg
+
+        mock_drive_dir = os.path.join(mock_package_dir, "drive")
+        mock_root_dir = os.path.join(mock_package_dir, "mock")
+        if not os.path.isdir(mock_drive_dir) and not os.path.isdir(mock_root_dir):
+            msg = f"支付mock包结构不正确:{mock_package_dir}（缺少 drive 或 mock 子目录）"
+            logger.warning(msg)
+            return False, msg
+
+        # drive/ -> POS/drive：同名覆盖、无则新增、原有其他文件保留
+        if os.path.isdir(mock_drive_dir):
+            drive_target = os.path.join(pos_dir, "drive")
+            logger.info(f"用mock包drive【{mock_drive_dir}】覆盖支付驱动:{drive_target}")
+            copytree(mock_drive_dir, drive_target, dirs_exist_ok=True)
+
+        # mock/ -> POS 安装根目录：同名覆盖、无则新增、原有其他文件保留
+        if os.path.isdir(mock_root_dir):
+            logger.info(f"用mock包mock【{mock_root_dir}】覆盖POS根目录:{pos_dir}")
+            copytree(mock_root_dir, pos_dir, dirs_exist_ok=True)
+
         return True, "覆盖支付驱动成功"
 
     @classmethod
@@ -603,16 +665,21 @@ class PosConfig:
 
 
 class PosToolConfig:
-    config_file = "storage/data/pos_tool_ini_data.json"
+    config_file = _data_file("pos_tool_ini_data.json")
 
     @classmethod
     def read_local_pos_tool_config(cls) -> PosInitRespModel | None:
-        if os.path.exists(cls.config_file):
-            with open(cls.config_file, encoding="utf-8") as f:
-                data = f.read()
-                if not data:
-                    return None
-                return PosInitRespModel.model_validate(json.loads(data))
+        if not os.path.exists(cls.config_file):
+            return None
+        with open(cls.config_file, encoding="utf-8") as f:
+            data = f.read()
+        if not data:
+            return None
+        try:
+            return PosInitRespModel.model_validate(json.loads(data))
+        except Exception as e:
+            logger.error(f"配置文件异常:{cls.config_file}, {e}")
+            raise ConfigFileException(f"配置文件异常:{cls.config_file}: {e}") from e
 
     @classmethod
     def save_local_pos_tool_config(cls, data: PosInitRespModel) -> None:
@@ -626,7 +693,7 @@ class PosToolConfig:
 
 
 class AgentConfig:
-    config_path = "storage/data/agent_config.json"
+    config_path = _data_file("agent_config.json")
 
     @classmethod
     def read_config(cls) -> AgentConfigModel:
@@ -638,13 +705,17 @@ class AgentConfig:
 
         with open(cls.config_path, encoding="utf-8") as f:
             data = f.read()
-            if not data:
-                config = AgentConfigModel()
-                with open(cls.config_path, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(config.model_dump(), ensure_ascii=False))
-                return config
+        if not data:
+            config = AgentConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
 
+        try:
             return AgentConfigModel.model_validate(json.loads(data))
+        except Exception as e:
+            logger.error(f"配置文件异常:{cls.config_path}, {e}")
+            raise ConfigFileException(f"配置文件异常:{cls.config_path}: {e}") from e
 
     @classmethod
     def save_config(cls, config_data: AgentConfigModel):
@@ -653,7 +724,7 @@ class AgentConfig:
 
 
 class SqliteQueryConfig:
-    config_path = "storage/data/sqlite_query_config.json"
+    config_path = _data_file("sqlite_query_config.json")
 
     @classmethod
     def read_config(cls) -> SqliteQueryConfigModel:
@@ -665,13 +736,17 @@ class SqliteQueryConfig:
 
         with open(cls.config_path, encoding="utf-8") as f:
             data = f.read()
-            if not data:
-                config = SqliteQueryConfigModel()
-                with open(cls.config_path, "w", encoding="utf-8") as w:
-                    w.write(json.dumps(config.model_dump(), ensure_ascii=False))
-                return config
+        if not data:
+            config = SqliteQueryConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
 
+        try:
             return SqliteQueryConfigModel.model_validate(json.loads(data))
+        except Exception as e:
+            logger.error(f"配置文件异常:{cls.config_path}, {e}")
+            raise ConfigFileException(f"配置文件异常:{cls.config_path}: {e}") from e
 
     @classmethod
     def save_config(cls, config_data: SqliteQueryConfigModel):
@@ -680,7 +755,7 @@ class SqliteQueryConfig:
 
 
 class FtpConfig:
-    config_path = "storage/data/ftp_config.json"
+    config_path = _data_file("ftp_config.json")
 
     @classmethod
     def read_config(cls) -> FtpConfigModel:
@@ -692,13 +767,17 @@ class FtpConfig:
 
         with open(cls.config_path, encoding="utf-8") as f:
             data = f.read()
-            if not data:
-                config = FtpConfigModel()
-                with open(cls.config_path, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(config.model_dump(), ensure_ascii=False))
-                return config
+        if not data:
+            config = FtpConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
 
+        try:
             return FtpConfigModel.model_validate(json.loads(data))
+        except Exception as e:
+            logger.error(f"配置文件异常:{cls.config_path}, {e}")
+            raise ConfigFileException(f"配置文件异常:{cls.config_path}: {e}") from e
 
     @classmethod
     def save_config(cls, config_data: FtpConfigModel):
@@ -707,7 +786,7 @@ class FtpConfig:
 
 
 class ThemeConfig:
-    config_path = "storage/data/theme_config.json"
+    config_path = _data_file("theme_config.json")
 
     @classmethod
     def read_config(cls) -> ThemeConfigModel:
@@ -719,13 +798,17 @@ class ThemeConfig:
 
         with open(cls.config_path, encoding="utf-8") as f:
             data = f.read()
-            if not data:
-                config = ThemeConfigModel()
-                with open(cls.config_path, "w", encoding="utf-8") as w:
-                    w.write(json.dumps(config.model_dump(), ensure_ascii=False))
-                return config
+        if not data:
+            config = ThemeConfigModel()
+            with open(cls.config_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(config.model_dump(), ensure_ascii=False))
+            return config
 
+        try:
             return ThemeConfigModel.model_validate(json.loads(data))
+        except Exception as e:
+            logger.error(f"配置文件异常:{cls.config_path}, {e}")
+            raise ConfigFileException(f"配置文件异常:{cls.config_path}: {e}") from e
 
     @classmethod
     def save_config(cls, config_data: ThemeConfigModel):

@@ -49,9 +49,13 @@ def _install_global_exception_handlers():
 
     global _FAULT_LOG_FILE
     try:
-        os.makedirs("logs", exist_ok=True)
+        # faulthandler 日志同样锚定应用根目录，避免 cwd 漂移时写错位置
+        from utils.common import get_client_root_dir
+
+        fault_log_dir = get_client_root_dir() / "logs"
+        os.makedirs(fault_log_dir, exist_ok=True)
         _FAULT_LOG_FILE = open(
-            os.path.join("logs", "fatal_error.log"),
+            os.path.join(fault_log_dir, "fatal_error.log"),
             "a",
             encoding="utf-8",
             buffering=1,

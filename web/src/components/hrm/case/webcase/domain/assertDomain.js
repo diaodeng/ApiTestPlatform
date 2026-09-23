@@ -1,3 +1,9 @@
+import { normalizeTargetSnapshot, createDefaultTargetSnapshot } from './snapshotDomain.js';
+import {
+  createDefaultLocator,
+  normalizeLocatorValue,
+} from './locatorDomain.js';
+
 export function normalizeAssertion(assertion = {}) {
   return {
     assertType: assertion.assertType || assertion.assert_type || 'visible',

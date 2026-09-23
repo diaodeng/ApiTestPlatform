@@ -388,10 +388,29 @@ def _build_launch_plan(
     )
 
 
+def _plugin_web_test_dir() -> Path | None:
+    """返回 Web 测试插件目录；存在则说明插件已安装，导入失败属于插件不完整。"""
+    try:
+        from plugins.manager import plugin_manager
+
+        plugin_dir = plugin_manager.plugin_dir("web-test")
+        return plugin_dir if plugin_dir.exists() else None
+    except Exception:
+        return None
+
+
 def _load_async_playwright_factory():
     try:
         module = importlib.import_module("playwright.async_api")
     except Exception as exc:
+        # 区分"插件未装"与"插件不完整/损坏"：插件已装但缺依赖（如 pyee）时
+        # 提示重装插件并给出真实异常，避免误导用户以为没安装。
+        if _plugin_web_test_dir() is not None:
+            raise RuntimeError(
+                f"playwright Python 包导入失败（Web 测试插件不完整或损坏）：{exc}。"
+                "请在客户端「插件管理」中卸载后重新安装「Web 测试」插件并重启客户端；"
+                "若反复出现请升级客户端到配套版本。"
+            ) from exc
         raise RuntimeError(
             "playwright Python 包未安装（Web 测试插件缺失），"
             "请在客户端「插件管理」中安装「Web 测试」插件后重启客户端"

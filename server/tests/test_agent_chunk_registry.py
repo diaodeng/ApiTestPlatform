@@ -161,8 +161,6 @@ def test_orphan_response_chunk_assembles_and_caches(monkeypatch):
     import asyncio
     import json
 
-    from module_qtr.service.agent_service import HandleResponse
-
     controller.orphan_response_chunks.clear()
     stored = {}
 
@@ -170,7 +168,6 @@ def test_orphan_response_chunk_assembles_and_caches(monkeypatch):
         async def set(self, key, value, ex=None):
             stored[key] = (value, ex)
 
-    payload = HandleResponse(status_code=200, response={"success": True, "result": {}}, message="ok")
     serialized = json.dumps(
         {"statusCode": 200, "response": {"success": True, "result": {}}, "message": "ok"}
     )
@@ -181,11 +178,25 @@ def test_orphan_response_chunk_assembles_and_caches(monkeypatch):
     websocket.app.state = type("State", (), {})()
     websocket.app.state.redis = FakeRedis()
     try:
-        message_first = {"type": "response_chunk", "request_id": "req-y", "data": "part", "finished": False}
+        message_first = {
+            "type": "response_chunk",
+            "request_id": "req-y",
+            "index": 0,
+            "total": 2,
+            "data": "part",
+            "finished": False,
+        }
         asyncio.run(controller._stash_orphan_response_chunk("agent-a", "req-y", message_first, websocket))
         assert "req-y" in controller.orphan_response_chunks
 
-        message_last = {"type": "response_chunk", "request_id": "req-y", "data": "part", "finished": True}
+        message_last = {
+            "type": "response_chunk",
+            "request_id": "req-y",
+            "index": 1,
+            "total": 2,
+            "data": "part",
+            "finished": True,
+        }
         asyncio.run(controller._stash_orphan_response_chunk("agent-a", "req-y", message_last, websocket))
         assert "req-y" not in controller.orphan_response_chunks
         assert stored, "完整响应应写入 Redis 结果缓存"
