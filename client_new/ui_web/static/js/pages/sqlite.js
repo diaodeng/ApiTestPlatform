@@ -1,13 +1,32 @@
 /** SQLite 查询页面：库/表选择、分页浏览、快速过滤、SQL 执行、收藏、列配置。 */
 const { call, el, $, clear, toast, openModal, textInput, select, copyText } = window.QTR;
 
+// ===== 模块级会话（跨页面切换保持，对齐 logs / mitm / pos 页的 session 模式）=====
+// 该页面无事件推送，数据均为请求-响应式：切页回来后已加载的数据直接复用，
+// 不重新扫描/查询；仅切换库或表时才重新拉取。
+const session = {
+  cfg: null,          // SqliteQueryConfigModel（get_config 结果，跨页保留引用）
+  directories: [],    // 扫描结果
+  tables: [],         // 当前库的表清单
+  columns: [],        // 当前表的列清单
+  page: 1,            // 当前页码
+  total: 0,           // 总行数
+  lastTableData: null, // 最近一次 fetch_table_page / execute_sql 的完整结果（含 columns/rows）
+  sqlResultText: "",  // SQL 执行结果区文本
+  statusText: "就绪", // 底部状态栏文本
+  sqlDraft: "",       // SQL 编辑器草稿（区别于已保存的 cfg.last_sql，输入未失焦也能保留）
+  lastDbPath: "",     // 切页前选中的库（用于恢复下拉选中值）
+  lastTableName: "",  // 切页前选中的表
+  lastDirPath: "",    // 切页前选中的目录
+};
+
 export function sqlitePage(mount) {
-  let cfg = null; // SqliteQueryConfigModel
-  let directories = []; // 扫描结果
-  let tables = [];
-  let columns = [];
-  let page = 1;
-  let total = 0;
+  let cfg = session.cfg;
+  let directories = session.directories;
+  let tables = session.tables;
+  let columns = session.columns;
+  let page = session.page;
+  let total = session.total;
 
   // ===== 工具栏 =====
   const dirSel = select([], "", null, { style: "min-width:180px" });
@@ -35,14 +54,16 @@ export function sqlitePage(mount) {
 
   // ===== SQL 编辑区 =====
   const sqlEditor = el("textarea", { class: "input mono", rows: 5, style: "width:100%;resize:vertical" });
+  sqlEditor.value = session.sqlDraft; // 恢复切页前的编辑草稿
   const btnRunSql = el("button", { class: "btn primary", text: "查询" });
   const btnClearSql = el("button", { class: "btn", text: "清空" });
   const btnFavManage = el("button", { class: "btn", text: "常用SQL" });
   const sqlResultPre = el("pre", { class: "panel", style: "max-height:26vh" });
+  sqlResultPre.textContent = session.sqlResultText; // 恢复上次执行结果
 
   // ===== 结果表 =====
   const resultWrap = el("div", { class: "table-wrap flex-fill" });
-  const statusLabel = el("span", { class: "muted", text: "就绪" });
+  const statusLabel = el("span", { class: "muted", text: session.statusText });
 
   mount.append(
     el("div", { class: "toolbar" },
@@ -104,11 +125,13 @@ export function sqlitePage(mount) {
   async function loadTables(prefer = "") {
     clear(tableSel);
     columns = [];
+    session.columns = columns;
     renderFilterFields();
     if (!dbSel.value) return renderTable({ columns: [], rows: [] });
     const res = await call("sqlite", "list_tables", dbSel.value);
     if (!res.ok) return toast(res.message, "error");
     tables = res.tables;
+    session.tables = tables;
     for (const t of tables) tableSel.append(el("option", { value: t, text: t }));
     const target = prefer || cfg.last_table_name;
     if (target && tables.includes(target)) tableSel.value = target;
@@ -126,6 +149,10 @@ export function sqlitePage(mount) {
     cfg.last_database_path = dbSel.value;
     cfg.last_table_name = tableSel.value;
     saveCfg();
+    // 同步到会话：切页后恢复下拉选中值
+    session.lastDirPath = dirSel.value;
+    session.lastDbPath = dbSel.value;
+    session.lastTableName = tableSel.value;
 
     if (!dbSel.value || !tableSel.value) return renderTable({ columns: [], rows: [] });
     const tcfg = currentTableCfg();
@@ -136,6 +163,8 @@ export function sqlitePage(mount) {
     page = res.page;
     total = res.total;
     columns = res.columns;
+    session.page = page; session.total = total; session.columns = columns;
+    session.lastTableData = res;
     renderFilterFields();
     renderTable(res);
     updatePagination();
@@ -174,10 +203,13 @@ export function sqlitePage(mount) {
     const res = await call("sqlite", "scan_databases");
     if (!res.ok) return toast(res.message, "error");
     directories = res.directories;
+    session.directories = directories;
     cfg.scanned_directories = directories;
     saveCfg();
     const totalDb = directories.reduce((n, d) => n + (d.database_files || []).length, 0);
-    statusLabel.textContent = `扫描完成，找到 ${directories.length} 个目录，${totalDb} 个数据库文件`;
+    const msg = `扫描完成，找到 ${directories.length} 个目录，${totalDb} 个数据库文件`;
+    session.statusText = msg;
+    statusLabel.textContent = msg;
     renderDirs();
   });
   dirSel.addEventListener("change", () => renderDatabases());
@@ -279,16 +311,24 @@ export function sqlitePage(mount) {
     saveCfg();
     const res = await call("sqlite", "execute_sql", dbSel.value, sql);
     if (!res.ok) {
-      sqlResultPre.textContent = "执行失败: " + res.message;
+      const msg = "执行失败: " + res.message;
+      session.sqlResultText = msg;
+      sqlResultPre.textContent = msg;
       return toast(res.message, "error");
     }
-    sqlResultPre.textContent = `执行成功，${res.total ?? (res.rows || []).length} 行`;
+    const okMsg = `执行成功，${res.total ?? (res.rows || []).length} 行`;
+    session.sqlResultText = okMsg;
+    sqlResultPre.textContent = okMsg;
     if (res.columns) {
+      session.lastTableData = res;
       renderTable(res);
-      statusLabel.textContent = `SQL 执行成功，返回 ${(res.rows || []).length} 行`;
+      const stMsg = `SQL 执行成功，返回 ${(res.rows || []).length} 行`;
+      session.statusText = stMsg;
+      statusLabel.textContent = stMsg;
     }
   });
-  btnClearSql.addEventListener("click", () => { sqlEditor.value = ""; });
+  btnClearSql.addEventListener("click", () => { sqlEditor.value = ""; session.sqlDraft = ""; });
+  sqlEditor.addEventListener("input", () => { session.sqlDraft = sqlEditor.value; });
   sqlEditor.addEventListener("change", () => { cfg.last_sql = sqlEditor.value; saveCfg(); });
 
   // ===== 弹窗：常用 SQL =====
@@ -352,13 +392,46 @@ export function sqlitePage(mount) {
 
   // ===== 初始化 =====
   (async function init() {
+    // 会话中已有数据（切页回来）：直接复用，不重新请求；恢复上次选中的目录/库/表与数据视图。
+    // 注意：不走 renderDirs→renderDatabases→loadTables 链路（会触发重新拉表清单与分页查询），
+    // 由 restoreTables 一次性从会话缓存重建视图。
+    if (session.cfg && session.directories.length) {
+      cfg = session.cfg;
+      // 重建目录/库下拉（不触发级联加载），并恢复目录/库选中值
+      clear(dirSel);
+      for (const d of directories) dirSel.append(el("option", { value: d.directory_path, text: d.directory_path }));
+      if (session.lastDirPath && dirSel.querySelector(`option[value="${CSS.escape(session.lastDirPath)}"]`)) dirSel.value = session.lastDirPath;
+      const dir = directories.find((d) => d.directory_path === dirSel.value);
+      clear(dbSel);
+      for (const db of dir?.database_files || []) dbSel.append(el("option", { value: db.file_path, text: `${db.file_name} (${formatSize(db.size)})` }));
+      if (session.lastDbPath && dbSel.querySelector(`option[value="${CSS.escape(session.lastDbPath)}"]`)) dbSel.value = session.lastDbPath;
+      await restoreTables();
+      return;
+    }
     const res = await call("sqlite", "get_config");
     if (!res.ok) return;
     cfg = res.config;
+    session.cfg = cfg;
     directories = cfg.scanned_directories || [];
+    session.directories = directories;
     sqlEditor.value = cfg.last_sql || "";
+    session.sqlDraft = sqlEditor.value;
     renderDirs(cfg.last_directory_path);
   })();
+
+  /** 切页恢复：按 session 记忆重建表下拉并渲染缓存数据 */
+  async function restoreTables() {
+    clear(tableSel);
+    tables = session.tables;
+    columns = session.columns;
+    for (const t of tables) tableSel.append(el("option", { value: t, text: t }));
+    if (session.lastTableName && tables.includes(session.lastTableName)) tableSel.value = session.lastTableName;
+    renderFilterFields();
+    if (session.lastTableData) {
+      renderTable(session.lastTableData);
+      updatePagination();
+    }
+  }
 
   return {};
 }
