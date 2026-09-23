@@ -5,6 +5,9 @@ title: 更新历史
 > 本文档为历史变更记录月度总结，按时间倒序排列。
 
 
+## 2026-09-23
+- Mock 响应头透传修复：客户端 mitmproxy 在 Mock 命中后重建响应时只保留 Content-Type，导致 Mock 服务端的命中标记头 `mockId`（`规则id_响应id`）与用户在响应头模板中配置的全部自定义头（业务 token 头、多条 `Set-Cookie` 等）无法到达被测应用，出现"直连 Mock 正常、走客户端代理异常"且无法从应用侧定位命中规则；修复为按 `multi_items()` 全量透传（保留重复头），仅剔除 `Content-Length`（自动重算）、`Content-Encoding`（探测已解压 body，保留压缩声明会解压失败）与 `Transfer-Encoding/Connection/Keep-Alive` 逐跳头，头键值按 utf-8 显式编码（`Response.make` 元组入参不自动转 bytes）。Mock 未命中/超时放行/断点链路不受影响，Mock 服务端无改动。详见：[Mock响应头透传修复](2026-09-23-client-mock-response-header-passthrough.md)，用户说明：[抓包与Mock使用说明](../client/mitm-proxy.md)。
+
 ## 2026-09-22
 - 日志拉取门店编号空间治理（生产 INC00002013662 排查产物）：来源门店编码（store_code/SAP 编号）与日志接口机构号（org_no）在弹窗回显与 hints 落库两处混用——回显值 333 被前端三字段 OR 跨列匹配改写到 sap_org_no=333 的仓库门店（org 550944）且无告警，未匹配的来源编码会被当 org_no 落入 hints 并可被直接提交；修复为提交字段只承载 org_no（匹配收窄 org_no-only、hints 匹配失败不写并清除旧映射、来源编码仅展示映射关系），提交前对匹配不到 org_no 的值二次确认以保留手输新店 org_no 的合法场景。详见：[门店编号空间治理](2026-09-22-log-pull-store-id-space-fix.md)，用户说明：[日志拉取使用说明](../ticket_log_pull.md)。
 

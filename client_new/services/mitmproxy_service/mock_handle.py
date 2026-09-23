@@ -17,6 +17,13 @@ from .runtime_config import RuntimeConfig
 class MockHandle:
     BREAKPOINT_WAIT_TIMEOUT_SECONDS = 180.0
     BREAKPOINT_MOCK_PROBE_TIMEOUT_SECONDS = 0.2
+    # mock 响应头透传黑名单（小写比较）：
+    # content-encoding —— httpx 探测时已自动解压 body，透传压缩声明会与明文 body 不一致导致解压失败；
+    # content-length —— Response.make 赋值 content 时按新 body 自动重算；
+    # transfer-encoding/connection/keep-alive —— 逐跳头，仅对 mock 服务器到代理这一跳有意义。
+    MOCK_RESPONSE_HEADER_SKIP = frozenset(
+        {"content-length", "content-encoding", "transfer-encoding", "connection", "keep-alive"}
+    )
 
     def __init__(
         self,
@@ -216,10 +223,20 @@ class MockHandle:
                 logger.info(f"mock 未命中规则，继续真实请求: {path}")
                 return
 
+            # 全量透传 mock 响应头（含 mockId 与用户在响应头模板中配置的自定义头），
+            # 保持与直连 mock 服务器行为一致；按 multi_items 逐条编码添加，
+            # 避免多条 Set-Cookie 被字典形式合并。元组列表形式 make 不做 str 转换，需显式编码为 bytes。
+            # 黑名单外的标准头（server/date 等）一并透传，与真实服务器响应语义一致。
+            passthrough_headers = [
+                (key.encode("utf-8", "surrogateescape"), value.encode("utf-8", "surrogateescape"))
+                for key, value in resp.headers.multi_items()
+                if key.lower() not in self.MOCK_RESPONSE_HEADER_SKIP
+            ]
+
             flow.response = Response.make(
                 resp.status_code,
                 resp.content,
-                {"Content-Type": resp.headers.get("Content-Type", "application/json")},
+                passthrough_headers,
             )
 
         except httpx.TimeoutException:
