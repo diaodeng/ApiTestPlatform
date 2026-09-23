@@ -251,9 +251,9 @@ export function posPage(mount) {
       ["pos_uat_host", "POS UAT"],
       ["pos_pro_host", "POS 生产"],
     ];
-    // 目录类配置：mock 驱动源目录 + 支付驱动备份目录（对齐旧版 Flet 设置项）
+    // 目录类配置：mock 包根目录 + 支付驱动备份目录（对齐旧版 Flet 设置项）
     const dirFields = [
-      ["payment_mock_driver_path", "支付MOCK驱动目录", "覆盖驱动/备份驱动时取 mock 驱动的源目录，留空用应用根目录 drive"],
+      ["payment_mock_driver_path", "支付MOCK驱动包目录", "填包含 drive 和 mock 两个子目录的包根目录；留空用应用根目录 payment_mock"],
       ["payment_driver_back_up_path", "支付驱动备份目录", "备份支付驱动的存放目录，留空用 POS 目录下 drive_backup"],
     ];
     const envFiles = listEditor(c.env_files || []);
@@ -274,8 +274,8 @@ export function posPage(mount) {
       ),
       el("div", { class: "form-section", text: "驱动目录" }),
       dirFields.map(([key, label, tip]) =>
-        el("div", { class: "form-row" },
-          el("label", { text: label, title: tip }),
+        el("div", { class: "form-row", title: tip },
+          el("label", { text: label }),
           textInput(c[key] || "", { style: "flex:1", placeholder: tip, onchange: (e) => (c[key] = e.target.value.trim()) }))
       ),
       el("div", { class: "form-section", text: "环境文件清单（启动前按此备份/切换）" }),

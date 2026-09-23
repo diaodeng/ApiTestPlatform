@@ -526,27 +526,44 @@ class PosConfig:
         return True, "mitm证书已存在，不用替换"
 
     @classmethod
+    def _get_mock_package_dir(cls, pos_config: PosConfigModel) -> str | None:
+        """
+        解析支付 mock 包根目录（包内应包含 drive/ 和 mock/ 两个子目录）。
+
+        取值优先级：配置 payment_mock_driver_path -> 应用根目录 payment_mock。
+        不做旧语义兼容：源目录必须是包根，缺失或不存在返回 None（调用方报错）。
+        :param pos_config: 当前 POS 配置
+        :return: 包根目录绝对路径；未配置或目录不存在时返回 None
+        """
+        configured_dir = pos_config.payment_mock_driver_path
+        if not configured_dir:
+            configured_dir = str(get_client_root_dir() / "payment_mock")
+        if not os.path.isdir(configured_dir):
+            logger.warning(f"支付mock包目录不存在:{configured_dir}")
+            return None
+        return configured_dir
+
+    @classmethod
     def backup_payment_driver(cls, pos_file):
         """
-        备份支付驱动：把 POS 目录 drive 下与 mock 驱动同名的文件备份出来。
+        备份支付驱动：把 POS 目录 drive 下与 mock 包 drive/ 内同名的文件备份出来。
+
+        注意：备份/恢复只覆盖 drive 内文件，不涉及 mock 包 mock/ 映射到 POS 根目录的文件。
 
         目录取值：
-        - mock 驱动源：配置 payment_mock_driver_path，未配置时回退应用根目录 drive；
+        - mock 包根：配置 payment_mock_driver_path（内含 drive/、mock/），
+          未配置时回退应用根目录 payment_mock；
         - 备份目录：配置 payment_driver_back_up_path，未配置（或目录不存在）时
           回退 POS 目录下 drive_backup。
         """
         pos_dir = os.path.dirname(pos_file)
         pos_config = cls.read_pos_config()
 
-        # mock 驱动源目录：配置优先，回退应用根目录 drive（与 cover_payment_driver 同规则）
-        mock_dirver_dir = pos_config.payment_mock_driver_path
-        if not mock_dirver_dir or not os.path.exists(mock_dirver_dir):
-            if mock_dirver_dir:
-                logger.warning(f"配置的支付mock驱动目录不存在，回退应用根目录drive: {mock_dirver_dir}")
-            mock_dirver_dir = str(get_client_root_dir() / "drive")
-        if not os.path.exists(mock_dirver_dir):
-            logger.error(f"支付mock驱动不存在:{mock_dirver_dir}，请设置支付mock驱动的目录")
+        mock_package_dir = cls._get_mock_package_dir(pos_config)
+        if not mock_package_dir:
+            logger.error("支付mock包目录未配置或不存在，无法备份支付驱动")
             return
+        mock_drive_dir = os.path.join(mock_package_dir, "drive")
 
         # 备份目录：配置优先，目录不存在则回退 POS 目录下 drive_backup
         backup_dir = pos_config.payment_driver_back_up_path
@@ -556,12 +573,12 @@ class PosConfig:
             backup_dir = os.path.join(pos_dir, "drive_backup")
         if not os.path.exists(backup_dir):
             os.makedirs(backup_dir)
-        logger.info(f"备份支付驱动: mock源={mock_dirver_dir}, 备份目录={backup_dir}")
+        logger.info(f"备份支付驱动: mock包drive={mock_drive_dir}, 备份目录={backup_dir}")
 
-        for root, dirs, files in os.walk(mock_dirver_dir):
+        for root, dirs, files in os.walk(mock_drive_dir):
             for file in files:
                 file_path = os.path.join(root, file)
-                rel_path = os.path.relpath(os.path.dirname(file_path), mock_dirver_dir)
+                rel_path = os.path.relpath(os.path.dirname(file_path), mock_drive_dir)
                 backup_path = os.path.join(backup_dir, rel_path)
                 old_payment_driver_dir = os.path.join(pos_dir, "drive", rel_path)
                 if not os.path.exists(backup_path):
@@ -583,27 +600,48 @@ class PosConfig:
         copytree(backup_dir, os.path.join(pos_dir, "drive"), dirs_exist_ok=True)
 
     @classmethod
-    def cover_payment_driver(cls, pos_file):
+    def cover_payment_driver(cls, pos_file) -> tuple[bool, str]:
+        """
+        用支付 mock 包覆盖 POS 驱动。
+
+        mock 包结构（配置项填包根目录）：
+        - drive/：整体内容复制到 POS 目录下 drive/，同名覆盖、原有其他文件保留；
+        - mock/：整体内容复制到 POS 安装根目录，同名覆盖、原有其他文件保留。
+
+        未配置 payment_mock_driver_path 时使用应用根目录下的 payment_mock 包。
+        """
         if not os.path.exists(pos_file):
             logger.warning(f"POS文件不存在:{pos_file}")
             return False, "POS文件不存在"
-        drive_file = os.path.join(os.path.dirname(pos_file), "drive")
+        pos_dir = os.path.dirname(pos_file)
 
-        # mock 驱动源目录：优先用 POS 配置里的 payment_mock_driver_path，
-        # 未配置时回退到应用根目录下的 drive（早期用 cwd 相对路径，cwd 漂移时会找错位置）
-        configured_dir = cls.read_pos_config().payment_mock_driver_path
-        if configured_dir and os.path.isdir(configured_dir):
-            mock_file = configured_dir
-        else:
-            if configured_dir:
-                logger.warning(f"配置的支付mock驱动目录不存在，回退应用根目录drive: {configured_dir}")
-            mock_file = str(get_client_root_dir() / "drive")
+        mock_package_dir = cls._get_mock_package_dir(cls.read_pos_config())
+        if not mock_package_dir:
+            msg = (
+                "支付mock包目录未配置或不存在，请在 POS 设置中配置"
+                "（目录内应包含 drive 和 mock 两个子目录）"
+            )
+            logger.warning(msg)
+            return False, msg
 
-        if not os.path.exists(mock_file):
-            logger.warning(f"支付mock驱动不存在:{mock_file}")
-            return False, f"支付mock驱动不存在:{mock_file}"
-        logger.info(f"用mock驱动【{mock_file}】覆盖支付驱动:{drive_file}")
-        copytree(mock_file, drive_file, dirs_exist_ok=True)
+        mock_drive_dir = os.path.join(mock_package_dir, "drive")
+        mock_root_dir = os.path.join(mock_package_dir, "mock")
+        if not os.path.isdir(mock_drive_dir) and not os.path.isdir(mock_root_dir):
+            msg = f"支付mock包结构不正确:{mock_package_dir}（缺少 drive 或 mock 子目录）"
+            logger.warning(msg)
+            return False, msg
+
+        # drive/ -> POS/drive：同名覆盖、无则新增、原有其他文件保留
+        if os.path.isdir(mock_drive_dir):
+            drive_target = os.path.join(pos_dir, "drive")
+            logger.info(f"用mock包drive【{mock_drive_dir}】覆盖支付驱动:{drive_target}")
+            copytree(mock_drive_dir, drive_target, dirs_exist_ok=True)
+
+        # mock/ -> POS 安装根目录：同名覆盖、无则新增、原有其他文件保留
+        if os.path.isdir(mock_root_dir):
+            logger.info(f"用mock包mock【{mock_root_dir}】覆盖POS根目录:{pos_dir}")
+            copytree(mock_root_dir, pos_dir, dirs_exist_ok=True)
+
         return True, "覆盖支付驱动成功"
 
     @classmethod

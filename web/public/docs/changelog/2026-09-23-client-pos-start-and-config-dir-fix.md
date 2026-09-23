@@ -56,6 +56,14 @@
 - 设置弹窗补回 pywebview 迁移时丢失的两个配置项（旧版 Flet 有、新版缺失）：**支付MOCK驱动目录**（`payment_mock_driver_path`）与**支付驱动备份目录**（`payment_driver_back_up_path`），归入"驱动目录"区块。
 - 修复重构引入的字段名笔误：`backup_payment_driver` 引用了模型上不存在的 `payment_mock_driver_backup_dir`，导致配置的备份目录从未生效（始终回退 POS 目录 drive_backup）；现已对齐旧版语义，改为读取 `payment_driver_back_up_path`，且"目录不存在才回退"。
 
+### 9. 支付 mock 包双目录覆盖语义（drive + mock）
+
+覆盖驱动的语义重新定义，此前只支持单 drive 目录：
+
+- 配置项现在填 **mock 包根目录**，包内放两个子目录：`drive/` 复制到 POS 目录下的 `drive/`，`mock/` 复制到 **POS 安装根目录**；两者都是同名覆盖、原有其他文件保留；
+- 默认包目录从应用根目录 `drive` 改为 **`payment_mock`**（避免与 POS 的 drive 目录名混淆）；不做旧单目录语义兼容，包内缺少 drive 和 mock 子目录时明确报错；
+- 备份/恢复只覆盖 `drive` 内文件，mock 写入根目录的文件不参与备份回滚。
+
 ## 变更文件
 
 - `client_new/do/config.py`：配置路径锚定、统一读取助手（缺失默认/损坏抛异常）、覆盖驱动目录取值
