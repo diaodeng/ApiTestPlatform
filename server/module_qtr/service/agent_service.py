@@ -197,7 +197,28 @@ async def _send_message_on_agent_loop(
                 response_message = response.error_message or response.message or "Agent 执行失败"
             response = handle_response((AgentResponseEnum.SUCCESS.value, response, response_message))
             return response
-        except TimeoutError as e:
+        except asyncio.CancelledError:
+            # 连接级清理（断连/心跳杀连接/会话接管）取消等待 Future 时才会走到这里：
+            # 用户取消任务走 cancel_task 消息通道，不取消该 Future。
+            # 返回 5009 让工单侧进入 pending_recovery 等待 Agent 补交结果，
+            # 而不是像 418 那样被当成终态失败丢弃迟到结果（INC00009930 根因）。
+            elapsed_sec = round(time.monotonic() - request_started_at, 3)
+            logger.error(
+                f"Agent 请求等待被取消（连接中断），request_id={request_id}, agent_code={agent_code}, "
+                f"request_type={request_type}, elapsed_sec={elapsed_sec}, timeout_sec={request_timeout}"
+            )
+            response = handle_response(
+                (
+                    AgentResponseEnum.AGENT_CONNECTION_LOST.value,
+                    None,
+                    f"Agent[{agent_code}] 连接中断，请求等待被取消，等待 Agent 补交结果恢复，request_id={request_id}",
+                )
+            )
+            return response
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            # Python 3.10 下 asyncio.wait_for 抛出的是 asyncio.TimeoutError，
+            # 与内置 TimeoutError 直到 3.11 才合并，必须显式一并捕获，
+            # 否则真超时会掉进 except Exception 产生空元组错误消息。
             elapsed_sec = round(time.monotonic() - request_started_at, 3)
             logger.error(
                 f"websocket请求超时{e}，request_id：{request_id}, agent_code={agent_code}, "
@@ -224,17 +245,22 @@ async def _send_message_on_agent_loop(
                     (AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}，request_id：{request_id}")
                 )
                 return response
-        except asyncio.CancelledError as e:
-            logger.error(e)
-            response = handle_response((AgentResponseEnum.TASK_CANCELLED.value, None, str(e.args)))
-            return response
+            else:
+                # 未知请求类型兜底：保证超时路径始终返回结构化响应而非落到 except Exception。
+                response = handle_response(
+                    (AgentResponseEnum.OPERATION_TIMEOUT.value, None, f"wobsocket请求超时{e}，request_id：{request_id}")
+                )
+                return response
         except Exception as e:
             elapsed_sec = round(time.monotonic() - request_started_at, 3)
+            # str(e.args) 对空参数异常会渲染成 "()"，排查时无法定位；无参数时回退类型名。
+            error_detail = str(e.args) if e.args else type(e).__name__
             logger.error(
                 f"Agent 请求异常，request_id={request_id}, agent_code={agent_code}, request_type={request_type}, "
-                f"elapsed_sec={elapsed_sec}, payload_size={len(compress_data)}, chunk_count={total}, error={e}"
+                f"elapsed_sec={elapsed_sec}, payload_size={len(compress_data)}, chunk_count={total}, "
+                f"error={error_detail}"
             )
-            response = handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, str(e.args)))
+            response = handle_response((AgentResponseEnum.UNKNOWN_EXCEPTION.value, None, error_detail))
             return response
         finally:
             if future and not future.done():

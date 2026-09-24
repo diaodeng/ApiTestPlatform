@@ -348,6 +348,9 @@ class WebSocketClient:
         # 心跳看门狗状态：最后一次收到服务端消息的单调时间戳与看门狗任务句柄
         self._last_received_at = 0.0
         self._watchdog_task: asyncio.Task | None = None
+        # 独立周期心跳任务句柄：不依赖服务端 ping，防 server→client 单向断时
+        # 客户端沉默导致服务端误判离线（pong 是被动响应，单向断时永远不会触发）
+        self._proactive_heartbeat_task: asyncio.Task | None = None
 
         self.before_request_call = before_request_call
         self.after_request_call = after_request_call
@@ -388,6 +391,9 @@ class WebSocketClient:
             # 连接建立即重置收信时间并启动看门狗，静默死链可在阈值内被发现
             self._last_received_at = time.monotonic()
             self._start_watchdog()
+            # 启动独立周期心跳：无论是否收到服务端 ping 都主动上报存活，
+            # 保证 server→client 单向断（pong 永远不会被动触发）时服务端仍能收到消息
+            self._start_proactive_heartbeat()
             # 连接建立后先补交断连期间未送达的响应，再进入正常消息循环。
             await self._flush_pending_responses()
             self.retry_num = 0
@@ -455,6 +461,8 @@ class WebSocketClient:
             if self._watchdog_task is not None and not self._watchdog_task.done():
                 self._watchdog_task.cancel()
             self._watchdog_task = None
+            # 同步停止独立周期心跳，避免旧连接的心跳任务残留继续发消息
+            await self._stop_proactive_heartbeat()
             close_code, close_reason = _get_websocket_close_info(self.websocket)
             logger.info(
                 f"Agent WebSocket 退出：uri={self.uri}, close_code={close_code}, close_reason={close_reason}, "
@@ -760,6 +768,40 @@ class WebSocketClient:
         if self._watchdog_task is not None and not self._watchdog_task.done():
             self._watchdog_task.cancel()
         self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+
+    def _start_proactive_heartbeat(self):
+        """启动（或重启）独立周期心跳任务；旧任务仍存活时先取消，避免重复心跳叠加。"""
+        if self._proactive_heartbeat_task is not None and not self._proactive_heartbeat_task.done():
+            self._proactive_heartbeat_task.cancel()
+        self._proactive_heartbeat_task = asyncio.create_task(self._proactive_heartbeat_loop())
+
+    async def _stop_proactive_heartbeat(self):
+        """停止独立周期心跳任务（连接退出时调用，重连成功后会重新启动）。"""
+        if self._proactive_heartbeat_task is not None and not self._proactive_heartbeat_task.done():
+            self._proactive_heartbeat_task.cancel()
+            try:
+                await self._proactive_heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        self._proactive_heartbeat_task = None
+
+    async def _proactive_heartbeat_loop(self):
+        """
+        独立周期心跳循环：每 HEARTBEAT_INTERVAL 秒主动向服务端上报一次存活。
+
+        与 send_heart（收到 ping 才被动回 pong）互补：server→client 单向断时
+        pong 永远不会被触发，服务端会因收不到任何消息误判离线并杀连接；
+        本循环主动发送，让服务端 heart_time 在数据回传方向（client→server）
+        仍然健康时保持新鲜，避免误杀在途 AI 分析请求的等待 Future。
+        """
+        try:
+            while self.running and not self.manual_stop:
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                if self.websocket is None:
+                    continue
+                await self.send_heart()
+        except asyncio.CancelledError:
+            pass
 
     async def _watchdog_loop(self):
         """
