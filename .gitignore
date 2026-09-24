@@ -138,12 +138,12 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments（/env/ 与 /ENV/ 根锚定：仅匹配仓库根目录，避免大小写不敏感系统上误伤 web/src/views/hrm/env/ 等业务目录）
 .env
 .venv
-env/
+/env/
 venv/
-ENV/
+/ENV/
 env.bak/
 venv.bak/
 
